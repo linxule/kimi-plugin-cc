@@ -1,0 +1,217 @@
+import { access, stat, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+
+import { RuntimeError } from "../errors.js";
+import { resolveRepoIdentity } from "../git.js";
+import { JobStore, type JobRecord } from "../job-store.js";
+import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
+import { renderManagedJobOutput } from "../render.js";
+import type { CommandContext } from "../types.js";
+import { sweepStaleBackgroundJobs } from "../jobs.js";
+import type { IncomingWireMessage, PromptResult } from "../wire/types.js";
+import {
+  createTurnCapture,
+  finalizeTurnCapture,
+  observeTurnEvent,
+} from "../wire/turn-capture.js";
+
+export interface ReplayResult {
+  rendered: string;
+  output: ReturnType<typeof renderManagedJobOutput>["output"];
+  summary: string;
+}
+
+const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
+
+interface WireLogEntry {
+  direction: "meta" | "in" | "out" | "stderr";
+  message: unknown;
+}
+
+export async function runReplay(argv: string[], context: CommandContext): Promise<string> {
+  const [jobId, ...rest] = argv;
+  if (!jobId || rest.length > 0) {
+    throw new RuntimeError(
+      "INVALID_ARGS",
+      "replay expects exactly one job id: replay <job-id>.",
+      "replay.parse",
+    );
+  }
+
+  const paths = resolvePluginPaths(context.env);
+  await ensurePluginPaths(paths);
+  const repoIdentity = await resolveRepoIdentity(context.cwd);
+  const store = new JobStore(paths);
+
+  try {
+    await sweepStaleBackgroundJobs(store, paths);
+
+    const job = store.getJob(jobId);
+    if (!job || job.repo_id !== repoIdentity.repoId) {
+      throw new RuntimeError("JOB_NOT_FOUND", `No job matched ${jobId} for replay.`, "replay.lookup");
+    }
+
+    const replayed = await replayJob(job);
+    return `${replayed.rendered}${replayed.rendered.endsWith("\n") ? "" : "\n"}`;
+  } finally {
+    store.close();
+  }
+}
+
+export async function replayJob(job: JobRecord): Promise<ReplayResult> {
+  if (!job.stream_log_path) {
+    throw new RuntimeError(
+      "REPLAY_LOG_MISSING",
+      `Job ${job.job_id} does not have a stored stream log path to replay.`,
+      "replay.lookup",
+    );
+  }
+
+  try {
+    await access(job.stream_log_path, fsConstants.R_OK);
+  } catch {
+    throw new RuntimeError(
+      "REPLAY_LOG_MISSING",
+      `Job ${job.job_id} cannot be replayed because ${job.stream_log_path} is missing.`,
+      "replay.lookup",
+    );
+  }
+
+  const stats = await stat(job.stream_log_path);
+  if (stats.size > MAX_REPLAY_LOG_BYTES) {
+    throw new RuntimeError(
+      "REPLAY_LOG_TOO_LARGE",
+      `Job ${job.job_id} stream log is ${stats.size} bytes, which exceeds the ${MAX_REPLAY_LOG_BYTES}-byte replay ceiling.`,
+      "replay.lookup",
+    );
+  }
+
+  const completedTurn = await replayCompletedTurn(job.stream_log_path);
+  const rendered = renderManagedJobOutput(job, completedTurn.finalText);
+
+  return {
+    rendered: rendered.rendered,
+    output: rendered.output,
+    summary: rendered.summary,
+  };
+}
+
+async function replayCompletedTurn(logPath: string) {
+  const contents = await readFile(logPath, "utf8");
+  const rawLines = contents.split("\n");
+  const turn = createTurnCapture();
+  let promptRequestId: string | null = null;
+  let promptResult: PromptResult | null = null;
+
+  for (let lineNumber = 0; lineNumber < rawLines.length; lineNumber += 1) {
+    const line = rawLines[lineNumber]!.trim();
+    if (!line) {
+      continue;
+    }
+
+    let entry: WireLogEntry;
+    try {
+      entry = JSON.parse(line) as WireLogEntry;
+    } catch (error) {
+      // A truncated final line is the expected shape when a worker was SIGKILL'd mid-write.
+      // Silently drop it so replay still works on the preceding, consistent prefix.
+      if (lineNumber === rawLines.length - 1) {
+        continue;
+      }
+      throw new RuntimeError(
+        "REPLAY_LOG_INVALID",
+        `Wire log ${logPath}:${lineNumber + 1} is malformed JSON: ${(error as Error).message}`,
+        "replay.log",
+        { cause: error as Error },
+      );
+    }
+
+    if (entry.direction === "out") {
+      const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
+      if (message.method === "prompt" && typeof message.id === "string") {
+        promptRequestId = message.id;
+      }
+      continue;
+    }
+
+    if (entry.direction !== "in") {
+      continue;
+    }
+
+    const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
+
+    if ("method" in message) {
+      if (message.method === "event" && isEventPayload(message.params)) {
+        observeTurnEvent(turn, message.params.type, message.params.payload);
+      }
+      continue;
+    }
+
+    if (
+      promptRequestId &&
+      message.id === promptRequestId &&
+      isPromptResult(message.result)
+    ) {
+      promptResult = message.result;
+    }
+  }
+
+  if (!promptRequestId || !promptResult) {
+    throw new RuntimeError(
+      "REPLAY_LOG_INVALID",
+      `Wire log ${logPath} does not contain a replayable prompt result.`,
+      "replay.log",
+    );
+  }
+
+  return finalizeTurnCapture(turn, promptResult);
+}
+
+function coerceWireObject(
+  value: unknown,
+  logPath: string,
+  lineNumber: number,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = typeof value === "string" ? JSON.parse(value) : value;
+  } catch (error) {
+    throw new RuntimeError(
+      "REPLAY_LOG_INVALID",
+      `Wire log ${logPath}:${lineNumber} message field is malformed JSON: ${(error as Error).message}`,
+      "replay.log",
+      { cause: error as Error },
+    );
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new RuntimeError(
+      "REPLAY_LOG_INVALID",
+      `Wire log ${logPath}:${lineNumber} entry is not a JSON object.`,
+      "replay.log",
+    );
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
+function isEventPayload(value: unknown): value is Extract<IncomingWireMessage, { method: "event" }>["params"] {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as { type?: unknown }).type === "string" &&
+    typeof (value as { payload?: unknown }).payload === "object" &&
+    (value as { payload?: unknown }).payload !== null &&
+    !Array.isArray((value as { payload?: unknown }).payload)
+  );
+}
+
+function isPromptResult(value: unknown): value is PromptResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as { status?: unknown }).status === "string"
+  );
+}

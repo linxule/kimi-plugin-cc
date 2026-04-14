@@ -1,0 +1,140 @@
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { RuntimeError } from "./errors.js";
+import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
+import { parseReviewOutput } from "./schemas/review-output.js";
+const EMPTY_RESCUE_FALLBACK = "Kimi did not return a final message.\n";
+const EMPTY_SUMMARY_FALLBACK = "Rescue did not return a final message.";
+export async function writeArtifact(paths, job, markdown) {
+    const artifactPath = path.join(paths.artifactsDir, `${job.command_type}-${job.job_id}.md`);
+    await writeFile(artifactPath, markdown.endsWith("\n") ? markdown : `${markdown}\n`, "utf8");
+    return artifactPath;
+}
+export async function readArtifact(artifactPath) {
+    return readFile(artifactPath, "utf8");
+}
+export function renderManagedJobOutput(job, finalText) {
+    switch (job.command_type) {
+        case "ask": {
+            const trimmed = finalText.trim();
+            if (!trimmed) {
+                throw new RuntimeError("ASK_EMPTY_OUTPUT", "ask returned an empty final response.", "ask.prompt");
+            }
+            return {
+                output: trimmed,
+                rendered: renderAskArtifact(trimmed),
+                summary: trimmed.slice(0, 160),
+                error: null,
+            };
+        }
+        case "review":
+        case "challenge": {
+            const output = parseReviewOutput(finalText);
+            return {
+                output,
+                rendered: renderReviewArtifact(job, output),
+                summary: output.summary,
+                error: null,
+            };
+        }
+        case "review_gate": {
+            const output = parseReviewGateOutput(finalText.trim());
+            return {
+                output,
+                rendered: renderReviewGateArtifact(job, output),
+                summary: output.summary,
+                error: null,
+            };
+        }
+        case "rescue": {
+            return {
+                output: finalText,
+                rendered: renderRescueArtifact(finalText),
+                summary: firstMeaningfulLine(finalText),
+                error: null,
+            };
+        }
+        default:
+            return assertNever(job.command_type);
+    }
+}
+export function renderAskArtifact(output) {
+    return output.trim();
+}
+export function renderReviewArtifact(job, output) {
+    const lines = [
+        `# ${job.command_type === "challenge" ? "Challenge" : "Review"} Result`,
+        "",
+        `- Job: ${job.job_id}`,
+        `- Verdict: ${output.verdict}`,
+        `- Summary: ${output.summary}`,
+        ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
+    ];
+    if (output.findings.length === 0) {
+        lines.push("", "No findings.");
+        return lines.join("\n");
+    }
+    lines.push("", "## Findings");
+    for (const finding of output.findings) {
+        lines.push("", `### ${finding.title}`, `- Severity: ${finding.severity}`, `- Confidence: ${finding.confidence}`, `- File: ${finding.file}:${finding.start_line}-${finding.end_line}`, finding.body);
+        if (finding.suggested_fix) {
+            lines.push("", `Suggested fix: ${finding.suggested_fix}`);
+        }
+    }
+    return lines.join("\n");
+}
+export function renderRescueArtifact(rawOutput) {
+    const trimmed = rawOutput.trim();
+    if (!trimmed) {
+        return EMPTY_RESCUE_FALLBACK;
+    }
+    return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
+}
+export function firstMeaningfulLine(text, fallback = EMPTY_SUMMARY_FALLBACK) {
+    const line = String(text ?? "")
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .find(Boolean);
+    return line ?? fallback;
+}
+export function renderReviewGateArtifact(job, output) {
+    const lines = [
+        "# Review Gate Result",
+        "",
+        `- Job: ${job.job_id}`,
+        `- Decision: ${output.decision}`,
+        `- Confidence: ${output.confidence}`,
+        `- Summary: ${output.summary}`,
+        ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
+    ];
+    if (output.issues.length === 0) {
+        lines.push("", "No issues.");
+        return lines.join("\n");
+    }
+    lines.push("", "## Issues");
+    for (const issue of output.issues) {
+        lines.push("", `### ${issue.title}`, `- Severity: ${issue.severity}`, issue.body);
+    }
+    return lines.join("\n");
+}
+export function renderTerminalJobArtifact(job) {
+    const lines = [
+        `# ${capitalize(job.status)} Job`,
+        "",
+        `- Job: ${job.job_id}`,
+        `- Command: ${job.command_type}`,
+        `- Status: ${job.status}`,
+        `- Summary: ${job.summary}`,
+        ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
+    ];
+    if (job.error) {
+        lines.push("", "## Error", `- Code: ${job.error.code}`, `- Stage: ${job.error.stage}`, job.error.message);
+    }
+    return lines.join("\n");
+}
+function capitalize(value) {
+    return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+function assertNever(value) {
+    throw new RuntimeError("UNSUPPORTED_COMMAND_TYPE", `Unsupported command type for rendering: ${String(value)}`, "render");
+}

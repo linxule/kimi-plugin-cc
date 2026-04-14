@@ -1,0 +1,47 @@
+import { constants } from "node:fs";
+import { access, mkdir } from "node:fs/promises";
+import path from "node:path";
+
+import { RuntimeError } from "./errors.js";
+
+export interface PluginPaths {
+  claudePluginData: string;
+  pluginRoot: string;
+  stateDbPath: string;
+  logsDir: string;
+  artifactsDir: string;
+  configPath: string;
+}
+
+export function resolvePluginPaths(env: NodeJS.ProcessEnv): PluginPaths {
+  const claudePluginData = env.CLAUDE_PLUGIN_DATA;
+
+  if (!claudePluginData) {
+    throw new RuntimeError(
+      "MISSING_PLUGIN_DATA",
+      "CLAUDE_PLUGIN_DATA is not set. Point it at a writable plugin data directory before running setup.",
+      "paths",
+    );
+  }
+
+  const pluginRoot = path.join(claudePluginData, "kimi-plugin-cc");
+
+  return {
+    claudePluginData,
+    pluginRoot,
+    stateDbPath: path.join(pluginRoot, "state.db"),
+    logsDir: path.join(pluginRoot, "logs"),
+    artifactsDir: path.join(pluginRoot, "artifacts"),
+    configPath: path.join(pluginRoot, "config.json"),
+  };
+}
+
+export async function ensurePluginPaths(paths: PluginPaths): Promise<void> {
+  await mkdir(paths.pluginRoot, { recursive: true });
+  await mkdir(paths.logsDir, { recursive: true });
+  await mkdir(paths.artifactsDir, { recursive: true });
+
+  await access(paths.pluginRoot, constants.R_OK | constants.W_OK);
+  await access(paths.logsDir, constants.R_OK | constants.W_OK);
+  await access(paths.artifactsDir, constants.R_OK | constants.W_OK);
+}
