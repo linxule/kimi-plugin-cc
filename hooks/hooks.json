@@ -1,0 +1,17 @@
+{
+  "description": "Opt-in Kimi stop-time review gate",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/review-gate-hook.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
