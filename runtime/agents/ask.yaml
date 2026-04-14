@@ -1,0 +1,16 @@
+version: 1
+agent:
+  extend: default
+  name: kimi-plugin-ask
+  system_prompt_path: ../prompts/ask-system.md
+  exclude_tools:
+    - "kimi_cli.tools.agent:Agent"
+    - "kimi_cli.tools.ask:AskUserQuestion"
+    - "kimi_cli.tools.shell:Shell"
+    - "kimi_cli.tools.file:WriteFile"
+    - "kimi_cli.tools.file:StrReplaceFile"
+    - "kimi_cli.tools.plan.enter:EnterPlanMode"
+    - "kimi_cli.tools.plan:ExitPlanMode"
+    - "kimi_cli.tools.background:TaskList"
+    - "kimi_cli.tools.background:TaskOutput"
+    - "kimi_cli.tools.background:TaskStop"
