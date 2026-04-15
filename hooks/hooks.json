@@ -1,0 +1,16 @@
+{
+  "description": "Opt-in Kimi stop-time review gate",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --import tsx \"${CLAUDE_PLUGIN_ROOT}/runtime/hooks/review-gate-stop.ts\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

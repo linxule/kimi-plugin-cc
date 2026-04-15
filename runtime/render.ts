@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { JobRecord } from "./job-store.js";
+import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
 import type { ReviewOutput } from "./schemas/review-output.js";
 import type { RescueOutput } from "./schemas/rescue-output.js";
 import type { PluginPaths } from "./paths.js";
@@ -114,6 +115,30 @@ export function renderRescueArtifact(
 
   if (rawFinalText.trim()) {
     lines.push("", "## Raw Final Output", "```json", rawFinalText.trim(), "```");
+  }
+
+  return lines.join("\n");
+}
+
+export function renderReviewGateArtifact(job: JobRecord, output: ReviewGateOutput): string {
+  const lines = [
+    "# Review Gate Result",
+    "",
+    `- Job: ${job.job_id}`,
+    `- Decision: ${output.decision}`,
+    `- Confidence: ${output.confidence}`,
+    `- Summary: ${output.summary}`,
+    ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
+  ];
+
+  if (output.issues.length === 0) {
+    lines.push("", "No issues.");
+    return lines.join("\n");
+  }
+
+  lines.push("", "## Issues");
+  for (const issue of output.issues) {
+    lines.push("", `### ${issue.title}`, `- Severity: ${issue.severity}`, issue.body);
   }
 
   return lines.join("\n");

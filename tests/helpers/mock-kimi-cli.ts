@@ -158,6 +158,58 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
       });
       return;
     }
+    case "review-gate-allow": {
+      await emitJsonFinal(
+        request.id,
+        JSON.stringify({
+          decision: "ALLOW",
+          confidence: "medium",
+          summary: "No blocking issue found in the assistant response.",
+          issues: [],
+        }),
+      );
+      return;
+    }
+    case "review-gate-block": {
+      await emitJsonFinal(
+        request.id,
+        JSON.stringify({
+          decision: "BLOCK",
+          confidence: "high",
+          summary: "The assistant claimed the requested work was complete without addressing the core fix.",
+          issues: [
+            {
+              title: "Requested fix still missing",
+              body: "The response says the task is done, but it does not address the user’s explicit request to fix the failing path.",
+              severity: "high",
+            },
+          ],
+        }),
+      );
+      return;
+    }
+    case "review-gate-block-medium": {
+      await emitJsonFinal(
+        request.id,
+        JSON.stringify({
+          decision: "BLOCK",
+          confidence: "medium",
+          summary: "There is a concern, but it is not high confidence.",
+          issues: [
+            {
+              title: "Possibly incomplete response",
+              body: "The response may have skipped an edge case, but the evidence is not conclusive.",
+              severity: "medium",
+            },
+          ],
+        }),
+      );
+      return;
+    }
+    case "review-gate-malformed": {
+      await emitJsonFinal(request.id, "{\"decision\":\"BLOCK\"");
+      return;
+    }
     case "rescue-success":
     case "rescue-malformed":
     case "rescue-cancel": {
@@ -264,6 +316,21 @@ async function emitRescueFinal(): Promise<void> {
             ],
             followups: [],
           }),
+  });
+  await finishPrompt("finished");
+}
+
+async function emitJsonFinal(promptId: string, text: string): Promise<void> {
+  if (delayMs > 0) {
+    await sleep(delayMs);
+  }
+
+  pendingPromptId = promptId;
+  sendEvent("TurnBegin", {});
+  sendEvent("StepBegin", { n: 1 });
+  sendEvent("ContentPart", {
+    type: "text",
+    text,
   });
   await finishPrompt("finished");
 }
