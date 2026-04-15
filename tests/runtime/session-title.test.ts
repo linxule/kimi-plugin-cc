@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  KIMI_SESSION_TITLE_MAX_LENGTH,
+  KIMI_SESSION_TITLE_EXCERPT_LENGTH,
+  KIMI_SESSION_TITLE_PREFIX,
   buildSessionTitle,
   shortenForTitle,
   stripLeadingLabel,
@@ -57,10 +58,12 @@ describe("buildSessionTitle", () => {
     expect(title).toBe("Kimi Task: line one line two line three");
   });
 
-  test("final title never exceeds the 200-char API limit", () => {
+  test("final title is naturally bounded by excerpt length even for very long prompts", () => {
     const veryLongButNormalized = "x".repeat(500);
     const title = buildSessionTitle("rescue", veryLongButNormalized);
-    expect(title.length).toBeLessThanOrEqual(KIMI_SESSION_TITLE_MAX_LENGTH);
+    const naturalMax =
+      KIMI_SESSION_TITLE_PREFIX.length + ": ".length + KIMI_SESSION_TITLE_EXCERPT_LENGTH + " [write]".length;
+    expect(title.length).toBeLessThanOrEqual(naturalMax);
   });
 });
 
