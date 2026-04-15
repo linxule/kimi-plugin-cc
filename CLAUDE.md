@@ -12,7 +12,10 @@ The source of truth is `docs/spec.md` plus the ADRs. Runtime code lives under `r
 
 - `bun run check` — `tsc --noEmit` + `bun test` (45+ tests across wire client, allowlist, command handlers, replay, review gate, job lifecycle)
 - `bun test <path>` — run a single test file
-- The companion is launched via `scripts/companion.sh <subcommand> <args>`, which cd's to `${CLAUDE_PLUGIN_ROOT}` and runs `node --import tsx runtime/companion.ts`. Slash commands and the Stop hook both route through that wrapper so tsx resolves against the plugin's `node_modules` regardless of the user's cwd.
+- `bun run build` — compile `runtime/**/*.ts` → `dist/**/*.js` via `tsc -p tsconfig.build.json` (preserves directory structure; no bundling). `dist/` is committed so installed plugins don't need a build step.
+- The companion is launched via `scripts/companion.sh <subcommand> <args>`, which cd's to `${CLAUDE_PLUGIN_ROOT}` and runs `node dist/companion.js`. Slash commands and the Stop hook both route through that wrapper. The runtime is pure JavaScript post-install — no `tsx` required at runtime (tsx stays as a devDependency for `bun run check` only).
+- Dev tests run from source via bun+tsx (unchanged). The `rescue.ts` background worker spawn checks `import.meta.url` to pick the right entrypoint — `runtime/companion.ts` via tsx in dev, `dist/companion.js` via plain node in production.
+- **Important**: after editing any `runtime/**/*.ts` file, run `bun run build` before committing so `dist/` stays in sync.
 
 Toolchain: Node >= 18.18, TypeScript, **bun** (not npm/yarn). Python work (if any) uses **uv**.
 
@@ -54,6 +57,7 @@ Review and rescue commands emit fixed JSON schemas defined in `docs/spec.md` ("O
 - Phase 3a (`a13c914`): stop-hook review gate end-to-end.
 - Phase 3b (`a9edbcd`): replay tooling + graceful degradation + cancellation hardening.
 - Post-phase-3 audit cleanup: closed allowlist escapes (backticks, sed prefix forms, find action escapes, ruff format, package-manager `run <script>`), hardened Wire client approval dispatching and stdout ordering, added command timeouts, fixed `--base` argument injection, consolidated plugin manifest for real-world install.
+- Drop-in install prep: precompile `runtime/**/*.ts` → `dist/**/*.js` via `tsc -p tsconfig.build.json`, ship `dist/` in the repo, switch `scripts/companion.sh` and `scripts/review-gate-hook.sh` to launch `node dist/companion.js` and `node dist/hooks/review-gate-stop.js`. `tsx` becomes dev-only. Matches the codex-plugin-cc "no runtime compilation" philosophy. Added `LICENSE` (Apache-2.0).
 
 Any further changes should be scoped as a new ADR or a targeted fix commit, not a new phase.
 

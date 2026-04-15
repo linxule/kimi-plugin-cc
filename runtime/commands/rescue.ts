@@ -17,8 +17,15 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import { createRescueApprovalPolicy } from "../rescue-approval.js";
 import type { CommandContext } from "../types.js";
 
-const companionEntrypoint = fileURLToPath(new URL("../companion.ts", import.meta.url));
+// Resolves to runtime/companion.ts in dev (via tsx) and dist/companion.js in production (compiled
+// with tsc to the same relative layout). The extension is derived from the running module so the
+// child-process spawn in startBackgroundRescue targets the right entrypoint in both modes.
+const isCompiledRuntime = import.meta.url.endsWith(".js");
+const companionEntrypoint = fileURLToPath(
+  new URL(isCompiledRuntime ? "../companion.js" : "../companion.ts", import.meta.url),
+);
 const companionProjectRoot = path.resolve(path.dirname(companionEntrypoint), "..");
+
 const AUTO_RESUME_PATTERN = /\b(continue|resume|keep going|keep working|apply the top fix|dig deeper)\b/i;
 
 export async function runRescue(argv: string[], context: CommandContext): Promise<string> {
@@ -268,20 +275,19 @@ async function startBackgroundRescue(
   wait: boolean,
 ): Promise<string> {
   const nodeBinary = context.env.KIMI_PLUGIN_CC_NODE_BIN || process.execPath;
-  const child = spawn(
-    nodeBinary,
-    ["--import", "tsx", companionEntrypoint, "worker", "rescue", job.job_id],
-    {
-      cwd: companionProjectRoot,
-      env: {
-        ...context.env,
-        KIMI_PLUGIN_CC_WORKSPACE_CWD: context.cwd,
-        KIMI_PLUGIN_CC_RESCUE_PROMPT_B64: Buffer.from(prompt, "utf8").toString("base64"),
-      },
-      detached: true,
-      stdio: "ignore",
+  const spawnArgs = isCompiledRuntime
+    ? [companionEntrypoint, "worker", "rescue", job.job_id]
+    : ["--import", "tsx", companionEntrypoint, "worker", "rescue", job.job_id];
+  const child = spawn(nodeBinary, spawnArgs, {
+    cwd: companionProjectRoot,
+    env: {
+      ...context.env,
+      KIMI_PLUGIN_CC_WORKSPACE_CWD: context.cwd,
+      KIMI_PLUGIN_CC_RESCUE_PROMPT_B64: Buffer.from(prompt, "utf8").toString("base64"),
     },
-  );
+    detached: true,
+    stdio: "ignore",
+  });
   child.unref();
 
   const store = new JobStore(paths);

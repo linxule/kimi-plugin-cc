@@ -13,4 +13,4 @@ set -euo pipefail
 export KIMI_PLUGIN_CC_WORKSPACE_CWD="${KIMI_PLUGIN_CC_WORKSPACE_CWD:-$PWD}"
 
 cd "${CLAUDE_PLUGIN_ROOT}"
-exec node --import tsx runtime/companion.ts "$@"
+exec node dist/companion.js "$@"

@@ -95,7 +95,7 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
       reviewGateEnabled,
       nextStep: "Proceed to /kimi:review, /kimi:ask, or /kimi:rescue. Enable the review gate with /kimi:setup --enable-review-gate.",
       details: [
-        `Companion runtime: Node ${process.version} via tsx`,
+        `Companion runtime: Node ${process.version}`,
         `Wire server: ${initializeResult.server.name} ${initializeResult.server.version}`,
         `Wire protocol: ${initializeResult.protocol_version}`,
         `Setup probe reply: ${JSON.stringify(reply)}`,
