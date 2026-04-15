@@ -2,7 +2,6 @@ version: 1
 agent:
   extend: default
   name: kimi-plugin-rescue
-  system_prompt_path: ../prompts/rescue-system.md
   exclude_tools:
     - "kimi_cli.tools.agent:Agent"
     - "kimi_cli.tools.ask:AskUserQuestion"
