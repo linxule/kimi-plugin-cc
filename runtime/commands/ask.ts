@@ -5,6 +5,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
+import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import {
   KIMI_ASK_PROMPT_TIMEOUT_MS,
@@ -12,6 +13,7 @@ import {
   KIMI_START_TIMEOUT_MS,
   withTimeout,
 } from "../kimi-timeouts.js";
+import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
@@ -91,6 +93,10 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
         KIMI_INITIALIZE_TIMEOUT_MS,
         "ask.initialize",
       );
+
+      await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
+        env: context.env,
+      });
 
       const completed = await withTimeout(
         client.prompt(askPrompt, "ask"),

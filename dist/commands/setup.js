@@ -2,6 +2,7 @@ import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { classifySetupFailure } from "../kimi-errors.js";
+import { createKimiWebClient } from "../kimi-web-client.js";
 import { resolveKimiWireCommand } from "../kimi-launch.js";
 import { KIMI_SETUP_INITIALIZE_TIMEOUT_MS, KIMI_SETUP_PROMPT_TIMEOUT_MS, withTimeout, } from "../kimi-timeouts.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
@@ -53,6 +54,11 @@ export async function runSetup(argv, context) {
         if (!reply) {
             throw new RuntimeError("EMPTY_SETUP_REPLY", "Kimi runtime returned an empty final reply during setup probe.", "setup.prompt");
         }
+        const kimiWebClient = createKimiWebClient({ env: context.env });
+        const kimiWebReachable = await kimiWebClient.healthCheck();
+        const kimiWebLine = kimiWebReachable
+            ? `Kimi web: detected at ${kimiWebClient.baseUrl} (plugin sessions will be renamed)`
+            : `Kimi web: not running (start \`kimi web\` to see plugin sessions with human-readable titles)`;
         return {
             summary: "Kimi runtime is ready.",
             runtimeProbe: "ok",
@@ -65,6 +71,7 @@ export async function runSetup(argv, context) {
                 `Wire protocol: ${initializeResult.protocol_version}`,
                 `Setup probe reply: ${JSON.stringify(reply)}`,
                 `Review gate: ${reviewGateEnabled ? "enabled" : "disabled"}`,
+                kimiWebLine,
                 `Wire log: ${logPath}`,
             ],
         };

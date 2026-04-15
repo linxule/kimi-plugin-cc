@@ -4,6 +4,7 @@ import path from "node:path";
 import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
+import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import {
@@ -12,6 +13,7 @@ import {
   KIMI_START_TIMEOUT_MS,
   withTimeout,
 } from "../kimi-timeouts.js";
+import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
@@ -103,6 +105,12 @@ export async function runReview(
       `${commandType}.initialize`,
     );
 
+    await announceSessionTitle(
+      reviewSessionId,
+      buildSessionTitle(commandType, buildReviewTitleExcerpt(commandType, parsed.focus)),
+      { env: context.env },
+    );
+
     const completed = await withTimeout(
       client.prompt(previewPrompt, commandType),
       KIMI_REVIEW_PROMPT_TIMEOUT_MS,
@@ -124,6 +132,15 @@ export async function runReview(
     await client.close();
     store.close();
   }
+}
+
+function buildReviewTitleExcerpt(
+  commandType: "review" | "adversarial_review",
+  focus: string | undefined,
+): string {
+  const trimmed = focus?.trim();
+  if (trimmed) return trimmed;
+  return commandType === "adversarial_review" ? "pending changes (adversarial)" : "pending changes";
 }
 
 function buildReviewPrompt(

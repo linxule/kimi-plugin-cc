@@ -7,9 +7,11 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, normalizeJobError, sweepStaleBackgroundJobs, waitForTerminalJob } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
+import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_INITIALIZE_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
+import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
@@ -156,6 +158,12 @@ export async function executeRescueJob(
       KIMI_INITIALIZE_TIMEOUT_MS,
       "rescue.initialize",
     );
+
+    if (job.kimi_session_id) {
+      await announceSessionTitle(job.kimi_session_id, buildSessionTitle("rescue", prompt), {
+        env: context.env,
+      });
+    }
 
     const completedTurn = await client.prompt(prompt, "rescue");
     const rendered = renderManagedJobOutput(job, completedTurn.finalText);

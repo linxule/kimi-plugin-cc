@@ -4,8 +4,10 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
+import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { KIMI_ASK_PROMPT_TIMEOUT_MS, KIMI_INITIALIZE_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout, } from "../kimi-timeouts.js";
+import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
@@ -71,6 +73,9 @@ export async function runAsk(argv, context) {
                     supports_plan_mode: false,
                 },
             }), KIMI_INITIALIZE_TIMEOUT_MS, "ask.initialize");
+            await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
+                env: context.env,
+            });
             const completed = await withTimeout(client.prompt(askPrompt, "ask"), KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
             const rendered = renderManagedJobOutput(job, completed.finalText);
             const artifactPath = await writeArtifact(paths, job, rendered.rendered);
