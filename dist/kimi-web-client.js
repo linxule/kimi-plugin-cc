@@ -8,7 +8,6 @@
 // method for setting a session title. PATCH /api/sessions/{id} is the
 // documented HTTP API that powers the web UI's own rename flow, so we use it
 // directly. See 2026-04-15 investigation memo for the full protocol survey.
-import { KIMI_SESSION_TITLE_MAX_LENGTH } from "./session-title.js";
 export const DEFAULT_KIMI_WEB_BASE_URL = "http://127.0.0.1:5494";
 export const KIMI_WEB_HEALTH_PATH = "/healthz";
 export const KIMI_WEB_SESSION_PATH = "/api/sessions";
@@ -17,6 +16,10 @@ export const KIMI_WEB_SESSION_PATH = "/api/sessions";
 // 0.1.5 flagged 500ms as too generous when the server is reachable-but-slow.
 const KIMI_WEB_HEALTH_TIMEOUT_MS = 200;
 const KIMI_WEB_PATCH_TIMEOUT_MS = 2_000;
+// Defensive cap on arbitrary title input to the HTTP PATCH payload. Titles
+// produced by `buildSessionTitle` are naturally bounded to ~75 chars, but this
+// client accepts externally-supplied titles, so we keep a sanity ceiling.
+const KIMI_WEB_TITLE_MAX_LENGTH = 200;
 export function resolveKimiWebBaseUrl(env) {
     const override = env?.KIMI_PLUGIN_CC_WEB_URL?.trim();
     if (!override)
@@ -50,11 +53,11 @@ export function createKimiWebClient(options = {}) {
             if (!trimmed) {
                 return { ok: false, reason: "invalid-title", detail: "title is empty after trim" };
             }
-            if (trimmed.length > KIMI_SESSION_TITLE_MAX_LENGTH) {
+            if (trimmed.length > KIMI_WEB_TITLE_MAX_LENGTH) {
                 return {
                     ok: false,
                     reason: "invalid-title",
-                    detail: `title exceeds ${KIMI_SESSION_TITLE_MAX_LENGTH} chars`,
+                    detail: `title exceeds ${KIMI_WEB_TITLE_MAX_LENGTH} chars`,
                 };
             }
             const controller = new AbortController();

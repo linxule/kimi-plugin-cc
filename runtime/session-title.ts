@@ -13,7 +13,6 @@ import type { ManagedCommandType } from "./types.js";
 
 export const KIMI_SESSION_TITLE_PREFIX = "Kimi Task";
 export const KIMI_SESSION_TITLE_EXCERPT_LENGTH = 56;
-export const KIMI_SESSION_TITLE_MAX_LENGTH = 200;
 
 const WRITE_CAPABLE_COMMANDS = new Set<ManagedCommandType>(["rescue"]);
 
@@ -30,10 +29,7 @@ export function buildSessionTitle(commandType: ManagedCommandType, prompt: strin
   const excerpt = shortenForTitle(stripped, KIMI_SESSION_TITLE_EXCERPT_LENGTH);
   const base = excerpt ? `${KIMI_SESSION_TITLE_PREFIX}: ${excerpt}` : KIMI_SESSION_TITLE_PREFIX;
   const suffix = WRITE_CAPABLE_COMMANDS.has(commandType) ? " [write]" : "";
-  const full = `${base}${suffix}`;
-  return full.length <= KIMI_SESSION_TITLE_MAX_LENGTH
-    ? full
-    : `${full.slice(0, KIMI_SESSION_TITLE_MAX_LENGTH - 1)}…`;
+  return `${base}${suffix}`;
 }
 
 export function shortenForTitle(text: string, maxLength: number): string {
