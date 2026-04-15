@@ -132,6 +132,9 @@ Purpose:
 Flags:
 
 - `-m, --model <name>`
+- `-r, --resume`
+- `--resume <job-id-or-session-id>`
+- `--fresh`
 - `--thinking`
 - `--no-thinking`
 - free-text question after flags
@@ -144,9 +147,9 @@ Parsing rule:
 
 Defaults:
 
-- every ask invocation uses a fresh session in v1
+- ask uses a fresh session by default; `--resume` chains the latest ask session
 - ask runs foreground-synchronously in v1
-- ask does not support `--background`, `--wait`, `--resume`, or `--fresh` in v1
+- ask does not support `--background` or `--wait` in v1
 
 Behavior:
 
@@ -430,7 +433,7 @@ Rules:
 
 - rescue jobs always have a non-null `kimi_session_id`
 - review jobs may keep `kimi_session_id = null`
-- ask jobs use a fresh client-assigned session id but do not expose resume behavior in v1
+- ask uses rescue-grade session persistence: client-assigned UUIDs, running-session guards, and fail-fast on resume-not-found
 - rescue resume is only available for jobs or sessions with a non-null stored session id
 - phase-1 implementation must re-verify that current Kimi CLI still supports "create new if not found" semantics for `--session <id>`
 

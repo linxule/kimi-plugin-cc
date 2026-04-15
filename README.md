@@ -7,7 +7,7 @@ A Claude Code plugin that delegates read-only review, free-form ask, and write-c
 Feature-complete against `docs/implementation-plan.md` through phase 3b. The plugin ships:
 
 - `/kimi:setup` — verify local Kimi + manage review-gate state
-- `/kimi:ask` — free-form read-only Q&A (fresh session per invocation)
+- `/kimi:ask` — free-form read-only Q&A (fresh by default, `-r` to continue)
 - `/kimi:review` — structured read-only code review of a working-tree or branch diff
 - `/kimi:adversarial-review` — adversarial read-only review with free-form focus
 - `/kimi:rescue` — write-capable delegation with session persistence and resume
@@ -61,7 +61,7 @@ Then inside Claude Code: `/kimi:setup`.
 
 ### After install
 
-Run `/kimi:setup` to verify the local `kimi` CLI is reachable and authenticated. Optional: `/kimi:setup --enable-review-gate` to turn on the stop-time review gate (disabled by default).
+Run `/kimi:setup` to verify the local `kimi` CLI is reachable and authenticated. Use `/kimi:ask -r` to continue the latest ask conversation in the current repo. Optional: `/kimi:setup --enable-review-gate` to turn on the stop-time review gate (disabled by default).
 
 ## Architecture and non-negotiables
 

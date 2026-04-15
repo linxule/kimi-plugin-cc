@@ -200,6 +200,24 @@ export class JobStore {
     return row ? hydrateRow(row) : null;
   }
 
+  findAskJobBySession(repoId: string, sessionId: string): JobRecord | null {
+    const row = this.db.get<DbRow>(
+      `
+        SELECT *
+        FROM jobs
+        WHERE repo_id = ?
+          AND command_type = 'ask'
+          AND kimi_session_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+      repoId,
+      sessionId,
+    );
+
+    return row ? hydrateRow(row) : null;
+  }
+
   updateRunningJob(jobId: string, patch: Partial<JobRecord>): JobRecord | null {
     return this.updateWhere(jobId, patch, "status = 'running'");
   }

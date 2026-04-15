@@ -8,6 +8,8 @@ describe("argument parsing", () => {
 
     expect(parsed.thinking).toBeFalse();
     expect(parsed.prompt).toBe("--literal question");
+    expect(parsed.resume).toBeFalse();
+    expect(parsed.fresh).toBeFalse();
   });
 
   test("parseAskArgs treats unknown flags as prompt text start", () => {
@@ -15,6 +17,40 @@ describe("argument parsing", () => {
 
     expect(parsed.model).toBe("kimi-k2");
     expect(parsed.prompt).toBe("--mystery tail");
+    expect(parsed.resume).toBeFalse();
+    expect(parsed.fresh).toBeFalse();
+  });
+
+  test("parseAskArgs handles explicit resume targets", () => {
+    const parsed = parseAskArgs(["--resume", "foo"]);
+
+    expect(parsed).toEqual({
+      resume: true,
+      resumeTarget: "foo",
+      fresh: false,
+      model: undefined,
+      thinking: undefined,
+      prompt: undefined,
+    });
+  });
+
+  test("parseAskArgs treats -r as bare resume and preserves following prompt text", () => {
+    const parsed = parseAskArgs(["-r", "my question"]);
+
+    expect(parsed).toEqual({
+      resume: true,
+      resumeTarget: undefined,
+      fresh: false,
+      model: undefined,
+      thinking: undefined,
+      prompt: "my question",
+    });
+  });
+
+  test("parseAskArgs rejects --fresh and --resume together", () => {
+    expect(() => parseAskArgs(["--fresh", "--resume"])).toThrow(
+      "ask does not allow --fresh and --resume together.",
+    );
   });
 
   test("parseReviewArgs preserves adversarial focus text after known flags", () => {

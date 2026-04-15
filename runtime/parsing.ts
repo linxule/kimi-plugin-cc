@@ -6,7 +6,10 @@ export interface KimiFlagState {
 }
 
 export interface AskArgs extends KimiFlagState {
-  prompt: string;
+  fresh: boolean;
+  resume: boolean;
+  resumeTarget?: string;
+  prompt?: string;
 }
 
 export interface ReviewArgs extends KimiFlagState {
@@ -34,16 +37,80 @@ export interface JobLookupArgs {
 }
 
 export function parseAskArgs(argv: string[]): AskArgs {
-  const parsed = parseKnownFlags(argv, new Set(["-m", "--model", "--thinking", "--no-thinking"]));
+  let model: string | undefined;
+  let thinking: boolean | undefined;
+  let fresh = false;
+  let resume = false;
+  let resumeTarget: string | undefined;
+  let trailingTokens: string[] | undefined;
 
-  if (!parsed.trailingText) {
-    throw new RuntimeError("INVALID_ARGS", "ask requires a question after the flags.", "ask.parse");
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+
+    if (token === "--") {
+      trailingTokens = argv.slice(index + 1);
+      break;
+    }
+
+    if (!token.startsWith("-")) {
+      trailingTokens = argv.slice(index);
+      break;
+    }
+
+    switch (token) {
+      case "-m":
+      case "--model": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
+        }
+        model = value;
+        index += 1;
+        break;
+      }
+      case "--fresh":
+        fresh = true;
+        break;
+      case "-r":
+        resume = true;
+        break;
+      case "--resume": {
+        resume = true;
+        const value = argv[index + 1];
+        if (value && !value.startsWith("-")) {
+          resumeTarget = value;
+          index += 1;
+        }
+        break;
+      }
+      case "--thinking":
+        thinking = true;
+        break;
+      case "--no-thinking":
+        thinking = false;
+        break;
+      default:
+        trailingTokens = argv.slice(index);
+        index = argv.length;
+        break;
+    }
+  }
+
+  if (fresh && resume) {
+    throw new RuntimeError(
+      "INVALID_FLAGS",
+      "ask does not allow --fresh and --resume together.",
+      "ask.parse",
+    );
   }
 
   return {
-    model: parsed.model,
-    thinking: parsed.thinking,
-    prompt: parsed.trailingText,
+    fresh,
+    resume,
+    resumeTarget,
+    model,
+    thinking,
+    prompt: trailingTokens?.join(" "),
   };
 }
 

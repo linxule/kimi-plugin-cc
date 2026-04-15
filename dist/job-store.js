@@ -117,6 +117,18 @@ export class JobStore {
       `, repoId, sessionId);
         return row ? hydrateRow(row) : null;
     }
+    findAskJobBySession(repoId, sessionId) {
+        const row = this.db.get(`
+        SELECT *
+        FROM jobs
+        WHERE repo_id = ?
+          AND command_type = 'ask'
+          AND kimi_session_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `, repoId, sessionId);
+        return row ? hydrateRow(row) : null;
+    }
     updateRunningJob(jobId, patch) {
         return this.updateWhere(jobId, patch, "status = 'running'");
     }
