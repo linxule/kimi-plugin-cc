@@ -167,6 +167,15 @@ describe("rescue approval policy", () => {
       "git commit -am wip",
       "git push origin main",
       "git reset --hard HEAD",
+      // git pre-subcommand flags — -c can smuggle pager overrides (git -c core.pager=bash
+      // show HEAD:exfil.sh), -C escapes the workspace root, --no-pager/-p shifts the
+      // subcommand position, and any natural "find first non-flag arg" refactor would
+      // accidentally admit this class without an explicit reject.
+      "git -c core.pager=bash show HEAD:exfil.sh",
+      "git -C /etc status",
+      "git --no-pager log --oneline",
+      "git -p show HEAD",
+      "git --exec-path=/tmp/fake status",
       // cargo/go escapes
       "cargo install foo",
       "cargo update",

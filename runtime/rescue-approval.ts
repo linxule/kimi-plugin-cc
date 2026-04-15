@@ -206,7 +206,20 @@ function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true
   }
 
   if (command === "git") {
-    return GIT_READONLY_SUBCOMMANDS.has(args[0] ?? "")
+    const firstArg = args[0] ?? "";
+    // Pre-subcommand git flags shift where the subcommand lives in argv. The `-c` form in
+    // particular can smuggle pager overrides: `git -c core.pager=bash show HEAD:exfil.sh`
+    // makes git pipe blob contents through bash without any shell metacharacters. Any
+    // legitimate "find first non-flag arg then check allowlist" refactor would accidentally
+    // admit that class of attack, so we preemptively reject every pre-subcommand flag here
+    // with an unambiguous error.
+    if (firstArg.startsWith("-")) {
+      return {
+        ok: false,
+        reason: `Rescue rejects git pre-subcommand flags (e.g. -c/-C/-p/--no-pager/--exec-path): ${tokens.join(" ")}. Put the read-only subcommand immediately after \`git\`.`,
+      };
+    }
+    return GIT_READONLY_SUBCOMMANDS.has(firstArg)
       ? { ok: true }
       : { ok: false, reason: `Rescue rejects git mutation commands: ${tokens.join(" ")}` };
   }
