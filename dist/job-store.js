@@ -29,10 +29,16 @@ export class JobStore {
         agent_profile TEXT NOT NULL,
         prompt_digest TEXT NOT NULL,
         summary TEXT NOT NULL,
+        phase TEXT,
         final_output_path TEXT,
         stream_log_path TEXT NOT NULL,
         error TEXT
       );
+    `);
+        if (!tableHasColumn(this.db, "jobs", "phase")) {
+            this.db.exec(`ALTER TABLE jobs ADD COLUMN phase TEXT;`);
+        }
+        this.db.exec(`
 
       CREATE INDEX IF NOT EXISTS jobs_repo_updated_idx
         ON jobs (repo_id, updated_at DESC);
@@ -93,12 +99,12 @@ export class JobStore {
           INSERT INTO jobs (
             job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
             background, pid, kimi_pid, status, kimi_session_id, agent_profile, prompt_digest,
-            summary, final_output_path, stream_log_path, error
+            summary, phase, final_output_path, stream_log_path, error
           )
           VALUES (
             @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
             @background, @pid, @kimi_pid, @status, @kimi_session_id, @agent_profile, @prompt_digest,
-            @summary, @final_output_path, @stream_log_path, @error
+            @summary, @phase, @final_output_path, @stream_log_path, @error
           )
         `, {
                 ...serializeRecord(input),
@@ -214,6 +220,7 @@ function hydrateRow(row) {
 function serializeRecord(record) {
     return {
         ...record,
+        phase: record.phase ?? null,
         thinking: record.thinking === null ? null : Number(record.thinking),
         background: Number(record.background),
         error: record.error ? JSON.stringify(record.error) : null,
@@ -369,6 +376,10 @@ function rewriteNamedParamsForBun(statement) {
 }
 function rewriteNamedBindingsForBun(bindings) {
     return Object.fromEntries(Object.entries(bindings).map(([key, value]) => [`$${key}`, value]));
+}
+function tableHasColumn(db, tableName, columnName) {
+    const columns = db.all(`PRAGMA table_info(${tableName})`);
+    return columns.some((column) => column.name === columnName);
 }
 function isSqliteConstraintError(error) {
     const message = formatError(error).toLowerCase();

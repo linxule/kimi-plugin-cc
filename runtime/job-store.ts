@@ -21,6 +21,7 @@ export interface JobRecord {
   agent_profile: string;
   prompt_digest: string;
   summary: string;
+  phase: string | null;
   final_output_path: string | null;
   stream_log_path: string;
   error: JobError | null;
@@ -41,6 +42,7 @@ export interface CreateJobInput {
   agent_profile: string;
   prompt_digest: string;
   summary: string;
+  phase?: string | null;
   final_output_path: string | null;
   stream_log_path: string;
   error: JobError | null;
@@ -82,10 +84,18 @@ export class JobStore {
         agent_profile TEXT NOT NULL,
         prompt_digest TEXT NOT NULL,
         summary TEXT NOT NULL,
+        phase TEXT,
         final_output_path TEXT,
         stream_log_path TEXT NOT NULL,
         error TEXT
       );
+    `);
+
+    if (!tableHasColumn(this.db, "jobs", "phase")) {
+      this.db.exec(`ALTER TABLE jobs ADD COLUMN phase TEXT;`);
+    }
+
+    this.db.exec(`
 
       CREATE INDEX IF NOT EXISTS jobs_repo_updated_idx
         ON jobs (repo_id, updated_at DESC);
@@ -149,12 +159,12 @@ export class JobStore {
           INSERT INTO jobs (
             job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
             background, pid, kimi_pid, status, kimi_session_id, agent_profile, prompt_digest,
-            summary, final_output_path, stream_log_path, error
+            summary, phase, final_output_path, stream_log_path, error
           )
           VALUES (
             @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
             @background, @pid, @kimi_pid, @status, @kimi_session_id, @agent_profile, @prompt_digest,
-            @summary, @final_output_path, @stream_log_path, @error
+            @summary, @phase, @final_output_path, @stream_log_path, @error
           )
         `,
         {
@@ -340,6 +350,7 @@ interface DbRow {
   agent_profile: string;
   prompt_digest: string;
   summary: string;
+  phase: string | null;
   final_output_path: string | null;
   stream_log_path: string;
   error: string | null;
@@ -357,6 +368,7 @@ function hydrateRow(row: DbRow): JobRecord {
 function serializeRecord(record: CreateJobInput): Record<string, unknown> {
   return {
     ...record,
+    phase: record.phase ?? null,
     thinking: record.thinking === null ? null : Number(record.thinking),
     background: Number(record.background),
     error: record.error ? JSON.stringify(record.error) : null,
@@ -551,6 +563,11 @@ function rewriteNamedParamsForBun(statement: string): string {
 
 function rewriteNamedBindingsForBun(bindings: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(bindings).map(([key, value]) => [`$${key}`, value]));
+}
+
+function tableHasColumn(db: SqliteAdapter, tableName: string, columnName: string): boolean {
+  const columns = db.all<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  return columns.some((column) => column.name === columnName);
 }
 
 function isSqliteConstraintError(error: unknown): boolean {

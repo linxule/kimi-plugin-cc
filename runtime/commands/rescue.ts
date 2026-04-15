@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, normalizeJobError, sweepStaleBackgroundJobs, waitForTerminalJob } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleBackgroundJobs, waitForTerminalJob } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
@@ -15,7 +15,7 @@ import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
-import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
+import { firstMeaningfulLine, readArtifact, renderRescueArtifact, writeArtifact } from "../render.js";
 import { createRescueApprovalPolicy } from "../rescue-approval.js";
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
@@ -30,6 +30,7 @@ const companionEntrypoint = fileURLToPath(
 const companionProjectRoot = path.resolve(path.dirname(companionEntrypoint), "..");
 
 const AUTO_RESUME_PATTERN = /\b(continue|resume|keep going|keep working|apply the top fix|dig deeper)\b/i;
+const RESCUE_SUMMARY_MAX = 120;
 
 export async function runRescue(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseRescueArgs(argv);
@@ -61,7 +62,8 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       kimi_session_id: sessionResolution.sessionId,
       agent_profile: agentProfile,
       prompt_digest: digestPrompt(prompt),
-      summary: parsed.background ? "Queued background rescue job." : "Starting rescue job.",
+      summary: shorten(prompt, RESCUE_SUMMARY_MAX),
+      phase: parsed.background ? "queued" : "starting",
       final_output_path: null,
       stream_log_path: logPath,
       error: null,
@@ -141,13 +143,13 @@ export async function executeRescueJob(
 
   try {
     if (options?.workerPid) {
-      store.updateRunningJob(job.job_id, { pid: options.workerPid, summary: "Background rescue worker running." });
+      store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
     }
 
     await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, "rescue.start");
     store.updateRunningJob(job.job_id, {
       kimi_pid: client.getChildPid(),
-      summary: "Rescue turn running.",
+      phase: "turn-running",
     });
 
     await withTimeout(
@@ -177,13 +179,13 @@ export async function executeRescueJob(
     }
 
     const completedTurn = await client.prompt(prompt, "rescue");
-    const rendered = renderManagedJobOutput(job, completedTurn.finalText);
-    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+    const artifactPath = await writeArtifact(paths, job, renderRescueArtifact(completedTurn.finalText));
     return (
       store.markCompleted(job.job_id, {
-        summary: rendered.summary,
+        summary: firstMeaningfulLine(completedTurn.finalText),
+        phase: "done",
         final_output_path: artifactPath,
-        error: rendered.error,
+        error: null,
       }) ?? job
     );
   } catch (error) {
@@ -317,7 +319,7 @@ async function startBackgroundRescue(
   try {
     store.updateRunningJob(job.job_id, {
       pid: child.pid ?? null,
-      summary: "Background rescue worker spawned.",
+      phase: "worker-spawned",
     });
   } finally {
     store.close();
@@ -344,4 +346,13 @@ async function startBackgroundRescue(
     null,
     2,
   )}\n`;
+}
+
+function shorten(text: string, max: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }

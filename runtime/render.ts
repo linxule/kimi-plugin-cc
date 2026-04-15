@@ -7,18 +7,19 @@ import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
 import type { ReviewOutput } from "./schemas/review-output.js";
 import { parseReviewOutput } from "./schemas/review-output.js";
-import type { RescueOutput } from "./schemas/rescue-output.js";
-import { parseRescueOutput } from "./schemas/rescue-output.js";
 import type { PluginPaths } from "./paths.js";
-import type { JobError, ManagedCommandType } from "./types.js";
+import type { JobError } from "./types.js";
 
 export type RenderedManagedOutput =
   | {
-      output: string | ReviewOutput | ReviewGateOutput | RescueOutput | null;
+      output: string | ReviewOutput | ReviewGateOutput | null;
       rendered: string;
       summary: string;
       error: JobError | null;
     };
+
+const EMPTY_RESCUE_FALLBACK = "Kimi did not return a final message.\n";
+const EMPTY_SUMMARY_FALLBACK = "Rescue did not return a final message.";
 
 export async function writeArtifact(
   paths: PluginPaths,
@@ -69,28 +70,12 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
       };
     }
     case "rescue": {
-      const rawFinalText = finalText.trim();
-
-      try {
-        const output = parseRescueOutput(rawFinalText);
-        return {
-          output,
-          rendered: renderRescueArtifact(job, output, rawFinalText),
-          summary: output.summary,
-          error: null,
-        };
-      } catch (error) {
-        const parseError = normalizeRenderError(error);
-        return {
-          output: null,
-          rendered: renderRescueArtifact(job, null, rawFinalText, {
-            message: parseError.message,
-            stage: parseError.stage,
-          }),
-          summary: "Rescue completed with partial or malformed final output.",
-          error: parseError,
-        };
-      }
+      return {
+        output: finalText,
+        rendered: renderRescueArtifact(finalText),
+        summary: firstMeaningfulLine(finalText),
+        error: null,
+      };
     }
     default:
       return assertNever(job.command_type);
@@ -135,65 +120,21 @@ export function renderReviewArtifact(job: JobRecord, output: ReviewOutput): stri
   return lines.join("\n");
 }
 
-export function renderRescueArtifact(
-  job: JobRecord,
-  output: RescueOutput | null,
-  rawFinalText: string,
-  parseError?: { message: string; stage: string },
-): string {
-  const lines = [
-    "# Rescue Result",
-    "",
-    `- Job: ${job.job_id}`,
-    `- Status: ${output?.status ?? "partial"}`,
-    `- Summary: ${output?.summary ?? "Rescue completed with an unparsed final response."}`,
-    ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
-  ];
-
-  if (output) {
-    if (output.changes.length > 0) {
-      lines.push("", "## Changes");
-      for (const change of output.changes) {
-        lines.push(`- ${change.action}: ${change.file} — ${change.description}`);
-      }
-    }
-
-    if (output.commands_run.length > 0) {
-      lines.push("", "## Commands");
-      for (const command of output.commands_run) {
-        lines.push(`- \`${command.command}\` (exit ${command.exit_code}) — ${command.note}`);
-      }
-    }
-
-    if (output.tests.length > 0) {
-      lines.push("", "## Tests");
-      for (const test of output.tests) {
-        lines.push(`- ${test.name}: ${test.status} — ${test.details}`);
-      }
-    }
-
-    if (output.followups.length > 0) {
-      lines.push("", "## Followups");
-      for (const followup of output.followups) {
-        lines.push(`- ${followup}`);
-      }
-    }
+export function renderRescueArtifact(rawOutput: string): string {
+  const trimmed = rawOutput.trim();
+  if (!trimmed) {
+    return EMPTY_RESCUE_FALLBACK;
   }
 
-  if (parseError) {
-    lines.push(
-      "",
-      "## Parse Warning",
-      `- Stage: ${parseError.stage}`,
-      `- Message: ${parseError.message}`,
-    );
-  }
+  return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
+}
 
-  if (rawFinalText.trim()) {
-    lines.push("", "## Raw Final Output", "```json", rawFinalText.trim(), "```");
-  }
-
-  return lines.join("\n");
+export function firstMeaningfulLine(text: string, fallback: string = EMPTY_SUMMARY_FALLBACK): string {
+  const line = String(text ?? "")
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .find(Boolean);
+  return line ?? fallback;
 }
 
 export function renderReviewGateArtifact(job: JobRecord, output: ReviewGateOutput): string {
@@ -240,30 +181,6 @@ export function renderTerminalJobArtifact(job: JobRecord): string {
 
 function capitalize(value: string): string {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
-}
-
-function normalizeRenderError(error: unknown): JobError {
-  if (error instanceof RuntimeError) {
-    return {
-      code: error.code,
-      message: error.message,
-      stage: error.stage,
-    };
-  }
-
-  if (error instanceof Error) {
-    return {
-      code: "UNEXPECTED_ERROR",
-      message: error.message,
-      stage: "runtime",
-    };
-  }
-
-  return {
-    code: "UNEXPECTED_ERROR",
-    message: String(error),
-    stage: "runtime",
-  };
 }
 
 function assertNever(value: never): never {

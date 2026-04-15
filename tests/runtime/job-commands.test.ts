@@ -126,11 +126,13 @@ describe("job-backed ask/status/result", () => {
         const older = store.getJob("job-older");
         const newer = store.getJob("job-newer");
         const other = store.getJob("job-other");
+        const columns = getJobTableColumns(paths.stateDbPath);
 
         expect(newer?.status).toBe("running");
         expect(older?.status).toBe("failed");
         expect(older?.error?.code).toBe("JOB_STORE_ORPHANED_ON_UPGRADE");
         expect(other?.status).toBe("running");
+        expect(columns).toContain("phase");
       } finally {
         store.close();
       }
@@ -138,4 +140,62 @@ describe("job-backed ask/status/result", () => {
       await cleanupTestPath(pluginDataRoot);
     }
   });
+
+  test("0.1.7 migration adds the phase column idempotently", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-phase-migration");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed.exec(`
+          CREATE TABLE jobs (
+            job_id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            command_type TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            model TEXT,
+            thinking INTEGER,
+            background INTEGER NOT NULL,
+            pid INTEGER,
+            kimi_pid INTEGER,
+            status TEXT NOT NULL,
+            kimi_session_id TEXT,
+            agent_profile TEXT NOT NULL,
+            prompt_digest TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            final_output_path TEXT,
+            stream_log_path TEXT NOT NULL,
+            error TEXT
+          );
+        `);
+      } finally {
+        seed.close();
+      }
+
+      const store = new JobStore(paths);
+      store.close();
+      expect(getJobTableColumns(paths.stateDbPath)).toContain("phase");
+
+      const reopened = new JobStore(paths);
+      reopened.close();
+      expect(getJobTableColumns(paths.stateDbPath).filter((column) => column === "phase")).toHaveLength(1);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
 });
+
+function getJobTableColumns(dbPath: string): string[] {
+  const db = new Database(dbPath);
+  try {
+    const columns = db.query("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
+    return columns.map((column) => column.name);
+  } finally {
+    db.close();
+  }
+}

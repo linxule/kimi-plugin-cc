@@ -125,6 +125,7 @@ describe("replay command", () => {
         agent_profile: "runtime/agents/review-gate.yaml",
         prompt_digest: "digest",
         summary: "failed",
+        phase: null,
         final_output_path: null,
         stream_log_path: path.join(pluginDataRoot, "missing.jsonl"),
         error: {
@@ -206,6 +207,7 @@ function makeReplayJobRecord(logPath: string): JobRecord {
     agent_profile: "runtime/agents/ask.yaml",
     prompt_digest: "digest",
     summary: "failed",
+    phase: null,
     final_output_path: null,
     stream_log_path: logPath,
     error: null,

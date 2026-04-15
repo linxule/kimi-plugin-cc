@@ -16,6 +16,15 @@ import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from 
 
 const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 const mockWireServerPath = path.join(process.cwd(), "tests/helpers/mock-wire-server.ts");
+const RESCUE_SUCCESS_OUTPUT = [
+  "Applied the requested change.",
+  "",
+  "- Updated note.txt with the requested fix.",
+  "- Ran pwd to verify the workspace context.",
+  "- Mock verification passed.",
+  "",
+].join("\n");
+const RESCUE_EMPTY_FALLBACK = "Kimi did not return a final message.\n";
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -149,15 +158,21 @@ describe("rescue command lifecycle", () => {
         job_id: string;
         status: string;
         kimi_session_id: string;
+        summary: string;
+        phase: string | null;
       };
       const store = new JobStore(resolvePluginPaths(env));
       const latest = store.getJob(status.job_id);
       store.close();
 
-      expect(output).toContain("# Rescue Result");
+      expect(output).toBe(RESCUE_SUCCESS_OUTPUT);
       expect(status.status).toBe("completed");
+      expect(status.summary).toBe("Applied the requested change.");
+      expect(status.phase).toBe("done");
       expect(status.kimi_session_id).toBe(invocation.argv[sessionIndex + 1]);
       expect(latest?.kimi_session_id).toBe(invocation.argv[sessionIndex + 1]);
+      expect(latest?.summary).toBe("Applied the requested change.");
+      expect(latest?.phase).toBe("done");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -262,15 +277,52 @@ describe("rescue command lifecycle", () => {
       const jobId = parseStartedJobId(startOutput);
       const runningStatus = JSON.parse(await runStatus([jobId], makeContext(repoRoot, successEnv))) as {
         status: string;
+        summary: string;
+        phase: string | null;
       };
+      const inFlight = await waitForJobState(
+        successEnv,
+        jobId,
+        (job) => job?.status === "running" && job.phase === "turn-running" && Boolean(job.kimi_pid),
+      );
 
       expect(["running", "completed"]).toContain(runningStatus.status);
+      expect(runningStatus.summary).toBe("Do the work");
+      expect(["worker-spawned", "worker-running", "turn-running", "done"]).toContain(runningStatus.phase ?? "");
+      expect(inFlight?.phase).toBe("turn-running");
+      expect(inFlight?.summary).toBe("Do the work");
 
       const completed = await waitForTerminalJob(() => new JobStore(resolvePluginPaths(successEnv)), jobId, 10_000);
       const resultOutput = await runResult([jobId], makeContext(repoRoot, successEnv));
 
       expect(completed.status).toBe("completed");
-      expect(resultOutput).toContain("# Rescue Result");
+      expect(completed.summary).toBe("Applied the requested change.");
+      expect(completed.phase).toBe("done");
+      expect(resultOutput).toBe(RESCUE_SUCCESS_OUTPUT);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("empty rescue output falls back to the default artifact and summary", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-empty");
+    const repoRoot = await createGitRepoFixture("rescue-empty-repo");
+    const invocationPath = path.join(pluginDataRoot, "rescue-empty.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-empty", invocationPath);
+
+    try {
+      const output = await runRescue(["Investigate", "the", "workspace"], makeContext(repoRoot, env));
+      const status = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoRoot, env))) as {
+        status: string;
+        summary: string;
+        phase: string | null;
+      };
+
+      expect(output).toBe(RESCUE_EMPTY_FALLBACK);
+      expect(status.status).toBe("completed");
+      expect(status.summary).toBe("Rescue did not return a final message.");
+      expect(status.phase).toBe("done");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);

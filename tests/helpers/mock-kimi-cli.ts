@@ -211,6 +211,7 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
       return;
     }
     case "rescue-success":
+    case "rescue-empty":
     case "rescue-malformed":
     case "rescue-cancel": {
       pendingPromptId = request.id;
@@ -288,34 +289,17 @@ async function emitRescueFinal(): Promise<void> {
   sendEvent("ContentPart", {
     type: "text",
     text:
-      scenario === "rescue-malformed"
-        ? "{\"summary\":\"oops\""
-        : JSON.stringify({
-            status: "success",
-            summary: "Applied the requested change.",
-            changes: [
-              {
-                file: "note.txt",
-                action: "edit",
-                description: "Updated the file requested by the task.",
-              },
-            ],
-            commands_run: [
-              {
-                command: approvalMode === "shell" ? approvalTarget : "pwd",
-                exit_code: 0,
-                note: "Inspection completed.",
-              },
-            ],
-            tests: [
-              {
-                name: "mock-check",
-                status: "passed",
-                details: "Mock verification passed.",
-              },
-            ],
-            followups: [],
-          }),
+      scenario === "rescue-empty"
+        ? "   "
+        : scenario === "rescue-malformed"
+          ? "{\"summary\":\"oops\""
+          : [
+              "Applied the requested change.",
+              "",
+              "- Updated note.txt with the requested fix.",
+              `- Ran ${approvalMode === "shell" ? approvalTarget : "pwd"} to verify the workspace context.`,
+              "- Mock verification passed.",
+            ].join("\n"),
   });
   await finishPrompt("finished");
 }
