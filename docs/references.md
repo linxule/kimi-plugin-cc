@@ -7,14 +7,16 @@ Primary source links for reviewers validating the `kimi-plugin-cc` planning bund
 - Codex plugin repository: [https://github.com/openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc)
 - Codex plugin README: [https://raw.githubusercontent.com/openai/codex-plugin-cc/main/README.md](https://raw.githubusercontent.com/openai/codex-plugin-cc/main/README.md)
 
-Useful repository paths to inspect:
+Useful repository paths to inspect (current `openai/codex-plugin-cc` layout; also mirrored in the installed plugin cache at `~/.claude/plugins/cache/openai-codex/codex/<version>/`):
 
-- `plugins/codex/scripts/lib/app-server.mjs`
-- `plugins/codex/scripts/codex-companion.mjs`
-- `plugins/codex/scripts/lib/state.mjs`
-- `plugins/codex/scripts/lib/job-control.mjs`
-- `plugins/codex/agents/codex-rescue.md`
-- `plugins/codex/hooks/hooks.json`
+- `scripts/lib/app-server.mjs`
+- `scripts/codex-companion.mjs`
+- `scripts/lib/render.mjs` — especially `renderTaskResult` and `firstMeaningfulLine` (the 4-line pass-through pattern kimi-plugin-cc's rescue was refactored toward in 0.1.7; see [ADR 004](./adr/004-rescue-pass-through.md))
+- `scripts/lib/state.mjs`
+- `scripts/lib/job-control.mjs`
+- `agents/codex-rescue.md`
+- `hooks/hooks.json`
+- `prompts/` — contains only `adversarial-review.md` and `stop-review-gate.md`; Codex task has no system prompt file
 
 ## Kimi CLI references
 

@@ -1,6 +1,8 @@
 # Implementation Plan
 
-This document is the build-order plan for the future implementation phase. It assumes the product and architecture decisions in [spec.md](./spec.md) and the ADRs are locked.
+> **Historical document.** This plan was written before any code landed. All referenced phases (0 through 3b) shipped between April 14–15, 2026, and the plugin has since landed targeted post-phase releases 0.1.1 through **0.1.7** (rescue pass-through refactor, tagged as `v0.1.7`). See [CLAUDE.md](../CLAUDE.md) §Phasing for the authoritative shipped-state timeline and [ADR 004](./adr/004-rescue-pass-through.md) for the most recent architectural decision. The content below is preserved for historical reference and is not a roadmap.
+
+This document was the build-order plan for the original implementation phase. It assumed the product and architecture decisions in [spec.md](./spec.md) and the ADRs were locked.
 
 ## Phase 0: Planning bundle
 

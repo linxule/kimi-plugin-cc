@@ -29,7 +29,7 @@ Scenarios:
 - foreground review
 - background review
 - challenge review with steering text
-- malformed review output from Kimi
+- malformed review or challenge output from Kimi (rescue is pass-through as of 0.1.7 and has no malformed state)
 - review finding with a single-line location
 - review finding with a multi-line range
 - attempted multi-file finding in one item
@@ -99,6 +99,12 @@ Scenarios:
 - rescue attempts to edit a file through a symlink that resolves outside workspace root
 - rescue attempts to write inside `.git/`
 - rescue edits `.gitignore` at repo root
+- rescue final output is empty or whitespace-only (0.1.7 — pass-through fallback)
+- rescue summary derives from the first meaningful line of the raw output (0.1.7 — `firstMeaningfulLine`)
+- rescue `phase` column transitions through queued → worker-running → turn-running → done on success (0.1.7)
+- rescue `phase` column lands on `failed` when the rescue hits an approval rejection or a runtime error (0.1.7)
+- rescue `phase` column lands on `cancelled` when the rescue is cancelled in-flight or force-cancelled after worker termination (0.1.7)
+- `JobStore` upgrades a 0.1.3-shaped database to the 0.1.7 schema idempotently (new `phase` column, `PRAGMA table_info(jobs)` guard)
 
 Expected outcomes:
 
@@ -107,6 +113,9 @@ Expected outcomes:
 - status/result reflect rescue progress and completion accurately
 - resume precedence follows the resolution order defined in the spec
 - rescue auto-approves permitted workspace-local file edits only
+- rescue output is pass-through prose, not schema-validated JSON (0.1.7)
+- empty rescue output renders the fallback artifact `"Kimi did not return a final message."` and falls back to the fixed summary `"Rescue did not return a final message."`, with `status` still `completed`
+- `summary` is written exactly twice per rescue run (at job creation from the shortened prompt, then overwritten on completion with `firstMeaningfulLine(rawOutput)`); transient lifecycle telemetry lives in `phase`, never in `summary`
 - rescue auto-approves only allowlisted local shell commands
 - non-allowlisted shell commands are rejected explicitly
 - cancelled rescue remains terminal as a job but may still expose a resumable Kimi session id

@@ -73,8 +73,10 @@ See [CLAUDE.md](./CLAUDE.md) for the locked architectural decisions. The canonic
 - [docs/spec.md](./docs/spec.md) — canonical product and technical spec
 - [docs/adr/001-wire-first-transport.md](./docs/adr/001-wire-first-transport.md) — why Wire is the primary transport
 - [docs/adr/002-plugin-runtime-shape.md](./docs/adr/002-plugin-runtime-shape.md) — why the runtime mirrors the Codex plugin split
-- [docs/adr/003-node-tsx-companion-runtime.md](./docs/adr/003-node-tsx-companion-runtime.md) — why the companion runs on Node+tsx instead of Bun
-- [docs/implementation-plan.md](./docs/implementation-plan.md) — phased implementation plan
+- [docs/adr/003-node-tsx-companion-runtime.md](./docs/adr/003-node-tsx-companion-runtime.md) — why the companion runs on Node (with `tsx` in dev, precompiled `dist/` in production since 0.1.4)
+- [docs/adr/004-rescue-pass-through.md](./docs/adr/004-rescue-pass-through.md) — why rescue is pass-through prose (0.1.7 refactor)
+- [docs/followups.md](./docs/followups.md) — **open gaps and deferred work** (single source of truth for post-0.1.7 tracked items)
+- [docs/implementation-plan.md](./docs/implementation-plan.md) — historical phased implementation plan (all referenced phases shipped)
 - [docs/test-plan.md](./docs/test-plan.md) — acceptance and failure-mode coverage
 - [docs/review/checklist.md](./docs/review/checklist.md) — review checklist
 - [docs/references.md](./docs/references.md) — primary source links

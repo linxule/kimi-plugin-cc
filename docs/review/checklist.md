@@ -1,6 +1,15 @@
 # Review Checklist
 
-Use this checklist when reviewing the planning bundle or a future implementation.
+Use this checklist when reviewing the planning bundle, a shipped release, or an in-flight change to the runtime. The bundle shipped in phases 0–3b in April 2026; current behaviour is captured in [spec.md](../spec.md), [CLAUDE.md](../../CLAUDE.md), and the ADRs. The questions below apply both to reviewing the original plan and to reviewing ongoing changes against the shipped state.
+
+## 0.1.7 Model B invariant (post-rescue-refactor)
+
+- Does the change respect the ownership split from [ADR 004](../adr/004-rescue-pass-through.md)? (The plugin owns transport, session, workspace, tool scope, approval policy, and job lifecycle; Kimi owns content, reasoning, and prose.)
+- For a rescue-touching change: is `summary` still written only at creation and completion, with transient lifecycle telemetry routed to `phase`?
+- For a new system prompt or prompt edit: is every line justified by something that cannot be expressed via `exclude_tools`, the approval allowlist, per-call schema injection, or Kimi's default behavior?
+- For a new command: is its output shape explicitly either structured (JSON with schema, parser, and renderer) or pass-through prose? Avoid the middle ground that produced the 0.1.7 refactor.
+- If the change widens the rescue shell allowlist, is the scope narrowly justified against `project_rescue_allowlist_gaps` in memory? Any allowance of `&&`, pipes, or subshells must be deliberate.
+- If the change touches `runtime/jobs.ts` terminal helpers (`markJobFailed`, `markJobCancelled`): is the new terminal `phase` value consistent with the rescue-only scope (other commands should not grow `phase` semantics without a conscious extension)?
 
 ## Architecture
 

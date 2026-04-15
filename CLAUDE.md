@@ -75,3 +75,4 @@ Any further changes should be scoped as a new ADR or a targeted fix commit, not 
 - Changes to product/architecture belong in `docs/spec.md` or a new ADR, not scattered across READMEs.
 - `docs/references.md` and `docs/research/` are grounding material — prefer updating them over inventing behavior from memory.
 - Validate proposed changes against `docs/test-plan.md` and `docs/review/checklist.md`.
+- **Open gaps, deferred work, and tracked follow-ups live in [`docs/followups.md`](./docs/followups.md)** — check there before opening a new issue or starting a new refactor. The file is the single source of truth for known-open items across rescue hardening, allowlist widening, ask refactor (0.1.8), upstream feature requests, and documentation polish. Remove items from the file when their fix lands.
