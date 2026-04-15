@@ -1,0 +1,16 @@
+{
+  "name": "kimi-marketplace",
+  "owner": {
+    "name": "linxule"
+  },
+  "metadata": {
+    "description": "Single-plugin marketplace for kimi-plugin-cc.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "kimi",
+      "source": "./"
+    }
+  ]
+}

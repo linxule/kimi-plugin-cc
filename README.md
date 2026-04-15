@@ -33,13 +33,35 @@ Kimi Wire is the primary transport. Wire is labeled experimental in Kimi's docs;
 - `node` >= 18.18 on `PATH`. If node lives outside `PATH`, set `KIMI_PLUGIN_CC_NODE_BIN=/absolute/path/to/node` — both the slash-command launcher and the Stop hook honor this.
 - `bun` is only required for contributor tooling (`bun run check`, `bun test`). Installed plugins do not need `bun` at runtime.
 
-## Install locally
+## Install
 
-1. Clone the repo somewhere convenient.
-2. `bun install` inside the clone — this installs `better-sqlite3` and `shell-quote`, the two real runtime dependencies. `tsx` is a dev-only dependency and is not needed post-install.
-3. Register the clone with Claude Code as a local plugin (`/plugin install /absolute/path/to/kimi-plugin-cc`, or the equivalent local-path flow your Claude Code build supports).
-4. In a Claude Code session, run `/kimi:setup` to verify `kimi` is reachable and authenticated.
-5. Optional: `/kimi:setup --enable-review-gate` to turn on stop-time review.
+Two supported paths.
+
+### Option A — via the marketplace (recommended)
+
+In a Claude Code session:
+
+```
+/plugin marketplace add linxule/kimi-plugin-cc
+/plugin install kimi@kimi-marketplace
+/kimi:setup
+```
+
+If the repo is private, `gh auth login` must be set up (Claude Code shells out to `gh` for private clones).
+
+### Option B — from a local clone (fastest for development)
+
+```bash
+git clone https://github.com/linxule/kimi-plugin-cc ~/kimi-plugin-cc
+cd ~/kimi-plugin-cc && bun install   # only needed for contributor tooling; runtime deps are in package.json → dependencies
+claude --plugin-dir ~/kimi-plugin-cc
+```
+
+Then inside Claude Code: `/kimi:setup`.
+
+### After install
+
+Run `/kimi:setup` to verify the local `kimi` CLI is reachable and authenticated. Optional: `/kimi:setup --enable-review-gate` to turn on the stop-time review gate (disabled by default).
 
 ## Architecture and non-negotiables
 
