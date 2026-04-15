@@ -11,6 +11,7 @@ import {
 } from "../kimi-timeouts.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
+import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { ApprovalDispatcher, rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { WireClient } from "../wire/client.js";
 
@@ -70,7 +71,7 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
         protocol_version: "1.9",
         client: {
           name: "kimi-plugin-cc",
-          version: "0.1.0",
+          version: KIMI_PLUGIN_CC_VERSION,
         },
         capabilities: {
           supports_question: false,

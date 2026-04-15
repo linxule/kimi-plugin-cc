@@ -5,6 +5,7 @@ import { classifySetupFailure } from "../kimi-errors.js";
 import { resolveKimiWireCommand } from "../kimi-launch.js";
 import { KIMI_SETUP_INITIALIZE_TIMEOUT_MS, KIMI_SETUP_PROMPT_TIMEOUT_MS, withTimeout, } from "../kimi-timeouts.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
+import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { ApprovalDispatcher, rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { WireClient } from "../wire/client.js";
 export async function runSetup(argv, context) {
@@ -40,7 +41,7 @@ export async function runSetup(argv, context) {
             protocol_version: "1.9",
             client: {
                 name: "kimi-plugin-cc",
-                version: "0.1.0",
+                version: KIMI_PLUGIN_CC_VERSION,
             },
             capabilities: {
                 supports_question: false,

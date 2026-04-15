@@ -9,6 +9,7 @@ import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
+import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 export async function runAsk(argv, context) {
@@ -60,7 +61,7 @@ export async function runAsk(argv, context) {
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
         await withTimeout(client.initialize({
             protocol_version: "1.9",
-            client: { name: "kimi-plugin-cc", version: "0.1.0" },
+            client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
             capabilities: {
                 supports_question: false,
                 supports_plan_mode: false,

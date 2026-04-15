@@ -16,6 +16,7 @@ import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { createRescueApprovalPolicy } from "../rescue-approval.js";
 import type { CommandContext } from "../types.js";
+import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 
 // Resolves to runtime/companion.ts in dev (via tsx) and dist/companion.js in production (compiled
 // with tsc to the same relative layout). The extension is derived from the running module so the
@@ -146,7 +147,7 @@ export async function executeRescueJob(
     await withTimeout(
       client.initialize({
         protocol_version: "1.9",
-        client: { name: "kimi-plugin-cc", version: "0.1.0" },
+        client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
         capabilities: {
           supports_question: false,
           supports_plan_mode: false,
