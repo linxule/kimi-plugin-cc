@@ -5,7 +5,8 @@ export type CompanionCommand =
   | "ask"
   | "status"
   | "result"
-  | "cancel";
+  | "cancel"
+  | "replay";
 
 export type RuntimeCommandType =
   | "setup"

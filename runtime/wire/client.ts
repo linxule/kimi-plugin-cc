@@ -62,6 +62,7 @@ export class WireClient {
   private stdoutBuffer = "";
   private suppressExitError = false;
   private approvalFailure?: RuntimeError;
+  private rejectApprovals = false;
 
   constructor(options: WireClientOptions) {
     this.cwd = options.cwd;
@@ -166,6 +167,7 @@ export class WireClient {
     this.currentTurn = new TurnEventBuffer();
     this.currentCommandType = commandType;
     this.approvalFailure = undefined;
+    this.rejectApprovals = false;
 
     try {
       const result = await this.sendRequest<PromptResult>("prompt", { user_input: userInput });
@@ -182,6 +184,20 @@ export class WireClient {
 
   async cancel(): Promise<CancelResult> {
     return this.sendRequest<CancelResult>("cancel", {});
+  }
+
+  beginCancellation(): void {
+    this.rejectApprovals = true;
+  }
+
+  terminateChild(signal: NodeJS.Signals = "SIGTERM"): void {
+    if (!this.child) {
+      return;
+    }
+
+    if (this.child.exitCode === null && this.child.signalCode === null) {
+      this.child.kill(signal);
+    }
   }
 
   async replay(): Promise<never> {
@@ -328,24 +344,37 @@ export class WireClient {
     }
 
     const payload = parseApprovalRequestPayload(message.params.payload);
-    const decision = await this.approvalDispatcher.handle(payload, {
-      commandType: this.currentCommandType,
-    });
+    const decision = this.rejectApprovals
+      ? {
+          response: "reject" as const,
+          feedback: "Command cancellation is in progress.",
+        }
+      : await this.approvalDispatcher.handle(payload, {
+          commandType: this.currentCommandType,
+        });
+
+    const finalDecision =
+      this.rejectApprovals && decision.response !== "reject"
+        ? {
+            response: "reject" as const,
+            feedback: "Command cancellation is in progress.",
+          }
+        : decision;
 
     const response = {
       jsonrpc: "2.0" as const,
       id: message.id,
       result: {
         request_id: payload.id,
-        response: decision.response,
-        ...(decision.feedback ? { feedback: decision.feedback } : {}),
+        response: finalDecision.response,
+        ...(finalDecision.feedback ? { feedback: finalDecision.feedback } : {}),
       },
     };
 
-    if (decision.response === "reject") {
+    if (finalDecision.response === "reject") {
       this.approvalFailure = new RuntimeError(
         "APPROVAL_REJECTED",
-        decision.feedback ?? `Approval rejected for ${payload.action}.`,
+        finalDecision.feedback ?? `Approval rejected for ${payload.action}.`,
         "wire.approval",
       );
     }

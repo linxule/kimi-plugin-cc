@@ -9,9 +9,10 @@ import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
-import { renderAskArtifact, writeArtifact } from "../render.js";
+import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
+import { classifyManagedCommandFailure } from "../kimi-errors.js";
 
 export async function runAsk(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseAskArgs(argv);
@@ -73,23 +74,19 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
     });
 
     const completed = await client.prompt(buildAskPrompt(parsed.prompt), "ask");
-    const finalText = completed.finalText.trim();
-
-    if (!finalText) {
-      throw new RuntimeError("ASK_EMPTY_OUTPUT", "ask returned an empty final response.", "ask.prompt");
-    }
-
-    const artifactPath = await writeArtifact(paths, job, renderAskArtifact(finalText));
+    const rendered = renderManagedJobOutput(job, completed.finalText);
+    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
     store.markCompleted(job.job_id, {
-      summary: finalText.slice(0, 160),
+      summary: rendered.summary,
       final_output_path: artifactPath,
       error: null,
     });
 
-    return finalText;
+    return rendered.output as string;
   } catch (error) {
-    await markJobFailed(store, paths, job, error, "Ask failed.");
-    throw error;
+    const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
+    await markJobFailed(store, paths, job, classified, "Ask failed.");
+    throw classified;
   } finally {
     await client.close();
     store.close();

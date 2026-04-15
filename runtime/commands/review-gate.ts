@@ -8,15 +8,15 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
+import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../kimi-errors.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import {
-  parseReviewGateOutput,
   type ReviewGateOutput,
 } from "../schemas/review-gate-output.js";
 import {
-  renderReviewGateArtifact,
+  renderManagedJobOutput,
   writeArtifact,
 } from "../render.js";
 import type { CommandContext } from "../types.js";
@@ -149,7 +149,7 @@ async function executeReviewGate(
   });
 
   try {
-    const output = await withTimeout(
+    const rendered = await withTimeout(
       (async () => {
         await client.start();
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
@@ -163,26 +163,27 @@ async function executeReviewGate(
         });
 
         const completed = await client.prompt(prompt, "review_gate");
-        return parseReviewGateOutput(completed.finalText.trim());
+        return renderManagedJobOutput(job, completed.finalText);
       })(),
       REVIEW_GATE_TIMEOUT_MS,
       "review_gate.runtime",
     );
 
-    const artifactPath = await writeArtifact(paths, job, renderReviewGateArtifact(job, output));
+    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
     store.markCompleted(job.job_id, {
-      summary: output.summary,
+      summary: rendered.summary,
       final_output_path: artifactPath,
       error: null,
     });
-    return output;
+    return rendered.output as ReviewGateOutput;
   } catch (error) {
+    const classified = classifyManagedCommandFailure(error, "review_gate", job.job_id);
     const summary =
-      error instanceof RuntimeError && error.code === "TIMEOUT"
+      classified instanceof RuntimeError && classified.code === "TIMEOUT"
         ? "Review gate timed out."
         : "Review gate failed.";
-    await markJobFailed(store, paths, job, error, summary);
-    throw error;
+    await markJobFailed(store, paths, job, classified, summary);
+    throw classified;
   } finally {
     await client.close();
     store.close();
@@ -250,12 +251,9 @@ function buildWarningMessage(error: unknown): string {
     }
   }
 
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("LLM is not set") || message.includes("LLM service error")) {
-    return "Kimi review gate is not configured for model access; allowing stop.";
-  }
-  if (message.includes("Failed to start kimi")) {
-    return "Kimi review gate could not start the Kimi CLI; allowing stop.";
+  const warning = summarizeKimiAvailabilityWarning(error, "review_gate");
+  if (warning) {
+    return warning;
   }
 
   return "Kimi review gate failed unexpectedly; allowing stop.";

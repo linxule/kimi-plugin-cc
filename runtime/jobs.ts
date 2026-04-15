@@ -96,6 +96,8 @@ export async function sweepStaleBackgroundJobs(store: JobStore, paths: PluginPat
       continue;
     }
 
+    // This is still vulnerable to PID reuse races. Fixing that needs pidfds or a worker heartbeat,
+    // which is out of scope for phase 3b.
     if (isPidAlive(job.pid)) {
       continue;
     }
@@ -150,7 +152,7 @@ export async function waitForTerminalJob(
 
   throw new RuntimeError(
     "JOB_WAIT_TIMEOUT",
-    `Timed out while waiting for job ${jobId} to finish.`,
+    `Timed out after ${timeoutMs}ms while waiting for job ${jobId} to finish. The worker may still be running; use /kimi:status ${jobId} to check progress or /kimi:result ${jobId} once it completes.`,
     "jobs.wait",
   );
 }

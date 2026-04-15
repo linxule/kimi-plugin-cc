@@ -2,10 +2,23 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { JobRecord } from "./job-store.js";
+import { RuntimeError } from "./errors.js";
 import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
+import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
 import type { ReviewOutput } from "./schemas/review-output.js";
+import { parseReviewOutput } from "./schemas/review-output.js";
 import type { RescueOutput } from "./schemas/rescue-output.js";
+import { parseRescueOutput } from "./schemas/rescue-output.js";
 import type { PluginPaths } from "./paths.js";
+import type { JobError, ManagedCommandType } from "./types.js";
+
+export type RenderedManagedOutput =
+  | {
+      output: string | ReviewOutput | ReviewGateOutput | RescueOutput | null;
+      rendered: string;
+      summary: string;
+      error: JobError | null;
+    };
 
 export async function writeArtifact(
   paths: PluginPaths,
@@ -19,6 +32,69 @@ export async function writeArtifact(
 
 export async function readArtifact(artifactPath: string): Promise<string> {
   return readFile(artifactPath, "utf8");
+}
+
+export function renderManagedJobOutput(job: JobRecord, finalText: string): RenderedManagedOutput {
+  switch (job.command_type) {
+    case "ask": {
+      const trimmed = finalText.trim();
+      if (!trimmed) {
+        throw new RuntimeError("ASK_EMPTY_OUTPUT", "ask returned an empty final response.", "ask.prompt");
+      }
+
+      return {
+        output: trimmed,
+        rendered: renderAskArtifact(trimmed),
+        summary: trimmed.slice(0, 160),
+        error: null,
+      };
+    }
+    case "review":
+    case "adversarial_review": {
+      const output = parseReviewOutput(finalText);
+      return {
+        output,
+        rendered: renderReviewArtifact(job, output),
+        summary: output.summary,
+        error: null,
+      };
+    }
+    case "review_gate": {
+      const output = parseReviewGateOutput(finalText.trim());
+      return {
+        output,
+        rendered: renderReviewGateArtifact(job, output),
+        summary: output.summary,
+        error: null,
+      };
+    }
+    case "rescue": {
+      const rawFinalText = finalText.trim();
+
+      try {
+        const output = parseRescueOutput(rawFinalText);
+        return {
+          output,
+          rendered: renderRescueArtifact(job, output, rawFinalText),
+          summary: output.summary,
+          error: null,
+        };
+      } catch (error) {
+        const parseError = normalizeRenderError(error);
+        return {
+          output: null,
+          rendered: renderRescueArtifact(job, null, rawFinalText, {
+            message: parseError.message,
+            stage: parseError.stage,
+          }),
+          summary: "Rescue completed with partial or malformed final output.",
+          error: parseError,
+        };
+      }
+    }
+    default:
+      return assertNever(job.command_type);
+  }
 }
 
 export function renderAskArtifact(output: string): string {
@@ -164,4 +240,36 @@ export function renderTerminalJobArtifact(job: JobRecord): string {
 
 function capitalize(value: string): string {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function normalizeRenderError(error: unknown): JobError {
+  if (error instanceof RuntimeError) {
+    return {
+      code: error.code,
+      message: error.message,
+      stage: error.stage,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      code: "UNEXPECTED_ERROR",
+      message: error.message,
+      stage: "runtime",
+    };
+  }
+
+  return {
+    code: "UNEXPECTED_ERROR",
+    message: String(error),
+    stage: "runtime",
+  };
+}
+
+function assertNever(value: never): never {
+  throw new RuntimeError(
+    "UNSUPPORTED_COMMAND_TYPE",
+    `Unsupported command type for rendering: ${String(value)}`,
+    "render",
+  );
 }

@@ -3,6 +3,7 @@
 import { runAsk } from "./commands/ask.js";
 import { runCancel } from "./commands/cancel.js";
 import { notImplementedInPhase1a } from "./commands/not-implemented.js";
+import { runReplay } from "./commands/replay.js";
 import { runResult } from "./commands/result.js";
 import { runReview } from "./commands/review.js";
 import { runRescue } from "./commands/rescue.js";
@@ -63,13 +64,16 @@ async function main(argv: string[]): Promise<void> {
     case "cancel":
       context.stdout.write(await runCancel(rest, context));
       return;
+    case "replay":
+      context.stdout.write(await runReplay(rest, context));
+      return;
     case "worker":
       await runWorker(rest, context);
       return;
     default:
       throw new RuntimeError(
         "INVALID_COMMAND",
-        `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, task, ask, status, result, cancel.`,
+        `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, task, ask, status, result, cancel, replay.`,
         "companion",
       );
   }

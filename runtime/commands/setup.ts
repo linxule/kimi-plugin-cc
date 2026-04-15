@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
+import { classifySetupFailure } from "../kimi-errors.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
 import { ApprovalDispatcher, rejectAllApprovals } from "../wire/approval-dispatcher.js";
@@ -108,35 +109,21 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
       `Probe error: ${message}`,
     ];
 
-    if (message.includes("LLM is not set") || message.includes("LLM service error")) {
+    const classified = classifySetupFailure(error);
+    if (classified) {
       return {
-        summary: "Kimi is installed, but the authentication or model configuration is not usable yet.",
-        runtimeProbe: "ok",
-        authProbe: "failed",
+        summary:
+          classified.kind === "auth_unavailable"
+            ? "Kimi is installed, but the authentication or model configuration is not usable yet."
+            : classified.kind === "binary_unavailable"
+              ? "Kimi is not installed or not executable from this environment."
+              : classified.kind === "timeout"
+                ? "Kimi is installed, but the setup probe did not complete within the expected time budget."
+                : "Kimi could not start a usable Wire session from this environment.",
+        runtimeProbe: classified.runtimeProbe,
+        authProbe: classified.authProbe,
         reviewGateEnabled,
-        nextStep: "Run `kimi login` or fix the local Kimi model configuration, then re-run /kimi:setup.",
-        details,
-      };
-    }
-
-    if (message.includes("Failed to start kimi")) {
-      return {
-        summary: "Kimi is not installed or not executable from this environment.",
-        runtimeProbe: "failed",
-        authProbe: "failed",
-        reviewGateEnabled,
-        nextStep: "Install or expose `kimi` on PATH, then re-run /kimi:setup.",
-        details,
-      };
-    }
-
-    if (message.includes("timed out")) {
-      return {
-        summary: "Kimi is installed, but the setup probe did not complete within the expected time budget.",
-        runtimeProbe: "failed",
-        authProbe: "failed",
-        reviewGateEnabled,
-        nextStep: "Check local Kimi auth/network health, then re-run /kimi:setup.",
+        nextStep: classified.nextStep,
         details,
       };
     }

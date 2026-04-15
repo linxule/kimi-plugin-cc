@@ -12,6 +12,7 @@ process.stdin.setEncoding("utf8");
 
 let buffer = "";
 let pendingPromptId: string | null = null;
+let pendingApprovalId: string | null = null;
 
 process.stdin.on("data", (chunk) => {
   buffer += chunk;
@@ -30,7 +31,13 @@ process.stdin.on("data", (chunk) => {
 });
 
 async function handleMessage(request: JsonRpcRequest): Promise<void> {
-  if (scenario === "approval-request" && request.id === "approval-req-1" && request.result) {
+  if (
+    (scenario === "approval-request" || scenario === "approval-cancel") &&
+    pendingApprovalId &&
+    request.id === pendingApprovalId &&
+    request.result
+  ) {
+    pendingApprovalId = null;
     if (pendingPromptId) {
       sendEvent("TurnEnd", {});
       send({
@@ -38,11 +45,16 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
         id: pendingPromptId,
         result: { status: "cancelled" },
       });
+      pendingPromptId = null;
     }
     return;
   }
 
   if (request.method === "initialize" && request.id) {
+    if (scenario === "slow-initialize") {
+      return;
+    }
+
     send({
       jsonrpc: "2.0",
       id: request.id,
@@ -63,6 +75,17 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
       id: request.id,
       result: {},
     });
+
+    if (scenario === "rescue-cancel-turn" && pendingPromptId) {
+      sendEvent("TurnEnd", {});
+      send({
+        jsonrpc: "2.0",
+        id: pendingPromptId,
+        result: { status: "cancelled" },
+      });
+      pendingPromptId = null;
+      return;
+    }
     return;
   }
 
@@ -85,11 +108,33 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
     }
     case "approval-request": {
       pendingPromptId = request.id;
+      pendingApprovalId = "approval-req-1";
       sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
       send({
         jsonrpc: "2.0",
         method: "request",
         id: "approval-req-1",
+        params: {
+          type: "ApprovalRequest",
+          payload: {
+            id: "approval-1",
+            sender: "Shell",
+            action: "run shell command",
+            description: "Run command `ls`",
+            display: [],
+          },
+        },
+      });
+      return;
+    }
+    case "approval-cancel": {
+      pendingPromptId = request.id;
+      pendingApprovalId = "approval-req-1";
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      send({
+        jsonrpc: "2.0",
+        method: "request",
+        id: pendingApprovalId,
         params: {
           type: "ApprovalRequest",
           payload: {
@@ -124,6 +169,13 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
         id: request.id,
         result: { status: "cancelled" },
       });
+      return;
+    }
+    case "rescue-cancel-turn": {
+      pendingPromptId = request.id;
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      sendEvent("StepBegin", { n: 1 });
+      sendEvent("ContentPart", { type: "text", text: "still working" });
       return;
     }
     default:

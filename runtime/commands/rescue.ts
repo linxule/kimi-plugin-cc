@@ -8,12 +8,12 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, normalizeJobError, sweepStaleBackgroundJobs, waitForTerminalJob } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
-import { readArtifact, renderRescueArtifact, writeArtifact } from "../render.js";
+import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { createRescueApprovalPolicy } from "../rescue-approval.js";
-import { parseRescueOutput } from "../schemas/rescue-output.js";
 import type { CommandContext } from "../types.js";
 
 const companionEntrypoint = fileURLToPath(new URL("../companion.ts", import.meta.url));
@@ -94,6 +94,7 @@ export async function executeRescueJob(
 
   let cancelling = false;
   let clientClosed = false;
+  let cancelEscalationTimer: ReturnType<typeof setTimeout> | undefined;
   const approvalPolicy = await createRescueApprovalPolicy(job.cwd);
   const client = buildWireClient({
     cwd: job.cwd,
@@ -112,7 +113,12 @@ export async function executeRescueJob(
     }
 
     cancelling = true;
+    client.beginCancellation();
     void client.cancel().catch(() => {});
+    cancelEscalationTimer = setTimeout(() => {
+      client.terminateChild("SIGTERM");
+    }, 1_500);
+    cancelEscalationTimer.unref();
   };
 
   process.once("SIGTERM", requestCancellation);
@@ -139,39 +145,18 @@ export async function executeRescueJob(
     });
 
     const completedTurn = await client.prompt(prompt, "rescue");
-    const rawFinalText = completedTurn.finalText.trim();
-
-    try {
-      const output = parseRescueOutput(rawFinalText);
-      const artifactPath = await writeArtifact(paths, job, renderRescueArtifact(job, output, rawFinalText));
-      return (
-        store.markCompleted(job.job_id, {
-          summary: output.summary,
-          final_output_path: artifactPath,
-          error: null,
-        }) ?? job
-      );
-    } catch (error) {
-      const parseError = normalizeJobError(error);
-      const artifactPath = await writeArtifact(
-        paths,
-        job,
-        renderRescueArtifact(job, null, rawFinalText, {
-          message: parseError.message,
-          stage: parseError.stage,
-        }),
-      );
-      return (
-        store.markCompleted(job.job_id, {
-          summary: "Rescue completed with partial or malformed final output.",
-          final_output_path: artifactPath,
-          error: parseError,
-        }) ?? job
-      );
-    }
+    const rendered = renderManagedJobOutput(job, completedTurn.finalText);
+    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+    return (
+      store.markCompleted(job.job_id, {
+        summary: rendered.summary,
+        final_output_path: artifactPath,
+        error: rendered.error,
+      }) ?? job
+    );
   } catch (error) {
     if (cancelling) {
-      return markJobCancelled(
+      return await markJobCancelled(
         store,
         paths,
         job,
@@ -180,10 +165,14 @@ export async function executeRescueJob(
       );
     }
 
-    return markJobFailed(store, paths, job, error, "Rescue failed.");
+    const classified = classifyManagedCommandFailure(error, "rescue", job.job_id);
+    return await markJobFailed(store, paths, job, classified, "Rescue failed.");
   } finally {
     process.removeListener("SIGTERM", requestCancellation);
     process.removeListener("SIGINT", requestCancellation);
+    if (cancelEscalationTimer) {
+      clearTimeout(cancelEscalationTimer);
+    }
 
     if (!clientClosed) {
       await client.close().catch(() => {});
@@ -273,7 +262,7 @@ async function startBackgroundRescue(
   paths: PluginPaths,
   wait: boolean,
 ): Promise<string> {
-  const nodeBinary = process.release.name === "node" ? process.execPath : context.env.KIMI_PLUGIN_CC_NODE_BIN || "node";
+  const nodeBinary = context.env.KIMI_PLUGIN_CC_NODE_BIN || process.execPath;
   const child = spawn(
     nodeBinary,
     ["--import", "tsx", companionEntrypoint, "worker", "rescue", job.job_id],

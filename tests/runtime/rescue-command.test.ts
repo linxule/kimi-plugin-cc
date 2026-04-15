@@ -8,13 +8,14 @@ import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { waitForTerminalJob } from "../../runtime/jobs.js";
-import { resolvePluginPaths } from "../../runtime/paths.js";
+import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import { createRescueApprovalPolicy } from "../../runtime/rescue-approval.js";
 import type { ApprovalRequestPayload } from "../../runtime/wire/types.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockWireServerPath = path.join(process.cwd(), "tests/helpers/mock-wire-server.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -49,8 +50,44 @@ function makeMockEnv(
   };
 }
 
+function makeMockWireEnv(pluginDataRoot: string, scenario: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+    KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockWireServerPath, scenario]),
+    KIMI_PLUGIN_CC_NODE_BIN: "node",
+  };
+}
+
 function parseStartedJobId(output: string): string {
   return (JSON.parse(output) as { job_id: string }).job_id;
+}
+
+async function waitForJobState(
+  env: NodeJS.ProcessEnv,
+  jobId: string,
+  predicate: (job: ReturnType<JobStore["getJob"]>) => boolean,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const store = new JobStore(resolvePluginPaths(env));
+    try {
+      const job = store.getJob(jobId);
+      if (predicate(job)) {
+        return job;
+      }
+    } finally {
+      store.close();
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+  }
+
+  throw new Error(`Timed out while waiting for job ${jobId} to reach the expected state.`);
 }
 
 function fileApproval(pathname: string): ApprovalRequestPayload {
@@ -242,6 +279,76 @@ describe("rescue command lifecycle", () => {
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("cancel during an in-flight turn leaves the job cancelled with its session id", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-cancel-mid-turn");
+    const repoRoot = await createGitRepoFixture("rescue-cancel-mid-turn-repo");
+    const env = makeMockWireEnv(pluginDataRoot, "rescue-cancel-turn");
+
+    try {
+      const startOutput = await runRescue(["--background", "Keep", "working"], makeContext(repoRoot, env));
+      const jobId = parseStartedJobId(startOutput);
+      const running = await waitForJobState(env, jobId, (job) => Boolean(job?.pid && job.kimi_pid));
+      const cancelled = JSON.parse(await runCancel([jobId], makeContext(repoRoot, env))) as {
+        status: string;
+      };
+      const terminal = await waitForTerminalJob(() => new JobStore(resolvePluginPaths(env)), jobId, 10_000);
+
+      expect(running?.kimi_session_id).toBeTruthy();
+      expect(cancelled.status).toBe("cancelled");
+      expect(terminal.status).toBe("cancelled");
+      expect(terminal.kimi_session_id).toBe(running?.kimi_session_id ?? null);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("cancel during initialize does not leave the Kimi process running", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-cancel-initialize");
+    const repoRoot = await createGitRepoFixture("rescue-cancel-initialize-repo");
+    const env = makeMockWireEnv(pluginDataRoot, "slow-initialize");
+
+    try {
+      const startOutput = await runRescue(["--background", "Keep", "working"], makeContext(repoRoot, env));
+      const jobId = parseStartedJobId(startOutput);
+      const running = await waitForJobState(env, jobId, (job) => Boolean(job?.pid && job.kimi_pid));
+      await runCancel([jobId], makeContext(repoRoot, env));
+      const terminal = await waitForTerminalJob(() => new JobStore(resolvePluginPaths(env)), jobId, 10_000);
+
+      expect(terminal.status).toBe("cancelled");
+      expect(running?.kimi_pid).toBeTruthy();
+
+      let alive = true;
+      try {
+        process.kill(running!.kimi_pid!, 0);
+      } catch (error) {
+        alive = (error as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+
+      expect(alive).toBe(false);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("waitForTerminalJob timeout tells the user how to recover", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-wait-timeout");
+    const env = {
+      ...process.env,
+      CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    };
+
+    try {
+      await ensurePluginPaths(resolvePluginPaths(env));
+      await expect(
+        waitForTerminalJob(() => new JobStore(resolvePluginPaths(env)), "job-timeout", 10),
+      ).rejects.toThrow("use /kimi:status job-timeout to check progress or /kimi:result job-timeout once it completes");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
     }
   });
 });

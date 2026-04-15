@@ -96,4 +96,48 @@ describe("WireClient interrupted-turn handling", () => {
       await cleanupTestPath(pluginDataRoot);
     }
   });
+
+  test("cancellation flips in-flight approvals to reject", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("wire-approval-cancel");
+    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
+    const client = new WireClient({
+      cwd: repoRoot,
+      command: "bun",
+      args: ["run", "tests/helpers/mock-wire-server.ts", "approval-cancel"],
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      },
+      logPath,
+      approvalDispatcher: new ApprovalDispatcher(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 150);
+        });
+        return {
+          response: "approve",
+        };
+      }),
+    });
+
+    try {
+      await client.start();
+      await client.initialize({
+        protocol_version: "1.9",
+        client: { name: "test-client", version: "0.1.0" },
+      });
+
+      const promptPromise = client.prompt("hello", "rescue");
+      setTimeout(() => {
+        client.beginCancellation();
+        void client.cancel().catch(() => {});
+      }, 10);
+
+      await expect(promptPromise).rejects.toThrow("Command cancellation is in progress.");
+      const logText = await Bun.file(logPath).text();
+      expect(logText).toContain("\"response\":\"reject\"");
+    } finally {
+      await client.close();
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
 });

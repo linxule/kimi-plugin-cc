@@ -5,11 +5,12 @@ import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
-import { renderReviewArtifact, writeArtifact } from "../render.js";
-import { parseReviewOutput, type ReviewOutput } from "../schemas/review-output.js";
+import { renderManagedJobOutput, writeArtifact } from "../render.js";
+import type { ReviewOutput } from "../schemas/review-output.js";
 import type { CommandContext } from "../types.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { RuntimeError } from "../errors.js";
@@ -95,18 +96,18 @@ export async function runReview(
       previewPrompt,
       commandType,
     );
-
-    const output = parseReviewOutput(completed.finalText);
-    const artifactPath = await writeArtifact(paths, job, renderReviewArtifact(job, output));
+    const rendered = renderManagedJobOutput(job, completed.finalText);
+    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
     store.markCompleted(job.job_id, {
-      summary: output.summary,
+      summary: rendered.summary,
       final_output_path: artifactPath,
       error: null,
     });
-    return output;
+    return rendered.output as ReviewOutput;
   } catch (error) {
-    await markJobFailed(store, paths, job, error, `${commandType} failed.`);
-    throw error;
+    const classified = classifyManagedCommandFailure(error, commandType, job.job_id);
+    await markJobFailed(store, paths, job, classified, `${commandType} failed.`);
+    throw classified;
   } finally {
     await client.close();
     store.close();
