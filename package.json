@@ -5,7 +5,7 @@
   "description": "Planning bundle and repo skeleton for a Codex-grade Claude Code plugin for Kimi.",
   "type": "module",
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=22.5.0"
   },
   "scripts": {
     "check": "bun run build && bunx tsc --noEmit && bun test && git diff --exit-code -- dist",
@@ -14,7 +14,6 @@
     "test": "bun test"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "^1.3.12",
     "@types/node": "^25.6.0",
     "@types/shell-quote": "^1.7.5",
@@ -22,7 +21,6 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "better-sqlite3": "^12.9.0",
     "shell-quote": "^1.8.3"
   }
 }

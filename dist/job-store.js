@@ -231,28 +231,75 @@ function createSqliteAdapter(filename) {
             },
         };
     }
-    const BetterSqlite3 = require("better-sqlite3");
-    const db = new BetterSqlite3(filename);
+    // Node 22.5+ ships node:sqlite as a built-in. We use it via createRequire so the compiled
+    // dist/ has zero native dependencies — no `bun install` step required for drop-in plugin
+    // installs, no platform-specific compiled binaries to ship. See package.json engines.node.
+    let nodeSqlite;
+    try {
+        nodeSqlite = require("node:sqlite");
+    }
+    catch (error) {
+        throw new RuntimeError("JOB_STORE_UNSUPPORTED_RUNTIME", "kimi-plugin-cc requires Node >= 22.5 for its built-in node:sqlite module. Upgrade Node, or set KIMI_PLUGIN_CC_NODE_BIN to a qualifying binary.", "job-store", error instanceof Error ? { cause: error } : undefined);
+    }
+    const db = new nodeSqlite.DatabaseSync(filename);
     return {
         pragma(statement) {
-            db.pragma(statement);
+            db.exec(`PRAGMA ${statement}`);
         },
         exec(statement) {
             db.exec(statement);
         },
         run(statement, params) {
-            db.prepare(statement).run(params ?? {});
+            // Cast through `any` so the prepared-statement methods are called as methods (preserving
+            // `this`). Pulling them off the instance via `const fn = stmt.run` strips the binding and
+            // node:sqlite throws "Illegal invocation".
+            const stmt = db.prepare(statement);
+            if (Array.isArray(params)) {
+                stmt.run(...params);
+                return;
+            }
+            stmt.run(normalizeNodeSqliteBindings((params ?? {})));
         },
         get(statement, ...params) {
-            return db.prepare(statement).get(...params);
+            const stmt = db.prepare(statement);
+            if (params.length === 1 && isPlainObject(params[0])) {
+                return stmt.get(normalizeNodeSqliteBindings(params[0]));
+            }
+            return stmt.get(...params);
         },
         all(statement, ...params) {
-            return db.prepare(statement).all(...params);
+            const stmt = db.prepare(statement);
+            if (params.length === 1 && isPlainObject(params[0])) {
+                return stmt.all(normalizeNodeSqliteBindings(params[0]));
+            }
+            return stmt.all(...params);
         },
         close() {
             db.close();
         },
     };
+}
+// node:sqlite's prepared-statement binding API accepts objects whose keys omit the parameter
+// prefix (so SQL `@job_id` binds from `{ job_id: ... }`). It also rejects `undefined` — serialize
+// `undefined` to `null` to match better-sqlite3/bun behavior for optional columns. Booleans
+// must also be coerced to 0/1 since node:sqlite rejects booleans outright.
+function normalizeNodeSqliteBindings(bindings) {
+    const result = {};
+    for (const [key, value] of Object.entries(bindings)) {
+        if (value === undefined) {
+            result[key] = null;
+            continue;
+        }
+        if (typeof value === "boolean") {
+            result[key] = value ? 1 : 0;
+            continue;
+        }
+        result[key] = value;
+    }
+    return result;
+}
+function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function rewriteNamedParamsForBun(statement) {
     return statement.replaceAll(/@([A-Za-z0-9_]+)/g, (_, key) => `$${key}`);
