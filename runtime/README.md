@@ -7,7 +7,7 @@ Command surface exposed via `companion.ts`:
 - `setup` — verify `kimi --wire` round-trip and manage review-gate config
 - `review` / `task challenge` — read-only reviews with fixed JSON schemas
 - `ask` — read-only free-form Q&A (fresh session per call)
-- `task rescue` — write-capable rescue with a companion-side approval allowlist and resumable Kimi sessions
+- `task rescue` — write-capable delegated task channel with a companion-side approval allowlist and resumable Kimi sessions; output is pass-through prose (no schema)
 - `status` / `result` / `cancel` — SQLite-backed job lifecycle commands
 - `replay <job-id>` — re-render a stored Wire event log through the same buffer-after-last-ToolResult path the live runtime uses
 
@@ -32,7 +32,7 @@ Behavior notes:
 - `start()`, `initialize()`, and (for ask/review) `prompt()` are wrapped in `withTimeout` so a Kimi that starts but never becomes usable surfaces a clean timeout instead of hanging forever
 - Rescue session resume is guarded by a partial unique index; two concurrent `/kimi:rescue --resume` calls against the same session id cannot both enter the running state
 - The Stop hook is disabled by default and reads `reviewGateEnabled` from plugin config; enable via `/kimi:setup --enable-review-gate`
-- Parse failure is a hard failure for `review`/`challenge`, a `completed` job with `error` set for `rescue` (raw output preserved), and a warn-allow for `review_gate`
+- Parse failure is a hard failure for `review`/`challenge` and a warn-allow for `review_gate`; `rescue` has no schema to parse against — Kimi's raw final output is stored verbatim and rendered as-is
 - Raw Wire traffic is logged to `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/logs/<command>-<job-id>.jsonl` for replay and debugging
 - The companion runs on Node via `tsx` (ADR 003) while Bun stays the package manager and test runner
 
@@ -40,7 +40,7 @@ Subdirectories:
 
 - `agents/` — Kimi agent profiles (read-only: review, ask, review-gate; write-capable: rescue)
 - `prompts/` — system prompts per command type
-- `schemas/` — structured output contracts (review, rescue, review-gate)
+- `schemas/` — structured output contracts (review, review-gate); rescue is pass-through prose and has no schema
 - `hooks/` — Stop hook entry point for the review gate
 - `commands/` — one file per companion subcommand
 - `wire/` — Wire client + turn capture
