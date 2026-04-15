@@ -30,7 +30,7 @@ Kimi Wire is the primary transport. Wire is labeled experimental in Kimi's docs;
 ## Prerequisites
 
 - `kimi` CLI available on `PATH` (`kimi --version` should work). Alternatively, point the runtime at a custom binary via `KIMI_PLUGIN_CC_KIMI_BIN=/absolute/path/to/kimi`.
-- `node` >= 18.18 on `PATH`. If node lives outside `PATH`, set `KIMI_PLUGIN_CC_NODE_BIN=/absolute/path/to/node` — both the slash-command launcher and the Stop hook honor this.
+- `node` >= 22.5 on `PATH`. `node:sqlite` is a built-in starting in Node 22.5, and kimi-plugin-cc uses it for the SQLite job store. Older versions will fail at first query. If node lives outside `PATH`, set `KIMI_PLUGIN_CC_NODE_BIN=/absolute/path/to/node` — both the slash-command launcher and the Stop hook honor this.
 - `bun` is only required for contributor tooling (`bun run check`, `bun test`). Installed plugins do not need `bun` at runtime.
 
 ## Install
@@ -53,7 +53,7 @@ If the repo is private, `gh auth login` must be set up (Claude Code shells out t
 
 ```bash
 git clone https://github.com/linxule/kimi-plugin-cc ~/kimi-plugin-cc
-cd ~/kimi-plugin-cc && bun install   # only needed for contributor tooling; runtime deps are in package.json → dependencies
+cd ~/kimi-plugin-cc && bun install   # only needed for contributor tooling; the installed runtime uses committed dist/ plus built-ins and vendored code
 claude --plugin-dir ~/kimi-plugin-cc
 ```
 

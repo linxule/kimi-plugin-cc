@@ -5,6 +5,7 @@ export function parseAskArgs(argv) {
     let fresh = false;
     let resume = false;
     let resumeTarget;
+    let explicitResumeTarget = false;
     let trailingTokens;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
@@ -34,12 +35,14 @@ export function parseAskArgs(argv) {
                 resume = true;
                 break;
             case "--resume": {
-                resume = true;
                 const value = argv[index + 1];
-                if (value && !value.startsWith("-")) {
-                    resumeTarget = value;
-                    index += 1;
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--resume requires a job-id or session-id. Use -r to resume the latest ask session for this repo.", "ask.parse");
                 }
+                resume = true;
+                resumeTarget = value;
+                explicitResumeTarget = true;
+                index += 1;
                 break;
             }
             case "--thinking":
@@ -55,7 +58,10 @@ export function parseAskArgs(argv) {
         }
     }
     if (fresh && resume) {
-        throw new RuntimeError("INVALID_FLAGS", "ask does not allow --fresh and --resume together.", "ask.parse");
+        throw new RuntimeError("INVALID_ARGS", "ask does not allow --fresh and --resume together.", "ask.parse");
+    }
+    if (explicitResumeTarget && trailingTokens?.length) {
+        throw new RuntimeError("INVALID_ARGS", "--resume only accepts a job-id or session-id. Use -r to resume the latest ask session with a prompt.", "ask.parse");
     }
     return {
         fresh,
@@ -85,6 +91,7 @@ export function parseRescueArgs(argv) {
     let fresh = false;
     let resume = false;
     let resumeTarget;
+    let explicitResumeTarget = false;
     let trailingTokens;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
@@ -116,13 +123,18 @@ export function parseRescueArgs(argv) {
             case "--fresh":
                 fresh = true;
                 break;
-            case "--resume": {
+            case "-r":
                 resume = true;
+                break;
+            case "--resume": {
                 const value = argv[index + 1];
-                if (value && !value.startsWith("-")) {
-                    resumeTarget = value;
-                    index += 1;
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--resume requires a job-id or session-id. Use -r to resume the latest rescue session for this repo.", "rescue.parse");
                 }
+                resume = true;
+                resumeTarget = value;
+                explicitResumeTarget = true;
+                index += 1;
                 break;
             }
             case "--thinking":
@@ -139,6 +151,9 @@ export function parseRescueArgs(argv) {
     }
     if (fresh && resume) {
         throw new RuntimeError("INVALID_ARGS", "rescue does not allow --fresh and --resume together.", "rescue.parse");
+    }
+    if (explicitResumeTarget && trailingTokens?.length) {
+        throw new RuntimeError("INVALID_ARGS", "--resume only accepts a job-id or session-id. Use -r to resume the latest rescue session with a prompt.", "rescue.parse");
     }
     return {
         background,

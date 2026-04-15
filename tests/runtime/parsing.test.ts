@@ -47,8 +47,26 @@ describe("argument parsing", () => {
     });
   });
 
+  test("parseAskArgs rejects bare --resume without a target", () => {
+    expect(() => parseAskArgs(["--resume"])).toThrow(
+      "--resume requires a job-id or session-id. Use -r to resume the latest ask session for this repo.",
+    );
+  });
+
+  test("parseAskArgs rejects --resume followed by another flag", () => {
+    expect(() => parseAskArgs(["--resume", "--fresh"])).toThrow(
+      "--resume requires a job-id or session-id. Use -r to resume the latest ask session for this repo.",
+    );
+  });
+
+  test("parseAskArgs rejects prompt text after --resume <id>", () => {
+    expect(() => parseAskArgs(["--resume", "What", "changed?"])).toThrow(
+      "--resume only accepts a job-id or session-id. Use -r to resume the latest ask session with a prompt.",
+    );
+  });
+
   test("parseAskArgs rejects --fresh and --resume together", () => {
-    expect(() => parseAskArgs(["--fresh", "--resume"])).toThrow(
+    expect(() => parseAskArgs(["--fresh", "-r"])).toThrow(
       "ask does not allow --fresh and --resume together.",
     );
   });
@@ -61,13 +79,39 @@ describe("argument parsing", () => {
     expect(parsed.focus).toBe("focus on rollback");
   });
 
-  test("parseRescueArgs handles explicit resume targets and prompt text", () => {
-    const parsed = parseRescueArgs(["--resume", "job-123", "--background", "continue", "work"]);
+  test("parseRescueArgs handles explicit resume targets and flags", () => {
+    const parsed = parseRescueArgs(["--resume", "job-123", "--background"]);
 
     expect(parsed.resume).toBeTrue();
     expect(parsed.resumeTarget).toBe("job-123");
     expect(parsed.background).toBeTrue();
+    expect(parsed.prompt).toBeUndefined();
+  });
+
+  test("parseRescueArgs treats -r as bare resume and preserves following prompt text", () => {
+    const parsed = parseRescueArgs(["-r", "continue", "work"]);
+
+    expect(parsed.resume).toBeTrue();
+    expect(parsed.resumeTarget).toBeUndefined();
     expect(parsed.prompt).toBe("continue work");
+  });
+
+  test("parseRescueArgs rejects bare --resume without a target", () => {
+    expect(() => parseRescueArgs(["--resume"])).toThrow(
+      "--resume requires a job-id or session-id. Use -r to resume the latest rescue session for this repo.",
+    );
+  });
+
+  test("parseRescueArgs rejects --resume followed by another flag", () => {
+    expect(() => parseRescueArgs(["--resume", "--fresh"])).toThrow(
+      "--resume requires a job-id or session-id. Use -r to resume the latest rescue session for this repo.",
+    );
+  });
+
+  test("parseRescueArgs rejects prompt text after --resume <id>", () => {
+    expect(() => parseRescueArgs(["--resume", "What", "changed?"])).toThrow(
+      "--resume only accepts a job-id or session-id. Use -r to resume the latest rescue session with a prompt.",
+    );
   });
 
   test("parseJobLookupArgs accepts an optional type filter and job id", () => {

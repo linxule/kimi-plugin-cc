@@ -1,7 +1,7 @@
 import { access, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { parse } from "shell-quote";
+import { parse } from "./vendor/shell-quote/index.js";
 
 import type { ApprovalPolicy } from "./wire/approval-dispatcher.js";
 import type { ApprovalRequestPayload } from "./wire/types.js";

@@ -78,7 +78,7 @@ describe("ask session resume", () => {
     const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
 
     try {
-      await expect(runAsk(["--resume"], makeContext(repoRoot, env))).rejects.toMatchObject({
+      await expect(runAsk(["-r"], makeContext(repoRoot, env))).rejects.toMatchObject({
         code: "ASK_RESUME_NOT_FOUND",
       });
     } finally {
@@ -94,9 +94,7 @@ describe("ask session resume", () => {
     const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
 
     try {
-      await expect(
-        runAsk(["--resume", "bogus-id", "What", "next?"], makeContext(repoRoot, env)),
-      ).rejects.toMatchObject({
+      await expect(runAsk(["--resume", "bogus-id"], makeContext(repoRoot, env))).rejects.toMatchObject({
         code: "ASK_RESUME_NOT_FOUND",
       });
     } finally {
@@ -158,7 +156,7 @@ describe("ask session resume", () => {
       const secondJob = store.findLatestJob({ repoId, commandType: "ask" });
       store.close();
 
-      await runAsk(["--resume", firstJob!.job_id, "Follow", "up?"], makeContext(repoRoot, env));
+      await runAsk(["--resume", firstJob!.job_id], makeContext(repoRoot, env));
       store = new JobStore(resolvePluginPaths(env));
       const latestJob = store.findLatestJob({ repoId, commandType: "ask" });
       store.close();
@@ -179,7 +177,7 @@ describe("ask session resume", () => {
     }
   });
 
-  test("resume plus fresh throws INVALID_FLAGS", async () => {
+  test("resume plus fresh throws INVALID_ARGS", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("ask-resume-fresh-invalid");
     const repoRoot = await createGitRepoFixture("ask-resume-fresh-invalid-repo");
     const invocationPath = path.join(pluginDataRoot, "ask-resume-fresh-invalid.jsonl");
@@ -187,9 +185,9 @@ describe("ask session resume", () => {
 
     try {
       await expect(
-        runAsk(["--resume", "--fresh", "What", "changed?"], makeContext(repoRoot, env)),
+        runAsk(["-r", "--fresh", "What", "changed?"], makeContext(repoRoot, env)),
       ).rejects.toMatchObject({
-        code: "INVALID_FLAGS",
+        code: "INVALID_ARGS",
       });
     } finally {
       await cleanupTestPath(pluginDataRoot);
@@ -247,6 +245,68 @@ describe("ask session resume", () => {
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("concurrent resume by explicit job id is rejected at job creation time", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-resume-race");
+    const repoRoot = await createGitRepoFixture("ask-resume-race-repo");
+    const invocationPath = path.join(pluginDataRoot, "ask-resume-race.jsonl");
+    const seedEnv = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
+    const raceEnv = makeMockEnv(pluginDataRoot, "review-gate-allow", invocationPath, { delayMs: 250 });
+    const repoId = await getRepoId(repoRoot);
+
+    try {
+      await runAsk(["Seed", "question?"], makeContext(repoRoot, seedEnv));
+
+      const store = new JobStore(resolvePluginPaths(seedEnv));
+      const seedJob = store.findLatestJob({ repoId, commandType: "ask" });
+      store.close();
+      if (!seedJob) {
+        throw new Error("Expected the seed ask job to exist.");
+      }
+
+      const results = await Promise.allSettled([
+        runAsk(["--resume", seedJob.job_id], makeContext(repoRoot, raceEnv)),
+        runAsk(["--resume", seedJob.job_id], makeContext(repoRoot, raceEnv)),
+      ]);
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(results.find((result) => result.status === "rejected")).toMatchObject({
+        reason: { code: "ASK_ALREADY_RUNNING" },
+      });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("resume by job id is scoped to the current repo", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-resume-cross-repo");
+    const repoA = await createGitRepoFixture("ask-resume-cross-repo-a");
+    const repoB = await createGitRepoFixture("ask-resume-cross-repo-b");
+    const invocationPath = path.join(pluginDataRoot, "ask-resume-cross-repo.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
+    const repoAId = await getRepoId(repoA);
+
+    try {
+      await runAsk(["Question", "from", "repo", "A?"], makeContext(repoA, env));
+
+      const store = new JobStore(resolvePluginPaths(env));
+      const repoAJob = store.findLatestJob({ repoId: repoAId, commandType: "ask" });
+      store.close();
+      if (!repoAJob) {
+        throw new Error("Expected an ask job in repo A.");
+      }
+
+      await expect(runAsk(["--resume", repoAJob.job_id], makeContext(repoB, env))).rejects.toMatchObject({
+        code: "ASK_RESUME_NOT_FOUND",
+      });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoA);
+      await cleanupTestPath(repoB);
     }
   });
 });

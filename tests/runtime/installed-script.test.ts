@@ -1,5 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { chmod, cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 // Smoke tests for the installed-plugin entry scripts (scripts/*.sh). These exercise the
@@ -11,15 +13,58 @@ const repoRoot = path.resolve(import.meta.dir, "..", "..");
 const companionScript = path.join(repoRoot, "scripts", "companion.sh");
 const reviewGateScript = path.join(repoRoot, "scripts", "review-gate-hook.sh");
 const SANITIZED_PATH = "/usr/bin:/bin";
+const nodeExecPath = resolveNodeExecPath();
+const bunExecPath = process.execPath;
+
+let cleanCopyRoot: string;
+let fakeNode20Path: string;
+
+beforeAll(async () => {
+  cleanCopyRoot = await mkdtemp(path.join(tmpdir(), "kimi-plugin-cc-installed-"));
+  await cp(repoRoot, cleanCopyRoot, {
+    recursive: true,
+    filter: (source) => {
+      const relative = path.relative(repoRoot, source);
+      if (!relative) {
+        return true;
+      }
+      const parts = relative.split(path.sep);
+      return !parts.includes("node_modules") && !parts.includes(".git");
+    },
+  });
+
+  fakeNode20Path = path.join(cleanCopyRoot, "fake-node-20.sh");
+  await writeFile(
+    fakeNode20Path,
+    [
+      "#!/usr/bin/env bash",
+      "if [ \"$1\" = \"--version\" ]; then",
+      "  echo \"v20.11.0\"",
+      "  exit 0",
+      "fi",
+      "echo \"unexpected invocation: $*\" >&2",
+      "exit 99",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await chmod(fakeNode20Path, 0o755);
+});
+
+afterAll(async () => {
+  if (cleanCopyRoot) {
+    await rm(cleanCopyRoot, { recursive: true, force: true });
+  }
+});
 
 describe("installed-plugin script wrappers", () => {
   test("companion.sh launches dist/companion.js under sanitized PATH via KIMI_PLUGIN_CC_NODE_BIN", () => {
     const result = spawnSync(companionScript, ["setup-bogus-subcommand"], {
       env: {
         PATH: SANITIZED_PATH,
-        KIMI_PLUGIN_CC_NODE_BIN: process.execPath,
+        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
         CLAUDE_PLUGIN_ROOT: repoRoot,
-        KIMI_PLUGIN_CC_DATA_DIR: path.join(repoRoot, ".tmp", "installed-smoke-data"),
+        CLAUDE_PLUGIN_DATA: path.join(repoRoot, ".tmp", "installed-smoke-data"),
       },
       encoding: "utf8",
     });
@@ -61,9 +106,9 @@ describe("installed-plugin script wrappers", () => {
       }),
       env: {
         PATH: SANITIZED_PATH,
-        KIMI_PLUGIN_CC_NODE_BIN: process.execPath,
+        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
         CLAUDE_PLUGIN_ROOT: repoRoot,
-        KIMI_PLUGIN_CC_DATA_DIR: path.join(repoRoot, ".tmp", "installed-smoke-data"),
+        CLAUDE_PLUGIN_DATA: path.join(repoRoot, ".tmp", "installed-smoke-data"),
       },
       encoding: "utf8",
     });
@@ -75,4 +120,57 @@ describe("installed-plugin script wrappers", () => {
     expect(combined).not.toContain("node: not found");
     expect(combined).not.toContain("unable to locate 'node'");
   });
+
+  test("clean installed copy runs setup without repo-root node_modules", () => {
+    const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
+      env: {
+        PATH: SANITIZED_PATH,
+        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
+        KIMI_PLUGIN_CC_KIMI_BIN: bunExecPath,
+        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([
+          "run",
+          path.join(cleanCopyRoot, "tests", "helpers", "mock-kimi-cli.ts"),
+        ]),
+        KIMI_PLUGIN_CC_MOCK_SCENARIO: "ask-success",
+        KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: path.join(cleanCopyRoot, ".tmp", "installed-setup.jsonl"),
+        CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
+        CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
+      },
+      encoding: "utf8",
+    });
+
+    const combined = `${result.stdout}\n${result.stderr}`;
+    expect(result.status).toBe(0);
+    expect(combined).toContain("Kimi runtime is ready.");
+    expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
+  });
+
+  test("companion.sh rejects Node versions below 22.5 before launching the runtime", () => {
+    const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
+      env: {
+        PATH: SANITIZED_PATH,
+        KIMI_PLUGIN_CC_NODE_BIN: fakeNode20Path,
+        CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
+        CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(127);
+    expect(result.stderr).toContain("requires Node >= 22.5.0");
+    expect(result.stderr).toContain("KIMI_PLUGIN_CC_NODE_BIN");
+  });
 });
+
+function resolveNodeExecPath(): string {
+  const result = spawnSync("node", ["-p", "process.execPath"], {
+    env: process.env,
+    encoding: "utf8",
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`Unable to resolve the Node executable path: ${result.stderr}`);
+  }
+
+  return result.stdout.trim();
+}

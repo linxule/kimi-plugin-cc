@@ -1,6 +1,6 @@
 import { access, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
-import { parse } from "shell-quote";
+import { parse } from "./vendor/shell-quote/index.js";
 const MUTATING_FLAGS_EXACT = new Set(["--fix", "--write", "-w", "--apply", "--in-place", "-i"]);
 const MUTATING_FLAG_PREFIXES = ["--fix=", "--write=", "--apply=", "--in-place="];
 const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);

@@ -9,8 +9,8 @@ Run the companion with any user-supplied flags appended after `ask`:
 
 Supported flags:
 
-- `-r`, `--resume` — resume the latest ask session for the current repo
-- `--resume <job-id-or-session-id>` — resume a specific prior ask session
+- `-r` — resume the latest ask session for the current repo; any trailing text becomes the next prompt
+- `--resume <job-id-or-session-id>` — resume a specific prior ask session without a new prompt payload
 - `--fresh` — force a new ask session id instead of reusing a prior session
 - `-m`, `--model <name>`
 - `--thinking`

@@ -96,9 +96,11 @@ export class JobStore {
       CREATE INDEX IF NOT EXISTS jobs_session_idx
         ON jobs (repo_id, kimi_session_id, updated_at DESC);
 
-      CREATE UNIQUE INDEX IF NOT EXISTS jobs_running_rescue_session_idx
-        ON jobs (repo_id, kimi_session_id)
-        WHERE status = 'running' AND command_type = 'rescue';
+      DROP INDEX IF EXISTS jobs_running_rescue_session_idx;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS jobs_running_session_idx
+        ON jobs (repo_id, command_type, kimi_session_id)
+        WHERE status = 'running' AND command_type IN ('rescue', 'ask');
     `);
   }
 
@@ -129,13 +131,23 @@ export class JobStore {
         },
       );
     } catch (error) {
-      if (isSqliteConstraintError(error) && input.command_type === "rescue") {
-        throw new RuntimeError(
-          "RESCUE_ALREADY_RUNNING",
-          `A rescue job for session ${input.kimi_session_id ?? "<unknown>"} is already running in this repo. Use /kimi:status to find it.`,
-          "rescue.resume",
-          error instanceof Error ? { cause: error } : undefined,
-        );
+      if (isSqliteConstraintError(error)) {
+        if (input.command_type === "rescue") {
+          throw new RuntimeError(
+            "RESCUE_ALREADY_RUNNING",
+            `A rescue job for session ${input.kimi_session_id ?? "<unknown>"} is already running in this repo. Use /kimi:status to find it.`,
+            "rescue.resume",
+            error instanceof Error ? { cause: error } : undefined,
+          );
+        }
+        if (input.command_type === "ask") {
+          throw new RuntimeError(
+            "ASK_ALREADY_RUNNING",
+            `An ask session ${input.kimi_session_id ?? "<unknown>"} is already running in this repo. Use /kimi:status to find it.`,
+            "ask.resume",
+            error instanceof Error ? { cause: error } : undefined,
+          );
+        }
       }
       throw translateSqliteError(error);
     }
@@ -462,9 +474,9 @@ function createSqliteAdapter(filename: string): SqliteAdapter {
 }
 
 // node:sqlite's prepared-statement binding API accepts objects whose keys omit the parameter
-// prefix (so SQL `@job_id` binds from `{ job_id: ... }`). It also rejects `undefined` — serialize
-// `undefined` to `null` to match better-sqlite3/bun behavior for optional columns. Booleans
-// must also be coerced to 0/1 since node:sqlite rejects booleans outright.
+// prefix (so SQL `@job_id` binds from `{ job_id: ... }`). Normalize optional values to null,
+// coerce booleans to 0/1, and fail fast on unsupported binding types before they reach the
+// native layer as opaque SQLITE_MISMATCH errors.
 function normalizeNodeSqliteBindings(bindings: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(bindings)) {
@@ -472,11 +484,26 @@ function normalizeNodeSqliteBindings(bindings: Record<string, unknown>): Record<
       result[key] = null;
       continue;
     }
+    if (value === null) {
+      result[key] = null;
+      continue;
+    }
     if (typeof value === "boolean") {
       result[key] = value ? 1 : 0;
       continue;
     }
-    result[key] = value;
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "bigint" ||
+      value instanceof Uint8Array
+    ) {
+      result[key] = value;
+      continue;
+    }
+    throw new Error(
+      `node:sqlite binding for ${key} has unsupported type ${typeof value} (${value?.constructor?.name ?? "unknown"})`,
+    );
   }
   return result;
 }

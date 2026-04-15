@@ -132,7 +132,7 @@ Purpose:
 Flags:
 
 - `-m, --model <name>`
-- `-r, --resume`
+- `-r`
 - `--resume <job-id-or-session-id>`
 - `--fresh`
 - `--thinking`
@@ -147,7 +147,7 @@ Parsing rule:
 
 Defaults:
 
-- ask uses a fresh session by default; `--resume` chains the latest ask session
+- ask uses a fresh session by default; `-r` chains the latest ask session
 - ask runs foreground-synchronously in v1
 - ask does not support `--background` or `--wait` in v1
 
@@ -191,7 +191,8 @@ Flags:
 
 - `--background`
 - `--wait`
-- `--resume`
+- `-r`
+- `--resume <job-id-or-session-id>`
 - `--fresh`
 - `-m, --model <name>`
 - `--thinking`
@@ -201,6 +202,8 @@ Behavior:
 
 - may read files, edit files, and run commands
 - persists a Kimi session id per rescue flow
+- `-r` resumes the latest rescue session for the repo and may include a new prompt
+- `--resume <job-id-or-session-id>` resumes a specific rescue session without a new prompt payload
 - defaults to continuing the latest rescue session for the repo when the request clearly implies continuation and `--fresh` is not present
 - background start responses must include `job_id` and `command_type`
 
@@ -739,14 +742,14 @@ Resume behavior is repo-scoped and deterministic:
 
 - `--fresh` always starts a new rescue session and ignores recent session history
 - explicit `--resume <job-id>` or `--resume <session-id>` takes precedence over all heuristics
-- bare `--resume` resumes the latest rescue job for the current `repo_id`
-- without `--resume` or `--fresh`, the plugin auto-resumes only when the user intent clearly implies continuation, such as "continue", "resume", "keep going", "apply the top fix", or "dig deeper"
+- `-r` resumes the latest rescue job for the current `repo_id`
+- without `-r`, `--resume`, or `--fresh`, the plugin auto-resumes only when the user intent clearly implies continuation, such as "continue", "resume", "keep going", "apply the top fix", or "dig deeper"
 - otherwise the plugin starts a fresh rescue session
 
 Resolution order:
 
 1. explicit `--fresh`
 2. explicit `--resume <job-id|session-id>`
-3. bare `--resume`
+3. explicit `-r`
 4. intent-based auto-resume heuristic
 5. fresh session

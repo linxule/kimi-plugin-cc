@@ -100,7 +100,8 @@ function resolveAskSession(store, repoId, fresh, resume, resumeTarget) {
     }
     if (resumeTarget) {
         const byJob = store.getJob(resumeTarget);
-        const exact = byJob?.command_type === "ask" ? byJob : store.findAskJobBySession(repoId, resumeTarget);
+        const scoped = byJob?.repo_id === repoId && byJob.command_type === "ask" ? byJob : null;
+        const exact = scoped ?? store.findAskJobBySession(repoId, resumeTarget);
         if (!exact?.kimi_session_id) {
             throw new RuntimeError("ASK_RESUME_NOT_FOUND", `No ask job or session matched ${resumeTarget}.`, "ask.resume");
         }

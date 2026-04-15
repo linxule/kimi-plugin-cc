@@ -17,7 +17,7 @@ The source of truth is `docs/spec.md` plus the ADRs. Runtime code lives under `r
 - Dev tests run from source via bun's native TypeScript loader. The `rescue.ts` background worker spawn checks `import.meta.url` to pick the right entrypoint — `runtime/companion.ts` in dev, `dist/companion.js` in production.
 - **Workflow**: edit `runtime/**/*.ts`, then `bun run check`. The drift gate will tell you if you forgot to stage the rebuilt `dist/`.
 
-Toolchain: Node >= 18.18, TypeScript, **bun** (not npm/yarn). Python work (if any) uses **uv**.
+Toolchain: Node >= 22.5, TypeScript, **bun** (not npm/yarn). Python work (if any) uses **uv**.
 
 ## Architecture (locked decisions)
 

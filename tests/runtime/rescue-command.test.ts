@@ -179,11 +179,11 @@ describe("rescue command lifecycle", () => {
         kimi_session_id: string;
       };
 
-      await runRescue(["--resume", firstStatus.job_id, "Continue"], makeContext(repoRoot, env));
+      await runRescue(["--resume", firstStatus.job_id], makeContext(repoRoot, env));
       let invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
       expect(invocation.argv[invocation.argv.indexOf("--session") + 1]).toBe(firstSession);
 
-      await runRescue(["--resume", firstSession, "Continue"], makeContext(repoRoot, env));
+      await runRescue(["--resume", firstSession], makeContext(repoRoot, env));
       invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
       expect(invocation.argv[invocation.argv.indexOf("--session") + 1]).toBe(firstSession);
 
@@ -223,6 +223,29 @@ describe("rescue command lifecycle", () => {
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("rescue resume by job id is scoped to the current repo", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-resume-cross-repo");
+    const repoA = await createGitRepoFixture("rescue-resume-cross-repo-a");
+    const repoB = await createGitRepoFixture("rescue-resume-cross-repo-b");
+    const invocationPath = path.join(pluginDataRoot, "rescue-resume-cross-repo.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+
+    try {
+      await runRescue(["Initial", "task"], makeContext(repoA, env));
+      const repoAStatus = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoA, env))) as {
+        job_id: string;
+      };
+
+      await expect(runRescue(["--resume", repoAStatus.job_id], makeContext(repoB, env))).rejects.toMatchObject({
+        code: "RESCUE_RESUME_NOT_FOUND",
+      });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoA);
+      await cleanupTestPath(repoB);
     }
   });
 
