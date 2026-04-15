@@ -3,6 +3,7 @@ import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { classifySetupFailure } from "../kimi-errors.js";
+import { resolveKimiWireCommand } from "../kimi-launch.js";
 import {
   KIMI_SETUP_INITIALIZE_TIMEOUT_MS,
   KIMI_SETUP_PROMPT_TIMEOUT_MS,
@@ -45,9 +46,16 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
   }
 
   const logPath = path.join(paths.logsDir, `setup-${Date.now()}.jsonl`);
+  // Resolve the same kimi binary + prefix args that the managed commands honor, so setup
+  // validates the exact launch path /kimi:ask and /kimi:rescue will use. Otherwise an
+  // installed plugin could probe an ambient `kimi` while the real commands miss the
+  // configured binary.
+  const { command: kimiCommand, prefixArgs: kimiPrefixArgs } = resolveKimiWireCommand(context.env);
   const wireClient = new WireClient({
     cwd: context.cwd,
     env: context.env,
+    command: kimiCommand,
+    args: [...kimiPrefixArgs, "--wire"],
     logPath,
     approvalDispatcher: new ApprovalDispatcher(
       rejectAllApprovals("setup does not permit tool approvals; runtime probe failed."),

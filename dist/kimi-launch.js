@@ -27,7 +27,7 @@ const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export function resolveAgentFile(relativePath) {
     return path.join(runtimeRoot, relativePath);
 }
-function resolveKimiWireCommand(env) {
+export function resolveKimiWireCommand(env) {
     const command = env.KIMI_PLUGIN_CC_KIMI_BIN || "kimi";
     const rawPrefixArgs = env.KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS;
     if (!rawPrefixArgs) {

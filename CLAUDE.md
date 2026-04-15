@@ -10,12 +10,12 @@ The source of truth is `docs/spec.md` plus the ADRs. Runtime code lives under `r
 
 ## Commands
 
-- `bun run check` — `tsc --noEmit` + `bun test` (45+ tests across wire client, allowlist, command handlers, replay, review gate, job lifecycle)
+- `bun run check` — rebuilds `dist/`, runs `tsc --noEmit`, the full `bun test` suite (48+ tests across wire client, allowlist, command handlers, replay, review gate, job lifecycle, installed-script wrappers), then runs `git diff --exit-code -- dist` as a drift gate. If the rebuild produced unstaged changes in `dist/`, check fails — stage the rebuilt files and retry. This catches forgotten rebuilds before they ship.
 - `bun test <path>` — run a single test file
 - `bun run build` — compile `runtime/**/*.ts` → `dist/**/*.js` via `tsc -p tsconfig.build.json` (preserves directory structure; no bundling). `dist/` is committed so installed plugins don't need a build step.
-- The companion is launched via `scripts/companion.sh <subcommand> <args>`, which cd's to `${CLAUDE_PLUGIN_ROOT}` and runs `node dist/companion.js`. Slash commands and the Stop hook both route through that wrapper. The runtime is pure JavaScript post-install — no `tsx` required at runtime (tsx stays as a devDependency for `bun run check` only).
-- Dev tests run from source via bun+tsx (unchanged). The `rescue.ts` background worker spawn checks `import.meta.url` to pick the right entrypoint — `runtime/companion.ts` via tsx in dev, `dist/companion.js` via plain node in production.
-- **Important**: after editing any `runtime/**/*.ts` file, run `bun run build` before committing so `dist/` stays in sync.
+- The companion is launched via `scripts/companion.sh <subcommand> <args>`, which cd's to `${CLAUDE_PLUGIN_ROOT}`, resolves `node` via `KIMI_PLUGIN_CC_NODE_BIN` or `command -v node` (fails with an actionable error if neither is available), and runs `node dist/companion.js`. Slash commands and the Stop hook both route through that wrapper. The runtime is pure JavaScript post-install — no `tsx` required at runtime.
+- Dev tests run from source via bun's native TypeScript loader. The `rescue.ts` background worker spawn checks `import.meta.url` to pick the right entrypoint — `runtime/companion.ts` in dev, `dist/companion.js` in production.
+- **Workflow**: edit `runtime/**/*.ts`, then `bun run check`. The drift gate will tell you if you forgot to stage the rebuilt `dist/`.
 
 Toolchain: Node >= 18.18, TypeScript, **bun** (not npm/yarn). Python work (if any) uses **uv**.
 

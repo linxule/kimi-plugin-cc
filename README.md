@@ -21,23 +21,23 @@ Feature-complete against `docs/implementation-plan.md` through phase 3b. The plu
 The plugin mirrors the thin-plugin-rich-runtime split of [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc):
 
 - **Claude plugin layer** — thin slash commands, agent, skill, hook, and manifest
-- **Local runtime layer** — Node+tsx companion (see ADR 003) that owns Kimi Wire sessions, SQLite job state, rescue approval policy, replay tooling, and cancellation
+- **Local runtime layer** — Node runtime (see ADR 003) compiled from TypeScript sources under `runtime/` to ESM JavaScript under `dist/`. The runtime owns Kimi Wire sessions, SQLite job state, rescue approval policy, replay tooling, and cancellation. `dist/` is committed so installed plugins have no build step.
 
-Flow: `slash command → scripts/companion.sh → runtime/companion.ts → Kimi Wire session → SQLite job store → rendered artifact`.
+Flow: `slash command → scripts/companion.sh → node dist/companion.js → Kimi Wire session → SQLite job store → rendered artifact`.
 
 Kimi Wire is the primary transport. Wire is labeled experimental in Kimi's docs; the runtime re-verifies Wire shape at every phase boundary.
 
 ## Prerequisites
 
-- `kimi` CLI available on `PATH` (`kimi --version` should work)
-- `bun` for package management and the test suite
-- `node` >= 18.18 for the companion runtime
+- `kimi` CLI available on `PATH` (`kimi --version` should work). Alternatively, point the runtime at a custom binary via `KIMI_PLUGIN_CC_KIMI_BIN=/absolute/path/to/kimi`.
+- `node` >= 18.18 on `PATH`. If node lives outside `PATH`, set `KIMI_PLUGIN_CC_NODE_BIN=/absolute/path/to/node` — both the slash-command launcher and the Stop hook honor this.
+- `bun` is only required for contributor tooling (`bun run check`, `bun test`). Installed plugins do not need `bun` at runtime.
 
 ## Install locally
 
 1. Clone the repo somewhere convenient.
-2. `bun install` inside the clone — this installs `tsx`, `better-sqlite3`, and the other dependencies the companion resolves at runtime.
-3. Point Claude Code at the clone as a local plugin (see Claude Code plugin install docs for the exact mechanism).
+2. `bun install` inside the clone — this installs `better-sqlite3` and `shell-quote`, the two real runtime dependencies. `tsx` is a dev-only dependency and is not needed post-install.
+3. Register the clone with Claude Code as a local plugin (`/plugin install /absolute/path/to/kimi-plugin-cc`, or the equivalent local-path flow your Claude Code build supports).
 4. In a Claude Code session, run `/kimi:setup` to verify `kimi` is reachable and authenticated.
 5. Optional: `/kimi:setup --enable-review-gate` to turn on stop-time review.
 
@@ -58,7 +58,8 @@ See [CLAUDE.md](./CLAUDE.md) for the locked architectural decisions. The canonic
 
 ## Development
 
-- `bun run check` — typecheck + test suite
+- `bun run check` — rebuild `dist/`, typecheck, run the full test suite, then fail if the rebuild produced any uncommitted changes in `dist/` (the drift gate)
+- `bun run build` — recompile `runtime/**/*.ts` → `dist/**/*.js` via `tsc -p tsconfig.build.json`
 - `bun test <path>` — run a single test file
 
 Test helpers (mock Wire server, mock Kimi CLI) live under `tests/helpers`. The real-kimi smoke test in `tests/wire/live-kimi.integration.test.ts` is gated on `KIMI_PLUGIN_CC_LIVE_TEST` and only runs against an actual `kimi` CLI install.

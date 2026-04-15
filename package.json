@@ -8,7 +8,7 @@
     "node": ">=18.18.0"
   },
   "scripts": {
-    "check": "bunx tsc --noEmit && bun test",
+    "check": "bun run build && bunx tsc --noEmit && bun test && git diff --exit-code -- dist",
     "build": "rm -rf dist && bunx tsc -p tsconfig.build.json",
     "companion": "node --import tsx runtime/companion.ts",
     "test": "bun test"

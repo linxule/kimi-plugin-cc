@@ -92,7 +92,10 @@ describe("rescue approval policy", () => {
       "cat package.json",
       "pwd",
       "find . -name '*.ts' -type f",
+      "find . -iname '*.TS' -type f",
       "find . -print",
+      "grep -il pattern src",
+      "rg -iw needle src",
       "tsc --noEmit",
       "pyright",
       "mypy runtime",
@@ -194,6 +197,11 @@ describe("rescue approval policy", () => {
       "ls && rm -rf /",
       "ls ; rm -rf /",
       "ls > /tmp/out",
+      // Raw newline/carriage-return splits (shell-quote collapses the separator and hides
+      // the second command from per-stage validation).
+      "git status\nrm -rf /",
+      "git status\r\nrm -rf /",
+      "git status\rrm -rf /",
     ];
 
     try {

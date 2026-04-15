@@ -45,7 +45,7 @@ export function resolveAgentFile(relativePath: string): string {
   return path.join(runtimeRoot, relativePath);
 }
 
-function resolveKimiWireCommand(env: NodeJS.ProcessEnv): { command: string; prefixArgs: string[] } {
+export function resolveKimiWireCommand(env: NodeJS.ProcessEnv): { command: string; prefixArgs: string[] } {
   const command = env.KIMI_PLUGIN_CC_KIMI_BIN || "kimi";
   const rawPrefixArgs = env.KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS;
 

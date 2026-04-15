@@ -150,6 +150,14 @@ function extractShellCommand(request: ApprovalRequestPayload): string | null {
 }
 
 function validateShellCommand(command: string): { response: "approve" | "reject"; feedback?: string } {
+  // shell-quote collapses raw newline/carriage-return separators into adjacent tokens, which
+  // hides a second command from per-stage validation (`git status\nrm -rf /` parses as
+  // ['git','status','rm','-rf','/']). Reject any line-break characters up front so every
+  // approved command maps to a single shell invocation.
+  if (/[\r\n]/.test(command)) {
+    return reject(`Rescue rejects multi-line shell commands: ${JSON.stringify(command)}`);
+  }
+
   if (hasUnsafeShellSyntax(command)) {
     return reject(`Rescue rejects command substitution, process substitution, or backticks: ${command}`);
   }
@@ -287,9 +295,10 @@ function hasMutatingFlag(args: string[]): boolean {
     if (MUTATING_FLAG_PREFIXES.some((prefix) => arg.startsWith(prefix))) {
       return true;
     }
-    // sed's -i accepts an optional suffix like -i.bak, so any token starting with "-i" past length 2
-    // is a mutating in-place form we must catch even though "-i" alone is also in the exact set.
-    if (arg.length > 2 && arg.startsWith("-i")) {
+    // sed's -i accepts an optional suffix like -i.bak or --in-place=.bak. Match only the
+    // punctuation-suffix shapes so we don't collide with read-only short-flag clusters
+    // such as `find -iname`, `grep -il`, or `rg -iw`.
+    if (/^-i[.=]/.test(arg)) {
       return true;
     }
   }

@@ -1,5 +1,3 @@
-#!/usr/bin/env -S node --import tsx
-
 import { readFileSync } from "node:fs";
 
 import { runReviewGateStopHook, type StopHookInput } from "../commands/review-gate.js";

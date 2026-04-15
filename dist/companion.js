@@ -1,4 +1,3 @@
-#!/usr/bin/env -S node --import tsx
 import { runAsk } from "./commands/ask.js";
 import { runCancel } from "./commands/cancel.js";
 import { notImplementedCompanionCommand } from "./commands/not-implemented.js";
