@@ -1,33 +1,16 @@
 # Follow-ups
 
-Single source of truth for open gaps, deferred work, and tracked follow-ups after the 0.1.7 release. The plugin is feature-complete and v0.1.7 is tagged; nothing here is urgent, and nothing here blocks production use. This file exists so future contributors (and future Claude sessions) don't have to reconstruct the known-open list from memory.
+Single source of truth for open gaps, deferred work, and tracked follow-ups. The plugin is feature-complete and stable — v0.1.8 is tagged. Nothing here is urgent, and nothing here blocks production use. This file exists so future contributors (and future Claude sessions) don't have to reconstruct the known-open list from memory.
+
+**Resolved in 0.1.8** (2026-04-15): rescue hardening items 1/2/6/7 (setup leak, worker spawn failure surfacing, writeArtifact + writeInvocationLogHeader classification, NODE_BIN fast-path validation), 0.1.5 audit Lows L1 (dead 200-char session-title guard), L2 (AbortController timeout test coverage), L3 (URL path concatenation double-slash). Shipped as three parallel /batch PRs (#4, #5, #6) and a release commit.
 
 Items are grouped by scope. Each item links to the relevant spec section or ADR where available, and to memory-level context where the item is Claude-facing. Priority tags are suggestions, not commitments.
 
 ---
 
-## Rescue hardening (post-0.1.7)
+## Rescue hardening (post-0.1.8)
 
-The 0.1.7 empirical verification runs surfaced seven distinct rescue code-quality issues (beyond the pass-through refactor itself). None are blockers; all are worth scheduling.
-
-### 1. Resource leak in `executeRescueJob` setup phase
-
-**Priority**: medium. Identified by verification run 3 (kimi finding a real bug in `rescue.ts` on its own).
-
-`JobStore` is opened and `SIGTERM`/`SIGINT` listeners are registered *before* the `try` block in `executeRescueJob` (around `runtime/commands/rescue.ts:103,139–140`). The `finally` block cleans them up, but if `createRescueApprovalPolicy(job.cwd)` or `buildWireClient(...)` throws in the pre-`try` setup phase, the exception propagates out without entering the `try` block. Consequences:
-
-- The `JobStore` connection is never closed, leaking a database/file handle.
-- `SIGTERM`/`SIGINT` listeners remain attached and can interfere with subsequent operations.
-
-**Fix**: wrap the pre-`try` setup in its own `try…finally`, or move `createRescueApprovalPolicy` and `buildWireClient` inside the main `try`.
-
-### 2. Background worker spawn failure is not surfaced
-
-**Priority**: medium. Identified by verification run 4.
-
-`startBackgroundRescue` calls `spawn()` but never attaches an `error` or `close` listener to the child process. If the Node binary is missing, the worker entrypoint is unreadable, or `KIMI_PLUGIN_CC_NODE_BIN` points to a bad path, `child.pid` is undefined and the job remains `running` until `waitForTerminalJob` times out with a generic `JOB_WAIT_TIMEOUT`.
-
-**Fix**: attach `error` and `close` listeners. On `error`, immediately mark the job failed with `RESCUE_WORKER_SPAWN_FAILED` and a descriptive message. On `close` before the worker has updated state, mark the job failed rather than letting it look like a stuck background job.
+Items 1, 2, 6, 7 from the original 0.1.7-verification list shipped in 0.1.8 (PR #6). The three items below remain open as lower-priority polish.
 
 ### 3. `RESCUE_RESULT_MISSING` does not include cause
 
@@ -45,6 +28,8 @@ When `parsed.wait` is true and the background job reaches a terminal state witho
 
 **Fix**: switch to an `AbortController`-style pattern or a per-invocation cleanup registry so each invocation has an isolated cancellation token. Wrap `client.close()` in a try/finally that tracks the promise to ensure we never attempt to close twice.
 
+Note: 0.1.8's Unit A work reshaped parts of this territory (new spawn-failure helpers open short-lived JobStores in the parent; listener cleanup paths are tighter). Revisit this item against the post-0.1.8 code before starting — the race may have narrowed, or the fix may be smaller now.
+
 ### 5. Phase-specific failure classification
 
 **Priority**: low. Identified by verification run 4.
@@ -53,21 +38,7 @@ When `parsed.wait` is true and the background job reaches a terminal state witho
 
 **Fix**: extend the failure classification so the final persisted `JobError` preserves the deepest available stage (or at least appends it to the message). Makes post-mortem debugging significantly easier.
 
-### 6. `writeArtifact` and `writeInvocationLogHeader` failure handling
-
-**Priority**: low. Identified by verification run 4.
-
-Both `writeInvocationLogHeader` in `runRescue` and `writeArtifact` inside `executeRescueJob` can fail with filesystem errors (disk full, permissions, removed data directory). These throws currently bubble up unhandled and, in `executeRescueJob`, can bypass the `catch` block that normally marks the job failed because they occur in the `try` body *after* successful completion.
-
-**Fix**: wrap the artifact-writing step in its own try/catch so a write failure is treated as a job failure rather than an unhandled exception. Consider a best-effort fallback that logs the error to stderr.
-
-### 7. `NODE_BIN` fast-path validation
-
-**Priority**: low. Identified by verification run 4.
-
-`startBackgroundRescue` trusts `context.env.KIMI_PLUGIN_CC_NODE_BIN || process.execPath` without checking the binary exists or is executable.
-
-**Fix**: add a lightweight `fs.access` check (or catch the spawn error from item 2) so misconfigured environments fail immediately with a clear message like "Configured Node binary not found" instead of leaving a phantom running job.
+Note: 0.1.8's Unit A introduced several new stages (`rescue.setup`, `rescue.log-header`, `rescue.artifact`, `rescue.worker.spawn`) that bypass `classifyManagedCommandFailure` entirely. The scope of this item is now narrower — it's specifically about the inner Wire-initialization errors that still route through `classifyManagedCommandFailure`.
 
 ---
 
@@ -85,49 +56,25 @@ The 0.1.7 verification runs exposed that rescue's current shell allowlist reject
 
 ---
 
-## 0.1.5 audit Lows (verified still open 2026-04-15)
+## 0.1.5 audit Lows (remaining after 0.1.8)
 
-These were flagged as low-severity findings during the 0.1.5 review but not addressed then. Spot-checked during the 0.1.7 doc cleanup pass.
-
-### L1 — dead 200-char session title guard
-
-**Priority**: cosmetic.
-
-`runtime/session-title.ts:34–36` clamps `full` to `KIMI_SESSION_TITLE_MAX_LENGTH = 200` chars if it exceeds the limit. But `full` is `"Kimi Task: " + <excerpt up to 56 chars> + " [write]"`, max ~85 chars. The 200-char guard is unreachable under normal operation.
-
-**Fix**: either raise `KIMI_SESSION_TITLE_EXCERPT_LENGTH` so long prompts can produce longer titles up to 200 chars, or remove the unreachable 200-char clamp. Low-risk cleanup.
-
-### L2 — no AbortController timeout test
-
-**Priority**: low.
-
-`runtime/kimi-web-client.ts` uses `AbortController` with `KIMI_WEB_HEALTH_TIMEOUT_MS = 200` and `KIMI_WEB_PATCH_TIMEOUT_MS = 2000` for its health probe and PATCH request. `tests/runtime/kimi-web-client.test.ts` does not exercise the abort path — there is no test that simulates a slow server to verify the timeout actually fires and the request is cleanly aborted.
-
-**Fix**: add a mock server that delays its response past the timeout budget and assert the client returns an `unreachable` or error result cleanly.
-
-### L3 — URL path parsing by string concatenation
-
-**Priority**: low-medium.
-
-`runtime/kimi-web-client.ts:54,82` builds URLs via `${baseUrl}${KIMI_WEB_HEALTH_PATH}` and `${baseUrl}${KIMI_WEB_SESSION_PATH}/${encodeURIComponent(sessionId)}`. If `baseUrl` has a trailing slash (e.g. `http://127.0.0.1:5494/`), the result is `http://127.0.0.1:5494//healthz` — double slash. If an env override puts a path component in `baseUrl` (e.g. `http://proxy/kimi/`), concatenation produces broken paths.
-
-**Fix**: use `new URL(path, baseUrl)` which normalizes correctly, or trim trailing slashes from `baseUrl` on resolve. Add a test case for both `http://host:port` and `http://host:port/`.
+L1, L2, L3 shipped in 0.1.8 (PRs #5 and #4). The one remaining item is L6, which still lacks a concrete repro.
 
 ### L6 — Ctrl-C stall (verify)
 
 **Priority**: unclear — no concrete repro documented.
 
-The 0.1.5 audit flagged a Ctrl-C stall concern, but the 0.1.7 doc sweep couldn't find a specific failure mode. `runtime/commands/rescue.ts:141–142` registers `SIGINT` and `SIGTERM` handlers and cleans them up in `finally`. Without a concrete reproduction, this item may be a shade of cancellation race hardening (item 4 above) or an outdated note.
+The 0.1.5 audit flagged a Ctrl-C stall concern, but no specific failure mode has been reproduced. `runtime/commands/rescue.ts` registers `SIGINT` and `SIGTERM` handlers and cleans them up in `finally`; 0.1.8's Unit A reshaped parts of this territory without introducing new race surfaces. The item may be a shade of cancellation race hardening (rescue item 4 above) or an outdated note.
 
-**Fix**: either reproduce the stall with a specific command sequence and file it as a concrete bug, or close this item out. Consider re-checking after the cancellation race hardening (item 4) lands.
+**Fix**: either reproduce the stall with a specific command sequence and file it as a concrete bug, or close this item out. Consider re-checking after rescue item 4 (cancellation race hardening) lands, since both touch the same signal-handling region.
 
 ---
 
-## 0.1.8 candidates
+## 0.1.9 candidates
 
 ### Ask refactor
 
-**Priority**: medium. Mentioned as followup in [ADR 004](./adr/004-rescue-pass-through.md) and the 0.1.7 ship memo.
+**Priority**: medium. Mentioned as followup in [ADR 004](./adr/004-rescue-pass-through.md) and the 0.1.7 ship memo. Was in 0.1.8 scope but deferred in favor of rescue hardening.
 
 Apply the same Model B treatment to `/kimi:ask` that rescue got in 0.1.7:
 
