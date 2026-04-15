@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, symlink } from "node:fs/promises";
 import path from "node:path";
 
@@ -407,6 +408,140 @@ describe("rescue command lifecycle", () => {
       }
 
       expect(alive).toBe(false);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("rescue setup failure marks the job failed, releases signal listeners, and closes the job store", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-setup-leak");
+    const invocationPath = path.join(pluginDataRoot, "rescue-setup-leak.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+    // A cwd that cannot be realpath'd forces createRescueApprovalPolicy to
+    // throw ENOENT before the Wire client is built.
+    const missingCwd = path.join(pluginDataRoot, "definitely", "missing", randomUUID());
+
+    const sigTermBefore = process.listenerCount("SIGTERM");
+    const sigIntBefore = process.listenerCount("SIGINT");
+
+    try {
+      // Pre-create a git-repo fixture just to satisfy the initial repo-identity probe;
+      // then redirect the CommandContext at the missing path for the actual execution.
+      const realRepo = await createGitRepoFixture("rescue-setup-leak-repo");
+      try {
+        // Seed a rescue job whose cwd cannot be realpath'd — this forces
+        // createRescueApprovalPolicy to throw ENOENT inside the new setup
+        // try/catch before any Wire client or signal listeners are attached.
+        const seedContext = makeContext(realRepo, env);
+        await ensurePluginPaths(resolvePluginPaths(env));
+        const store = new JobStore(resolvePluginPaths(env));
+        let createdJob;
+        try {
+          createdJob = store.createJob({
+            job_id: randomUUID(),
+            repo_id: "setup-leak-repo",
+            command_type: "rescue",
+            cwd: missingCwd,
+            model: null,
+            thinking: null,
+            background: false,
+            pid: null,
+            kimi_pid: null,
+            status: "running",
+            kimi_session_id: randomUUID(),
+            agent_profile: "runtime/agents/rescue.yaml",
+            prompt_digest: "deadbeef",
+            summary: "setup leak test",
+            phase: "starting",
+            final_output_path: null,
+            stream_log_path: path.join(pluginDataRoot, "logs", `rescue-setup-leak-${randomUUID()}.jsonl`),
+            error: null,
+          });
+        } finally {
+          store.close();
+        }
+
+        const { executeRescueJob } = await import("../../runtime/commands/rescue.js");
+        const result = await executeRescueJob(createdJob.job_id, "dummy prompt", seedContext);
+
+        expect(result.status).toBe("failed");
+        expect(result.phase).toBe("failed");
+        expect(result.error?.stage).toBe("rescue.setup");
+        expect(result.error?.code).toBe("RESCUE_SETUP_FAILED");
+
+        // No orphaned signal listeners should remain — setup failure runs
+        // before process.once registration.
+        expect(process.listenerCount("SIGTERM")).toBe(sigTermBefore);
+        expect(process.listenerCount("SIGINT")).toBe(sigIntBefore);
+
+        // Fresh JobStore reopen must succeed (the failure path closed the
+        // previous store — no busy lock should be held).
+        const reopen = new JobStore(resolvePluginPaths(env));
+        try {
+          const persisted = reopen.getJob(createdJob.job_id);
+          expect(persisted?.status).toBe("failed");
+          expect(persisted?.phase).toBe("failed");
+        } finally {
+          reopen.close();
+        }
+      } finally {
+        await cleanupTestPath(realRepo);
+      }
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("rescue fails fast when KIMI_PLUGIN_CC_NODE_BIN points at a missing binary", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-node-bin-invalid");
+    const repoRoot = await createGitRepoFixture("rescue-node-bin-invalid-repo");
+    const invocationPath = path.join(pluginDataRoot, "rescue-node-bin-invalid.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+    env.KIMI_PLUGIN_CC_NODE_BIN = `/tmp/kimi-plugin-cc-missing-node-${randomUUID()}`;
+
+    try {
+      await expect(
+        runRescue(["--background", "Do", "the", "work"], makeContext(repoRoot, env)),
+      ).rejects.toMatchObject({
+        code: "RESCUE_NODE_BIN_INVALID",
+      });
+
+      const status = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoRoot, env))) as {
+        status: string;
+        phase: string | null;
+        error: { code?: string; stage?: string } | null;
+      };
+      expect(status.status).toBe("failed");
+      expect(status.phase).toBe("failed");
+      expect(status.error?.code).toBe("RESCUE_NODE_BIN_INVALID");
+      expect(status.error?.stage).toBe("rescue.worker.spawn");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("rescue classifies writeArtifact failure as RESCUE_ARTIFACT_WRITE_FAILED", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-artifact-write-fail");
+    const repoRoot = await createGitRepoFixture("rescue-artifact-write-fail-repo");
+    const invocationPath = path.join(pluginDataRoot, "rescue-artifact-write-fail.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+    env.KIMI_PLUGIN_CC_TEST_FAIL_WRITE_ARTIFACT = "1";
+
+    try {
+      const output = await runRescue(["Implement", "the", "fix"], makeContext(repoRoot, env));
+      const status = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoRoot, env))) as {
+        status: string;
+        phase: string | null;
+        error: { code?: string; stage?: string } | null;
+      };
+
+      expect(output).toContain("# Failed Job");
+      expect(status.status).toBe("failed");
+      expect(status.phase).toBe("failed");
+      expect(status.error?.code).toBe("RESCUE_ARTIFACT_WRITE_FAILED");
+      expect(status.error?.stage).toBe("rescue.artifact");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
