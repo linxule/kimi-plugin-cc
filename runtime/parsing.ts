@@ -148,12 +148,9 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
   };
 }
 
-export function parseJobLookupArgs(
-  argv: string[],
-): JobLookupArgs & { runningOnly?: boolean } {
+export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
   let type: JobLookupArgs["type"];
   let jobId: string | undefined;
-  let runningOnly = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -169,11 +166,6 @@ export function parseJobLookupArgs(
       }
       type = value;
       index += 1;
-      continue;
-    }
-
-    if (token === "--running") {
-      runningOnly = true;
       continue;
     }
 
@@ -195,7 +187,6 @@ export function parseJobLookupArgs(
   return {
     jobId,
     type,
-    runningOnly,
   };
 }
 
@@ -252,6 +243,13 @@ function parseKnownFlags(argv: string[], knownFlags: Set<string>): ParsedKnownFl
         const value = argv[index + 1];
         if (!value) {
           throw new RuntimeError("INVALID_ARGS", "--base requires a ref value.", "args.parse");
+        }
+        if (value.startsWith("-")) {
+          throw new RuntimeError(
+            "INVALID_ARGS",
+            "--base value cannot start with '-'; pass a branch, tag, or commit ref.",
+            "args.parse",
+          );
         }
         base = value;
         index += 1;

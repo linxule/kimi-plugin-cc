@@ -37,15 +37,17 @@ export async function collectReviewContext(cwd: string, base?: string): Promise<
     };
   }
 
+  // Working-tree review is repo-wide. status --short is already repo-wide; limiting diff to
+  // the caller's subdirectory would mask unrelated-but-relevant changes elsewhere in the repo.
   const headDiff = await runGitAllowFailure(
-    ["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", "."],
+    ["diff", "--no-ext-diff", "--unified=3", "HEAD", "--"],
     cwd,
   );
 
   const diffText =
     headDiff.ok && headDiff.stdout.trim().length > 0
       ? headDiff.stdout
-      : await runGit(["diff", "--no-ext-diff", "--unified=3", "--", "."], cwd);
+      : await runGit(["diff", "--no-ext-diff", "--unified=3", "--"], cwd);
 
   return {
     repoRoot,
@@ -53,20 +55,6 @@ export async function collectReviewContext(cwd: string, base?: string): Promise<
     diffText: truncateDiff(diffText),
     targetDescription: "current working tree changes",
   };
-}
-
-async function getGitRepoRoot(cwd: string): Promise<string> {
-  const { repoRoot } = await resolveRepoIdentity(cwd);
-
-  if (!repoRoot) {
-    throw new RuntimeError(
-      "REVIEW_REQUIRES_GIT",
-      "review requires a git repository in phase 1b.",
-      "review.git",
-    );
-  }
-
-  return repoRoot;
 }
 
 export async function resolveRepoIdentity(cwd: string): Promise<RepoIdentity> {
@@ -103,8 +91,10 @@ export async function resolveRepoIdentity(cwd: string): Promise<RepoIdentity> {
 }
 
 async function getBaseDiff(cwd: string, base: string): Promise<string> {
+  // --end-of-options is a git safety marker (since 2.24) telling git every token after it is
+  // a refspec, not a flag. Defense in depth against argument injection via --base.
   const threeDot = await runGitAllowFailure(
-    ["diff", "--no-ext-diff", "--unified=3", `${base}...HEAD`, "--"],
+    ["diff", "--no-ext-diff", "--unified=3", "--end-of-options", `${base}...HEAD`, "--"],
     cwd,
   );
 
@@ -112,7 +102,7 @@ async function getBaseDiff(cwd: string, base: string): Promise<string> {
     return threeDot.stdout;
   }
 
-  return runGit(["diff", "--no-ext-diff", "--unified=3", base, "--"], cwd);
+  return runGit(["diff", "--no-ext-diff", "--unified=3", "--end-of-options", base, "--"], cwd);
 }
 
 async function runGit(args: string[], cwd: string): Promise<string> {

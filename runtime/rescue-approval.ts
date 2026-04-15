@@ -6,23 +6,23 @@ import { parse } from "shell-quote";
 import type { ApprovalPolicy } from "./wire/approval-dispatcher.js";
 import type { ApprovalRequestPayload } from "./wire/types.js";
 
-const MUTATING_FLAGS = new Set(["--fix", "--write", "-w", "--apply", "--in-place", "-i"]);
-const STOP_LIST = new Set([
-  "start",
-  "dev",
-  "serve",
-  "watch",
-  "deploy",
-  "publish",
-  "release",
-  "preview",
-  "run",
-  "install",
-]);
-const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq", "awk", "sed"]);
+const MUTATING_FLAGS_EXACT = new Set(["--fix", "--write", "-w", "--apply", "--in-place", "-i"]);
+const MUTATING_FLAG_PREFIXES = ["--fix=", "--write=", "--apply=", "--in-place="];
+const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);
 const GIT_READONLY_SUBCOMMANDS = new Set(["status", "diff", "show", "log", "grep", "blame"]);
 const CARGO_SUBCOMMANDS = new Set(["check", "clippy", "test"]);
 const GO_SUBCOMMANDS = new Set(["build", "vet", "test"]);
+const BANNED_FIND_ACTIONS = new Set([
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  "-delete",
+  "-fprint",
+  "-fprintf",
+  "-fprint0",
+  "-fls",
+]);
 
 export async function createRescueApprovalPolicy(workspaceRoot: string): Promise<ApprovalPolicy> {
   const root = await realpath(workspaceRoot);
@@ -150,6 +150,10 @@ function extractShellCommand(request: ApprovalRequestPayload): string | null {
 }
 
 function validateShellCommand(command: string): { response: "approve" | "reject"; feedback?: string } {
+  if (hasUnsafeShellSyntax(command)) {
+    return reject(`Rescue rejects command substitution, process substitution, or backticks: ${command}`);
+  }
+
   const parsed = parse(command);
   const stages: string[][] = [[]];
 
@@ -189,7 +193,7 @@ function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true
     return { ok: false, reason: `Rescue rejects non-standard shell entrypoints: ${tokens.join(" ")}` };
   }
 
-  if (args.some((arg) => MUTATING_FLAGS.has(arg))) {
+  if (hasMutatingFlag(args)) {
     return { ok: false, reason: `Rescue rejects mutating shell flags: ${tokens.join(" ")}` };
   }
 
@@ -200,8 +204,11 @@ function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true
   }
 
   if (command === "find") {
-    return args.some((arg) => arg === "-exec" || arg === "-execdir" || arg === "-delete")
-      ? { ok: false, reason: `Rescue rejects find with -exec/-execdir/-delete: ${tokens.join(" ")}` }
+    return args.some((arg) => BANNED_FIND_ACTIONS.has(arg))
+      ? {
+          ok: false,
+          reason: `Rescue rejects find actions that execute or write files: ${tokens.join(" ")}`,
+        }
       : { ok: true };
   }
 
@@ -215,6 +222,18 @@ function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true
     return args[0] === "check"
       ? { ok: true }
       : { ok: false, reason: "Rescue allows biome only in check mode." };
+  }
+
+  if (command === "ruff") {
+    if (args[0] === "check") {
+      return { ok: true };
+    }
+    if (args[0] === "format") {
+      return args.some((arg) => arg === "--check" || arg === "--diff")
+        ? { ok: true }
+        : { ok: false, reason: "Rescue allows ruff format only with --check or --diff." };
+    }
+    return { ok: false, reason: `Rescue rejects ruff subcommand: ${tokens.join(" ")}` };
   }
 
   if (command === "cargo") {
@@ -241,53 +260,57 @@ function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true
       : { ok: false, reason: `Rescue rejects ${command} shell command: ${tokens.join(" ")}` };
   }
 
-  if (command === "uv") {
-    return validateRunCommand(command, args);
-  }
-
-  if (command === "npm" || command === "pnpm" || command === "yarn" || command === "bun") {
+  if (command === "npm" || command === "pnpm" || command === "yarn" || command === "bun" || command === "uv") {
     return validatePackageManagerCommand(command, args);
   }
 
-  if (["rg", "grep", "ls", "cat", "pwd", "pyright", "mypy", "ruff", "eslint", "pytest"].includes(command)) {
+  if (["rg", "grep", "ls", "cat", "pwd", "pyright", "mypy", "eslint", "pytest"].includes(command)) {
     return { ok: true };
   }
 
   if (pipelineMode && PIPELINE_PLUMBING.has(command)) {
-    if (command === "sed" && args.includes("-i")) {
-      return { ok: false, reason: "Rescue rejects sed -i in shell pipelines." };
-    }
     return { ok: true };
   }
 
   return { ok: false, reason: `Rescue rejects shell command: ${tokens.join(" ")}` };
 }
 
+function hasUnsafeShellSyntax(command: string): boolean {
+  return /[`]/.test(command) || /\$\(/.test(command) || /<\(/.test(command) || />\(/.test(command);
+}
+
+function hasMutatingFlag(args: string[]): boolean {
+  for (const arg of args) {
+    if (MUTATING_FLAGS_EXACT.has(arg)) {
+      return true;
+    }
+    if (MUTATING_FLAG_PREFIXES.some((prefix) => arg.startsWith(prefix))) {
+      return true;
+    }
+    // sed's -i accepts an optional suffix like -i.bak, so any token starting with "-i" past length 2
+    // is a mutating in-place form we must catch even though "-i" alone is also in the exact set.
+    if (arg.length > 2 && arg.startsWith("-i")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function validatePackageManagerCommand(
   command: string,
   args: string[],
 ): { ok: true } | { ok: false; reason: string } {
+  // Direct `<pm> test` is the test-runner shorthand.
   if (args[0] === "test") {
     return { ok: true };
   }
 
-  if (args[0] !== "run" || !args[1]) {
-    return { ok: false, reason: `Rescue rejects ${command} command: ${[command, ...args].join(" ")}` };
-  }
-
-  return STOP_LIST.has(args[1])
-    ? { ok: false, reason: `Rescue rejects ${command} run ${args[1]} via stop list.` }
-    : { ok: true };
-}
-
-function validateRunCommand(command: string, args: string[]): { ok: true } | { ok: false; reason: string } {
-  if (args[0] !== "run" || !args[1]) {
-    return { ok: false, reason: `Rescue rejects ${command} command: ${[command, ...args].join(" ")}` };
-  }
-
-  return STOP_LIST.has(args[1])
-    ? { ok: false, reason: `Rescue rejects ${command} run ${args[1]} via stop list.` }
-    : { ok: true };
+  // `<pm> run <script>` is opaque: a malicious package.json can redefine any script to do anything.
+  // Rescue requires users to invoke direct check/build tools (tsc, pyright, mypy, eslint, etc.).
+  return {
+    ok: false,
+    reason: `Rescue rejects ${command} ${args.join(" ")}. Use direct tools (tsc --noEmit, pyright, mypy, ruff check, eslint, pytest) instead of package.json scripts.`,
+  };
 }
 
 function isWithin(root: string, target: string): boolean {

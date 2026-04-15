@@ -63,6 +63,7 @@ export class WireClient {
   private suppressExitError = false;
   private approvalFailure?: RuntimeError;
   private rejectApprovals = false;
+  private processingChain: Promise<void> = Promise.resolve();
 
   constructor(options: WireClientOptions) {
     this.cwd = options.cwd;
@@ -99,14 +100,17 @@ export class WireClient {
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk) => {
           this.stdoutBuffer += chunk;
-          void this.handleStdoutBuffer();
+          this.processingChain = this.processingChain.then(() => this.handleStdoutBuffer());
         });
         child.stderr.on("data", (chunk) => {
           const text = chunk.toString("utf8");
           this.stderrBuffer += text;
           void this.logWire("stderr", text.trimEnd());
         });
-        child.once("exit", (code, signal) => {
+        // Use 'close' rather than 'exit' to guarantee all buffered stdout data
+        // has been delivered before we reject pending requests. 'exit' can fire
+        // while the stdio streams still hold the final JSON-RPC response.
+        child.once("close", (code, signal) => {
           this.handleExit(code, signal);
         });
         resolve();
@@ -198,22 +202,6 @@ export class WireClient {
     if (this.child.exitCode === null && this.child.signalCode === null) {
       this.child.kill(signal);
     }
-  }
-
-  async replay(): Promise<never> {
-    throw new RuntimeError("NOT_IMPLEMENTED", "replay is not implemented in phase 1a.", "wire.replay");
-  }
-
-  async steer(): Promise<never> {
-    throw new RuntimeError("NOT_IMPLEMENTED", "steer is not implemented in phase 1a.", "wire.steer");
-  }
-
-  async setPlanMode(): Promise<never> {
-    throw new RuntimeError(
-      "NOT_IMPLEMENTED",
-      "set_plan_mode is not implemented in phase 1a.",
-      "wire.set_plan_mode",
-    );
   }
 
   getStderrBuffer(): string {
@@ -321,6 +309,48 @@ export class WireClient {
       return;
     }
 
+    try {
+      await this.dispatchWireRequest(message);
+    } catch (error) {
+      // Any throw from payload parsing, approval dispatch, or realpath calls in the policy must
+      // still unblock Kimi. Send a JSON-RPC error response so the peer drops the pending request,
+      // and stash the failure so prompt() surfaces it to the command layer.
+      this.approvalFailure =
+        error instanceof RuntimeError
+          ? error
+          : new RuntimeError(
+              "APPROVAL_DISPATCHER_FAILED",
+              `Approval dispatcher threw: ${formatError(error)}`,
+              "wire.approval",
+              error instanceof Error ? { cause: error } : undefined,
+            );
+
+      if (this.child) {
+        const errorResponse = {
+          jsonrpc: "2.0" as const,
+          id: message.id,
+          error: {
+            code: -32603,
+            message: this.approvalFailure.message,
+          },
+        };
+        await this.logWire("out", errorResponse).catch(() => {});
+        try {
+          this.child.stdin.write(`${JSON.stringify(errorResponse)}\n`);
+        } catch {
+          // stdin may already be closed during cancellation; ignore.
+        }
+      }
+    }
+  }
+
+  private async dispatchWireRequest(
+    message: Extract<IncomingWireMessage, { method: "request" }>,
+  ): Promise<void> {
+    if (!this.child) {
+      return;
+    }
+
     if (message.params.type !== "ApprovalRequest") {
       const error = {
         jsonrpc: "2.0" as const,
@@ -414,7 +444,21 @@ export class WireClient {
       message,
     };
 
-    await appendFile(this.logPath, `${JSON.stringify(entry)}\n`, "utf8");
+    try {
+      await appendFile(this.logPath, `${JSON.stringify(entry)}\n`, "utf8");
+    } catch (error) {
+      // If the log directory was removed mid-run (e.g. the user nuked ${CLAUDE_PLUGIN_DATA}),
+      // recreate it once and retry so the turn doesn't disappear into the filesystem. Other
+      // failures are swallowed since logging must not take down the hot path.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        try {
+          await mkdir(path.dirname(this.logPath), { recursive: true });
+          await appendFile(this.logPath, `${JSON.stringify(entry)}\n`, "utf8");
+        } catch {
+          // Intentional: best-effort.
+        }
+      }
+    }
   }
 }
 

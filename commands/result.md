@@ -3,8 +3,8 @@ description: Return the stored rendered result for the latest or selected termin
 disable-model-invocation: true
 ---
 
-Run the companion from the repository root with any user-supplied flags appended after `result`:
+Run the companion with any user-supplied flags appended after `result`:
 
-`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$PWD/runtime/dev-data}" bun run companion -- result <args>`
+`${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh result <args>`
 
 Return the companion stdout verbatim.

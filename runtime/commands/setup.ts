@@ -3,13 +3,15 @@ import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { classifySetupFailure } from "../kimi-errors.js";
+import {
+  KIMI_SETUP_INITIALIZE_TIMEOUT_MS,
+  KIMI_SETUP_PROMPT_TIMEOUT_MS,
+  withTimeout,
+} from "../kimi-timeouts.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
 import { ApprovalDispatcher, rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { WireClient } from "../wire/client.js";
-
-const SETUP_INITIALIZE_TIMEOUT_MS = 5_000;
-const SETUP_PROMPT_TIMEOUT_MS = 10_000;
 
 export interface SetupResult {
   summary: string;
@@ -67,13 +69,13 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
           supports_plan_mode: false,
         },
       }),
-      SETUP_INITIALIZE_TIMEOUT_MS,
+      KIMI_SETUP_INITIALIZE_TIMEOUT_MS,
       "setup.initialize",
     );
 
     const completedTurn = await withTimeout(
       wireClient.prompt("Reply with the single word READY. Do not use tools.", "setup"),
-      SETUP_PROMPT_TIMEOUT_MS,
+      KIMI_SETUP_PROMPT_TIMEOUT_MS,
       "setup.prompt",
     );
     const reply = completedTurn.finalText.trim();
@@ -91,7 +93,7 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
       runtimeProbe: "ok",
       authProbe: "ok",
       reviewGateEnabled,
-      nextStep: "Proceed to /kimi:review or /kimi:ask once phase 1b lands.",
+      nextStep: "Proceed to /kimi:review, /kimi:ask, or /kimi:rescue. Enable the review gate with /kimi:setup --enable-review-gate.",
       details: [
         `Companion runtime: Node ${process.version} via tsx`,
         `Wire server: ${initializeResult.server.name} ${initializeResult.server.version}`,
@@ -147,20 +149,4 @@ export function renderSetupResult(result: SetupResult): string {
     "",
     `Next step: ${result.nextStep}`,
   ].join("\n");
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, stage: string): Promise<T> {
-  const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(
-        new RuntimeError(
-          "TIMEOUT",
-          `${stage} timed out after ${timeoutMs}ms.`,
-          stage,
-        ),
-      );
-    }, timeoutMs).unref();
-  });
-
-  return Promise.race([promise, timeout]);
 }

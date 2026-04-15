@@ -1,5 +1,5 @@
 ---
-description: Ask Kimi for a read-only second-pair-of-eyes review of a working tree diff or branch diff. Use when Claude has already inspected a change once and wants an independent review perspective, when the change spans multiple files or has design risk, or when the user explicitly asks for another reviewer.
+description: Ask Kimi (an independent model) for a read-only second-pair-of-eyes review of a working tree diff or branch diff. Use when Claude has already inspected a change once and wants a cross-model review perspective, when the change spans multiple files or has design or risk implications, or when the user explicitly asks for another reviewer.
 ---
 
 # kimi-review
@@ -20,13 +20,13 @@ Prefer this skill when:
 
 Do not use this skill when:
 
-- the task is an implementation or delegation request better served by `kimi:rescue`
+- the task is an implementation or delegation request better served by `/kimi:rescue`
 - the user wants a challenge review; prefer `/kimi:adversarial-review`
 - the user wants only the main Claude thread's judgment
 
 ## Expected behavior
 
-- invoke the plugin review path in read-only mode, using `/kimi:review` for a normal second opinion or `/kimi:adversarial-review` when the user wants a challenge review
+- invoke `/kimi:review` in read-only mode
 - preserve the plugin's structured JSON review contract and surface findings, not implementation
 - prefer working-tree review by default; use `--base <ref>` when the user clearly wants branch-diff review
 - keep the call thin: pass the user's target or focus text through, then summarize the returned findings for the main thread without rewriting them into implementation work
@@ -35,8 +35,7 @@ Do not use this skill when:
 
 When this skill triggers:
 
-- decide whether the request is a standard review or an adversarial review
-- keep the request read-only; if the user wants edits or shell work, switch to rescue instead of stretching review
+- keep the request read-only; if the user wants edits or shell work, switch to `/kimi:rescue` instead of stretching review
 - preserve any explicit focus text after the command flags
 - if Kimi returns no findings, report that explicitly rather than implying the review was skipped
 

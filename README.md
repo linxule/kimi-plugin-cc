@@ -1,83 +1,64 @@
 # kimi-plugin-cc
 
-Planning and review bundle for a Codex-grade Claude Code plugin backed by Kimi CLI.
+A Claude Code plugin that delegates read-only review, free-form ask, and write-capable rescue work to a locally installed Kimi CLI. Includes an opt-in stop-time review gate.
 
-This repository is intentionally **docs-first**. It defines the product, architecture, runtime contracts, review process, and implementation phases for `kimi-plugin-cc` before any runtime code is written.
+## Status
 
-## Current phase
+Feature-complete against `docs/implementation-plan.md` through phase 3b. The plugin ships:
 
-This repo is in the **planning bundle** phase:
+- `/kimi:setup` — verify local Kimi + manage review-gate state
+- `/kimi:ask` — free-form read-only Q&A (fresh session per invocation)
+- `/kimi:review` — structured read-only code review of a working-tree or branch diff
+- `/kimi:adversarial-review` — adversarial read-only review with free-form focus
+- `/kimi:rescue` — write-capable delegation with session persistence and resume
+- `/kimi:status` / `/kimi:result` / `/kimi:cancel` — job lifecycle commands
+- `kimi-rescue` subagent — proactive delegation trigger
+- `kimi-review` skill — proactive second-opinion review trigger
+- Opt-in `Stop` hook review gate (disabled by default; enable via `/kimi:setup --enable-review-gate`)
 
-- the source of truth is the documentation under [docs](./docs)
-- the plugin/runtime directories are present only as a skeleton
-- no Kimi transport, job runtime, or Claude command implementation is included yet
+## How it works
 
-## Project goal
+The plugin mirrors the thin-plugin-rich-runtime split of [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc):
 
-Build the Kimi equivalent of OpenAI's Codex Claude Code plugin at the same quality bar:
+- **Claude plugin layer** — thin slash commands, agent, skill, hook, and manifest
+- **Local runtime layer** — Node+tsx companion (see ADR 003) that owns Kimi Wire sessions, SQLite job state, rescue approval policy, replay tooling, and cancellation
 
-- native Claude Code plugin UX
-- thin plugin shell
-- rich local runtime
-- Kimi Wire as the primary transport
-- explicit job lifecycle
-- safe read-only review path
-- write-capable rescue path
-- phased delivery with review gate later in v1
+Flow: `slash command → scripts/companion.sh → runtime/companion.ts → Kimi Wire session → SQLite job store → rendered artifact`.
 
-## How to review this repo
+Kimi Wire is the primary transport. Wire is labeled experimental in Kimi's docs; the runtime re-verifies Wire shape at every phase boundary.
 
-Start here:
+## Prerequisites
 
-1. Read [docs/spec.md](./docs/spec.md)
-2. Read the ADRs in [docs/adr](./docs/adr)
-3. Read [docs/implementation-plan.md](./docs/implementation-plan.md)
-4. Use the prompts in [docs/review/prompts](./docs/review/prompts)
-5. Validate against [docs/test-plan.md](./docs/test-plan.md) and [docs/review/checklist.md](./docs/review/checklist.md)
+- `kimi` CLI available on `PATH` (`kimi --version` should work)
+- `bun` for package management and the test suite
+- `node` >= 18.18 for the companion runtime
 
-## Repository layout
+## Install locally
 
-Documentation:
+1. Clone the repo somewhere convenient.
+2. `bun install` inside the clone — this installs `tsx`, `better-sqlite3`, and the other dependencies the companion resolves at runtime.
+3. Point Claude Code at the clone as a local plugin (see Claude Code plugin install docs for the exact mechanism).
+4. In a Claude Code session, run `/kimi:setup` to verify `kimi` is reachable and authenticated.
+5. Optional: `/kimi:setup --enable-review-gate` to turn on stop-time review.
 
-- [docs/spec.md](./docs/spec.md): canonical product and technical spec
-- [docs/adr/001-wire-first-transport.md](./docs/adr/001-wire-first-transport.md): why Wire is the primary transport
-- [docs/adr/002-plugin-runtime-shape.md](./docs/adr/002-plugin-runtime-shape.md): why the runtime mirrors Codex's plugin/runtime split
-- [docs/implementation-plan.md](./docs/implementation-plan.md): phased implementation plan
-- [docs/test-plan.md](./docs/test-plan.md): acceptance and failure-mode coverage
-- [docs/review/checklist.md](./docs/review/checklist.md): human/AI review checklist
-- [docs/references.md](./docs/references.md): primary source links for Codex plugin and Kimi docs
-- [docs/research](./docs/research): synthesized repo/doc notes used to ground the design
+## Architecture and non-negotiables
 
-Planned implementation skeleton:
+See [CLAUDE.md](./CLAUDE.md) for the locked architectural decisions. The canonical spec lives in [docs/spec.md](./docs/spec.md); ADRs in [docs/adr](./docs/adr).
 
-- [.claude-plugin/plugin.json](./.claude-plugin/plugin.json)
-- [commands](./commands)
-- [agents](./agents)
-- [skills](./skills)
-- [hooks](./hooks)
-- [scripts](./scripts)
-- [runtime](./runtime)
-- [tests](./tests)
+## Documentation
 
-Planned v1 command surface:
+- [docs/spec.md](./docs/spec.md) — canonical product and technical spec
+- [docs/adr/001-wire-first-transport.md](./docs/adr/001-wire-first-transport.md) — why Wire is the primary transport
+- [docs/adr/002-plugin-runtime-shape.md](./docs/adr/002-plugin-runtime-shape.md) — why the runtime mirrors the Codex plugin split
+- [docs/adr/003-node-tsx-companion-runtime.md](./docs/adr/003-node-tsx-companion-runtime.md) — why the companion runs on Node+tsx instead of Bun
+- [docs/implementation-plan.md](./docs/implementation-plan.md) — phased implementation plan
+- [docs/test-plan.md](./docs/test-plan.md) — acceptance and failure-mode coverage
+- [docs/review/checklist.md](./docs/review/checklist.md) — review checklist
+- [docs/references.md](./docs/references.md) — primary source links
 
-- `/kimi:setup`
-- `/kimi:ask`
-- `/kimi:review`
-- `/kimi:adversarial-review`
-- `/kimi:rescue`
-- `/kimi:status`
-- `/kimi:result`
-- `/kimi:cancel`
+## Development
 
-## Scope boundary
+- `bun run check` — typecheck + test suite
+- `bun test <path>` — run a single test file
 
-This repository does **not** implement the plugin yet. It packages the planning artifacts needed for:
-
-- review by Claude Code and other agents
-- design iteration
-- implementation in a later phase without reopening core decisions
-
-Note:
-
-- `.claude-plugin/plugin.json` is intentionally minimal. Command, agent, hook, and skill behavior is defined by repo layout and the corresponding files, not by manifest-only metadata.
+Test helpers (mock Wire server, mock Kimi CLI) live under `tests/helpers`. The real-kimi smoke test in `tests/wire/live-kimi.integration.test.ts` is gated on `KIMI_PLUGIN_CC_LIVE_TEST` and only runs against an actual `kimi` CLI install.

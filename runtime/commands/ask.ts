@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
-import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import {
+  KIMI_ASK_PROMPT_TIMEOUT_MS,
+  KIMI_INITIALIZE_TIMEOUT_MS,
+  KIMI_START_TIMEOUT_MS,
+  withTimeout,
+} from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
@@ -62,18 +67,26 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
   });
 
   try {
-    await client.start();
+    await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, "ask.start");
     store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
-    await client.initialize({
-      protocol_version: "1.9",
-      client: { name: "kimi-plugin-cc", version: "0.1.0" },
-      capabilities: {
-        supports_question: false,
-        supports_plan_mode: false,
-      },
-    });
+    await withTimeout(
+      client.initialize({
+        protocol_version: "1.9",
+        client: { name: "kimi-plugin-cc", version: "0.1.0" },
+        capabilities: {
+          supports_question: false,
+          supports_plan_mode: false,
+        },
+      }),
+      KIMI_INITIALIZE_TIMEOUT_MS,
+      "ask.initialize",
+    );
 
-    const completed = await client.prompt(buildAskPrompt(parsed.prompt), "ask");
+    const completed = await withTimeout(
+      client.prompt(buildAskPrompt(parsed.prompt), "ask"),
+      KIMI_ASK_PROMPT_TIMEOUT_MS,
+      "ask.prompt",
+    );
     const rendered = renderManagedJobOutput(job, completed.finalText);
     const artifactPath = await writeArtifact(paths, job, rendered.rendered);
     store.markCompleted(job.job_id, {

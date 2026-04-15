@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 
+import { RuntimeError, formatError } from "./errors.js";
 import type { JobError, JobStatus, ManagedCommandType } from "./types.js";
 import type { PluginPaths } from "./paths.js";
 
@@ -56,9 +57,13 @@ export class JobStore {
   private readonly db: SqliteAdapter;
 
   constructor(paths: PluginPaths) {
-    this.db = createSqliteAdapter(paths.stateDbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("busy_timeout = 5000");
+    try {
+      this.db = createSqliteAdapter(paths.stateDbPath);
+      this.db.pragma("journal_mode = WAL");
+      this.db.pragma("busy_timeout = 5000");
+    } catch (error) {
+      throw translateSqliteError(error);
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
         job_id TEXT PRIMARY KEY,
@@ -90,6 +95,10 @@ export class JobStore {
 
       CREATE INDEX IF NOT EXISTS jobs_session_idx
         ON jobs (repo_id, kimi_session_id, updated_at DESC);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS jobs_running_rescue_session_idx
+        ON jobs (repo_id, kimi_session_id)
+        WHERE status = 'running' AND command_type = 'rescue';
     `);
   }
 
@@ -99,25 +108,37 @@ export class JobStore {
 
   createJob(input: CreateJobInput): JobRecord {
     const now = new Date().toISOString();
-    this.db.run(
-      `
-        INSERT INTO jobs (
-          job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
-          background, pid, kimi_pid, status, kimi_session_id, agent_profile, prompt_digest,
-          summary, final_output_path, stream_log_path, error
-        )
-        VALUES (
-          @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
-          @background, @pid, @kimi_pid, @status, @kimi_session_id, @agent_profile, @prompt_digest,
-          @summary, @final_output_path, @stream_log_path, @error
-        )
-      `,
-      {
-        ...serializeRecord(input),
-        created_at: now,
-        updated_at: now,
-      },
-    );
+    try {
+      this.db.run(
+        `
+          INSERT INTO jobs (
+            job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
+            background, pid, kimi_pid, status, kimi_session_id, agent_profile, prompt_digest,
+            summary, final_output_path, stream_log_path, error
+          )
+          VALUES (
+            @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
+            @background, @pid, @kimi_pid, @status, @kimi_session_id, @agent_profile, @prompt_digest,
+            @summary, @final_output_path, @stream_log_path, @error
+          )
+        `,
+        {
+          ...serializeRecord(input),
+          created_at: now,
+          updated_at: now,
+        },
+      );
+    } catch (error) {
+      if (isSqliteConstraintError(error) && input.command_type === "rescue") {
+        throw new RuntimeError(
+          "RESCUE_ALREADY_RUNNING",
+          `A rescue job for session ${input.kimi_session_id ?? "<unknown>"} is already running in this repo. Use /kimi:status to find it.`,
+          "rescue.resume",
+          error instanceof Error ? { cause: error } : undefined,
+        );
+      }
+      throw translateSqliteError(error);
+    }
 
     return this.getJob(input.job_id)!;
   }
@@ -181,10 +202,6 @@ export class JobStore {
 
   updateRunningJob(jobId: string, patch: Partial<JobRecord>): JobRecord | null {
     return this.updateWhere(jobId, patch, "status = 'running'");
-  }
-
-  updateJob(jobId: string, patch: Partial<JobRecord>): JobRecord | null {
-    return this.updateWhere(jobId, patch);
   }
 
   markCompleted(
@@ -398,4 +415,34 @@ function rewriteNamedParamsForBun(statement: string): string {
 
 function rewriteNamedBindingsForBun(bindings: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(bindings).map(([key, value]) => [`$${key}`, value]));
+}
+
+function isSqliteConstraintError(error: unknown): boolean {
+  const message = formatError(error).toLowerCase();
+  return message.includes("unique constraint") || message.includes("constraint failed");
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  const message = formatError(error).toLowerCase();
+  return message.includes("database is locked") || message.includes("busy");
+}
+
+function translateSqliteError(error: unknown): RuntimeError {
+  if (isSqliteBusyError(error)) {
+    return new RuntimeError(
+      "JOB_STORE_BUSY",
+      "The plugin job store is locked by another process. Wait a moment and retry, or check for stuck rescue workers with /kimi:status.",
+      "job-store",
+      error instanceof Error ? { cause: error } : undefined,
+    );
+  }
+  if (error instanceof RuntimeError) {
+    return error;
+  }
+  return new RuntimeError(
+    "JOB_STORE_ERROR",
+    `Job store operation failed: ${formatError(error)}`,
+    "job-store",
+    error instanceof Error ? { cause: error } : undefined,
+  );
 }

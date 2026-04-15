@@ -6,6 +6,12 @@ import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
+import {
+  KIMI_INITIALIZE_TIMEOUT_MS,
+  KIMI_REVIEW_PROMPT_TIMEOUT_MS,
+  KIMI_START_TIMEOUT_MS,
+  withTimeout,
+} from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
@@ -25,8 +31,8 @@ export async function runReview(
 
   if (parsed.background || parsed.wait) {
     throw new RuntimeError(
-      "NOT_IMPLEMENTED",
-      `${commandType} background execution is deferred until phase 2.`,
+      "INVALID_FLAGS",
+      `${commandType} does not support --background or --wait in v1; review runs foreground-synchronously.`,
       `${commandType}.parse`,
     );
   }
@@ -81,20 +87,25 @@ export async function runReview(
   });
 
   try {
-    await client.start();
+    await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, `${commandType}.start`);
     store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
-    await client.initialize({
-      protocol_version: "1.9",
-      client: { name: "kimi-plugin-cc", version: "0.1.0" },
-      capabilities: {
-        supports_question: false,
-        supports_plan_mode: false,
-      },
-    });
+    await withTimeout(
+      client.initialize({
+        protocol_version: "1.9",
+        client: { name: "kimi-plugin-cc", version: "0.1.0" },
+        capabilities: {
+          supports_question: false,
+          supports_plan_mode: false,
+        },
+      }),
+      KIMI_INITIALIZE_TIMEOUT_MS,
+      `${commandType}.initialize`,
+    );
 
-    const completed = await client.prompt(
-      previewPrompt,
-      commandType,
+    const completed = await withTimeout(
+      client.prompt(previewPrompt, commandType),
+      KIMI_REVIEW_PROMPT_TIMEOUT_MS,
+      `${commandType}.prompt`,
     );
     const rendered = renderManagedJobOutput(job, completed.finalText);
     const artifactPath = await writeArtifact(paths, job, rendered.rendered);

@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, stat, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 
 import { RuntimeError } from "../errors.js";
@@ -20,6 +20,8 @@ export interface ReplayResult {
   output: ReturnType<typeof renderManagedJobOutput>["output"];
   summary: string;
 }
+
+const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
 
 interface WireLogEntry {
   direction: "meta" | "in" | "out" | "stderr";
@@ -75,6 +77,15 @@ export async function replayJob(job: JobRecord): Promise<ReplayResult> {
     );
   }
 
+  const stats = await stat(job.stream_log_path);
+  if (stats.size > MAX_REPLAY_LOG_BYTES) {
+    throw new RuntimeError(
+      "REPLAY_LOG_TOO_LARGE",
+      `Job ${job.job_id} stream log is ${stats.size} bytes, which exceeds the ${MAX_REPLAY_LOG_BYTES}-byte replay ceiling.`,
+      "replay.lookup",
+    );
+  }
+
   const completedTurn = await replayCompletedTurn(job.stream_log_path);
   const rendered = renderManagedJobOutput(job, completedTurn.finalText);
 
@@ -87,19 +98,36 @@ export async function replayJob(job: JobRecord): Promise<ReplayResult> {
 
 async function replayCompletedTurn(logPath: string) {
   const contents = await readFile(logPath, "utf8");
-  const lines = contents
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const rawLines = contents.split("\n");
   const turn = createTurnCapture();
   let promptRequestId: string | null = null;
   let promptResult: PromptResult | null = null;
 
-  for (const line of lines) {
-    const entry = JSON.parse(line) as WireLogEntry;
+  for (let lineNumber = 0; lineNumber < rawLines.length; lineNumber += 1) {
+    const line = rawLines[lineNumber]!.trim();
+    if (!line) {
+      continue;
+    }
+
+    let entry: WireLogEntry;
+    try {
+      entry = JSON.parse(line) as WireLogEntry;
+    } catch (error) {
+      // A truncated final line is the expected shape when a worker was SIGKILL'd mid-write.
+      // Silently drop it so replay still works on the preceding, consistent prefix.
+      if (lineNumber === rawLines.length - 1) {
+        continue;
+      }
+      throw new RuntimeError(
+        "REPLAY_LOG_INVALID",
+        `Wire log ${logPath}:${lineNumber + 1} is malformed JSON: ${(error as Error).message}`,
+        "replay.log",
+        { cause: error as Error },
+      );
+    }
 
     if (entry.direction === "out") {
-      const message = coerceWireObject(entry.message, "replay.log");
+      const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
       if (message.method === "prompt" && typeof message.id === "string") {
         promptRequestId = message.id;
       }
@@ -110,7 +138,7 @@ async function replayCompletedTurn(logPath: string) {
       continue;
     }
 
-    const message = coerceWireObject(entry.message, "replay.log.in");
+    const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
 
     if ("method" in message) {
       if (message.method === "event" && isEventPayload(message.params)) {
@@ -139,13 +167,28 @@ async function replayCompletedTurn(logPath: string) {
   return finalizeTurnCapture(turn, promptResult);
 }
 
-function coerceWireObject(value: unknown, stage: string): Record<string, unknown> {
-  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+function coerceWireObject(
+  value: unknown,
+  logPath: string,
+  lineNumber: number,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = typeof value === "string" ? JSON.parse(value) : value;
+  } catch (error) {
+    throw new RuntimeError(
+      "REPLAY_LOG_INVALID",
+      `Wire log ${logPath}:${lineNumber} message field is malformed JSON: ${(error as Error).message}`,
+      "replay.log",
+      { cause: error as Error },
+    );
+  }
+
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new RuntimeError(
       "REPLAY_LOG_INVALID",
-      `Wire log entry at ${stage} is not a JSON object.`,
-      stage,
+      `Wire log ${logPath}:${lineNumber} entry is not a JSON object.`,
+      "replay.log",
     );
   }
 

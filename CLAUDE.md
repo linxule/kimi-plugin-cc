@@ -4,18 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-**Phase 0 closed, phase 1 dispatched.** The planning bundle in `docs/` is locked and internally consistent. Phase 1 implementation (Wire client, companion dispatcher, read-only commands including `/kimi:ask`) is running in a separate Codex dispatch with a five-checkpoint structure — checkpoint 0 is the phase-1 re-verification gate against current Kimi docs.
+**Phase 3b shipped.** The plugin is feature-complete against `docs/implementation-plan.md`: planning bundle (phase 0), Wire client + companion dispatcher + setup (phase 1a), ask + review + adversarial review + read-only agent profiles (phase 1b), SQLite job store + rescue + background workers + rescue allowlist (phase 2), stop-hook review gate (phase 3a), replay tooling + graceful degradation + cancellation hardening (phase 3b). Each phase landed as a committed checkpoint on `main`.
 
-The source of truth remains `docs/`; runtime code belongs under `runtime/` and is built against the spec, not designed ad-hoc. `commands/`, `agents/`, `hooks/`, `skills/`, and `scripts/` hold the Claude-facing shell. Do not reopen locked decisions from `docs/spec.md` without raising them explicitly — the spec is the contract the Codex implementation dispatch is building against.
-
-Key planning artifacts already authored (do not treat as placeholders):
-
-- `agents/kimi-rescue.md` — subagent with trigger-oriented description and runtime contract; body is rewritten by phase 2
-- `skills/kimi-review/SKILL.md` — proactive-discovery skill wrapping `/kimi:review`
+The source of truth is `docs/spec.md` plus the ADRs. Runtime code lives under `runtime/` and is built against the spec. `commands/`, `agents/`, `hooks/`, `skills/`, and `scripts/` hold the Claude-facing shell. Do not reopen locked decisions from `docs/spec.md` without raising them explicitly — the spec is the contract the whole runtime was built against.
 
 ## Commands
 
-The only script is `bun run check`, which currently prints a placeholder. There is no build, lint, or test yet. `tsconfig.json` targets ES2022 / NodeNext / `strict` with `noEmit`, scoped to `scripts/`, `runtime/`, `tests/` — use it as the baseline when implementation work begins.
+- `bun run check` — `tsc --noEmit` + `bun test` (45+ tests across wire client, allowlist, command handlers, replay, review gate, job lifecycle)
+- `bun test <path>` — run a single test file
+- The companion is launched via `scripts/companion.sh <subcommand> <args>`, which cd's to `${CLAUDE_PLUGIN_ROOT}` and runs `node --import tsx runtime/companion.ts`. Slash commands and the Stop hook both route through that wrapper so tsx resolves against the plugin's `node_modules` regardless of the user's cwd.
 
 Toolchain: Node >= 18.18, TypeScript, **bun** (not npm/yarn). Python work (if any) uses **uv**.
 
@@ -40,7 +37,7 @@ Non-negotiables (see `docs/spec.md` and `docs/adr/` for full detail — these ar
 - **Wire client owns approvals**, not `--agent-file`. Kimi YAML cannot pre-declare selective auto-approvals; all approval-response logic lives in TypeScript per `command_type`.
 - **Review sessions are always fresh and isolated.** Rescue sessions persist per repo and are resumable via stored client-assigned session ids. Ask is stateless in v1.
 - **Jobs are the source of truth** for `status`/`result`/`cancel`, stored in SQLite at `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/state.db` in WAL mode with `busy_timeout`. No concurrency cap in v1. Follow the job schema in `docs/spec.md` §Job model exactly. Terminal states (`completed`/`failed`/`cancelled`) are permanent; `cancel` on a terminal job is a no-op.
-- **Parse failure is a hard failure.** The runtime buffers text `ContentPart` payloads after the last `ToolResult` of the turn and commits on `TurnEnd`; interrupted turns (no `TurnEnd`) fail as malformed rather than parsing partial buffers. No repair pass. Review-gate malformed output becomes a warning, never a silent block.
+- **Parse failure policy by command type.** The runtime buffers text `ContentPart` payloads after the last `ToolResult` of the turn and commits on `TurnEnd`; interrupted turns (no `TurnEnd`) fail as malformed rather than parsing partial buffers. No repair pass. For `review` and `adversarial_review`, malformed JSON is a hard failure. For `rescue`, malformed JSON lands as a `completed` job with `error` set and raw output preserved in the artifact — rescue runs can produce value even when the final JSON summary is malformed. For `review_gate`, malformed output becomes a warning (fail-open), never a silent block.
 - **Review gate** is a `Stop` hook (phase 3, disabled by default, persisted in plugin config). On `decision=BLOCK` + `confidence=high` it prevents Claude from stopping and injects corrective context for a follow-up turn. It does not retract the already-generated assistant message from the transcript. Defaults to `--no-thinking` + small model inside an 8s budget.
 - **Claude-permission pass-through for rescue is deferred to v2.** V1 enforces safety via a companion-side allowlist instead of routing through Claude Code's own tool permissions — true pass-through would require an IPC path from detached plugin subprocesses back into Claude's session that Claude Code does not currently expose. The trade-off and revisit point are documented in `docs/spec.md` §Approval policy → Deferred architecture option.
 
@@ -48,14 +45,17 @@ Non-negotiables (see `docs/spec.md` and `docs/adr/` for full detail — these ar
 
 Review and rescue commands emit fixed JSON schemas defined in `docs/spec.md` ("Output schemas"). Review findings are one-file-per-finding; multi-file issues must be split. Review gate uses its own `decision/confidence/summary/issues` schema. Keep prompts and schemas versioned alongside the runtime when implementation begins.
 
-## Phasing
+## Phasing (historical)
 
-- Phase 0 (complete, 2026-04-14): planning bundle locked.
-- Phase 1 (dispatched, checkpoint-based): runtime shell, Wire client, `setup` / `review` / `adversarial-review` / `ask`, `kimi-review` skill. Split into 1a (Wire client + dispatcher) and 1b (commands + profiles + skill).
-- Phase 2: rescue, SQLite job store, background workers, `status`/`result`/`cancel`, rescue session persistence, `kimi:rescue` subagent body rewritten as runtime system prompt.
-- Phase 3: review gate Stop hook, runtime hardening, replay tooling.
+- Phase 0 (2026-04-14, commit `3fac238`): planning bundle locked.
+- Phase 1a (`ecebd23`): Wire client + companion dispatcher + setup.
+- Phase 1b (`297ffa9`): ask + review + adversarial review + read-only agent profiles + Node+tsx ADR.
+- Phase 2 (`0ab032f`): SQLite job store + rescue + background workers + rescue allowlist + subagent rewrite.
+- Phase 3a (`a13c914`): stop-hook review gate end-to-end.
+- Phase 3b (`a9edbcd`): replay tooling + graceful degradation + cancellation hardening.
+- Post-phase-3 audit cleanup: closed allowlist escapes (backticks, sed prefix forms, find action escapes, ruff format, package-manager `run <script>`), hardened Wire client approval dispatching and stdout ordering, added command timeouts, fixed `--base` argument injection, consolidated plugin manifest for real-world install.
 
-Each phase exits via a hard checkpoint with a structured report and human+Claude review. Do not pull phase-N+1 work forward into phase N without an explicit strategic decision.
+Any further changes should be scoped as a new ADR or a targeted fix commit, not a new phase.
 
 ## When editing
 

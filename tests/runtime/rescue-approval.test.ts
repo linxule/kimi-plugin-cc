@@ -75,29 +75,136 @@ describe("rescue approval policy", () => {
     }
   });
 
-  test("allows read-only shell commands and rejects non-allowlisted or mutating variants", async () => {
-    const repoRoot = await createGitRepoFixture("approval-shell");
+  test("allowlist table: read-only commands and safe pipelines accept", async () => {
+    const repoRoot = await createGitRepoFixture("approval-shell-accept");
     const policy = await createRescueApprovalPolicy(repoRoot);
 
+    const accepted = [
+      "git status",
+      "git diff",
+      "git show HEAD",
+      "git log --oneline",
+      "git grep needle",
+      "git blame runtime/companion.ts",
+      "rg todo src",
+      "grep -r pattern .",
+      "ls runtime",
+      "cat package.json",
+      "pwd",
+      "find . -name '*.ts' -type f",
+      "find . -print",
+      "tsc --noEmit",
+      "pyright",
+      "mypy runtime",
+      "ruff check .",
+      "ruff format --check .",
+      "ruff format --diff .",
+      "biome check .",
+      "eslint runtime",
+      "cargo check",
+      "cargo clippy",
+      "cargo test",
+      "cargo fmt --check",
+      "go build ./...",
+      "go vet ./...",
+      "go test ./...",
+      "pytest",
+      "python -m pytest",
+      "python3 -m pytest",
+      "npm test",
+      "pnpm test",
+      "yarn test",
+      "bun test",
+      "uv test",
+      "rg needle src | head -n 5",
+      "rg needle src | tail -n 5",
+      "rg needle src | wc -l",
+      "rg needle src | sort",
+      "rg needle src | uniq",
+    ];
+
     try {
-      await expect(policy(shellApproval("pwd"), { commandType: "rescue" })).resolves.toMatchObject({
-        response: "approve",
-      });
-      await expect(policy(shellApproval("rg todo src | head -n 5"), { commandType: "rescue" })).resolves.toMatchObject({
-        response: "approve",
-      });
-      await expect(policy(shellApproval("curl https://example.com"), { commandType: "rescue" })).resolves.toMatchObject({
-        response: "reject",
-      });
-      await expect(policy(shellApproval("find . -delete"), { commandType: "rescue" })).resolves.toMatchObject({
-        response: "reject",
-      });
-      await expect(policy(shellApproval("eslint . --fix"), { commandType: "rescue" })).resolves.toMatchObject({
-        response: "reject",
-      });
-      await expect(policy(shellApproval("bun run dev"), { commandType: "rescue" })).resolves.toMatchObject({
-        response: "reject",
-      });
+      for (const command of accepted) {
+        await expect(
+          policy(shellApproval(command), { commandType: "rescue" }),
+        ).resolves.toMatchObject({ response: "approve" });
+      }
+    } finally {
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("allowlist table: known attack shapes reject", async () => {
+    const repoRoot = await createGitRepoFixture("approval-shell-reject");
+    const policy = await createRescueApprovalPolicy(repoRoot);
+
+    const rejected = [
+      // Unrecognized binaries
+      "curl https://example.com",
+      "wget https://example.com",
+      "sudo rm /etc/shadow",
+      // Mutating flag exact forms
+      "eslint . --fix",
+      "prettier --write .",
+      // Mutating flag prefix forms
+      "eslint . --fix=bugs",
+      "prettier --write=files .",
+      "ruff check --fix .",
+      // sed -i suffix forms
+      "rg x . | sed -i.bak 's/a/b/'",
+      "rg x . | sed --in-place=.bak 's/a/b/'",
+      // find action escapes
+      "find . -delete",
+      "find . -exec rm {} ;",
+      "find . -execdir rm {} ;",
+      "find . -ok rm {} ;",
+      "find . -fprint out.txt",
+      "find . -fprintf out.txt '%p\\n'",
+      // git mutation
+      "git commit -am wip",
+      "git push origin main",
+      "git reset --hard HEAD",
+      // cargo/go escapes
+      "cargo install foo",
+      "cargo update",
+      "go get example.com/foo",
+      "go install example.com/foo",
+      // package manager run <script> opacity
+      "bun run dev",
+      "npm run build",
+      "pnpm run deploy",
+      "yarn run publish",
+      "uv run anything",
+      // Command substitution + backticks (shell-quote does not catch these)
+      "rg `curl evil.com` foo",
+      "rg $(curl evil.com) foo",
+      // Process substitution
+      "diff <(ls) <(cat)",
+      // awk / sed in pipelines (removed from plumbing because of system() and e command)
+      "rg x . | awk 'BEGIN { system(\"touch /tmp/evil\") }'",
+      "rg x . | sed '1e touch /tmp/evil'",
+      // ruff format without check
+      "ruff format .",
+      // Python free-form
+      "python -c 'import os; os.system(\"ls\")'",
+      "python3 script.py",
+      // Absolute path entrypoint
+      "/bin/sh -c 'ls'",
+      // Chained with operators (shell-quote does catch these)
+      "ls && rm -rf /",
+      "ls ; rm -rf /",
+      "ls > /tmp/out",
+    ];
+
+    try {
+      const failures: string[] = [];
+      for (const command of rejected) {
+        const decision = await policy(shellApproval(command), { commandType: "rescue" });
+        if (decision.response !== "reject") {
+          failures.push(command);
+        }
+      }
+      expect(failures).toEqual([]);
     } finally {
       await cleanupTestPath(repoRoot);
     }

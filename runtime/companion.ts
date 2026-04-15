@@ -2,7 +2,7 @@
 
 import { runAsk } from "./commands/ask.js";
 import { runCancel } from "./commands/cancel.js";
-import { notImplementedInPhase1a } from "./commands/not-implemented.js";
+import { notImplementedCompanionCommand } from "./commands/not-implemented.js";
 import { runReplay } from "./commands/replay.js";
 import { runResult } from "./commands/result.js";
 import { runReview } from "./commands/review.js";
@@ -47,7 +47,7 @@ async function main(argv: string[]): Promise<void> {
         return;
       }
 
-      notImplementedInPhase1a(taskType ? `task ${taskType}` : "task");
+      notImplementedCompanionCommand(taskType ? `task ${taskType}` : "task");
       return;
     }
     case "ask": {

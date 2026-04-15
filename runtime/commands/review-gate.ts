@@ -10,6 +10,7 @@ import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../kimi-errors.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { KIMI_REVIEW_GATE_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import {
@@ -22,7 +23,6 @@ import {
 import type { CommandContext } from "../types.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
 
-const REVIEW_GATE_TIMEOUT_MS = 8_000;
 const DEFAULT_REVIEW_GATE_MODEL = "kimi-for-coding";
 
 export interface StopHookInput {
@@ -165,7 +165,7 @@ async function executeReviewGate(
         const completed = await client.prompt(prompt, "review_gate");
         return renderManagedJobOutput(job, completed.finalText);
       })(),
-      REVIEW_GATE_TIMEOUT_MS,
+      KIMI_REVIEW_GATE_TIMEOUT_MS,
       "review_gate.runtime",
     );
 
@@ -178,10 +178,7 @@ async function executeReviewGate(
     return rendered.output as ReviewGateOutput;
   } catch (error) {
     const classified = classifyManagedCommandFailure(error, "review_gate", job.job_id);
-    const summary =
-      classified instanceof RuntimeError && classified.code === "TIMEOUT"
-        ? "Review gate timed out."
-        : "Review gate failed.";
+    const summary = isTimeoutError(classified) ? "Review gate timed out." : "Review gate failed.";
     await markJobFailed(store, paths, job, classified, summary);
     throw classified;
   } finally {
@@ -228,12 +225,19 @@ function buildBlockReason(output: ReviewGateOutput): string {
   ].join("\n");
 }
 
-function buildWarningMessage(error: unknown): string {
-  if (error instanceof RuntimeError) {
-    if (error.code === "TIMEOUT") {
-      return "Kimi review gate timed out after 8s; allowing stop.";
-    }
+function isTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof RuntimeError &&
+    (error.code === "TIMEOUT" || error.code === "REVIEW_GATE_KIMI_TIMEOUT")
+  );
+}
 
+function buildWarningMessage(error: unknown): string {
+  if (isTimeoutError(error)) {
+    return "Kimi review gate timed out after 8s; allowing stop.";
+  }
+
+  if (error instanceof RuntimeError) {
     if (
       error.code === "REVIEW_GATE_PARSE_FAILED" ||
       error.code === "MISSING_TURN_END" ||
@@ -370,20 +374,4 @@ function expandHomeDir(filePath: string): string {
   }
 
   return filePath;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, stage: string): Promise<T> {
-  const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      reject(
-        new RuntimeError(
-          "TIMEOUT",
-          `${stage} timed out after ${timeoutMs}ms.`,
-          stage,
-        ),
-      );
-    }, timeoutMs).unref();
-  });
-
-  return Promise.race([promise, timeout]);
 }

@@ -105,8 +105,6 @@ Purpose:
 Flags:
 
 - `--base <ref>`
-- `--background`
-- `--wait`
 - `-m, --model <name>`
 - `--thinking`
 - `--no-thinking`
@@ -115,7 +113,8 @@ Defaults:
 
 - target is working tree changes unless `--base` is passed
 - phase 1b/2 scope is git-only target selection (working-tree diff or branch diff); file-diff and PR-target modes are deferred
-- plugin recommends foreground only for clearly small reviews, otherwise background
+- working-tree review is repo-wide; subdirectory-scoped review is not supported in v1
+- review runs foreground-synchronously in v1 — background review is deferred
 - review always uses a fresh isolated Kimi session
 
 Behavior:
@@ -123,7 +122,6 @@ Behavior:
 - no file writes
 - no shell execution
 - structured findings output only
-- background start responses must include `job_id` and `command_type`
 
 ### `/kimi:ask`
 
@@ -178,7 +176,7 @@ Behavior:
 - same target selection as review
 - different prompt contract
 - still read-only
-- background start responses must include `job_id` and `command_type`
+- foreground-synchronous like review; no background support in v1
 
 ### `/kimi:rescue`
 
@@ -620,7 +618,7 @@ Rules:
 Enforcement path:
 
 - rescue also requests a final single JSON object
-- if rescue JSON is malformed, the job may still finish as `partial` with raw output attached, but the parse error is explicit in job metadata and rendered output
+- if rescue JSON is malformed, the job still lands as `completed` with `error` set and raw output attached; the parse failure is explicit in job metadata and rendered output (`JobStatus` is only `running | completed | failed | cancelled` — there is no dedicated `partial` state)
 
 ### Ask output
 
