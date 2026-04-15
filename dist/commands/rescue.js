@@ -62,9 +62,13 @@ export async function runRescue(argv, context) {
             cwd: context.cwd,
         });
         if (parsed.background) {
-            return startBackgroundRescue(job, prompt, context, paths, parsed.wait);
+            return startBackgroundRescue(job, prompt, context, paths, parsed.wait, {
+                reusedSession: sessionResolution.reusedSession,
+            });
         }
-        const completed = await executeRescueJob(job.job_id, prompt, context);
+        const completed = await executeRescueJob(job.job_id, prompt, context, {
+            reusedSession: sessionResolution.reusedSession,
+        });
         if (!completed.final_output_path) {
             throw new RuntimeError("RESCUE_RESULT_MISSING", "Rescue finished without a rendered result.", "rescue.result");
         }
@@ -128,7 +132,14 @@ export async function executeRescueJob(jobId, prompt, context, options) {
                 supports_plan_mode: false,
             },
         }), KIMI_INITIALIZE_TIMEOUT_MS, "rescue.initialize");
-        if (job.kimi_session_id) {
+        // Skip the rename on resumed sessions: the title was set by the original
+        // rescue call and the current prompt here is either the generic
+        // "Continue the previous rescue task..." string or a user-supplied
+        // refinement — neither should clobber the original identifying excerpt
+        // in `kimi web`. A future enhancement could update the title when the
+        // user explicitly supplies a new prompt on resume, but the no-op on
+        // reuse is the conservative choice.
+        if (job.kimi_session_id && !options?.reusedSession) {
             await announceSessionTitle(job.kimi_session_id, buildSessionTitle("rescue", prompt), {
                 env: context.env,
             });
@@ -207,7 +218,7 @@ function ensureSessionIsNotRunning(job) {
         throw new RuntimeError("RESCUE_ALREADY_RUNNING", `Rescue session ${job.kimi_session_id ?? "<unknown>"} is already active under job ${job.job_id}.`, "rescue.resume");
     }
 }
-async function startBackgroundRescue(job, prompt, context, paths, wait) {
+async function startBackgroundRescue(job, prompt, context, paths, wait, options) {
     const nodeBinary = context.env.KIMI_PLUGIN_CC_NODE_BIN || process.execPath;
     const spawnArgs = isCompiledRuntime
         ? [companionEntrypoint, "worker", "rescue", job.job_id]
@@ -218,6 +229,7 @@ async function startBackgroundRescue(job, prompt, context, paths, wait) {
             ...context.env,
             KIMI_PLUGIN_CC_WORKSPACE_CWD: context.cwd,
             KIMI_PLUGIN_CC_RESCUE_PROMPT_B64: Buffer.from(prompt, "utf8").toString("base64"),
+            KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION: options?.reusedSession ? "1" : "0",
         },
         detached: true,
         stdio: "ignore",

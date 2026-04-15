@@ -94,9 +94,11 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
         "ask.initialize",
       );
 
-      await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
-        env: context.env,
-      });
+      if (!sessionResolution.reusedSession) {
+        await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
+          env: context.env,
+        });
+      }
 
       const completed = await withTimeout(
         client.prompt(askPrompt, "ask"),

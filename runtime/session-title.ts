@@ -17,8 +17,17 @@ export const KIMI_SESSION_TITLE_MAX_LENGTH = 200;
 
 const WRITE_CAPABLE_COMMANDS = new Set<ManagedCommandType>(["rescue"]);
 
+// Prompts that begin with a label like "Task: ..." or "TODO: ..." produce
+// doubled titles such as "Kimi Task: Task: ..." when excerpted as-is. Strip
+// leading label tokens from the excerpt so the rendered title reads cleanly.
+// The pattern is conservative on purpose: it only strips the first label,
+// only when followed by a colon and whitespace, and only for a small set of
+// recognizable meta-labels we have actually seen in the wild.
+const LEADING_LABEL_PATTERN = /^(task|todo|job|ticket|work|item)\s*:\s*/i;
+
 export function buildSessionTitle(commandType: ManagedCommandType, prompt: string | undefined): string {
-  const excerpt = shortenForTitle(prompt ?? "", KIMI_SESSION_TITLE_EXCERPT_LENGTH);
+  const stripped = stripLeadingLabel(prompt ?? "");
+  const excerpt = shortenForTitle(stripped, KIMI_SESSION_TITLE_EXCERPT_LENGTH);
   const base = excerpt ? `${KIMI_SESSION_TITLE_PREFIX}: ${excerpt}` : KIMI_SESSION_TITLE_PREFIX;
   const suffix = WRITE_CAPABLE_COMMANDS.has(commandType) ? " [write]" : "";
   const full = `${base}${suffix}`;
@@ -32,4 +41,8 @@ export function shortenForTitle(text: string, maxLength: number): string {
   if (!normalized) return "";
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+export function stripLeadingLabel(text: string): string {
+  return text.replace(LEADING_LABEL_PATTERN, "");
 }

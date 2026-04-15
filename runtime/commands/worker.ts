@@ -19,5 +19,6 @@ export async function runWorker(argv: string[], context: CommandContext): Promis
   }
 
   const prompt = Buffer.from(encodedPrompt, "base64").toString("utf8");
-  await executeRescueJob(jobId, prompt, context, { workerPid: process.pid });
+  const reusedSession = context.env.KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION === "1";
+  await executeRescueJob(jobId, prompt, context, { workerPid: process.pid, reusedSession });
 }

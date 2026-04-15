@@ -4,6 +4,7 @@ import {
   KIMI_SESSION_TITLE_MAX_LENGTH,
   buildSessionTitle,
   shortenForTitle,
+  stripLeadingLabel,
 } from "../../runtime/session-title.js";
 
 describe("buildSessionTitle", () => {
@@ -60,6 +61,41 @@ describe("buildSessionTitle", () => {
     const veryLongButNormalized = "x".repeat(500);
     const title = buildSessionTitle("rescue", veryLongButNormalized);
     expect(title.length).toBeLessThanOrEqual(KIMI_SESSION_TITLE_MAX_LENGTH);
+  });
+});
+
+describe("stripLeadingLabel", () => {
+  test("strips a leading 'Task:' so the title does not render doubled", () => {
+    expect(stripLeadingLabel("Task: rename adversarial-review to challenge")).toBe(
+      "rename adversarial-review to challenge",
+    );
+  });
+
+  test("case-insensitive: strips TASK:, task:, Task:", () => {
+    expect(stripLeadingLabel("TASK: one")).toBe("one");
+    expect(stripLeadingLabel("task: two")).toBe("two");
+    expect(stripLeadingLabel("Task: three")).toBe("three");
+  });
+
+  test("strips other common labels (TODO, Job, Ticket)", () => {
+    expect(stripLeadingLabel("TODO: fix this")).toBe("fix this");
+    expect(stripLeadingLabel("Job: run the thing")).toBe("run the thing");
+    expect(stripLeadingLabel("Ticket: ABC-123")).toBe("ABC-123");
+  });
+
+  test("only strips the first label, not recursive labels", () => {
+    expect(stripLeadingLabel("Task: Task: doubled")).toBe("Task: doubled");
+  });
+
+  test("leaves non-label text untouched", () => {
+    expect(stripLeadingLabel("rename the command")).toBe("rename the command");
+    expect(stripLeadingLabel("refactor: extract helper")).toBe("refactor: extract helper");
+  });
+
+  test("integration with buildSessionTitle: prompt starting with Task: produces a clean title", () => {
+    expect(buildSessionTitle("rescue", "Task: rename adversarial-review to challenge")).toBe(
+      "Kimi Task: rename adversarial-review to challenge [write]",
+    );
   });
 });
 

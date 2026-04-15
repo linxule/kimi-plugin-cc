@@ -22,6 +22,14 @@ export async function runSetup(argv, context) {
     if (reviewGateEnabled !== existingConfig.reviewGateEnabled) {
         await writePluginConfig(paths, { reviewGateEnabled });
     }
+    // Probe kimi web up front so the status line appears in both success and
+    // failure details. An unreachable kimi web is unrelated to Kimi runtime
+    // health and should not be hidden behind a runtime failure.
+    const kimiWebClient = createKimiWebClient({ env: context.env });
+    const kimiWebReachable = await kimiWebClient.healthCheck();
+    const kimiWebLine = kimiWebReachable
+        ? `Kimi web: detected at ${kimiWebClient.baseUrl} (plugin sessions will be renamed)`
+        : `Kimi web: not running at ${kimiWebClient.baseUrl} (start \`kimi web\` to see plugin sessions with human-readable titles)`;
     const logPath = path.join(paths.logsDir, `setup-${Date.now()}.jsonl`);
     // Resolve the same kimi binary + prefix args that the managed commands honor, so setup
     // validates the exact launch path /kimi:ask and /kimi:rescue will use. Otherwise an
@@ -54,11 +62,6 @@ export async function runSetup(argv, context) {
         if (!reply) {
             throw new RuntimeError("EMPTY_SETUP_REPLY", "Kimi runtime returned an empty final reply during setup probe.", "setup.prompt");
         }
-        const kimiWebClient = createKimiWebClient({ env: context.env });
-        const kimiWebReachable = await kimiWebClient.healthCheck();
-        const kimiWebLine = kimiWebReachable
-            ? `Kimi web: detected at ${kimiWebClient.baseUrl} (plugin sessions will be renamed)`
-            : `Kimi web: not running (start \`kimi web\` to see plugin sessions with human-readable titles)`;
         return {
             summary: "Kimi runtime is ready.",
             runtimeProbe: "ok",
@@ -80,6 +83,7 @@ export async function runSetup(argv, context) {
         const message = error instanceof Error ? error.message : String(error);
         const details = [
             `Review gate: ${reviewGateEnabled ? "enabled" : "disabled"}`,
+            kimiWebLine,
             `Wire log: ${logPath}`,
             `Probe error: ${message}`,
         ];

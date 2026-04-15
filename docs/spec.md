@@ -440,6 +440,34 @@ Rules:
 - rescue resume is only available for jobs or sessions with a non-null stored session id
 - phase-1 implementation must re-verify that current Kimi CLI still supports "create new if not found" semantics for `--session <id>`
 
+### Session titles (kimi web integration)
+
+Kimi CLI persists every session to `~/.kimi/sessions/<md5(cwd)>/<session-uuid>/` regardless of frontend (TUI, `--prompt`, wire). Plugin-dispatched sessions land there automatically — no integration is needed for persistence. `kimi web` (the local HTTP server shipped with kimi-cli) displays those sessions keyed by `custom_title`, which Kimi auto-derives from the first line of the prompt.
+
+To make plugin-dispatched sessions visually distinct from ambient interactive sessions, the runtime sets a human-readable title via the `PATCH /api/sessions/{id}` endpoint that `kimi web` exposes on `http://127.0.0.1:5494` by default. The call fires right after `client.initialize()` returns (session dir guaranteed to exist, Kimi has not yet auto-generated a title from a prompt turn) and before `client.prompt()`.
+
+Title convention:
+
+- fixed prefix `Kimi Task: `
+- followed by a whitespace-normalized 56-char excerpt of the user prompt (for review the `--focus` text, defaulting to `pending changes` or `pending changes (challenge)`)
+- followed by ` [write]` suffix on rescue only — the only command that can mutate the working tree
+
+Leading meta-labels on the prompt (e.g. `Task: `, `TODO: `, `Job: `) are stripped before excerpting so the rendered title does not read `Kimi Task: Task: ...`.
+
+Operational rules:
+
+- the PATCH call is best-effort; `kimi web` being unreachable, slow, or rejecting the request never fails the managed command
+- health probe budget is 200 ms; PATCH budget is 2 s; both enforced via `AbortController`
+- resumed ask and rescue sessions skip the PATCH to preserve the original session's identifying excerpt (and to avoid clobbering a title the user may have manually set in `kimi web`)
+- `kimi web` is detected by `/kimi:setup` and surfaced in both the success and failure details. If it is not running, `/kimi:setup` prints a one-line hint
+
+Environment overrides:
+
+- `KIMI_PLUGIN_CC_WEB_URL` — base URL of the kimi web server; defaults to `http://127.0.0.1:5494`. Trailing slashes are stripped
+- `KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE=1` — disables the rename call entirely; used by the test suite so end-to-end command tests do not burn the hot-path health probe budget or pollute a developer's own kimi web session index
+
+Upstream: kimi-cli currently exposes no non-interactive mechanism to set a session title (no `--title` flag, no wire-protocol title field, `/title` is TUI-only). A feature request for a sanctioned launch-time mechanism — preferably `--session-title TEXT` as a sibling of `--session` — is worth filing; when it lands the plugin should prefer it to the HTTP PATCH path.
+
 ## Job model
 
 Plugin-managed jobs are the source of truth for:

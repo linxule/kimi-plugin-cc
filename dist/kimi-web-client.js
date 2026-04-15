@@ -12,7 +12,10 @@ import { KIMI_SESSION_TITLE_MAX_LENGTH } from "./session-title.js";
 export const DEFAULT_KIMI_WEB_BASE_URL = "http://127.0.0.1:5494";
 export const KIMI_WEB_HEALTH_PATH = "/healthz";
 export const KIMI_WEB_SESSION_PATH = "/api/sessions";
-const KIMI_WEB_HEALTH_TIMEOUT_MS = 500;
+// 200ms keeps the health probe inside an inter-keystroke budget: sessions
+// sit in the hot path of every managed command, and the Kimi meta review on
+// 0.1.5 flagged 500ms as too generous when the server is reachable-but-slow.
+const KIMI_WEB_HEALTH_TIMEOUT_MS = 200;
 const KIMI_WEB_PATCH_TIMEOUT_MS = 2_000;
 export function resolveKimiWebBaseUrl(env) {
     const override = env?.KIMI_PLUGIN_CC_WEB_URL?.trim();
@@ -84,7 +87,15 @@ export function createKimiWebClient(options = {}) {
 // Best-effort helper for managed commands: rename the session if kimi web is
 // reachable, otherwise silently skip. Returns the outcome so the caller can
 // log or surface it, but never throws.
+//
+// Respects KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE=1 as a kill switch. Tests set
+// this to avoid burning the hot-path health-probe budget on every command
+// invocation and to prevent pollution of any developer's actual `kimi web`
+// session index with spurious rename attempts for invalid test session ids.
 export async function announceSessionTitle(sessionId, title, options = {}) {
+    if (options.env?.KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE === "1") {
+        return { ok: false, reason: "unreachable", detail: "disabled via env" };
+    }
     const client = createKimiWebClient(options);
     const healthy = await client.healthCheck();
     if (!healthy) {

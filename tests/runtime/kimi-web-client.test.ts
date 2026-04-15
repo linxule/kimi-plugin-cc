@@ -125,6 +125,27 @@ describe("createKimiWebClient.setSessionTitle", () => {
   });
 });
 
+describe("KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE kill switch", () => {
+  test("announceSessionTitle short-circuits without any fetch when disabled", async () => {
+    const { fetchImpl, calls } = makeFetchStub(() => ({ ok: true, status: 200 }));
+    const result = await announceSessionTitle("abc", "title", {
+      fetchImpl,
+      env: { KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE: "1" },
+    });
+    expect(result).toMatchObject({ ok: false, reason: "unreachable", detail: "disabled via env" });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("announceSessionTitle honors the disable flag even when health probe would succeed", async () => {
+    const { fetchImpl, calls } = makeFetchStub(() => ({ ok: true, status: 200 }));
+    await announceSessionTitle("abc", "title", {
+      fetchImpl,
+      env: { KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE: "1", KIMI_PLUGIN_CC_WEB_URL: "http://fake:1" },
+    });
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("announceSessionTitle", () => {
   test("skips PATCH when health check fails", async () => {
     const { fetchImpl, calls } = makeFetchStub((url) => {

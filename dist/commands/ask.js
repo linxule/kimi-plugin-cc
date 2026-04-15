@@ -73,9 +73,11 @@ export async function runAsk(argv, context) {
                     supports_plan_mode: false,
                 },
             }), KIMI_INITIALIZE_TIMEOUT_MS, "ask.initialize");
-            await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
-                env: context.env,
-            });
+            if (!sessionResolution.reusedSession) {
+                await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
+                    env: context.env,
+                });
+            }
             const completed = await withTimeout(client.prompt(askPrompt, "ask"), KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
             const rendered = renderManagedJobOutput(job, completed.finalText);
             const artifactPath = await writeArtifact(paths, job, rendered.rendered);
