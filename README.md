@@ -4,17 +4,18 @@ A Claude Code plugin that delegates read-only review, free-form ask, and write-c
 
 ## Status
 
-Feature-complete against `docs/implementation-plan.md` through phase 3b. The plugin ships:
+**Current release: 0.1.7** ([`v0.1.7`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.1.7)). Feature-complete since phase 3b and iteratively hardened through a sequence of targeted releases. The plugin ships:
 
 - `/kimi:setup` — verify local Kimi + manage review-gate state
 - `/kimi:ask` — free-form read-only Q&A (fresh by default, `-r` to continue)
 - `/kimi:review` — structured read-only code review of a working-tree or branch diff
-- `/kimi:challenge` — challenge read-only review with free-form focus
-- `/kimi:rescue` — write-capable delegation with session persistence and resume
-- `/kimi:status` / `/kimi:result` / `/kimi:cancel` — job lifecycle commands
+- `/kimi:challenge` — read-only review with a free-form adversarial focus
+- `/kimi:rescue` — write-capable delegation with session persistence, resume, and pass-through prose output (refactored in 0.1.7 — see [ADR 004](./docs/adr/004-rescue-pass-through.md))
+- `/kimi:status` / `/kimi:result` / `/kimi:cancel` / `/kimi:replay` — job lifecycle commands
 - `kimi-rescue` subagent — proactive delegation trigger
 - `kimi-review` skill — proactive second-opinion review trigger
 - Opt-in `Stop` hook review gate (disabled by default; enable via `/kimi:setup --enable-review-gate`)
+- kimi web session-title integration (0.1.5+) — plugin-started rescue/ask sessions show up in `kimi web` alongside terminal-started sessions
 
 ## How it works
 
