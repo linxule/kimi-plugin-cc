@@ -9,7 +9,7 @@ Feature-complete against `docs/implementation-plan.md` through phase 3b. The plu
 - `/kimi:setup` — verify local Kimi + manage review-gate state
 - `/kimi:ask` — free-form read-only Q&A (fresh by default, `-r` to continue)
 - `/kimi:review` — structured read-only code review of a working-tree or branch diff
-- `/kimi:adversarial-review` — adversarial read-only review with free-form focus
+- `/kimi:challenge` — challenge read-only review with free-form focus
 - `/kimi:rescue` — write-capable delegation with session persistence and resume
 - `/kimi:status` / `/kimi:result` / `/kimi:cancel` — job lifecycle commands
 - `kimi-rescue` subagent — proactive delegation trigger

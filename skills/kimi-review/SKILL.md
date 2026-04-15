@@ -21,7 +21,7 @@ Prefer this skill when:
 Do not use this skill when:
 
 - the task is an implementation or delegation request better served by `/kimi:rescue`
-- the user wants a challenge review; prefer `/kimi:adversarial-review`
+- the user wants a challenge review; prefer `/kimi:challenge`
 - the user wants only the main Claude thread's judgment
 
 ## Expected behavior

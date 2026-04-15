@@ -27,7 +27,7 @@ export function renderManagedJobOutput(job, finalText) {
             };
         }
         case "review":
-        case "adversarial_review": {
+        case "challenge": {
             const output = parseReviewOutput(finalText);
             return {
                 output,
@@ -78,7 +78,7 @@ export function renderAskArtifact(output) {
 }
 export function renderReviewArtifact(job, output) {
     const lines = [
-        `# ${job.command_type === "adversarial_review" ? "Adversarial Review" : "Review"} Result`,
+        `# ${job.command_type === "challenge" ? "Challenge" : "Review"} Result`,
         "",
         `- Job: ${job.job_id}`,
         `- Verdict: ${output.verdict}`,

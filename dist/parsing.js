@@ -174,7 +174,7 @@ export function parseJobLookupArgs(argv) {
         if (token === "--type") {
             const value = argv[index + 1];
             if (!value || !isManagedCommandType(value)) {
-                throw new RuntimeError("INVALID_ARGS", "--type requires one of review, adversarial_review, rescue, review_gate, ask.", "args.parse");
+                throw new RuntimeError("INVALID_ARGS", "--type requires one of review, challenge, rescue, review_gate, ask.", "args.parse");
             }
             type = value;
             index += 1;
@@ -195,7 +195,7 @@ export function parseJobLookupArgs(argv) {
 }
 function isManagedCommandType(value) {
     return (value === "review" ||
-        value === "adversarial_review" ||
+        value === "challenge" ||
         value === "rescue" ||
         value === "review_gate" ||
         value === "ask");

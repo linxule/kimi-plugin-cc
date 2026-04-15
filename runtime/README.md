@@ -5,7 +5,7 @@ Local runtime implementation for `kimi-plugin-cc`. Feature-complete through phas
 Command surface exposed via `companion.ts`:
 
 - `setup` — verify `kimi --wire` round-trip and manage review-gate config
-- `review` / `task adversarial-review` — read-only reviews with fixed JSON schemas
+- `review` / `task challenge` — read-only reviews with fixed JSON schemas
 - `ask` — read-only free-form Q&A (fresh session per call)
 - `task rescue` — write-capable rescue with a companion-side approval allowlist and resumable Kimi sessions
 - `status` / `result` / `cancel` — SQLite-backed job lifecycle commands
@@ -32,7 +32,7 @@ Behavior notes:
 - `start()`, `initialize()`, and (for ask/review) `prompt()` are wrapped in `withTimeout` so a Kimi that starts but never becomes usable surfaces a clean timeout instead of hanging forever
 - Rescue session resume is guarded by a partial unique index; two concurrent `/kimi:rescue --resume` calls against the same session id cannot both enter the running state
 - The Stop hook is disabled by default and reads `reviewGateEnabled` from plugin config; enable via `/kimi:setup --enable-review-gate`
-- Parse failure is a hard failure for `review`/`adversarial_review`, a `completed` job with `error` set for `rescue` (raw output preserved), and a warn-allow for `review_gate`
+- Parse failure is a hard failure for `review`/`challenge`, a `completed` job with `error` set for `rescue` (raw output preserved), and a warn-allow for `review_gate`
 - Raw Wire traffic is logged to `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/logs/<command>-<job-id>.jsonl` for replay and debugging
 - The companion runs on Node via `tsx` (ADR 003) while Bun stays the package manager and test runner
 

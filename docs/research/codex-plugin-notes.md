@@ -10,7 +10,7 @@ These are synthesized notes from `openai/codex-plugin-cc`, focused on decisions 
 - `status`, `result`, and `cancel` read from the plugin-owned state model.
 - The rescue subagent is intentionally a thin forwarder into the shared runtime.
 - Codex plugin review gate is opt-in, session-scoped, and implemented through hooks plus an explicit allow/block contract.
-- Review and adversarial review are separated on purpose: one is fixed-shape review, the other is steerable.
+- Review and challenge are separated on purpose: one is fixed-shape review, the other is steerable.
 
 ## Why it matters here
 

@@ -101,7 +101,7 @@ function buildReviewTitleExcerpt(commandType, focus) {
     const trimmed = focus?.trim();
     if (trimmed)
         return trimmed;
-    return commandType === "adversarial_review" ? "pending changes (adversarial)" : "pending changes";
+    return commandType === "challenge" ? "pending changes (challenge)" : "pending changes";
 }
 function buildReviewPrompt(commandType, reviewContext, focus) {
     const schemaReminder = `{
@@ -120,9 +120,9 @@ function buildReviewPrompt(commandType, reviewContext, focus) {
     }
   ]
 }`;
-    const modeInstructions = commandType === "adversarial_review"
+    const modeInstructions = commandType === "challenge"
         ? [
-            "Take an adversarial stance.",
+            "Take a challenging stance.",
             "Challenge assumptions, identify brittle design choices, and surface safer alternatives.",
         ]
         : ["Focus on concrete bugs, regressions, and missing safeguards in the supplied changes."];

@@ -131,6 +131,9 @@ export class JobStore {
       CREATE UNIQUE INDEX IF NOT EXISTS jobs_running_session_idx
         ON jobs (repo_id, command_type, kimi_session_id)
         WHERE status = 'running' AND command_type IN ('rescue', 'ask');
+
+      -- 0.1.6 migration: rename adversarial_review to challenge
+      UPDATE jobs SET command_type = 'challenge' WHERE command_type = 'adversarial_review';
     `);
   }
 

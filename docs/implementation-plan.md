@@ -30,7 +30,7 @@ Build:
 - setup command
 - ask command
 - review command
-- adversarial review command
+- challenge command
 - `kimi-review` Claude skill
 - author and validate `runtime/agents/*.yaml` against the current Kimi `--agent-file` schema
 
@@ -45,7 +45,7 @@ Decisions already locked:
 
 Exit criteria:
 
-- `setup`, `ask`, `review`, and `adversarial-review` are implementable without revisiting architecture
+- `setup`, `ask`, `review`, and `challenge` are implementable without revisiting architecture
 
 ## Phase 2: Rescue and job lifecycle
 
@@ -91,5 +91,5 @@ Before merging each phase:
 
 - architecture check against Codex shape
 - Kimi runtime feasibility check against current docs
-- adversarial review of safety boundaries
+- challenge review of safety boundaries
 - acceptance test review against [test-plan.md](./test-plan.md)

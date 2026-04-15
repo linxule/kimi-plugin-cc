@@ -14,7 +14,7 @@ import {
 const companionPath = path.join(process.cwd(), "runtime/companion.ts");
 
 describe("companion Kimi-unavailable handling", () => {
-  test("ask, review, adversarial review, and rescue report actionable startup failures and persist failed jobs", async () => {
+  test("ask, review, challenge, and rescue report actionable startup failures and persist failed jobs", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("companion-unavailable");
     const repoRoot = await createGitRepoFixture("companion-unavailable-repo");
     const env = {
@@ -29,9 +29,9 @@ describe("companion Kimi-unavailable handling", () => {
       await assertUnavailableCommand(env, ["review"], "review", "REVIEW_KIMI_BINARY_UNAVAILABLE");
       await assertUnavailableCommand(
         env,
-        ["task", "adversarial-review", "Challenge", "this"],
-        "adversarial_review",
-        "ADVERSARIAL_REVIEW_KIMI_BINARY_UNAVAILABLE",
+        ["task", "challenge", "Challenge", "this"],
+        "challenge",
+        "CHALLENGE_KIMI_BINARY_UNAVAILABLE",
       );
       await assertUnavailableCommand(env, ["task", "rescue", "Fix", "this"], "rescue", "RESCUE_KIMI_BINARY_UNAVAILABLE");
     } finally {
@@ -44,7 +44,7 @@ describe("companion Kimi-unavailable handling", () => {
 async function assertUnavailableCommand(
   env: NodeJS.ProcessEnv,
   argv: string[],
-  commandType: "ask" | "review" | "adversarial_review" | "rescue",
+  commandType: "ask" | "review" | "challenge" | "rescue",
   errorCode: string,
 ): Promise<void> {
   const failure = await runCompanion(argv, env);

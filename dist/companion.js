@@ -35,8 +35,8 @@ async function main(argv) {
                 context.stdout.write(result);
                 return;
             }
-            if (taskType === "adversarial-review" || taskType === "adversarial_review") {
-                const result = await runReview(taskArgs, context, "adversarial_review");
+            if (taskType === "challenge") {
+                const result = await runReview(taskArgs, context, "challenge");
                 context.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
                 return;
             }

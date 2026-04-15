@@ -21,7 +21,7 @@ Use this checklist when reviewing the planning bundle or a future implementation
 - Does the command surface match the Codex-style mental model?
 - Are status/result/cancel semantics built around first-class jobs rather than ad hoc process checks?
 - Is the rescue subagent correctly scoped as a thin forwarder?
-- Is review vs adversarial review intentionally separated?
+- Is review vs challenge intentionally separated?
 
 ## Runtime feasibility
 

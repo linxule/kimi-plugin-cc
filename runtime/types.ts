@@ -11,7 +11,7 @@ export type CompanionCommand =
 export type RuntimeCommandType =
   | "setup"
   | "review"
-  | "adversarial_review"
+  | "challenge"
   | "rescue"
   | "review_gate"
   | "ask"
@@ -19,7 +19,7 @@ export type RuntimeCommandType =
 
 export type ManagedCommandType =
   | "review"
-  | "adversarial_review"
+  | "challenge"
   | "rescue"
   | "review_gate"
   | "ask";

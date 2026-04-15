@@ -37,7 +37,7 @@ The design is intentionally **Wire-first**:
 - `/kimi:setup`
 - `/kimi:ask`
 - `/kimi:review`
-- `/kimi:adversarial-review`
+- `/kimi:challenge`
 - `/kimi:rescue`
 - `/kimi:status`
 - `/kimi:result`
@@ -157,7 +157,7 @@ Behavior:
 - no structured JSON contract
 - returns free-form prose
 
-### `/kimi:adversarial-review`
+### `/kimi:challenge`
 
 Purpose:
 
@@ -217,7 +217,7 @@ Behavior:
 
 - default view shows the latest job for the current `repo_id`
 - optional job id shows a more detailed view
-- optional `--type <review|adversarial_review|rescue|review_gate|ask>` narrows lookup within the current `repo_id`
+- optional `--type <review|challenge|rescue|review_gate|ask>` narrows lookup within the current `repo_id`
 
 ### `/kimi:result`
 
@@ -230,7 +230,7 @@ Behavior:
 - default returns the latest finished job
 - optional job id returns an exact job
 - includes the linked Kimi session id when available
-- optional `--type <review|adversarial_review|rescue|review_gate|ask>` narrows lookup within the current `repo_id`
+- optional `--type <review|challenge|rescue|review_gate|ask>` narrows lookup within the current `repo_id`
 
 ### `/kimi:cancel`
 
@@ -320,7 +320,7 @@ Print mode remains a fallback only for setup/probing or emergency compatibility.
 
 ### Review profile
 
-`review` and `adversarial-review` use a dedicated restricted Kimi **agent-file profile** with:
+`review` and `challenge` use a dedicated restricted Kimi **agent-file profile** with:
 
 - no write tools
 - no shell tools
@@ -364,7 +364,7 @@ The companion runtime owns Kimi approval responses.
 
 - Wire taxonomy: `ApprovalRequest` is a Wire **request** (requires a client response), while `ApprovalResponse` is a Wire **event** (fire-and-forget notification of the decision). The runtime replies to `ApprovalRequest` inbound; it never produces `ApprovalResponse` itself
 - because `--agent-file` cannot pre-declare selective auto-approvals, all approval-response logic is implemented in the Wire client per `command_type`
-- `review`, `adversarial-review`, `ask`, and `review_gate` do not forward Kimi approvals to Claude; unexpected approval requests are rejected and the job fails
+- `review`, `challenge`, `ask`, and `review_gate` do not forward Kimi approvals to Claude; unexpected approval requests are rejected and the job fails
 - `rescue` auto-approves file edits only when every target path resolves under the current workspace root, avoids symlink escape, and does not touch `.git/`
 - `rescue` does not blanket-auto-approve shell commands
 - `rescue` shell approvals are allowed only for this conservative v1 allowlist of local inspection, check, and test commands:
@@ -481,7 +481,7 @@ Plugin-managed jobs are the source of truth for:
 
 - `job_id`: plugin-generated stable identifier unique within the job store
 - `repo_id`: stable hash of git common-dir plus current worktree root; if not in git, hash the realpath of `cwd`
-- `command_type`: one of `review`, `adversarial_review`, `rescue`, `review_gate`, `ask`
+- `command_type`: one of `review`, `challenge`, `rescue`, `review_gate`, `ask`
 - `pid`: background worker process id when a worker exists, otherwise `null`
 - `kimi_pid`: Kimi Wire child process id when a live process exists, otherwise `null`
 - `summary`: short status-safe summary string; may be empty only before the first meaningful runtime event
@@ -710,7 +710,7 @@ Malformed output rule:
 - setup
 - ask
 - review
-- adversarial review
+- challenge
 - companion/runtime shell
 - Kimi Wire client foundation
 - `kimi-review` Claude skill

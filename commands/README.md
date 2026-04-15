@@ -5,7 +5,7 @@ Claude Code slash command markdown. Each file is thin — it routes through `scr
 - `setup.md` — verify local Kimi and manage review-gate state
 - `ask.md` — free-form read-only Q&A
 - `review.md` — structured read-only review
-- `adversarial-review.md` — adversarial read-only review
+- `challenge.md` — challenge read-only review
 - `rescue.md` — write-capable rescue with session persistence
 - `status.md` / `result.md` / `cancel.md` — job lifecycle commands
 

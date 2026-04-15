@@ -91,8 +91,8 @@ function mapAvailabilityCode(kind, commandType) {
 }
 function formatCommandLabel(commandType) {
     switch (commandType) {
-        case "adversarial_review":
-            return "adversarial review";
+        case "challenge":
+            return "challenge";
         case "review_gate":
             return "review gate";
         default:

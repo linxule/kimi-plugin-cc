@@ -260,7 +260,7 @@ export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
       if (!value || !isManagedCommandType(value)) {
         throw new RuntimeError(
           "INVALID_ARGS",
-          "--type requires one of review, adversarial_review, rescue, review_gate, ask.",
+          "--type requires one of review, challenge, rescue, review_gate, ask.",
           "args.parse",
         );
       }
@@ -300,7 +300,7 @@ interface ParsedKnownFlags extends KimiFlagState {
 function isManagedCommandType(value: string): value is import("./types.js").ManagedCommandType {
   return (
     value === "review" ||
-    value === "adversarial_review" ||
+    value === "challenge" ||
     value === "rescue" ||
     value === "review_gate" ||
     value === "ask"

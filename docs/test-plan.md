@@ -28,7 +28,7 @@ Scenarios:
 - branch diff review with `--base`
 - foreground review
 - background review
-- adversarial review with steering text
+- challenge review with steering text
 - malformed review output from Kimi
 - review finding with a single-line location
 - review finding with a multi-line range
@@ -42,7 +42,7 @@ Expected outcomes:
 
 - review is read-only
 - review never shells out through Kimi
-- adversarial review preserves the same read-only guarantee
+- challenge review preserves the same read-only guarantee
 - malformed output is surfaced as failure, not converted into a fake clean review
 - multi-file issues are split into separate findings
 - missing `end_line` defaults to `start_line`

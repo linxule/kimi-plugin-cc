@@ -25,9 +25,9 @@ describe("buildSessionTitle", () => {
     );
   });
 
-  test("adversarial review does not get the write tag", () => {
-    expect(buildSessionTitle("adversarial_review", "pending changes (adversarial)")).toBe(
-      "Kimi Task: pending changes (adversarial)",
+  test("challenge review does not get the write tag", () => {
+    expect(buildSessionTitle("challenge", "pending changes (challenge)")).toBe(
+      "Kimi Task: pending changes (challenge)",
     );
   });
 

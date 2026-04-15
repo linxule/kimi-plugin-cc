@@ -28,7 +28,7 @@ import { resolveRepoIdentity } from "../git.js";
 export async function runReview(
   argv: string[],
   context: CommandContext,
-  commandType: "review" | "adversarial_review",
+  commandType: "review" | "challenge",
 ): Promise<ReviewOutput> {
   const parsed = parseReviewArgs(argv);
 
@@ -135,16 +135,16 @@ export async function runReview(
 }
 
 function buildReviewTitleExcerpt(
-  commandType: "review" | "adversarial_review",
+  commandType: "review" | "challenge",
   focus: string | undefined,
 ): string {
   const trimmed = focus?.trim();
   if (trimmed) return trimmed;
-  return commandType === "adversarial_review" ? "pending changes (adversarial)" : "pending changes";
+  return commandType === "challenge" ? "pending changes (challenge)" : "pending changes";
 }
 
 function buildReviewPrompt(
-  commandType: "review" | "adversarial_review",
+  commandType: "review" | "challenge",
   reviewContext: Awaited<ReturnType<typeof collectReviewContext>>,
   focus?: string,
 ): string {
@@ -166,9 +166,9 @@ function buildReviewPrompt(
 }`;
 
   const modeInstructions =
-    commandType === "adversarial_review"
+    commandType === "challenge"
       ? [
-          "Take an adversarial stance.",
+          "Take a challenging stance.",
           "Challenge assumptions, identify brittle design choices, and surface safer alternatives.",
         ]
       : ["Focus on concrete bugs, regressions, and missing safeguards in the supplied changes."];
