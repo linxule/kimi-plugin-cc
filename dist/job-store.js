@@ -45,6 +45,36 @@ export class JobStore {
 
       DROP INDEX IF EXISTS jobs_running_rescue_session_idx;
 
+      -- Reconcile orphaned duplicate running rows before creating the unique
+      -- partial index. A 0.1.3 database with a hard-crashed worker can contain
+      -- multiple (repo_id, command_type, kimi_session_id) rows at status='running',
+      -- which would fail the CREATE UNIQUE INDEX at open and brick the store.
+      -- Keep the most recently updated row per group; mark the rest as failed.
+      UPDATE jobs
+      SET status = 'failed',
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          error = COALESCE(
+            error,
+            '{"code":"JOB_STORE_ORPHANED_ON_UPGRADE","message":"Orphaned duplicate running job reconciled on 0.1.4 schema upgrade","stage":"job-store.migrate"}'
+          )
+      WHERE status = 'running'
+        AND command_type IN ('rescue', 'ask')
+        AND kimi_session_id IS NOT NULL
+        AND rowid NOT IN (
+          SELECT rowid FROM (
+            SELECT rowid,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY repo_id, command_type, kimi_session_id
+                     ORDER BY updated_at DESC, rowid DESC
+                   ) AS rn
+            FROM jobs
+            WHERE status = 'running'
+              AND command_type IN ('rescue', 'ask')
+              AND kimi_session_id IS NOT NULL
+          )
+          WHERE rn = 1
+        );
+
       CREATE UNIQUE INDEX IF NOT EXISTS jobs_running_session_idx
         ON jobs (repo_id, command_type, kimi_session_id)
         WHERE status = 'running' AND command_type IN ('rescue', 'ask');

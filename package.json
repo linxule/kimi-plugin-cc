@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "bun run build && bunx tsc --noEmit && bun test && git diff --exit-code -- dist",
-    "build": "rm -rf dist && bunx tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && mkdir -p dist/vendor/shell-quote && cp runtime/vendor/shell-quote/LICENSE dist/vendor/shell-quote/LICENSE",
     "companion": "node --import tsx runtime/companion.ts",
     "test": "bun test"
   },

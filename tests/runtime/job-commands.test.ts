@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsk } from "../../runtime/commands/ask.js";
@@ -58,6 +59,81 @@ describe("job-backed ask/status/result", () => {
       expect(status.command_type).toBe("ask");
       expect(status.status).toBe("completed");
       expect(resultOutput).toContain("Ask answer from mock Kimi.");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("0.1.4 migration reconciles orphaned duplicate running rows", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-migration");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+
+      // Seed a 0.1.3-shaped database: jobs table with the old rescue-only unique
+      // index, plus two running ask rows that share a (repo_id, kimi_session_id).
+      // The new 0.1.4 unique index would reject these at CREATE time, so the
+      // migration step must reconcile them before the index is built.
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed.exec(`
+          CREATE TABLE jobs (
+            job_id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            command_type TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            model TEXT,
+            thinking INTEGER,
+            background INTEGER NOT NULL,
+            pid INTEGER,
+            kimi_pid INTEGER,
+            status TEXT NOT NULL,
+            kimi_session_id TEXT,
+            agent_profile TEXT NOT NULL,
+            prompt_digest TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            final_output_path TEXT,
+            stream_log_path TEXT NOT NULL,
+            error TEXT
+          );
+          CREATE UNIQUE INDEX jobs_running_rescue_session_idx
+            ON jobs (repo_id, kimi_session_id)
+            WHERE status = 'running' AND command_type = 'rescue';
+        `);
+        const insert = seed.query(`
+          INSERT INTO jobs (
+            job_id, repo_id, command_type, created_at, updated_at, cwd, background,
+            status, kimi_session_id, agent_profile, prompt_digest, summary, stream_log_path
+          ) VALUES (?, ?, 'ask', ?, ?, '/tmp/fake', 0, 'running', ?, 'read-only', 'digest', 'summary', '/tmp/fake.log')
+        `);
+        // Older row (should be reconciled)
+        insert.run("job-older", "repo-x", "2026-04-14T10:00:00.000Z", "2026-04-14T10:00:00.000Z", "session-dup");
+        // Newer row (should survive as the canonical running entry)
+        insert.run("job-newer", "repo-x", "2026-04-14T11:00:00.000Z", "2026-04-14T11:00:00.000Z", "session-dup");
+        // Unrelated running row with a distinct session — must stay untouched
+        insert.run("job-other", "repo-x", "2026-04-14T10:30:00.000Z", "2026-04-14T10:30:00.000Z", "session-other");
+      } finally {
+        seed.close();
+      }
+
+      // Opening the JobStore runs the 0.1.4 schema init, which must dedupe
+      // before creating the new unique partial index. This should not throw.
+      const store = new JobStore(paths);
+      try {
+        const older = store.getJob("job-older");
+        const newer = store.getJob("job-newer");
+        const other = store.getJob("job-other");
+
+        expect(newer?.status).toBe("running");
+        expect(older?.status).toBe("failed");
+        expect(older?.error?.code).toBe("JOB_STORE_ORPHANED_ON_UPGRADE");
+        expect(other?.status).toBe("running");
+      } finally {
+        store.close();
+      }
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
