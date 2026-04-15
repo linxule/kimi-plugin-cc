@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { access, constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -69,11 +70,22 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       error: null,
     });
 
-    await writeInvocationLogHeader(logPath, {
-      commandType: "rescue",
-      kimiSessionId: sessionResolution.sessionId,
-      cwd: context.cwd,
-    });
+    try {
+      await writeInvocationLogHeader(logPath, {
+        commandType: "rescue",
+        kimiSessionId: sessionResolution.sessionId,
+        cwd: context.cwd,
+      });
+    } catch (error) {
+      const classified = new RuntimeError(
+        "RESCUE_LOG_HEADER_FAILED",
+        `Failed to write rescue invocation log header: ${(error as Error).message ?? String(error)}`,
+        "rescue.log-header",
+        error instanceof Error ? { cause: error } : undefined,
+      );
+      await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+      throw classified;
+    }
 
     if (parsed.background) {
       return startBackgroundRescue(job, prompt, context, paths, parsed.wait, {
@@ -112,20 +124,10 @@ export async function executeRescueJob(
   let cancelling = false;
   let clientClosed = false;
   let cancelEscalationTimer: ReturnType<typeof setTimeout> | undefined;
-  const approvalPolicy = await createRescueApprovalPolicy(job.cwd);
-  const client = buildWireClient({
-    cwd: job.cwd,
-    env: context.env,
-    sessionId: job.kimi_session_id ?? randomUUID(),
-    agentFile: job.agent_profile,
-    model: job.model ?? undefined,
-    thinking: job.thinking ?? undefined,
-    logPath: job.stream_log_path,
-    approvalPolicy,
-  });
-
+  let client: ReturnType<typeof buildWireClient> | undefined;
+  let signalsRegistered = false;
   const requestCancellation = () => {
-    if (cancelling) {
+    if (cancelling || !client) {
       return;
     }
 
@@ -133,15 +135,39 @@ export async function executeRescueJob(
     client.beginCancellation();
     void client.cancel().catch(() => {});
     cancelEscalationTimer = setTimeout(() => {
-      client.terminateChild("SIGTERM");
+      client?.terminateChild("SIGTERM");
     }, 1_500);
     cancelEscalationTimer.unref();
   };
 
-  process.once("SIGTERM", requestCancellation);
-  process.once("SIGINT", requestCancellation);
-
   try {
+    let approvalPolicy;
+    try {
+      approvalPolicy = await createRescueApprovalPolicy(job.cwd);
+      client = buildWireClient({
+        cwd: job.cwd,
+        env: context.env,
+        sessionId: job.kimi_session_id ?? randomUUID(),
+        agentFile: job.agent_profile,
+        model: job.model ?? undefined,
+        thinking: job.thinking ?? undefined,
+        logPath: job.stream_log_path,
+        approvalPolicy,
+      });
+    } catch (error) {
+      const classified = new RuntimeError(
+        "RESCUE_SETUP_FAILED",
+        `Rescue setup failed: ${(error as Error).message ?? String(error)}`,
+        "rescue.setup",
+        error instanceof Error ? { cause: error } : undefined,
+      );
+      return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+    }
+
+    process.once("SIGTERM", requestCancellation);
+    process.once("SIGINT", requestCancellation);
+    signalsRegistered = true;
+
     if (options?.workerPid) {
       store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
     }
@@ -179,7 +205,25 @@ export async function executeRescueJob(
     }
 
     const completedTurn = await client.prompt(prompt, "rescue");
-    const artifactPath = await writeArtifact(paths, job, renderRescueArtifact(completedTurn.finalText));
+    let artifactPath: string;
+    try {
+      if (context.env.KIMI_PLUGIN_CC_TEST_FAIL_WRITE_ARTIFACT === "1") {
+        throw new Error("Simulated artifact write failure (test seam).");
+      }
+      artifactPath = await writeArtifact(paths, job, renderRescueArtifact(completedTurn.finalText));
+    } catch (writeError) {
+      process.stderr.write(
+        `[kimi-plugin-cc] rescue artifact write failed for job ${job.job_id}; raw output follows:\n${completedTurn.finalText}\n`,
+      );
+      const classified = new RuntimeError(
+        "RESCUE_ARTIFACT_WRITE_FAILED",
+        `Failed to write rescue artifact: ${(writeError as Error).message ?? String(writeError)}`,
+        "rescue.artifact",
+        writeError instanceof Error ? { cause: writeError } : undefined,
+      );
+      return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+    }
+
     return (
       store.markCompleted(job.job_id, {
         summary: firstMeaningfulLine(completedTurn.finalText),
@@ -203,13 +247,15 @@ export async function executeRescueJob(
     const classified = classifyManagedCommandFailure(error, "rescue", job.job_id);
     return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
   } finally {
-    process.removeListener("SIGTERM", requestCancellation);
-    process.removeListener("SIGINT", requestCancellation);
+    if (signalsRegistered) {
+      process.removeListener("SIGTERM", requestCancellation);
+      process.removeListener("SIGINT", requestCancellation);
+    }
     if (cancelEscalationTimer) {
       clearTimeout(cancelEscalationTimer);
     }
 
-    if (!clientClosed) {
+    if (client && !clientClosed) {
       await client.close().catch(() => {});
       clientClosed = true;
     }
@@ -300,6 +346,36 @@ async function startBackgroundRescue(
   options?: { reusedSession?: boolean },
 ): Promise<string> {
   const nodeBinary = context.env.KIMI_PLUGIN_CC_NODE_BIN || process.execPath;
+
+  // Only fast-path the `fs.access` check for absolute/relative paths. A bare
+  // name like "node" is resolved by spawn() via PATH; the spawn `error` listener
+  // will still surface ENOENT on nextTick for that path, classified as
+  // RESCUE_WORKER_SPAWN_FAILED via the listener below.
+  if (nodeBinary.includes("/") || nodeBinary.includes("\\")) {
+    try {
+      await access(nodeBinary, fsConstants.X_OK);
+    } catch (accessError) {
+      const code = (accessError as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EACCES" || code === "EPERM") {
+        const classified = new RuntimeError(
+          "RESCUE_NODE_BIN_INVALID",
+          `Configured Node binary is not executable: ${nodeBinary}. Set KIMI_PLUGIN_CC_NODE_BIN to a valid Node >=22.5 executable and retry.`,
+          "rescue.worker.spawn",
+          accessError instanceof Error ? { cause: accessError } : undefined,
+        );
+        const failStore = new JobStore(paths);
+        try {
+          await markJobFailed(failStore, paths, job, classified, "Rescue failed.", { phase: "failed" });
+        } finally {
+          failStore.close();
+        }
+        throw classified;
+      }
+      // Any other errno (EIO, etc.) — fall through to the spawn attempt and let the
+      // existing spawn error path surface it.
+    }
+  }
+
   const spawnArgs = isCompiledRuntime
     ? [companionEntrypoint, "worker", "rescue", job.job_id]
     : ["--import", "tsx", companionEntrypoint, "worker", "rescue", job.job_id];
@@ -314,7 +390,57 @@ async function startBackgroundRescue(
     detached: true,
     stdio: "ignore",
   });
+
+  let spawnReportedFailure = false;
+  const spawnErrorPromise = new Promise<RuntimeError | null>((resolve) => {
+    let settled = false;
+    const settle = (value: RuntimeError | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+    child.once("error", (spawnError) => {
+      spawnReportedFailure = true;
+      settle(
+        new RuntimeError(
+          "RESCUE_WORKER_SPAWN_FAILED",
+          `Background rescue worker failed to spawn: ${spawnError.message}`,
+          "rescue.worker.spawn",
+          { cause: spawnError },
+        ),
+      );
+    });
+    // Give the event loop one tick to deliver a synchronous spawn error
+    // (ENOENT fires on process.nextTick). If nothing fires by then, the
+    // child is live and we can proceed.
+    setImmediate(() => settle(null));
+  });
+
+  child.on("close", (exitCode, signal) => {
+    if (spawnReportedFailure) {
+      return;
+    }
+    if (exitCode === null || exitCode === 0) {
+      return;
+    }
+    // The worker exited non-zero before any state update. If the job is
+    // still in its spawn phase, the worker never reached `executeRescueJob`.
+    const classified = new RuntimeError(
+      "RESCUE_WORKER_EXITED_EARLY",
+      `Background rescue worker exited with code ${exitCode}${signal ? ` (signal ${signal})` : ""} before reporting a result.`,
+      "rescue.worker.spawn",
+    );
+    void markEarlyExit(paths, job.job_id, classified);
+  });
   child.unref();
+
+  const spawnError = await spawnErrorPromise;
+  if (spawnError) {
+    await markSpawnFailure(paths, job.job_id, spawnError);
+    throw spawnError;
+  }
 
   const store = new JobStore(paths);
   try {
@@ -347,6 +473,54 @@ async function startBackgroundRescue(
     null,
     2,
   )}\n`;
+}
+
+async function markSpawnFailure(
+  paths: PluginPaths,
+  jobId: string,
+  classified: RuntimeError,
+): Promise<void> {
+  const store = new JobStore(paths);
+  try {
+    const current = store.getJob(jobId);
+    if (!current || current.status !== "running") {
+      return;
+    }
+    await markJobFailed(store, paths, current, classified, "Rescue failed.", { phase: "failed" });
+  } catch (writeError) {
+    process.stderr.write(
+      `[kimi-plugin-cc] failed to mark rescue ${jobId} as spawn-failed: ${(writeError as Error).message ?? String(writeError)}\n`,
+    );
+  } finally {
+    store.close();
+  }
+}
+
+async function markEarlyExit(
+  paths: PluginPaths,
+  jobId: string,
+  classified: RuntimeError,
+): Promise<void> {
+  const store = new JobStore(paths);
+  try {
+    const current = store.getJob(jobId);
+    if (!current || current.status !== "running") {
+      return;
+    }
+    // Only mark failure if the worker exited before advancing past the spawn phase.
+    // Once the worker reaches worker-running or turn-running, the child owns the
+    // job state and the parent's close listener must not race with it.
+    if (current.phase !== "worker-spawned" && current.phase !== "queued") {
+      return;
+    }
+    await markJobFailed(store, paths, current, classified, "Rescue failed.", { phase: "failed" });
+  } catch (writeError) {
+    process.stderr.write(
+      `[kimi-plugin-cc] failed to mark rescue ${jobId} as early-exit: ${(writeError as Error).message ?? String(writeError)}\n`,
+    );
+  } finally {
+    store.close();
+  }
 }
 
 function shorten(text: string, max: number): string {
