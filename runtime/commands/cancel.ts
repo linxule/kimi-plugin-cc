@@ -88,6 +88,8 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
           paths,
           current,
           "Background rescue was force-cancelled after worker termination.",
+          undefined,
+          current.command_type === "rescue" ? { phase: "cancelled" } : undefined,
         );
       }
     } finally {

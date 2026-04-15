@@ -61,7 +61,7 @@ export async function runCancel(argv, context) {
         try {
             const current = forcedStore.getJob(job.job_id);
             if (current?.status === "running") {
-                await markJobCancelled(forcedStore, paths, current, "Background rescue was force-cancelled after worker termination.");
+                await markJobCancelled(forcedStore, paths, current, "Background rescue was force-cancelled after worker termination.", undefined, current.command_type === "rescue" ? { phase: "cancelled" } : undefined);
             }
         }
         finally {

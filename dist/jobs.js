@@ -25,8 +25,9 @@ export function normalizeJobError(error) {
         stage: "runtime",
     };
 }
-export async function markJobFailed(store, paths, job, error, summary = "Job failed.") {
+export async function markJobFailed(store, paths, job, error, summary = "Job failed.", options) {
     const normalized = normalizeJobError(error);
+    const phase = options?.phase;
     const artifactJob = {
         ...job,
         status: "failed",
@@ -35,16 +36,19 @@ export async function markJobFailed(store, paths, job, error, summary = "Job fai
         final_output_path: null,
         pid: null,
         kimi_pid: null,
+        ...(phase !== undefined ? { phase } : {}),
     };
     const artifactPath = await writeArtifact(paths, artifactJob, renderTerminalJobArtifact(artifactJob));
     return (store.markFailed(job.job_id, {
         summary,
         error: normalized,
         final_output_path: artifactPath,
+        ...(phase !== undefined ? { phase } : {}),
     }) ?? artifactJob);
 }
-export async function markJobCancelled(store, paths, job, summary, error) {
+export async function markJobCancelled(store, paths, job, summary, error, options) {
     const normalized = error ? normalizeJobError(error) : null;
+    const phase = options?.phase;
     const artifactJob = {
         ...job,
         status: "cancelled",
@@ -53,12 +57,14 @@ export async function markJobCancelled(store, paths, job, summary, error) {
         final_output_path: null,
         pid: null,
         kimi_pid: null,
+        ...(phase !== undefined ? { phase } : {}),
     };
     const artifactPath = await writeArtifact(paths, artifactJob, renderTerminalJobArtifact(artifactJob));
     return (store.markCancelled(job.job_id, {
         summary,
         error: normalized,
         final_output_path: artifactPath,
+        ...(phase !== undefined ? { phase } : {}),
     }) ?? artifactJob);
 }
 export async function sweepStaleBackgroundJobs(store, paths) {
@@ -71,7 +77,7 @@ export async function sweepStaleBackgroundJobs(store, paths) {
         if (isPidAlive(job.pid)) {
             continue;
         }
-        await markJobFailed(store, paths, job, new RuntimeError("WORKER_DISAPPEARED", `Background worker pid ${job.pid} is no longer running.`, "jobs.sweep"), "Background worker disappeared before reporting a terminal state.");
+        await markJobFailed(store, paths, job, new RuntimeError("WORKER_DISAPPEARED", `Background worker pid ${job.pid} is no longer running.`, "jobs.sweep"), "Background worker disappeared before reporting a terminal state.", job.command_type === "rescue" ? { phase: "failed" } : undefined);
     }
 }
 function isPidAlive(pid) {

@@ -196,11 +196,12 @@ export async function executeRescueJob(
         job,
         "Rescue cancelled by user request.",
         error,
+        { phase: "cancelled" },
       );
     }
 
     const classified = classifyManagedCommandFailure(error, "rescue", job.job_id);
-    return await markJobFailed(store, paths, job, classified, "Rescue failed.");
+    return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
   } finally {
     process.removeListener("SIGTERM", requestCancellation);
     process.removeListener("SIGINT", requestCancellation);

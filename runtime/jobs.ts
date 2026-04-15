@@ -40,8 +40,10 @@ export async function markJobFailed(
   job: JobRecord,
   error: unknown,
   summary = "Job failed.",
+  options?: { phase?: string | null },
 ): Promise<JobRecord> {
   const normalized = normalizeJobError(error);
+  const phase = options?.phase;
   const artifactJob = {
     ...job,
     status: "failed" as const,
@@ -50,6 +52,7 @@ export async function markJobFailed(
     final_output_path: null,
     pid: null,
     kimi_pid: null,
+    ...(phase !== undefined ? { phase } : {}),
   };
   const artifactPath = await writeArtifact(paths, artifactJob, renderTerminalJobArtifact(artifactJob));
 
@@ -58,6 +61,7 @@ export async function markJobFailed(
       summary,
       error: normalized,
       final_output_path: artifactPath,
+      ...(phase !== undefined ? { phase } : {}),
     }) ?? artifactJob
   );
 }
@@ -68,8 +72,10 @@ export async function markJobCancelled(
   job: JobRecord,
   summary: string,
   error?: unknown,
+  options?: { phase?: string | null },
 ): Promise<JobRecord> {
   const normalized = error ? normalizeJobError(error) : null;
+  const phase = options?.phase;
   const artifactJob = {
     ...job,
     status: "cancelled" as const,
@@ -78,6 +84,7 @@ export async function markJobCancelled(
     final_output_path: null,
     pid: null,
     kimi_pid: null,
+    ...(phase !== undefined ? { phase } : {}),
   };
   const artifactPath = await writeArtifact(paths, artifactJob, renderTerminalJobArtifact(artifactJob));
 
@@ -86,6 +93,7 @@ export async function markJobCancelled(
       summary,
       error: normalized,
       final_output_path: artifactPath,
+      ...(phase !== undefined ? { phase } : {}),
     }) ?? artifactJob
   );
 }
@@ -112,6 +120,7 @@ export async function sweepStaleBackgroundJobs(store: JobStore, paths: PluginPat
         "jobs.sweep",
       ),
       "Background worker disappeared before reporting a terminal state.",
+      job.command_type === "rescue" ? { phase: "failed" } : undefined,
     );
   }
 }

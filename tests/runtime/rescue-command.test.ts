@@ -232,9 +232,11 @@ describe("rescue command lifecycle", () => {
       const output = await runRescue(["Inspect", "the", "repo"], makeContext(repoRoot, env));
       const status = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoRoot, env))) as {
         status: string;
+        phase: string | null;
       };
       expect(output).toContain("# Failed Job");
       expect(status.status).toBe("failed");
+      expect(status.phase).toBe("failed");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -374,6 +376,7 @@ describe("rescue command lifecycle", () => {
       expect(running?.kimi_session_id).toBeTruthy();
       expect(cancelled.status).toBe("cancelled");
       expect(terminal.status).toBe("cancelled");
+      expect(terminal.phase).toBe("cancelled");
       expect(terminal.kimi_session_id).toBe(running?.kimi_session_id ?? null);
     } finally {
       await cleanupTestPath(pluginDataRoot);
