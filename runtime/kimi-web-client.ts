@@ -41,6 +41,16 @@ export function resolveKimiWebBaseUrl(env: NodeJS.ProcessEnv | undefined): strin
   return override.replace(/\/+$/, "");
 }
 
+// Join a base URL (e.g. `http://127.0.0.1:5494` or `http://127.0.0.1:5494/`)
+// with an absolute path (e.g. `/healthz`) without producing a double slash.
+// Uses the WHATWG URL parser so the result is always canonical. Note:
+// `new URL("/x", "http://host/sub/")` drops `/sub/`, which is correct here
+// because `baseUrl` is always an origin-only URL as produced by
+// `resolveKimiWebBaseUrl` — never a URL with a path suffix.
+function joinUrl(baseUrl: string, path: string): string {
+  return new URL(path, baseUrl).toString();
+}
+
 export function createKimiWebClient(options: KimiWebClientOptions = {}): KimiWebClient {
   const baseUrl = resolveKimiWebBaseUrl(options.env);
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -51,7 +61,7 @@ export function createKimiWebClient(options: KimiWebClientOptions = {}): KimiWeb
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), KIMI_WEB_HEALTH_TIMEOUT_MS);
       try {
-        const response = await fetchImpl(`${baseUrl}${KIMI_WEB_HEALTH_PATH}`, {
+        const response = await fetchImpl(joinUrl(baseUrl, KIMI_WEB_HEALTH_PATH), {
           method: "GET",
           signal: controller.signal,
         });
@@ -79,7 +89,7 @@ export function createKimiWebClient(options: KimiWebClientOptions = {}): KimiWeb
       const timer = setTimeout(() => controller.abort(), KIMI_WEB_PATCH_TIMEOUT_MS);
       try {
         const response = await fetchImpl(
-          `${baseUrl}${KIMI_WEB_SESSION_PATH}/${encodeURIComponent(sessionId)}`,
+          joinUrl(baseUrl, `${KIMI_WEB_SESSION_PATH}/${encodeURIComponent(sessionId)}`),
           {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },

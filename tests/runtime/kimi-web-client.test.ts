@@ -18,7 +18,23 @@ interface StubResponse {
   status: number;
 }
 
-function makeFetchStub(handler: (url: string, init: RequestInit) => StubResponse | Error) {
+interface FetchStubOptions {
+  // When set, the stub waits `delayMs` before resolving so the client's
+  // AbortController + setTimeout path can fire first and reject with an
+  // AbortError-shaped rejection (matching the runtime `fetch` contract).
+  delayMs?: number;
+}
+
+function makeAbortError(): Error {
+  const err = new Error("aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+function makeFetchStub(
+  handler: (url: string, init: RequestInit) => StubResponse | Error,
+  options: FetchStubOptions = {},
+) {
   const calls: FetchRecord[] = [];
   const fn = async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = input instanceof URL ? input.toString() : String(input);
@@ -27,6 +43,24 @@ function makeFetchStub(handler: (url: string, init: RequestInit) => StubResponse
       method: init.method ?? "GET",
       body: typeof init.body === "string" ? init.body : undefined,
     });
+    if (options.delayMs !== undefined) {
+      await new Promise<void>((resolve, reject) => {
+        const signal = init.signal as AbortSignal | null | undefined;
+        if (signal?.aborted) {
+          reject(makeAbortError());
+          return;
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, options.delayMs);
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(makeAbortError());
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    }
     const result = handler(url, init);
     if (result instanceof Error) throw result;
     return {
@@ -72,6 +106,17 @@ describe("createKimiWebClient.healthCheck", () => {
     const { fetchImpl } = makeFetchStub(() => new Error("ECONNREFUSED"));
     const client = createKimiWebClient({ fetchImpl });
     expect(await client.healthCheck()).toBe(false);
+  });
+
+  test("normalizes trailing-slash base URLs without producing a double slash", async () => {
+    const { fetchImpl, calls } = makeFetchStub(() => ({ ok: true, status: 200 }));
+    const client = createKimiWebClient({
+      fetchImpl,
+      env: { KIMI_PLUGIN_CC_WEB_URL: "http://127.0.0.1:5494/" },
+    });
+    expect(await client.healthCheck()).toBe(true);
+    expect(calls[0].url).toBe("http://127.0.0.1:5494/healthz");
+    expect(calls[0].url).not.toContain("//healthz");
   });
 });
 
@@ -122,6 +167,42 @@ describe("createKimiWebClient.setSessionTitle", () => {
     const client = createKimiWebClient({ fetchImpl });
     const result = await client.setSessionTitle("abc", "title");
     expect(result).toMatchObject({ ok: false, reason: "unreachable" });
+  });
+
+  test("normalizes trailing-slash base URLs without producing a double slash", async () => {
+    const { fetchImpl, calls } = makeFetchStub(() => ({ ok: true, status: 200 }));
+    const client = createKimiWebClient({
+      fetchImpl,
+      env: { KIMI_PLUGIN_CC_WEB_URL: "http://127.0.0.1:5494/" },
+    });
+    const result = await client.setSessionTitle("abc-123", "title");
+    expect(result).toEqual({ ok: true, title: "title" });
+    expect(calls[0].url).toBe("http://127.0.0.1:5494/api/sessions/abc-123");
+    expect(calls[0].url).not.toContain("//api");
+  });
+});
+
+describe("createKimiWebClient AbortController timeouts", () => {
+  test("healthCheck returns false when the 200ms budget fires before fetch resolves", async () => {
+    const { fetchImpl } = makeFetchStub(() => ({ ok: true, status: 200 }), { delayMs: 5_000 });
+    const client = createKimiWebClient({ fetchImpl });
+    const start = Date.now();
+    const result = await client.healthCheck();
+    const elapsed = Date.now() - start;
+    expect(result).toBe(false);
+    // If the client's 200ms AbortController didn't fire, we'd wait the full 5s stub delay.
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  test("setSessionTitle returns unreachable when the 2s budget fires before fetch resolves", async () => {
+    const { fetchImpl } = makeFetchStub(() => ({ ok: true, status: 200 }), { delayMs: 10_000 });
+    const client = createKimiWebClient({ fetchImpl });
+    const start = Date.now();
+    const result = await client.setSessionTitle("abc", "title");
+    const elapsed = Date.now() - start;
+    expect(result).toMatchObject({ ok: false, reason: "unreachable" });
+    // If the client's 2000ms AbortController didn't fire, we'd wait the full 10s stub delay.
+    expect(elapsed).toBeLessThan(5_000);
   });
 });
 
