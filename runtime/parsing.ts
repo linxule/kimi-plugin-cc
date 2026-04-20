@@ -6,6 +6,8 @@ export interface KimiFlagState {
 }
 
 export interface AskArgs extends KimiFlagState {
+  background: boolean;
+  wait: boolean;
   fresh: boolean;
   resume: boolean;
   resumeTarget?: string;
@@ -39,6 +41,8 @@ export interface JobLookupArgs {
 export function parseAskArgs(argv: string[]): AskArgs {
   let model: string | undefined;
   let thinking: boolean | undefined;
+  let background = false;
+  let wait = false;
   let fresh = false;
   let resume = false;
   let resumeTarget: string | undefined;
@@ -69,6 +73,12 @@ export function parseAskArgs(argv: string[]): AskArgs {
         index += 1;
         break;
       }
+      case "--background":
+        background = true;
+        break;
+      case "--wait":
+        wait = true;
+        break;
       case "--fresh":
         fresh = true;
         break;
@@ -120,6 +130,8 @@ export function parseAskArgs(argv: string[]): AskArgs {
   }
 
   return {
+    background,
+    wait,
     fresh,
     resume,
     resumeTarget,

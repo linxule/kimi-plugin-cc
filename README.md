@@ -50,13 +50,13 @@ Kimi opens the file, writes the fix, runs the relevant tests, and reports back. 
 
 | Command | What it does | Kimi can write? | Session persists? |
 |---------|-------------|-----------------|-------------------|
-| `/kimi:ask` | Free-form Q&A — "explain this module" | No | Fresh by default, `-r` to resume |
+| `/kimi:ask` | Free-form Q&A — "explain this module"; supports `--background` / `--wait` like rescue | No | Fresh by default, `-r` to resume |
 | `/kimi:review` | Structured code review of your diff | No | Fresh each time |
 | `/kimi:challenge` | Adversarial review with a custom focus | No | Fresh each time |
 | `/kimi:rescue` | Delegate real work — bug hunts, refactors, fixes | Yes (allowlisted) | Persists + resumable |
 | Review gate | Kimi checks Claude's work before stopping | No | Per-stop-event |
 
-The plugin also ships a `kimi-rescue` **subagent** that Claude triggers proactively when it sees a task worth delegating, and a `kimi-review` **skill** for automatic second-opinion reviews.
+The plugin ships four Claude Code **subagents** that the main thread can dispatch proactively via the Agent tool: `kimi-rescue` (write-capable delegation), plus `kimi-review`, `kimi-challenge`, and `kimi-ask` (read-only forwarders to the matching companion surfaces). A `kimi-review` **skill** also nudges Claude toward the review slash command when appropriate.
 
 ## How it works
 

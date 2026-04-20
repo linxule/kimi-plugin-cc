@@ -2,6 +2,8 @@ import { RuntimeError } from "./errors.js";
 export function parseAskArgs(argv) {
     let model;
     let thinking;
+    let background = false;
+    let wait = false;
     let fresh = false;
     let resume = false;
     let resumeTarget;
@@ -28,6 +30,12 @@ export function parseAskArgs(argv) {
                 index += 1;
                 break;
             }
+            case "--background":
+                background = true;
+                break;
+            case "--wait":
+                wait = true;
+                break;
             case "--fresh":
                 fresh = true;
                 break;
@@ -64,6 +72,8 @@ export function parseAskArgs(argv) {
         throw new RuntimeError("INVALID_ARGS", "--resume only accepts a job-id or session-id. Use -r to resume the latest ask session with a prompt.", "ask.parse");
     }
     return {
+        background,
+        wait,
         fresh,
         resume,
         resumeTarget,

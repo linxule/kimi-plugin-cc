@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobFailed } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleBackgroundJobs } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
@@ -17,11 +17,14 @@ import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
-import { renderManagedJobOutput, writeArtifact } from "../render.js";
+import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
+import { startBackgroundJob } from "../background-spawn.js";
+
+const ASK_SUMMARY_MAX = 120;
 
 export async function runAsk(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseAskArgs(argv);
@@ -30,6 +33,8 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
   const repoIdentity = await resolveRepoIdentity(context.cwd);
   const store = new JobStore(paths);
   try {
+    await sweepStaleBackgroundJobs(store, paths);
+
     const jobId = randomUUID();
     const sessionResolution = resolveAskSession(
       store,
@@ -49,79 +54,202 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       cwd: context.cwd,
       model: parsed.model ?? null,
       thinking: parsed.thinking ?? null,
-      background: false,
+      background: parsed.background,
       pid: null,
       kimi_pid: null,
       status: "running",
       kimi_session_id: kimiSessionId,
       agent_profile: agentProfile,
       prompt_digest: digestPrompt(askPrompt),
-      summary: "Running ask.",
+      summary: shorten(parsed.prompt ?? askPrompt, ASK_SUMMARY_MAX),
+      phase: parsed.background ? "queued" : "starting",
       final_output_path: null,
       stream_log_path: logPath,
       error: null,
     });
-    await writeInvocationLogHeader(logPath, {
-      commandType: "ask",
-      kimiSessionId,
-      cwd: context.cwd,
-    });
-
-    const client = buildWireClient({
-      cwd: context.cwd,
-      env: context.env,
-      sessionId: sessionResolution.sessionId,
-      agentFile: agentProfile,
-      model: parsed.model,
-      thinking: parsed.thinking,
-      logPath,
-      approvalPolicy: rejectAllApprovals("ask is read-only; approval requests fail the command."),
-    });
 
     try {
-      await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, "ask.start");
-      store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
-      await withTimeout(
-        client.initialize({
-          protocol_version: "1.9",
-          client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
-          capabilities: {
-            supports_question: false,
-            supports_plan_mode: false,
-          },
-        }),
-        KIMI_INITIALIZE_TIMEOUT_MS,
-        "ask.initialize",
+      await writeInvocationLogHeader(logPath, {
+        commandType: "ask",
+        kimiSessionId,
+        cwd: context.cwd,
+      });
+    } catch (error) {
+      const classified = new RuntimeError(
+        "ASK_LOG_HEADER_FAILED",
+        `Failed to write ask invocation log header: ${(error as Error).message ?? String(error)}`,
+        "ask.log-header",
+        error instanceof Error ? { cause: error } : undefined,
       );
+      await markJobFailed(store, paths, job, classified, "Ask failed.", { phase: "failed" });
+      throw classified;
+    }
 
-      if (!sessionResolution.reusedSession) {
-        await announceSessionTitle(kimiSessionId, buildSessionTitle("ask", parsed.prompt), {
-          env: context.env,
-        });
-      }
+    const rawQuestion = parsed.prompt?.trim();
 
-      const completed = await withTimeout(
-        client.prompt(askPrompt, "ask"),
-        KIMI_ASK_PROMPT_TIMEOUT_MS,
-        "ask.prompt",
-      );
-      const rendered = renderManagedJobOutput(job, completed.finalText);
-      const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+    if (parsed.background) {
+      return startBackgroundJob(job, askPrompt, context, paths, {
+        workerKind: "ask",
+        wait: parsed.wait,
+        promptEnvVar: "KIMI_PLUGIN_CC_ASK_PROMPT_B64",
+        reusedSessionEnvVar: "KIMI_PLUGIN_CC_ASK_REUSED_SESSION",
+        reusedSession: sessionResolution.reusedSession,
+        failedSummary: "Ask failed.",
+        missingResultErrorCode: "ASK_RESULT_MISSING",
+        spawnFailedErrorCode: "ASK_WORKER_SPAWN_FAILED",
+        earlyExitErrorCode: "ASK_WORKER_EXITED_EARLY",
+        nodeBinInvalidErrorCode: "ASK_NODE_BIN_INVALID",
+        waitStage: "ask.wait",
+        spawnStage: "ask.worker.spawn",
+        extraEnv: rawQuestion
+          ? { KIMI_PLUGIN_CC_ASK_RAW_QUESTION_B64: Buffer.from(rawQuestion, "utf8").toString("base64") }
+          : undefined,
+      });
+    }
+
+    const completed = await executeAskJob(job.job_id, askPrompt, context, {
+      reusedSession: sessionResolution.reusedSession,
+      rawPrompt: rawQuestion,
+    });
+
+    if (!completed.final_output_path) {
+      throw new RuntimeError("ASK_RESULT_MISSING", "Ask finished without a rendered result.", "ask.result");
+    }
+
+    // trimEnd() strips the trailing newline that writeArtifact appends but the
+    // original runAsk did not include in its return value (it returned rendered.output
+    // directly, which is already trimmed). The /kimi:result command reads the artifact
+    // file directly so it still gets the newline — only the inline foreground return
+    // needs to match the original contract.
+    return (await readArtifact(completed.final_output_path)).trimEnd();
+  } finally {
+    store.close();
+  }
+}
+
+export async function executeAskJob(
+  jobId: string,
+  prompt: string,
+  context: CommandContext,
+  options?: { workerPid?: number; reusedSession?: boolean; rawPrompt?: string },
+): Promise<JobRecord> {
+  const paths = resolvePluginPaths(context.env);
+  await ensurePluginPaths(paths);
+  const store = new JobStore(paths);
+  const job = store.getJob(jobId);
+  if (!job) {
+    store.close();
+    throw new RuntimeError("JOB_NOT_FOUND", `Ask job ${jobId} was not found.`, "ask.worker");
+  }
+
+  let cancelling = false;
+  let clientClosed = false;
+  let cancelEscalationTimer: ReturnType<typeof setTimeout> | undefined;
+  let signalsRegistered = false;
+  const client = buildWireClient({
+    cwd: job.cwd,
+    env: context.env,
+    sessionId: job.kimi_session_id ?? randomUUID(),
+    agentFile: job.agent_profile,
+    model: job.model ?? undefined,
+    thinking: job.thinking ?? undefined,
+    logPath: job.stream_log_path,
+    approvalPolicy: rejectAllApprovals("ask is read-only; approval requests fail the command."),
+  });
+  const requestCancellation = () => {
+    if (cancelling) {
+      return;
+    }
+    cancelling = true;
+    client.beginCancellation();
+    void client.cancel().catch(() => {});
+    cancelEscalationTimer = setTimeout(() => {
+      client.terminateChild("SIGTERM");
+    }, 1_500);
+    cancelEscalationTimer.unref();
+  };
+
+  try {
+    if (options?.workerPid) {
+      store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
+    }
+
+    process.once("SIGTERM", requestCancellation);
+    process.once("SIGINT", requestCancellation);
+    signalsRegistered = true;
+
+    await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, "ask.start");
+    store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
+    await withTimeout(
+      client.initialize({
+        protocol_version: "1.9",
+        client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
+        capabilities: {
+          supports_question: false,
+          supports_plan_mode: false,
+        },
+      }),
+      KIMI_INITIALIZE_TIMEOUT_MS,
+      "ask.initialize",
+    );
+
+    // Skip the title announcement on resumed sessions: the title was set by the
+    // original ask call and the current prompt here is either a continuation or
+    // refinement — neither should clobber the original identifying title in
+    // `kimi web`.
+    if (!options?.reusedSession) {
+      // Use the raw user question for the title, not the wrapped ask prompt
+      // (`buildAskPrompt` prepends boilerplate like "Answer the user's question
+      // directly..."; passing the wrapped form would collapse every fresh ask
+      // session's kimi-web title to that boilerplate prefix instead of the
+      // actual question). `rawPrompt` is threaded from runAsk in foreground
+      // and via KIMI_PLUGIN_CC_ASK_RAW_QUESTION_B64 from the worker.
+      await announceSessionTitle(job.kimi_session_id!, buildSessionTitle("ask", options?.rawPrompt ?? prompt), {
+        env: context.env,
+      });
+    }
+
+    const completed = await withTimeout(
+      client.prompt(prompt, "ask"),
+      KIMI_ASK_PROMPT_TIMEOUT_MS,
+      "ask.prompt",
+    );
+    const rendered = renderManagedJobOutput(job, completed.finalText);
+    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+    return (
       store.markCompleted(job.job_id, {
         summary: rendered.summary,
+        phase: "done",
         final_output_path: artifactPath,
         error: null,
-      });
-
-      return rendered.output as string;
-    } catch (error) {
-      const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
-      await markJobFailed(store, paths, job, classified, "Ask failed.");
-      throw classified;
-    } finally {
-      await client.close();
+      }) ?? job
+    );
+  } catch (error) {
+    if (cancelling) {
+      return await markJobCancelled(
+        store,
+        paths,
+        job,
+        "Ask cancelled by user request.",
+        error,
+        { phase: "cancelled" },
+      );
     }
+    const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
+    await markJobFailed(store, paths, job, classified, "Ask failed.", { phase: "failed" });
+    throw classified;
   } finally {
+    if (signalsRegistered) {
+      process.removeListener("SIGTERM", requestCancellation);
+      process.removeListener("SIGINT", requestCancellation);
+    }
+    if (cancelEscalationTimer) {
+      clearTimeout(cancelEscalationTimer);
+    }
+    if (!clientClosed) {
+      await client.close().catch(() => {});
+      clientClosed = true;
+    }
     store.close();
   }
 }
@@ -199,4 +327,13 @@ function buildAskPrompt(question: string | undefined, reusedSession: boolean): s
   }
 
   throw new RuntimeError("INVALID_ARGS", "ask requires a question after the flags.", "ask.parse");
+}
+
+function shorten(text: string, max: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
