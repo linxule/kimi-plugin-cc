@@ -13,10 +13,11 @@ Project context for coding agents working in this repository.
 ```
 .claude-plugin/     Plugin manifest (plugin.json, marketplace.json)
 commands/           Slash command markdown — thin wrappers over companion.sh
-agents/             Claude Code subagent definitions (kimi-rescue)
+agents/             Claude Code subagent definitions (kimi-rescue, kimi-review, kimi-challenge, kimi-ask)
 hooks/              Stop hook for the review gate
 scripts/            Shell entry points (companion.sh, review-gate-hook.sh)
 runtime/            TypeScript source — the real runtime
+  ├── background-spawn.ts  Shared detached-worker spawn helper (rescue + ask)
   ├── wire/         Wire client (JSON-RPC over stdio) + turn capture
   ├── commands/     One file per companion subcommand
   ├── agents/       Kimi agent profiles (YAML)
@@ -24,7 +25,7 @@ runtime/            TypeScript source — the real runtime
   ├── schemas/      Structured output contracts (review, review-gate)
   └── hooks/        Stop hook entry point
 dist/               Compiled JS — committed for zero-build install
-tests/              bun test suite (132 tests / 20 files)
+tests/              bun test suite (146 tests / 22 files)
 ```
 
 ## Commands
@@ -58,3 +59,17 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 - Read the code before changing it — the runtime has specific invariants that aren't obvious from file names
 - Run `bun run check` before considering any change done
 - `dist/` is committed intentionally (zero-build install). The drift gate catches forgotten rebuilds.
+- Agent files register at session start. Adding or editing `agents/*.md` mid-session doesn't activate them until Claude Code reloads — reach for slash commands or direct `companion.sh` in the same session.
+- `.claude/` is gitignored — notes, worktrees, internal docs under it stay local. Don't try to commit them.
+
+## Releasing
+
+Version bump touches 5 files — update all before tagging:
+
+- `runtime/version.ts` (`KIMI_PLUGIN_CC_VERSION` — sent on the Wire handshake)
+- `package.json`
+- `.claude-plugin/plugin.json`
+- `.claude-plugin/marketplace.json`
+- `AGENTS.md` (the "Version" line above)
+
+Then `bun run check`, commit, `git tag -a vX.Y.Z -m "..."`, `git push` + `git push origin vX.Y.Z`, then `gh release create`.
