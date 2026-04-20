@@ -24,6 +24,11 @@ Context: The user says, "Have Kimi keep going from the last rescue and apply the
 Why this triggers: The user is clearly asking to resume a prior Kimi rescue workflow.
 </example>
 
+<example>
+Context: The main Claude thread has been debugging a multi-file runtime error for several turns, the investigation has grown beyond inline reasoning, and the user has not yet explicitly asked for delegation.
+Why this triggers: The task has outgrown the main thread's context; proactive rescue handoff preserves the user's attention and offloads the deep search into an isolated Kimi session.
+</example>
+
 ## Runtime instructions
 
 When invoked:
