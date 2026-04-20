@@ -15,7 +15,7 @@ Supported flags:
 - `--resume <job-id-or-session-id>` — resume a specific prior ask session without a new prompt payload
 - `--fresh` — force a new ask session id instead of reusing a prior session
 - `-m`, `--model <name>`
-- `--thinking`
-- `--no-thinking`
+- `--thinking` — enable Kimi's extended reasoning (on by default; this flag is a no-op now, kept for explicit intent)
+- `--no-thinking` — disable Kimi's extended reasoning (opt out of the new default)
 
 Return the companion stdout verbatim.

@@ -40,7 +40,10 @@ export interface JobLookupArgs {
 
 export function parseAskArgs(argv: string[]): AskArgs {
   let model: string | undefined;
-  let thinking: boolean | undefined;
+  // Thinking is on by default across ask/review/challenge/rescue. Users opt out
+  // with --no-thinking. The review-gate path sets thinking: false explicitly in
+  // its runtime caller, so this default does not affect the gate.
+  let thinking: boolean | undefined = true;
   let background = false;
   let wait = false;
   let fresh = false;
@@ -159,7 +162,7 @@ export function parseReviewArgs(argv: string[]): ReviewArgs {
 
 export function parseRescueArgs(argv: string[]): RescueArgs {
   let model: string | undefined;
-  let thinking: boolean | undefined;
+  let thinking: boolean | undefined = true;
   let background = false;
   let wait = false;
   let fresh = false;
@@ -321,7 +324,7 @@ function isManagedCommandType(value: string): value is import("./types.js").Mana
 
 function parseKnownFlags(argv: string[], knownFlags: Set<string>): ParsedKnownFlags {
   let model: string | undefined;
-  let thinking: boolean | undefined;
+  let thinking: boolean | undefined = true;
   let base: string | undefined;
   let background = false;
   let wait = false;

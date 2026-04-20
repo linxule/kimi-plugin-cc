@@ -1,7 +1,10 @@
 import { RuntimeError } from "./errors.js";
 export function parseAskArgs(argv) {
     let model;
-    let thinking;
+    // Thinking is on by default across ask/review/challenge/rescue. Users opt out
+    // with --no-thinking. The review-gate path sets thinking: false explicitly in
+    // its runtime caller, so this default does not affect the gate.
+    let thinking = true;
     let background = false;
     let wait = false;
     let fresh = false;
@@ -95,7 +98,7 @@ export function parseReviewArgs(argv) {
 }
 export function parseRescueArgs(argv) {
     let model;
-    let thinking;
+    let thinking = true;
     let background = false;
     let wait = false;
     let fresh = false;
@@ -212,7 +215,7 @@ function isManagedCommandType(value) {
 }
 function parseKnownFlags(argv, knownFlags) {
     let model;
-    let thinking;
+    let thinking = true;
     let base;
     let background = false;
     let wait = false;

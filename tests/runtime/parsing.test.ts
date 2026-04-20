@@ -31,7 +31,7 @@ describe("argument parsing", () => {
       resumeTarget: "foo",
       fresh: false,
       model: undefined,
-      thinking: undefined,
+      thinking: true,
       prompt: undefined,
     });
   });
@@ -46,7 +46,7 @@ describe("argument parsing", () => {
       resumeTarget: undefined,
       fresh: false,
       model: undefined,
-      thinking: undefined,
+      thinking: true,
       prompt: "my question",
     });
   });
