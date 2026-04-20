@@ -6,7 +6,8 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleBackgroundJobs } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
-import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { WireClient } from "../wire/client.js";
 import {
   KIMI_ASK_PROMPT_TIMEOUT_MS,
   KIMI_INITIALIZE_TIMEOUT_MS,
@@ -146,39 +147,65 @@ export async function executeAskJob(
   let clientClosed = false;
   let cancelEscalationTimer: ReturnType<typeof setTimeout> | undefined;
   let signalsRegistered = false;
-  const client = buildWireClient({
-    cwd: job.cwd,
-    env: context.env,
-    sessionId: job.kimi_session_id ?? randomUUID(),
-    agentFile: job.agent_profile,
-    model: job.model ?? undefined,
-    thinking: job.thinking ?? undefined,
-    logPath: job.stream_log_path,
-    approvalPolicy: rejectAllApprovals("ask is read-only; approval requests fail the command."),
-  });
+  let client: WireClient | undefined;
+  // Latches cancelling immediately and only fans out Wire-side cancellation if
+  // the client already exists. Registered BEFORE buildAndStartWireClient so a
+  // signal during the startup/retry window still sets the flag; the post-helper
+  // check below and the catch block both handle the "cancelled during start"
+  // case cleanly.
   const requestCancellation = () => {
     if (cancelling) {
       return;
     }
     cancelling = true;
+    if (!client) {
+      return;
+    }
     client.beginCancellation();
     void client.cancel().catch(() => {});
     cancelEscalationTimer = setTimeout(() => {
-      client.terminateChild("SIGTERM");
+      client?.terminateChild("SIGTERM");
     }, 1_500);
     cancelEscalationTimer.unref();
   };
 
+  process.once("SIGTERM", requestCancellation);
+  process.once("SIGINT", requestCancellation);
+  signalsRegistered = true;
+
   try {
+    client = await buildAndStartWireClient(
+      {
+        cwd: job.cwd,
+        env: context.env,
+        sessionId: job.kimi_session_id ?? randomUUID(),
+        agentFile: job.agent_profile,
+        model: job.model ?? undefined,
+        thinking: job.thinking ?? undefined,
+        logPath: job.stream_log_path,
+        approvalPolicy: rejectAllApprovals("ask is read-only; approval requests fail the command."),
+      },
+      KIMI_START_TIMEOUT_MS,
+      "ask.start",
+      { shouldRetry: () => !cancelling },
+    );
+
+    if (cancelling) {
+      // Signal fired during startup and the first attempt happened to succeed
+      // before the retry gate could short-circuit. Close the fresh client and
+      // fall through the catch via a synthetic throw so the normal cancellation
+      // teardown path (markJobCancelled + signal deregistration) runs.
+      throw new RuntimeError(
+        "ASK_CANCELLED_DURING_START",
+        "Ask cancelled during startup.",
+        "ask.start",
+      );
+    }
+
     if (options?.workerPid) {
       store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
     }
 
-    process.once("SIGTERM", requestCancellation);
-    process.once("SIGINT", requestCancellation);
-    signalsRegistered = true;
-
-    await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, "ask.start");
     store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
     await withTimeout(
       client.initialize({
@@ -246,7 +273,7 @@ export async function executeAskJob(
     if (cancelEscalationTimer) {
       clearTimeout(cancelEscalationTimer);
     }
-    if (!clientClosed) {
+    if (!clientClosed && client) {
       await client.close().catch(() => {});
       clientClosed = true;
     }

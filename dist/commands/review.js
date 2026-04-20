@@ -4,7 +4,7 @@ import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
-import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_INITIALIZE_TIMEOUT_MS, KIMI_REVIEW_PROMPT_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout, } from "../kimi-timeouts.js";
 import { buildSessionTitle } from "../session-title.js";
@@ -55,18 +55,18 @@ export async function runReview(argv, context, commandType) {
         kimiSessionId: reviewSessionId,
         cwd: context.cwd,
     });
-    const client = buildWireClient({
-        cwd: context.cwd,
-        env: context.env,
-        sessionId: reviewSessionId,
-        agentFile: agentProfile,
-        model: parsed.model,
-        thinking: parsed.thinking,
-        logPath,
-        approvalPolicy: rejectAllApprovals(`${commandType} is read-only; unexpected approval requests fail the command.`),
-    });
+    let client;
     try {
-        await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, `${commandType}.start`);
+        client = await buildAndStartWireClient({
+            cwd: context.cwd,
+            env: context.env,
+            sessionId: reviewSessionId,
+            agentFile: agentProfile,
+            model: parsed.model,
+            thinking: parsed.thinking,
+            logPath,
+            approvalPolicy: rejectAllApprovals(`${commandType} is read-only; unexpected approval requests fail the command.`),
+        }, KIMI_START_TIMEOUT_MS, `${commandType}.start`);
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
         await withTimeout(client.initialize({
             protocol_version: "1.9",
@@ -93,7 +93,7 @@ export async function runReview(argv, context, commandType) {
         throw classified;
     }
     finally {
-        await client.close();
+        await client?.close();
         store.close();
     }
 }

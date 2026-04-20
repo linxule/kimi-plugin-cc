@@ -5,7 +5,7 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleBackgroundJobs } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
-import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_INITIALIZE_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
 import { buildSessionTitle } from "../session-title.js";
@@ -106,11 +106,17 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     let cancelEscalationTimer;
     let client;
     let signalsRegistered = false;
+    // Latches cancelling immediately and only fans out Wire-side cancellation if
+    // the client already exists. Registered BEFORE buildAndStartWireClient so a
+    // signal during the startup/retry window still sets the flag.
     const requestCancellation = () => {
-        if (cancelling || !client) {
+        if (cancelling) {
             return;
         }
         cancelling = true;
+        if (!client) {
+            return;
+        }
         client.beginCancellation();
         void client.cancel().catch(() => { });
         cancelEscalationTimer = setTimeout(() => {
@@ -118,32 +124,37 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         }, 1_500);
         cancelEscalationTimer.unref();
     };
+    process.once("SIGTERM", requestCancellation);
+    process.once("SIGINT", requestCancellation);
+    signalsRegistered = true;
     try {
         let approvalPolicy;
         try {
             approvalPolicy = await createRescueApprovalPolicy(job.cwd);
-            client = buildWireClient({
-                cwd: job.cwd,
-                env: context.env,
-                sessionId: job.kimi_session_id ?? randomUUID(),
-                agentFile: job.agent_profile,
-                model: job.model ?? undefined,
-                thinking: job.thinking ?? undefined,
-                logPath: job.stream_log_path,
-                approvalPolicy,
-            });
         }
         catch (error) {
             const classified = new RuntimeError("RESCUE_SETUP_FAILED", `Rescue setup failed: ${error.message ?? String(error)}`, "rescue.setup", error instanceof Error ? { cause: error } : undefined);
             return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
         }
-        process.once("SIGTERM", requestCancellation);
-        process.once("SIGINT", requestCancellation);
-        signalsRegistered = true;
+        client = await buildAndStartWireClient({
+            cwd: job.cwd,
+            env: context.env,
+            sessionId: job.kimi_session_id ?? randomUUID(),
+            agentFile: job.agent_profile,
+            model: job.model ?? undefined,
+            thinking: job.thinking ?? undefined,
+            logPath: job.stream_log_path,
+            approvalPolicy,
+        }, KIMI_START_TIMEOUT_MS, "rescue.start", { shouldRetry: () => !cancelling });
+        if (cancelling) {
+            // Signal fired during startup; the first attempt succeeded before the
+            // retry gate could short-circuit. Synthesize a throw so the normal
+            // cancellation teardown path runs.
+            throw new RuntimeError("RESCUE_CANCELLED_DURING_START", "Rescue cancelled during startup.", "rescue.start");
+        }
         if (options?.workerPid) {
             store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
         }
-        await withTimeout(client.start(), KIMI_START_TIMEOUT_MS, "rescue.start");
         store.updateRunningJob(job.job_id, {
             kimi_pid: client.getChildPid(),
             phase: "turn-running",

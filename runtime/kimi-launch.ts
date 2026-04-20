@@ -4,6 +4,8 @@ import path from "node:path";
 import type { ApprovalPolicy } from "./wire/approval-dispatcher.js";
 import { ApprovalDispatcher } from "./wire/approval-dispatcher.js";
 import { WireClient } from "./wire/client.js";
+import { RuntimeError } from "./errors.js";
+import { withTimeout } from "./kimi-timeouts.js";
 
 export interface KimiLaunchOptions {
   cwd: string;
@@ -37,6 +39,98 @@ export function buildWireClient(options: KimiLaunchOptions): WireClient {
     logPath: options.logPath,
     approvalDispatcher: new ApprovalDispatcher(options.approvalPolicy),
   });
+}
+
+/**
+ * Build a WireClient and start it, with one automatic retry on start-timeout.
+ *
+ * On attempt 1: builds a new WireClient, calls client.start() wrapped with
+ * withTimeout(). If that succeeds, returns the client.
+ *
+ * On a TIMEOUT RuntimeError whose stage matches `stage`: closes the first
+ * client (awaited, errors swallowed) and retries exactly once (attempt 2).
+ * If attempt 2 also fails — for any reason — the error is re-thrown.
+ *
+ * Non-timeout errors (spawn failures, auth errors, etc.) are re-thrown
+ * immediately after attempt 1 without retrying.
+ *
+ * Signal handling: SIGTERM/SIGINT handlers SHOULD be registered by the caller
+ * BEFORE calling this helper. Pass `shouldRetry: () => !cancelling` so the
+ * helper skips its retry window if the user has cancelled during startup.
+ * Callers must also check their cancellation flag after this helper returns
+ * successfully, because a signal can fire during the brief window between the
+ * first attempt succeeding and the caller regaining control.
+ *
+ * Escape hatch: set KIMI_PLUGIN_CC_DISABLE_START_RETRY=1 in the environment
+ * to disable the retry entirely (useful for tests that need strict
+ * single-attempt behavior or for users who want deterministic failure).
+ */
+export async function buildAndStartWireClient(
+  options: KimiLaunchOptions,
+  startTimeoutMs: number,
+  stage: string,
+  retryOptions?: { shouldRetry?: () => boolean },
+): Promise<WireClient> {
+  return buildAndStartWithFactory(
+    () => buildWireClient(options),
+    options.env,
+    startTimeoutMs,
+    stage,
+    retryOptions,
+  );
+}
+
+/**
+ * Internal implementation that accepts a client factory.
+ * Exported for unit testing only — production code should use buildAndStartWireClient.
+ */
+export async function buildAndStartWithFactory(
+  factory: () => WireClient,
+  env: NodeJS.ProcessEnv,
+  startTimeoutMs: number,
+  stage: string,
+  retryOptions?: { shouldRetry?: () => boolean },
+): Promise<WireClient> {
+  const retryDisabled = env.KIMI_PLUGIN_CC_DISABLE_START_RETRY === "1";
+
+  // Attempt 1
+  const client1 = factory();
+  try {
+    await withTimeout(client1.start(), startTimeoutMs, stage);
+    return client1;
+  } catch (err) {
+    // Always clean up the first process regardless of error type. The
+    // WireClient.closed flag ensures any in-flight spawn will be killed even
+    // if close() returns before this.child is assigned.
+    await client1.close().catch(() => {});
+
+    // Only retry on timeout errors from this specific stage; re-throw everything else
+    if (
+      retryDisabled ||
+      !(err instanceof RuntimeError) ||
+      err.code !== "TIMEOUT" ||
+      err.stage !== stage
+    ) {
+      throw err;
+    }
+
+    // Caller-controlled retry gate: e.g., skip the retry if the user has
+    // cancelled during the first attempt. Preserves the original timeout
+    // error for downstream classification.
+    if (retryOptions?.shouldRetry && !retryOptions.shouldRetry()) {
+      throw err;
+    }
+  }
+
+  // Attempt 2 (timeout retry only)
+  const client2 = factory();
+  try {
+    await withTimeout(client2.start(), startTimeoutMs, stage);
+    return client2;
+  } catch (err) {
+    await client2.close().catch(() => {});
+    throw err;
+  }
 }
 
 const runtimeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

@@ -54,6 +54,12 @@ export class WireClient {
   private readonly logPath?: string;
   private readonly approvalDispatcher: ApprovalDispatcher;
   private child?: ChildProcessWithoutNullStreams;
+  // closed latches true the first time close() is called. Guards the race where
+  // start() is mid-flight (e.g. awaiting mkdir or the spawn event) and close()
+  // is invoked before this.child has been assigned — start() checks this.closed
+  // at each async boundary and, if a child has already been spawn()ed but not
+  // yet bound to this.child, kills it in the "spawn" handler.
+  private closed = false;
   private readonly pendingRequests = new Map<string, PendingRequest>();
   private currentTurn?: TurnEventBuffer;
   private currentCommandType?: RuntimeCommandType;
@@ -75,6 +81,13 @@ export class WireClient {
   }
 
   async start(): Promise<void> {
+    if (this.closed) {
+      throw new RuntimeError(
+        "WIRE_CLIENT_CLOSED",
+        "Cannot start a closed wire client.",
+        "wire.start",
+      );
+    }
     if (this.child) {
       return;
     }
@@ -83,6 +96,15 @@ export class WireClient {
 
     if (this.logPath) {
       await mkdir(path.dirname(this.logPath), { recursive: true });
+    }
+
+    // Re-check after mkdir — close() may have latched the flag while we awaited.
+    if (this.closed) {
+      throw new RuntimeError(
+        "WIRE_CLIENT_CLOSED",
+        "Wire client was closed during startup.",
+        "wire.start",
+      );
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -95,6 +117,29 @@ export class WireClient {
       let settled = false;
 
       child.once("spawn", () => {
+        if (settled) {
+          return;
+        }
+        // If close() was called between the outer reject-of-start (e.g. via
+        // withTimeout) and the "spawn" event firing, the child exists but we
+        // never attached it to this.child. Kill it here to avoid a zombie and
+        // reject the start promise.
+        if (this.closed) {
+          settled = true;
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            // best-effort — child may already be dying
+          }
+          reject(
+            new RuntimeError(
+              "WIRE_CLIENT_CLOSED",
+              "Wire client was closed during spawn.",
+              "wire.start",
+            ),
+          );
+          return;
+        }
         settled = true;
         this.child = child;
         child.stdout.setEncoding("utf8");
@@ -132,6 +177,10 @@ export class WireClient {
   }
 
   async close(): Promise<void> {
+    // Latch the flag FIRST so any in-flight start() sees it at the next await
+    // boundary (post-mkdir re-check, or the "spawn" event handler).
+    this.closed = true;
+
     if (!this.child) {
       return;
     }
