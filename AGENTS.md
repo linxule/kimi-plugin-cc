@@ -15,7 +15,6 @@ Project context for coding agents working in this repository.
 commands/           Slash command markdown — thin wrappers over companion.sh
 agents/             Claude Code subagent definitions (kimi-rescue)
 hooks/              Stop hook for the review gate
-skills/             Claude Code skill definitions (kimi-review)
 scripts/            Shell entry points (companion.sh, review-gate-hook.sh)
 runtime/            TypeScript source — the real runtime
   ├── wire/         Wire client (JSON-RPC over stdio) + turn capture

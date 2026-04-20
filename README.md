@@ -56,7 +56,7 @@ Kimi opens the file, writes the fix, runs the relevant tests, and reports back. 
 | `/kimi:rescue` | Delegate real work — bug hunts, refactors, fixes | Yes (allowlisted) | Persists + resumable |
 | Review gate | Kimi checks Claude's work before stopping | No | Per-stop-event |
 
-The plugin ships four Claude Code **subagents** that the main thread can dispatch proactively via the Agent tool: `kimi-rescue` (write-capable delegation), plus `kimi-review`, `kimi-challenge`, and `kimi-ask` (read-only forwarders to the matching companion surfaces). A `kimi-review` **skill** also nudges Claude toward the review slash command when appropriate.
+The plugin ships four Claude Code **subagents** that the main thread can dispatch proactively via the Agent tool: `kimi-rescue` (write-capable delegation), plus `kimi-review`, `kimi-challenge`, and `kimi-ask` (read-only forwarders to the matching companion surfaces). Each agent's description is Kimi's own statement of what it's good for — Claude matches the moment and dispatches; no prescriptive skill manual in between.
 
 ## How it works
 
