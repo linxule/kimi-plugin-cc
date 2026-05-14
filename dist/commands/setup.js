@@ -9,6 +9,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { ApprovalDispatcher, rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { WireClient } from "../wire/client.js";
+import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
 export async function runSetup(argv, context) {
     const enableReviewGate = argv.includes("--enable-review-gate");
     const disableReviewGate = argv.includes("--disable-review-gate");
@@ -47,7 +48,7 @@ export async function runSetup(argv, context) {
     try {
         await wireClient.start();
         const initializeResult = await withTimeout(wireClient.initialize({
-            protocol_version: "1.9",
+            protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
             client: {
                 name: "kimi-plugin-cc",
                 version: KIMI_PLUGIN_CC_VERSION,

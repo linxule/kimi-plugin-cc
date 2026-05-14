@@ -5,6 +5,7 @@ import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
+import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_INITIALIZE_TIMEOUT_MS, KIMI_REVIEW_PROMPT_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout, } from "../kimi-timeouts.js";
 import { buildSessionTitle } from "../session-title.js";
@@ -69,7 +70,7 @@ export async function runReview(argv, context, commandType) {
         }, KIMI_START_TIMEOUT_MS, `${commandType}.start`);
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
         await withTimeout(client.initialize({
-            protocol_version: "1.9",
+            protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
             client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
             capabilities: {
                 supports_question: false,

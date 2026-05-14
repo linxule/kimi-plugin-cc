@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { ApprovalDispatcher, rejectAllApprovals } from "../runtime/wire/approval-dispatcher.js";
 import { WireClient } from "../runtime/wire/client.js";
+import { KIMI_WIRE_PROTOCOL_VERSION } from "../runtime/wire/types.js";
 
 const sessionId = `test-resume-${randomUUID()}`;
 
@@ -20,7 +21,7 @@ async function runTurn(label: string, prompt: string): Promise<string> {
     await client.start();
 
     await client.initialize({
-      protocol_version: "1.9",
+      protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
       client: { name: "wire-resume-test", version: "0.0.1" },
       capabilities: { supports_question: false, supports_plan_mode: false },
     });

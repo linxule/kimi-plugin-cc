@@ -23,6 +23,7 @@ import {
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
+import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
 
 const DEFAULT_REVIEW_GATE_MODEL = "kimi-for-coding";
 
@@ -155,7 +156,7 @@ async function executeReviewGate(
         await client.start();
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
         await client.initialize({
-          protocol_version: "1.9",
+          protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
           client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
           capabilities: {
             supports_question: false,

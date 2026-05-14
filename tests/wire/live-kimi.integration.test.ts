@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { ApprovalDispatcher, rejectAllApprovals } from "../../runtime/wire/approval-dispatcher.js";
 import { WireClient } from "../../runtime/wire/client.js";
+import { KIMI_WIRE_PROTOCOL_VERSION } from "../../runtime/wire/types.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const hasKimi = spawnSync("sh", ["-lc", "command -v kimi >/dev/null 2>&1"], {
@@ -30,7 +31,7 @@ describe("WireClient live Kimi integration", () => {
     try {
       await client.start();
       const result = await client.initialize({
-        protocol_version: "1.9",
+        protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
         client: { name: "kimi-plugin-cc-tests", version: "0.1.0" },
       });
 

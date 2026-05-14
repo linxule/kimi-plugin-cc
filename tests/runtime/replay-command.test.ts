@@ -9,6 +9,7 @@ import { JobStore, type JobRecord } from "../../runtime/job-store.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import { WireClient } from "../../runtime/wire/client.js";
 import { ApprovalDispatcher, rejectAllApprovals } from "../../runtime/wire/approval-dispatcher.js";
+import { KIMI_WIRE_PROTOCOL_VERSION } from "../../runtime/wire/types.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -161,7 +162,7 @@ describe("replay command", () => {
     try {
       await client.start();
       await client.initialize({
-        protocol_version: "1.9",
+        protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
         client: { name: "test-client", version: "0.1.0" },
       });
 
@@ -186,7 +187,71 @@ describe("replay command", () => {
       await cleanupTestPath(pluginDataRoot);
     }
   });
+  test("replay discards failed-attempt text when StepRetry is in the log", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("replay-step-retry");
+    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
+
+    try {
+      const promptId = "prompt-1";
+      const entries: { direction: "out" | "in"; message: unknown }[] = [
+        {
+          direction: "out",
+          message: {
+            jsonrpc: "2.0",
+            method: "prompt",
+            id: promptId,
+            params: { user_input: "tell me a fact" },
+          },
+        },
+        wireEvent("TurnBegin", { user_input: "tell me a fact" }),
+        wireEvent("StepBegin", { n: 1 }),
+        wireEvent("ContentPart", { type: "text", text: "bad partial draft" }),
+        wireEvent("StepRetry", {
+          n: 1,
+          next_attempt: 2,
+          max_attempts: 3,
+          wait_s: 0.5,
+          error_type: "RateLimitError",
+          status_code: 429,
+        }),
+        wireEvent("ContentPart", { type: "text", text: "good final answer" }),
+        wireEvent("TurnEnd", {}),
+        {
+          direction: "in",
+          message: {
+            jsonrpc: "2.0",
+            id: promptId,
+            result: { status: "finished" },
+          },
+        },
+      ];
+
+      await writeFile(
+        logPath,
+        entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+        "utf8",
+      );
+
+      const replayed = await replayJob(makeReplayJobRecord(logPath));
+
+      expect(replayed.rendered).toContain("good final answer");
+      expect(replayed.rendered).not.toContain("bad partial draft");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
 });
+
+function wireEvent(type: string, payload: Record<string, unknown>): { direction: "in"; message: unknown } {
+  return {
+    direction: "in",
+    message: {
+      jsonrpc: "2.0",
+      method: "event",
+      params: { type, payload },
+    },
+  };
+}
 
 function makeReplayJobRecord(logPath: string): JobRecord {
   const now = new Date().toISOString();

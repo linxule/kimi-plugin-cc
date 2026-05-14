@@ -30,6 +30,20 @@ export function observeTurnEvent(state, type, payload) {
             state.textAfterLastToolResult = [];
             break;
         }
+        case "StepRetry": {
+            // kimi-cli 1.42.0+ emits StepRetry before tenacity sleeps between attempts of the
+            // same step. The retried attempt re-streams ContentPart text under the same step
+            // number, so we drop whatever the failed attempt accumulated to avoid leaking
+            // partial output into either the per-step record or the final-text slice.
+            const rawStep = payload.n;
+            const retryStep = typeof rawStep === "number" ? rawStep : Number(rawStep);
+            const targetStep = Number.isFinite(retryStep) ? retryStep : state.currentStep;
+            const step = ensureStep(state, targetStep);
+            step.textParts = [];
+            state.currentStep = targetStep;
+            state.textAfterLastToolResult = [];
+            break;
+        }
         case "TurnEnd": {
             state.turnEnded = true;
             break;

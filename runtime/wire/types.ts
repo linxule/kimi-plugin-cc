@@ -1,3 +1,8 @@
+// Wire protocol version advertised to kimi-cli on the `initialize` handshake. Bumped to
+// "1.10" alongside the StepRetry event kimi-cli 1.42.0 added. Centralized so every
+// command-side initialize call agrees on a single value.
+export const KIMI_WIRE_PROTOCOL_VERSION = "1.10";
+
 export interface InitializeParams {
   protocol_version: string;
   client?: {
@@ -67,6 +72,18 @@ export interface WireRequest {
 }
 
 export type IncomingWireMessage = WireNotification | WireRequest;
+
+// Emitted by kimi-cli when a step's LLM call fails with a retryable error and tenacity is
+// about to sleep before re-running the attempt. The retried step reuses the same step
+// number, so any text streamed before the retry must be discarded.
+export interface StepRetryPayload {
+  n: number;
+  next_attempt: number;
+  max_attempts: number;
+  wait_s: number;
+  error_type: string;
+  status_code?: number | null;
+}
 
 export interface StepCapture {
   step: number;

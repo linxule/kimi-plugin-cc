@@ -46,7 +46,7 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
       jsonrpc: "2.0",
       id: request.id,
       result: {
-        protocol_version: "1.9",
+        protocol_version: "1.10",
         server: {
           name: "Mock Kimi",
           version: "1.34.0",
