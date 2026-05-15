@@ -22,6 +22,11 @@ See `client.ts` for the low-level read/write loop.
 `ToolResult` of the turn and commits the buffer on `TurnEnd`. Interrupted
 turns (no `TurnEnd`) are treated as malformed rather than parsing partial data.
 
+When kimi-cli (>= 1.42.0) emits `StepRetry`, the retried attempt re-streams
+its `ContentPart` text under the same step number. The capture state drops
+both the per-step buffer and the running final-text slice on retry so the
+failed attempt's partial output cannot reach the committed artifact.
+
 ## Approval dispatcher
 
 `approval-dispatcher.ts` is the policy hook for inbound `ApprovalRequest`
