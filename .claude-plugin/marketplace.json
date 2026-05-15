@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Single-plugin marketplace for kimi-plugin-cc.",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {
