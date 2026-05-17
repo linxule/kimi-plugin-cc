@@ -4,6 +4,12 @@ import path from "node:path";
 import { RuntimeError, formatError } from "../errors.js";
 import { TurnEventBuffer } from "./event-buffer.js";
 const DEFAULT_THINK_STALL_MS = 120_000;
+const DEFAULT_THINK_LOOP_DUPLICATE_THRESHOLD = 8;
+/** Maximum recognized ContentPart subtypes we treat as "forward progress". */
+const KNOWN_CONTENT_PART_SUBTYPES = new Set([
+    "text",
+    "think",
+]);
 export class WireClient {
     cwd;
     env;
@@ -30,8 +36,24 @@ export class WireClient {
     processingChain = Promise.resolve();
     // Think-stall watchdog state (see WireClientOptions.thinkStallMs).
     thinkStallMs;
+    thinkLoopDuplicateThreshold;
     thinkStallTimer;
     thinkStalled = false;
+    thinkLoopDetected = false;
+    thinkPayloadHashes = [];
+    // Guards against double `cancel` JSON-RPC requests when /kimi:cancel and
+    // the think-stall watchdog fire concurrently (Claude reviewer caught the
+    // race in v0.3.1 review). Set when EITHER path issues a wire-side cancel.
+    cancelInFlight = false;
+    // Forward-compat telemetry: log a warning the first time we see a
+    // ContentPart subtype that isn't in KNOWN_CONTENT_PART_SUBTYPES so
+    // operators know the watchdog may be miscategorizing it (Kimi
+    // adversarial reviewer flagged the `payload.type === "think"`
+    // hard-code as a forward-compat hazard).
+    warnedUnknownContentPartSubtypes = new Set();
+    // v0.3.3 (Claude M3): one-shot warning for payload-shape drift on
+    // `type:"think"` ContentParts that lack a recognized text field.
+    warnedUnknownThinkPayloadShape = false;
     constructor(options) {
         this.cwd = options.cwd;
         this.env = { ...process.env, ...options.env };
@@ -40,6 +62,8 @@ export class WireClient {
         this.logPath = options.logPath;
         this.approvalDispatcher = options.approvalDispatcher;
         this.thinkStallMs = options.thinkStallMs ?? DEFAULT_THINK_STALL_MS;
+        this.thinkLoopDuplicateThreshold =
+            options.thinkLoopDuplicateThreshold ?? DEFAULT_THINK_LOOP_DUPLICATE_THRESHOLD;
     }
     async start() {
         if (this.closed) {
@@ -143,16 +167,31 @@ export class WireClient {
         return this.sendRequest("initialize", params);
     }
     async prompt(userInput, commandType) {
+        // v0.3.2: guard against concurrent callers. currentTurn, thinkStalled,
+        // and the watchdog timer are single-prompt state — a second concurrent
+        // call would clobber the first's turn buffer and timer. Codex reviewer
+        // caught this gap in the v0.3.1 watchdog review.
+        if (this.currentTurn) {
+            throw new RuntimeError("WIRE_PROMPT_CONCURRENT", "Wire client cannot run two prompts concurrently; await the first prompt before calling again.", "wire.prompt");
+        }
         this.currentTurn = new TurnEventBuffer();
         this.currentCommandType = commandType;
         this.approvalFailure = undefined;
         this.rejectApprovals = false;
         this.thinkStalled = false;
+        this.thinkLoopDetected = false;
+        this.cancelInFlight = false;
+        this.thinkPayloadHashes = [];
         this.armThinkStallWatchdog();
         try {
             const result = await this.sendRequest("prompt", { user_input: userInput });
             if (this.approvalFailure) {
                 throw this.approvalFailure;
+            }
+            if (this.thinkLoopDetected) {
+                throw new RuntimeError("KIMI_THINK_LOOP_DETECTED", `Kimi emitted ${this.thinkLoopDuplicateThreshold} consecutive identical \`think\` payloads; ` +
+                    `cancelled to recover the session. Likely an upstream reasoning-loop bug (kimi-cli ≥1.44.0). ` +
+                    `Retry with --no-thinking or a more focused prompt.`, "wire.prompt");
             }
             if (this.thinkStalled) {
                 throw new RuntimeError("KIMI_THINK_STALLED", `Kimi reasoning stream produced only \`think\` events for over ${this.thinkStallMs}ms; ` +
@@ -174,12 +213,107 @@ export class WireClient {
         }
         this.thinkStallTimer = setTimeout(() => {
             this.thinkStalled = true;
-            // Best-effort cancel; the server emits TurnEnd + cancelled PromptResult
-            // via its own finally, which unblocks our pending prompt request. If
-            // cancel itself hangs, the outer withTimeout still fires.
-            void this.cancel().catch(() => { });
+            process.stderr.write(`[kimi-plugin-cc] think-stall watchdog fired after ${this.thinkStallMs}ms with no non-think events; cancelling.\n`);
+            this.maybeCancelInFlight();
         }, this.thinkStallMs);
         this.thinkStallTimer.unref();
+    }
+    /**
+     * Internal entry point for the stall watchdog and loop detector to
+     * fire a wire-side cancel without awaiting. The flag itself is owned
+     * by `cancel()`; this method exists to wrap the fire-and-forget
+     * pattern and the early-exit when a cancel is already in-flight
+     * (avoids the noise of `cancel()`'s redundant short-circuit log).
+     */
+    maybeCancelInFlight() {
+        if (this.cancelInFlight) {
+            return;
+        }
+        void this.cancel().catch(() => { });
+    }
+    /**
+     * Route a `ContentPart{type:"think"}` payload to the loop detector.
+     * v0.3.3 (Claude M3) adds payload-shape surveillance: if the payload
+     * carries no recognized text field, emit a one-shot warning so
+     * operators see drift in the same way the subtype warning surfaces
+     * type-level drift. The time-based watchdog still fires at
+     * `thinkStallMs` either way.
+     */
+    observeThinkPart(payload) {
+        const text = extractThinkPayloadText(payload);
+        if (text === null) {
+            if (!this.warnedUnknownThinkPayloadShape) {
+                this.warnedUnknownThinkPayloadShape = true;
+                process.stderr.write(`[kimi-plugin-cc] think ContentPart payload missing recognized text field; loop detector cannot hash it. Time-based watchdog (${this.thinkStallMs}ms) still active.\n`);
+            }
+            return;
+        }
+        this.observeThinkPayload(text);
+    }
+    /**
+     * Forward-compat surveillance: emit a one-shot warning the first time
+     * we see a ContentPart subtype that isn't in the known set, so the
+     * watchdog isn't silently miscategorizing it. Kimi adversarial
+     * reviewer flagged the v0.3.1 watchdog's hard-coded `"think"` literal
+     * as a hazard if kimi-cli 1.45+ renames the field.
+     */
+    warnOnUnknownContentPartSubtype(type, payload) {
+        if (type !== "ContentPart") {
+            return;
+        }
+        const subtype = typeof payload.type === "string" ? payload.type : undefined;
+        if (!subtype || KNOWN_CONTENT_PART_SUBTYPES.has(subtype)) {
+            return;
+        }
+        if (this.warnedUnknownContentPartSubtypes.has(subtype)) {
+            return;
+        }
+        this.warnedUnknownContentPartSubtypes.add(subtype);
+        process.stderr.write(`[kimi-plugin-cc] unrecognized ContentPart subtype '${subtype}'; think-stall watchdog will treat it as forward progress (re-arm). If this is a new reasoning event, update KNOWN_CONTENT_PART_SUBTYPES.\n`);
+    }
+    /**
+     * Hash a string to a 32-bit signed integer. Used by the duplicate-think
+     * detector — collision rate is negligible for streaming reasoning
+     * chunks, and the alternative (full payload retention) would balloon
+     * memory on long thinking-on turns.
+     */
+    hashThinkPayload(text) {
+        let hash = 5381;
+        for (let i = 0; i < text.length; i += 1) {
+            hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+        }
+        return hash;
+    }
+    /**
+     * Detect tight reasoning loops by tracking the last
+     * THINK_LOOP_DUPLICATE_THRESHOLD think-payload hashes. If they're all
+     * identical, fire `KIMI_THINK_LOOP_DETECTED` immediately. Catches the
+     * kimi-cli 1.44.0 bug class in seconds rather than the 120s stall
+     * timer's wall-clock cliff.
+     */
+    observeThinkPayload(text) {
+        if (this.thinkLoopDetected || this.thinkStalled) {
+            return;
+        }
+        const threshold = this.thinkLoopDuplicateThreshold;
+        if (threshold <= 0) {
+            // Loop detection disabled — time-based stall watchdog still runs.
+            return;
+        }
+        const hash = this.hashThinkPayload(text);
+        this.thinkPayloadHashes.push(hash);
+        if (this.thinkPayloadHashes.length > threshold) {
+            this.thinkPayloadHashes.shift();
+        }
+        if (this.thinkPayloadHashes.length < threshold) {
+            return;
+        }
+        const first = this.thinkPayloadHashes[0];
+        if (this.thinkPayloadHashes.every((h) => h === first)) {
+            this.thinkLoopDetected = true;
+            process.stderr.write(`[kimi-plugin-cc] think-loop detected: ${threshold} consecutive identical think payloads; cancelling.\n`);
+            this.maybeCancelInFlight();
+        }
     }
     disarmThinkStallWatchdog() {
         if (this.thinkStallTimer) {
@@ -187,13 +321,30 @@ export class WireClient {
             this.thinkStallTimer = undefined;
         }
     }
-    /** Test seam: visible for unit tests that want to fast-forward the watchdog. */
-    _fireThinkStallWatchdog() {
-        this.thinkStalled = true;
-        void this.cancel().catch(() => { });
-    }
     async cancel() {
-        return this.sendRequest("cancel", {});
+        // v0.3.3: single chokepoint for wire-side cancellation. Coalesces
+        // BOTH directions of the watchdog/external-cancel race that Claude
+        // and Kimi flagged in the v0.3.1 review:
+        //
+        //   - watchdog → external: external cancel() consults the flag and
+        //     short-circuits to an empty CancelResult. Pre-v0.3.3 it sent a
+        //     second JSON-RPC (benign per Kimi server, but wasteful).
+        //   - external → watchdog: maybeCancelInFlight() already consults
+        //     the flag set below.
+        //
+        // The flag is set ONLY after sendRequest dispatches successfully
+        // (Kimi defect MOD): pre-v0.3.3 the flag was set unconditionally; if
+        // sendRequest threw (e.g. WIRE_NOT_STARTED when child is null), the
+        // flag stayed `true` and silently suppressed every subsequent
+        // cancel attempt — including legitimate ones from a re-armed
+        // prompt(). Set-after-success means a throw leaves the flag clear
+        // so the next caller can retry.
+        if (this.cancelInFlight) {
+            return {};
+        }
+        const result = await this.sendRequest("cancel", {});
+        this.cancelInFlight = true;
+        return result;
     }
     beginCancellation() {
         this.rejectApprovals = true;
@@ -248,10 +399,22 @@ export class WireClient {
         }
         if ("method" in message) {
             if (message.method === "event") {
-                // Think-stall watchdog: any event that ISN'T a `ContentPart{type:"think"}`
-                // signals forward progress, so re-arm the timer. (Think parts alone are
-                // the kimi-cli 1.44.0 reasoning-only loop signature — see task #41.)
-                if (!isThinkOnlyEvent(message.params.type, message.params.payload)) {
+                // Watchdog routing: any event that ISN'T a `ContentPart{type:"think"}`
+                // counts as forward progress and re-arms the stall timer. Think
+                // payloads feed the duplicate-content detector — if N consecutive
+                // are identical we fire KIMI_THINK_LOOP_DETECTED immediately
+                // instead of waiting for thinkStallMs (see v0.3.1 review).
+                this.warnOnUnknownContentPartSubtype(message.params.type, message.params.payload);
+                if (isThinkOnlyEvent(message.params.type, message.params.payload)) {
+                    this.observeThinkPart(message.params.payload);
+                }
+                else {
+                    // v0.3.3 (Codex MOD): any forward-progress event also clears
+                    // the duplicate-think buffer so `[think_A, text, think_A,
+                    // text, ...]` cannot accumulate enough identical hashes to
+                    // trip KIMI_THINK_LOOP_DETECTED. The "consecutive" semantics
+                    // in the loop-detector log now matches what the code does.
+                    this.thinkPayloadHashes = [];
                     this.armThinkStallWatchdog();
                 }
                 this.currentTurn?.observeEvent(message.params.type, message.params.payload);
@@ -421,6 +584,19 @@ function isThinkOnlyEvent(type, payload) {
         return false;
     }
     return payload.type === "think";
+}
+/**
+ * Extract the textual content from a think `ContentPart` payload for
+ * hashing by the duplicate-content detector. Returns null when the
+ * payload shape is unfamiliar (e.g., Kimi added a `delta` field instead
+ * of `text` — caller skips loop-detection in that case but still
+ * benefits from the time-based watchdog).
+ */
+function extractThinkPayloadText(payload) {
+    if (typeof payload.text === "string") {
+        return payload.text;
+    }
+    return null;
 }
 function parseApprovalRequestPayload(payload) {
     if (typeof payload.id !== "string" ||

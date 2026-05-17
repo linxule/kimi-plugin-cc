@@ -59,14 +59,36 @@ export class JobStore {
   private readonly db: SqliteAdapter;
 
   constructor(paths: PluginPaths) {
+    // v0.3.3 final audit (Claude H1.1 + Kimi defect HIGH #1): open the
+    // adapter into a local before assigning to this.db so the catch
+    // can release the handle even if pragma throws AFTER the adapter
+    // opened. Pre-audit fix wrapped only the schema-migration block;
+    // a `journal_mode = WAL` failure on a read-only mount would leak
+    // the open handle because the constructor exits via throw before
+    // `new JobStore` can return a reference for withJobStore to close.
+    let db: SqliteAdapter | undefined;
     try {
-      this.db = createSqliteAdapter(paths.stateDbPath);
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("busy_timeout = 5000");
+      db = createSqliteAdapter(paths.stateDbPath);
+      db.pragma("journal_mode = WAL");
+      db.pragma("busy_timeout = 5000");
     } catch (error) {
+      try {
+        db?.close();
+      } catch {
+        // Best-effort — original error takes priority over close failure.
+      }
       throw translateSqliteError(error);
     }
-    this.db.exec(`
+    this.db = db;
+    // v0.3.3 (Claude H1): every `this.db.exec` / `tableHasColumn` below can
+    // throw on a corrupt DB, full disk, mid-migration failure, etc. Before
+    // this wrap, a throw here leaked the SQLite handle because the
+    // constructor exited with `this.db` open but the new JobStore reference
+    // never reached the caller. Catch internally, close the adapter, and
+    // rethrow the translated error so withJobStore's `store?.close()`
+    // path doesn't end up as the only line of defense.
+    try {
+      this.db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
         job_id TEXT PRIMARY KEY,
         repo_id TEXT NOT NULL,
@@ -145,6 +167,17 @@ export class JobStore {
       -- 0.1.6 migration: rename adversarial_review to challenge
       UPDATE jobs SET command_type = 'challenge' WHERE command_type = 'adversarial_review';
     `);
+    } catch (error) {
+      // Migration failed — close the adapter so the OS handle is released
+      // before propagating. Wrap close() in its own try so a double-fault
+      // doesn't mask the original migration error.
+      try {
+        this.db.close();
+      } catch {
+        // intentionally swallow — original error takes priority
+      }
+      throw translateSqliteError(error);
+    }
   }
 
   close(): void {
@@ -609,32 +642,43 @@ function translateSqliteError(error: unknown): RuntimeError {
 }
 
 /**
- * Run a function with a temporary `JobStore` whose handle is guaranteed
- * to be closed even if the constructor or the function throws.
+ * Run a function with a temporary `JobStore` whose handle is closed when
+ * the function returns OR when the function throws after construction
+ * succeeded.
  *
- * v0.3.1 introduces this helper to consolidate the repeated
+ * Note on construction failures (v0.3.3): if `new JobStore(paths)` itself
+ * throws, this helper cannot close anything — the constructor's own
+ * try/catch (lines 61–166) is what owns adapter-handle cleanup on
+ * mid-migration failures. The helper handles the common case of "store
+ * opened cleanly, function threw"; JobStore handles "open or migrate
+ * failed mid-construction." Together they make the leak class
+ * unreachable.
+ *
+ * Consolidates the repeated
  *
  *     const store = new JobStore(paths);
  *     try { ... } finally { store.close(); }
  *
- * dance that every command file used to copy. Pre-v0.2.4 review-gate.ts
- * shipped a regression because the constructor was outside the try; this
- * helper makes that class of leak impossible.
- *
- * For the rare case where the caller needs to keep a reference to the
- * store past the function body (e.g., async cancel handlers that close
- * elsewhere), continue using the explicit `new JobStore` + try/finally
- * idiom — `withJobStore` is for the common single-scope case.
+ * dance that every command file used to copy. For the rare case where
+ * the caller needs to keep a reference to the store past the function
+ * body (e.g., async cancel handlers that close elsewhere), continue
+ * using the explicit `new JobStore` + try/finally idiom — `withJobStore`
+ * is for the common single-scope case.
  */
 export async function withJobStore<T>(
   paths: PluginPaths,
   fn: (store: JobStore) => Promise<T>,
 ): Promise<T> {
-  const store = new JobStore(paths);
+  // v0.3.2: construct inside the try so a constructor throw that opens
+  // the SQLite adapter and then fails during pragma/exec doesn't leak
+  // the handle. Pre-v0.3.2 the JSDoc claimed this safety but `new
+  // JobStore` lived above the try block.
+  let store: JobStore | undefined;
   try {
+    store = new JobStore(paths);
     return await fn(store);
   } finally {
-    store.close();
+    store?.close();
   }
 }
 
@@ -643,10 +687,11 @@ export function withJobStoreSync<T>(
   paths: PluginPaths,
   fn: (store: JobStore) => T,
 ): T {
-  const store = new JobStore(paths);
+  let store: JobStore | undefined;
   try {
+    store = new JobStore(paths);
     return fn(store);
   } finally {
-    store.close();
+    store?.close();
   }
 }

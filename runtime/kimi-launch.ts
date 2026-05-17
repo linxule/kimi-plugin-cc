@@ -38,17 +38,26 @@ export function buildWireClient(options: KimiLaunchOptions): WireClient {
     args,
     logPath: options.logPath,
     approvalDispatcher: new ApprovalDispatcher(options.approvalPolicy),
-    thinkStallMs: resolveThinkStallMs(options.env),
+    thinkStallMs: resolveNonNegativeIntEnv(options.env, "KIMI_PLUGIN_CC_THINK_STALL_MS"),
+    thinkLoopDuplicateThreshold: resolveNonNegativeIntEnv(
+      options.env,
+      "KIMI_PLUGIN_CC_THINK_LOOP_DUPLICATES",
+    ),
   });
 }
 
 /**
- * Resolve the think-stall watchdog threshold from env. Accepts
- * `KIMI_PLUGIN_CC_THINK_STALL_MS` (positive integer, 0 to disable, falls
- * back to the WireClient default of 120s when unset or unparseable).
+ * Generic non-negative-integer env reader. Returns undefined when the
+ * env var is unset or unparseable so the WireClient default applies.
+ * Used for both the think-stall watchdog threshold
+ * (`KIMI_PLUGIN_CC_THINK_STALL_MS`) and the duplicate-loop count
+ * (`KIMI_PLUGIN_CC_THINK_LOOP_DUPLICATES`).
  */
-function resolveThinkStallMs(env: NodeJS.ProcessEnv): number | undefined {
-  const raw = env.KIMI_PLUGIN_CC_THINK_STALL_MS;
+function resolveNonNegativeIntEnv(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): number | undefined {
+  const raw = env[name];
   if (!raw) {
     return undefined;
   }

@@ -44,11 +44,12 @@ async function withMockClient(
 
 describe("WireClient interrupted-turn handling", () => {
   test("think-stall watchdog cancels reasoning-only streams (KIMI_THINK_STALLED)", async () => {
-    // v0.3.1 task #41: kimi-cli 1.44.0 thinking-on enters indefinite
-    // reasoning-only loops where the upstream HTTP stream never
-    // terminates. Client-side watchdog detects only-`think`-events for
-    // thinkStallMs, sends cancel, finalizes the pending prompt with
-    // KIMI_THINK_STALLED instead of waiting for the global timeout.
+    // v0.3.1 task #41 (revised in v0.3.3 by Claude H2): the mock now
+    // emits diversified think payloads (`chunk-${n++}`) so the duplicate
+    // detector cannot win the race against the time-based watchdog.
+    // Pre-v0.3.3 the mock emitted identical payloads, so this test
+    // accidentally rode the loop detector when the test name promised
+    // the stall watchdog. The loop detector has its own test below.
     const pluginDataRoot = await createTestPluginDataRoot("wire-think-stall");
     const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
 
@@ -64,8 +65,6 @@ describe("WireClient interrupted-turn handling", () => {
       approvalDispatcher: new ApprovalDispatcher(
         rejectAllApprovals("unexpected approval request in test"),
       ),
-      // 250ms — keeps the test fast while still exercising the timer arm /
-      // disarm / cancel-flow. Real default is 120_000.
       thinkStallMs: 250,
     });
 
@@ -78,6 +77,87 @@ describe("WireClient interrupted-turn handling", () => {
       await expect(client.prompt("think please", "setup")).rejects.toThrow(
         "Kimi reasoning stream produced only `think` events",
       );
+    } finally {
+      await client.close();
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("loop detector fires KIMI_THINK_LOOP_DETECTED on consecutive identical think payloads", async () => {
+    // v0.3.3 (Claude M2): separate scenario from think-stall, asserts
+    // the duplicate-content detector fires INDEPENDENTLY of the
+    // time-based watchdog. thinkStallMs raised to a value that the
+    // duplicate detector should comfortably beat.
+    const pluginDataRoot = await createTestPluginDataRoot("wire-think-loop");
+    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
+
+    const client = new WireClient({
+      cwd: repoRoot,
+      command: "bun",
+      args: ["run", "tests/helpers/mock-wire-server.ts", "think-loop"],
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      },
+      logPath,
+      approvalDispatcher: new ApprovalDispatcher(
+        rejectAllApprovals("unexpected approval request in test"),
+      ),
+      // 60s — comfortably beyond the duplicate detector window. If
+      // the loop detector regresses, this test will hang and CI will
+      // notice the time excess rather than masking it as a stall.
+      thinkStallMs: 60_000,
+      thinkLoopDuplicateThreshold: 8,
+    });
+
+    try {
+      await client.start();
+      await client.initialize({
+        protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
+        client: { name: "test-client", version: "0.1.0" },
+      });
+      await expect(client.prompt("loop please", "setup")).rejects.toThrow(
+        "consecutive identical `think` payloads",
+      );
+    } finally {
+      await client.close();
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("concurrent prompt() rejects the second caller with WIRE_PROMPT_CONCURRENT", async () => {
+    // v0.3.3 (Claude M2): direct coverage for the v0.3.2 guard.
+    const pluginDataRoot = await createTestPluginDataRoot("wire-concurrent");
+    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
+
+    const client = new WireClient({
+      cwd: repoRoot,
+      command: "bun",
+      args: ["run", "tests/helpers/mock-wire-server.ts", "think-stall"],
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      },
+      logPath,
+      approvalDispatcher: new ApprovalDispatcher(
+        rejectAllApprovals("unexpected approval request in test"),
+      ),
+      thinkStallMs: 250,
+    });
+
+    try {
+      await client.start();
+      await client.initialize({
+        protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
+        client: { name: "test-client", version: "0.1.0" },
+      });
+      const first = client.prompt("first", "setup").catch(() => {});
+      // Yield one microtask so the first prompt assigns currentTurn.
+      await new Promise((resolve) => setImmediate(resolve));
+      await expect(client.prompt("second", "setup")).rejects.toThrow(
+        "Wire client cannot run two prompts concurrently",
+      );
+      await first;
     } finally {
       await client.close();
       await cleanupTestPath(pluginDataRoot);

@@ -77,7 +77,9 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
     });
 
     if (
-      (scenario === "rescue-cancel-turn" || scenario === "think-stall") &&
+      (scenario === "rescue-cancel-turn" ||
+        scenario === "think-stall" ||
+        scenario === "think-loop") &&
       pendingPromptId
     ) {
       sendEvent("TurnEnd", {});
@@ -152,11 +154,31 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
       return;
     }
     case "think-stall": {
-      // Emit only ContentPart{type:"think"} events forever and never send
-      // PromptResult. The wire client's think-stall watchdog (v0.3.1)
-      // should detect the stall, call `cancel`, and finalize with
-      // KIMI_THINK_STALLED. After cancel arrives we honor it like the
-      // real Kimi server: emit TurnEnd + return cancelled PromptResult.
+      // Emit ContentPart{type:"think"} events forever and never send
+      // PromptResult. The mock used to emit IDENTICAL text payloads, which
+      // tripped the v0.3.2 duplicate-content detector before the
+      // time-based stall watchdog could fire — Claude H2 caught the test
+      // race in v0.3.2 review. v0.3.3 diversifies the payloads so this
+      // scenario exercises ONLY the time-based watchdog.
+      pendingPromptId = request.id;
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      sendEvent("StepBegin", { n: 1 });
+      let chunkCount = 0;
+      const interval = setInterval(() => {
+        if (pendingPromptId === null) {
+          clearInterval(interval);
+          return;
+        }
+        sendEvent("ContentPart", { type: "think", text: `chunk-${chunkCount++}` });
+      }, 5);
+      interval.unref();
+      return;
+    }
+    case "think-loop": {
+      // Emit IDENTICAL ContentPart{type:"think"} events. The duplicate
+      // detector should fire KIMI_THINK_LOOP_DETECTED after N matching
+      // payload hashes (default 8). Used by the v0.3.3 test that
+      // verifies the loop detector independently of the stall timer.
       pendingPromptId = request.id;
       sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
       sendEvent("StepBegin", { n: 1 });
@@ -165,9 +187,26 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
           clearInterval(interval);
           return;
         }
-        sendEvent("ContentPart", { type: "think", text: "..." });
+        sendEvent("ContentPart", { type: "think", text: "stuck-payload" });
       }, 5);
       interval.unref();
+      return;
+    }
+    case "unknown-subtype": {
+      // Emits a single ContentPart with an unrecognized subtype, then
+      // finishes cleanly. Used to verify the forward-compat warning
+      // fires exactly once per subtype.
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      sendEvent("StepBegin", { n: 1 });
+      sendEvent("ContentPart", { type: "speculation", text: "future-event" });
+      sendEvent("ContentPart", { type: "speculation", text: "future-event-2" });
+      sendEvent("ContentPart", { type: "text", text: "done" });
+      sendEvent("TurnEnd", {});
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { status: "finished" },
+      });
       return;
     }
     case "missing-turn-end": {
