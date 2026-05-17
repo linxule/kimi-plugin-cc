@@ -1,7 +1,7 @@
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
-import { JobStore } from "../job-store.js";
+import { withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 export async function runStatus(argv, context) {
@@ -9,8 +9,7 @@ export async function runStatus(argv, context) {
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
-    const store = new JobStore(paths);
-    try {
+    return withJobStore(paths, async (store) => {
         await sweepStaleJobs(store, paths);
         const job = parsed.jobId
             ? store.getJob(parsed.jobId)
@@ -22,8 +21,5 @@ export async function runStatus(argv, context) {
             throw new RuntimeError("JOB_NOT_FOUND", "No matching job was found for status.", "status.lookup");
         }
         return `${JSON.stringify(job, null, 2)}\n`;
-    }
-    finally {
-        store.close();
-    }
+    });
 }

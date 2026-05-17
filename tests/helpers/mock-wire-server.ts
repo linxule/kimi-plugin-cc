@@ -76,7 +76,10 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
       result: {},
     });
 
-    if (scenario === "rescue-cancel-turn" && pendingPromptId) {
+    if (
+      (scenario === "rescue-cancel-turn" || scenario === "think-stall") &&
+      pendingPromptId
+    ) {
       sendEvent("TurnEnd", {});
       send({
         jsonrpc: "2.0",
@@ -146,6 +149,25 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
           },
         },
       });
+      return;
+    }
+    case "think-stall": {
+      // Emit only ContentPart{type:"think"} events forever and never send
+      // PromptResult. The wire client's think-stall watchdog (v0.3.1)
+      // should detect the stall, call `cancel`, and finalize with
+      // KIMI_THINK_STALLED. After cancel arrives we honor it like the
+      // real Kimi server: emit TurnEnd + return cancelled PromptResult.
+      pendingPromptId = request.id;
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      sendEvent("StepBegin", { n: 1 });
+      const interval = setInterval(() => {
+        if (pendingPromptId === null) {
+          clearInterval(interval);
+          return;
+        }
+        sendEvent("ContentPart", { type: "think", text: "..." });
+      }, 5);
+      interval.unref();
       return;
     }
     case "missing-turn-end": {

@@ -607,3 +607,46 @@ function translateSqliteError(error: unknown): RuntimeError {
     error instanceof Error ? { cause: error } : undefined,
   );
 }
+
+/**
+ * Run a function with a temporary `JobStore` whose handle is guaranteed
+ * to be closed even if the constructor or the function throws.
+ *
+ * v0.3.1 introduces this helper to consolidate the repeated
+ *
+ *     const store = new JobStore(paths);
+ *     try { ... } finally { store.close(); }
+ *
+ * dance that every command file used to copy. Pre-v0.2.4 review-gate.ts
+ * shipped a regression because the constructor was outside the try; this
+ * helper makes that class of leak impossible.
+ *
+ * For the rare case where the caller needs to keep a reference to the
+ * store past the function body (e.g., async cancel handlers that close
+ * elsewhere), continue using the explicit `new JobStore` + try/finally
+ * idiom — `withJobStore` is for the common single-scope case.
+ */
+export async function withJobStore<T>(
+  paths: PluginPaths,
+  fn: (store: JobStore) => Promise<T>,
+): Promise<T> {
+  const store = new JobStore(paths);
+  try {
+    return await fn(store);
+  } finally {
+    store.close();
+  }
+}
+
+/** Synchronous companion to `withJobStore` for callers that don't await inside. */
+export function withJobStoreSync<T>(
+  paths: PluginPaths,
+  fn: (store: JobStore) => T,
+): T {
+  const store = new JobStore(paths);
+  try {
+    return fn(store);
+  } finally {
+    store.close();
+  }
+}

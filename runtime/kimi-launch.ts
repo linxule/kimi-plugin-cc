@@ -38,7 +38,25 @@ export function buildWireClient(options: KimiLaunchOptions): WireClient {
     args,
     logPath: options.logPath,
     approvalDispatcher: new ApprovalDispatcher(options.approvalPolicy),
+    thinkStallMs: resolveThinkStallMs(options.env),
   });
+}
+
+/**
+ * Resolve the think-stall watchdog threshold from env. Accepts
+ * `KIMI_PLUGIN_CC_THINK_STALL_MS` (positive integer, 0 to disable, falls
+ * back to the WireClient default of 120s when unset or unparseable).
+ */
+function resolveThinkStallMs(env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env.KIMI_PLUGIN_CC_THINK_STALL_MS;
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
 }
 
 /**

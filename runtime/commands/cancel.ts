@@ -3,7 +3,7 @@ import process from "node:process";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
-import { JobStore } from "../job-store.js";
+import { JobStore, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import type { CommandContext } from "../types.js";
@@ -72,23 +72,22 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       // pre-mark failure, run the SIGTERM→SIGKILL escalation unconditionally,
       // and rethrow at the end so the user sees the underlying error.
       let preMarkError: unknown;
-      const preMarkStore = new JobStore(paths);
       try {
-        await markJobCancelled(
-          preMarkStore,
-          paths,
-          job,
-          "review_gate cancelled by user request.",
-          new RuntimeError(
-            "REVIEW_GATE_CANCELLED",
+        await withJobStore(paths, async (preMarkStore) => {
+          await markJobCancelled(
+            preMarkStore,
+            paths,
+            job,
             "review_gate cancelled by user request.",
-            "cancel.runtime",
-          ),
-        );
+            new RuntimeError(
+              "REVIEW_GATE_CANCELLED",
+              "review_gate cancelled by user request.",
+              "cancel.runtime",
+            ),
+          );
+        });
       } catch (error) {
         preMarkError = error;
-      } finally {
-        preMarkStore.close();
       }
 
       signalJobProcesses(job, "SIGTERM");
@@ -129,8 +128,7 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
 
     signalJobProcesses(job, "SIGKILL");
 
-    const forcedStore = new JobStore(paths);
-    try {
+    await withJobStore(paths, async (forcedStore) => {
       const current = forcedStore.getJob(job.job_id);
       if (current?.status === "running") {
         await markJobCancelled(
@@ -142,9 +140,7 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
           current.command_type === "ask" || current.command_type === "rescue" ? { phase: "cancelled" } : undefined,
         );
       }
-    } finally {
-      forcedStore.close();
-    }
+    });
 
     return `${JSON.stringify(
       {

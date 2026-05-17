@@ -1,7 +1,7 @@
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
-import { JobStore } from "../job-store.js";
+import { withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import { readArtifact, renderTerminalJobArtifact } from "../render.js";
@@ -12,9 +12,8 @@ export async function runResult(argv: string[], context: CommandContext): Promis
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
-  const store = new JobStore(paths);
 
-  try {
+  return withJobStore(paths, async (store) => {
     await sweepStaleJobs(store, paths);
 
     const job = parsed.jobId
@@ -38,7 +37,5 @@ export async function runResult(argv: string[], context: CommandContext): Promis
     }
 
     return readArtifact(job.final_output_path);
-  } finally {
-    store.close();
-  }
+  });
 }

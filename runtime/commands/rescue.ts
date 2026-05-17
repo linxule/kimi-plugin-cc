@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { createCancellationHandlers } from "../cancellation.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
@@ -125,32 +126,11 @@ export async function executeRescueJob(
     throw new RuntimeError("JOB_NOT_FOUND", `Rescue job ${jobId} was not found.`, "rescue.worker");
   }
 
-  let cancelling = false;
-  let cancelEscalationTimer: ReturnType<typeof setTimeout> | undefined;
+  // v0.3.1: shared cancellation handler — registers SIGTERM/SIGINT
+  // immediately so a signal during wire-client startup still latches
+  // cancelling=true. See runtime/cancellation.ts.
+  const handlers = createCancellationHandlers({ escalationMs: 1_500 });
   let client: WireClient | undefined;
-  let signalsRegistered = false;
-  // Latches cancelling immediately and only fans out Wire-side cancellation if
-  // the client already exists. Registered BEFORE buildAndStartWireClient so a
-  // signal during the startup/retry window still sets the flag.
-  const requestCancellation = () => {
-    if (cancelling) {
-      return;
-    }
-    cancelling = true;
-    if (!client) {
-      return;
-    }
-    client.beginCancellation();
-    void client.cancel().catch(() => {});
-    cancelEscalationTimer = setTimeout(() => {
-      client?.terminateChild("SIGTERM");
-    }, 1_500);
-    cancelEscalationTimer.unref();
-  };
-
-  process.once("SIGTERM", requestCancellation);
-  process.once("SIGINT", requestCancellation);
-  signalsRegistered = true;
 
   try {
     let approvalPolicy;
@@ -179,10 +159,11 @@ export async function executeRescueJob(
       },
       KIMI_START_TIMEOUT_MS,
       "rescue.start",
-      { shouldRetry: () => !cancelling },
+      { shouldRetry: () => !handlers.cancelling },
     );
+    handlers.attachClient(client);
 
-    if (cancelling) {
+    if (handlers.cancelling) {
       // Signal fired during startup; the first attempt succeeded before the
       // retry gate could short-circuit. Synthesize a throw so the normal
       // cancellation teardown path runs.
@@ -231,7 +212,7 @@ export async function executeRescueJob(
     const completedTurn = await client.prompt(prompt, "rescue");
     // Cancel-after-prompt-success check: SIGTERM could have fired between
     // prompt completion and our terminal-state writes. Honour it.
-    if (cancelling) {
+    if (handlers.cancelling) {
       throw new RuntimeError(
         "RESCUE_CANCELLED",
         "Rescue cancelled by user request after prompt completion.",
@@ -259,7 +240,7 @@ export async function executeRescueJob(
 
     // Re-check after the artifact write (disk I/O window) — cancel could
     // have landed there too.
-    if (cancelling) {
+    if (handlers.cancelling) {
       throw new RuntimeError(
         "RESCUE_CANCELLED",
         "Rescue cancelled by user request after artifact write.",
@@ -275,13 +256,10 @@ export async function executeRescueJob(
       }) ?? job
     );
   } catch (error) {
-    if (cancelling) {
+    if (handlers.cancelling) {
       // Clear escalation timer NOW, before awaiting markJobCancelled
       // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
-      if (cancelEscalationTimer) {
-        clearTimeout(cancelEscalationTimer);
-        cancelEscalationTimer = undefined;
-      }
+      handlers.clearEscalation();
       // Always wrap into a canonical RESCUE_CANCELLED RuntimeError so callers
       // can distinguish user-cancel from infra failure via error.code.
       const cancelledError = new RuntimeError(
@@ -305,13 +283,7 @@ export async function executeRescueJob(
     });
     return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
   } finally {
-    if (signalsRegistered) {
-      process.removeListener("SIGTERM", requestCancellation);
-      process.removeListener("SIGINT", requestCancellation);
-    }
-    if (cancelEscalationTimer) {
-      clearTimeout(cancelEscalationTimer);
-    }
+    handlers.dispose();
 
     // WireClient.close() has an internal `closed` latch so a second call
     // is a no-op — drop the separate clientClosed flag (dead code).

@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { JobStore, type JobRecord } from "../job-store.js";
+import { withJobStore, type JobRecord } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { renderManagedJobOutput } from "../render.js";
 import type { CommandContext } from "../types.js";
@@ -41,9 +41,8 @@ export async function runReplay(argv: string[], context: CommandContext): Promis
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
-  const store = new JobStore(paths);
 
-  try {
+  return withJobStore(paths, async (store) => {
     await sweepStaleJobs(store, paths);
 
     const job = store.getJob(jobId);
@@ -53,9 +52,7 @@ export async function runReplay(argv: string[], context: CommandContext): Promis
 
     const replayed = await replayJob(job);
     return `${replayed.rendered}${replayed.rendered.endsWith("\n") ? "" : "\n"}`;
-  } finally {
-    store.close();
-  }
+  });
 }
 
 export async function replayJob(job: JobRecord): Promise<ReplayResult> {

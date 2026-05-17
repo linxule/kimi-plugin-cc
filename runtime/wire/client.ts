@@ -44,7 +44,24 @@ export interface WireClientOptions {
   args?: string[];
   logPath?: string;
   approvalDispatcher: ApprovalDispatcher;
+  /**
+   * Threshold (ms) for the think-stall watchdog. If Kimi emits only
+   * `ContentPart{type:"think"}` events for this long without any other
+   * event type (StepBegin, StepRetry, ToolCall, ToolResult, text
+   * ContentPart, StatusUpdate, TurnEnd, etc.), the client sends `cancel`
+   * to recover the session.
+   *
+   * Default 120s. Set to 0 to disable. Investigation for v0.3.1 (task
+   * #23/#41) traced the thinking-on hang to kimi-cli 1.44.0 entering an
+   * indefinite reasoning-only loop where the upstream HTTP stream never
+   * terminates, so the soul never reaches its `finally` and the wire
+   * server never sends `PromptResult`. The watchdog detects this pattern
+   * client-side instead of waiting for the 10-min prompt timeout.
+   */
+  thinkStallMs?: number;
 }
+
+const DEFAULT_THINK_STALL_MS = 120_000;
 
 export class WireClient {
   private readonly cwd: string;
@@ -70,6 +87,10 @@ export class WireClient {
   private approvalFailure?: RuntimeError;
   private rejectApprovals = false;
   private processingChain: Promise<void> = Promise.resolve();
+  // Think-stall watchdog state (see WireClientOptions.thinkStallMs).
+  private readonly thinkStallMs: number;
+  private thinkStallTimer?: ReturnType<typeof setTimeout>;
+  private thinkStalled = false;
 
   constructor(options: WireClientOptions) {
     this.cwd = options.cwd;
@@ -78,6 +99,7 @@ export class WireClient {
     this.args = options.args ?? ["--wire"];
     this.logPath = options.logPath;
     this.approvalDispatcher = options.approvalDispatcher;
+    this.thinkStallMs = options.thinkStallMs ?? DEFAULT_THINK_STALL_MS;
   }
 
   async start(): Promise<void> {
@@ -221,18 +243,57 @@ export class WireClient {
     this.currentCommandType = commandType;
     this.approvalFailure = undefined;
     this.rejectApprovals = false;
+    this.thinkStalled = false;
+    this.armThinkStallWatchdog();
 
     try {
       const result = await this.sendRequest<PromptResult>("prompt", { user_input: userInput });
       if (this.approvalFailure) {
         throw this.approvalFailure;
       }
+      if (this.thinkStalled) {
+        throw new RuntimeError(
+          "KIMI_THINK_STALLED",
+          `Kimi reasoning stream produced only \`think\` events for over ${this.thinkStallMs}ms; ` +
+            `cancelled to recover the session. Retry with --no-thinking or a more focused prompt.`,
+          "wire.prompt",
+        );
+      }
       return this.currentTurn.finalize(result);
     } finally {
+      this.disarmThinkStallWatchdog();
       this.currentTurn = undefined;
       this.currentCommandType = undefined;
       this.approvalFailure = undefined;
     }
+  }
+
+  private armThinkStallWatchdog(): void {
+    this.disarmThinkStallWatchdog();
+    if (this.thinkStallMs <= 0) {
+      return;
+    }
+    this.thinkStallTimer = setTimeout(() => {
+      this.thinkStalled = true;
+      // Best-effort cancel; the server emits TurnEnd + cancelled PromptResult
+      // via its own finally, which unblocks our pending prompt request. If
+      // cancel itself hangs, the outer withTimeout still fires.
+      void this.cancel().catch(() => {});
+    }, this.thinkStallMs);
+    this.thinkStallTimer.unref();
+  }
+
+  private disarmThinkStallWatchdog(): void {
+    if (this.thinkStallTimer) {
+      clearTimeout(this.thinkStallTimer);
+      this.thinkStallTimer = undefined;
+    }
+  }
+
+  /** Test seam: visible for unit tests that want to fast-forward the watchdog. */
+  public _fireThinkStallWatchdog(): void {
+    this.thinkStalled = true;
+    void this.cancel().catch(() => {});
   }
 
   async cancel(): Promise<CancelResult> {
@@ -312,6 +373,12 @@ export class WireClient {
 
     if ("method" in message) {
       if (message.method === "event") {
+        // Think-stall watchdog: any event that ISN'T a `ContentPart{type:"think"}`
+        // signals forward progress, so re-arm the timer. (Think parts alone are
+        // the kimi-cli 1.44.0 reasoning-only loop signature — see task #41.)
+        if (!isThinkOnlyEvent(message.params.type, message.params.payload)) {
+          this.armThinkStallWatchdog();
+        }
         this.currentTurn?.observeEvent(message.params.type, message.params.payload);
         return;
       }
@@ -509,6 +576,20 @@ export class WireClient {
       }
     }
   }
+}
+
+/**
+ * Returns true if the event is a reasoning-only `ContentPart`. Used by the
+ * think-stall watchdog to decide whether to re-arm the timer: every other
+ * event type (StepBegin, StepRetry, text ContentPart, ToolCall, ToolResult,
+ * StatusUpdate, TurnEnd, ...) counts as "forward progress" and resets the
+ * stall window.
+ */
+function isThinkOnlyEvent(type: string, payload: Record<string, unknown>): boolean {
+  if (type !== "ContentPart") {
+    return false;
+  }
+  return payload.type === "think";
 }
 
 function parseApprovalRequestPayload(payload: Record<string, unknown>): ApprovalRequestPayload {

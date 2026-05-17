@@ -2,7 +2,7 @@ import process from "node:process";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
-import { JobStore } from "../job-store.js";
+import { JobStore, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 export async function runCancel(argv, context) {
@@ -55,15 +55,13 @@ export async function runCancel(argv, context) {
             // pre-mark failure, run the SIGTERM→SIGKILL escalation unconditionally,
             // and rethrow at the end so the user sees the underlying error.
             let preMarkError;
-            const preMarkStore = new JobStore(paths);
             try {
-                await markJobCancelled(preMarkStore, paths, job, "review_gate cancelled by user request.", new RuntimeError("REVIEW_GATE_CANCELLED", "review_gate cancelled by user request.", "cancel.runtime"));
+                await withJobStore(paths, async (preMarkStore) => {
+                    await markJobCancelled(preMarkStore, paths, job, "review_gate cancelled by user request.", new RuntimeError("REVIEW_GATE_CANCELLED", "review_gate cancelled by user request.", "cancel.runtime"));
+                });
             }
             catch (error) {
                 preMarkError = error;
-            }
-            finally {
-                preMarkStore.close();
             }
             signalJobProcesses(job, "SIGTERM");
             await sleep(1_000);
@@ -89,16 +87,12 @@ export async function runCancel(argv, context) {
             }, null, 2)}\n`;
         }
         signalJobProcesses(job, "SIGKILL");
-        const forcedStore = new JobStore(paths);
-        try {
+        await withJobStore(paths, async (forcedStore) => {
             const current = forcedStore.getJob(job.job_id);
             if (current?.status === "running") {
                 await markJobCancelled(forcedStore, paths, current, "Job was force-cancelled after recorded process termination.", undefined, current.command_type === "ask" || current.command_type === "rescue" ? { phase: "cancelled" } : undefined);
             }
-        }
-        finally {
-            forcedStore.close();
-        }
+        });
         return `${JSON.stringify({
             job_id: job.job_id,
             status: "cancelled",

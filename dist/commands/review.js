@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
+import { createCancellationHandlers } from "../cancellation.js";
 import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
@@ -58,27 +59,8 @@ export async function runReview(argv, context, commandType) {
         cwd: context.cwd,
     });
     let client;
-    let cancelling = false;
-    let cancelEscalationTimer;
-    let signalsRegistered = false;
-    const requestCancellation = () => {
-        if (cancelling) {
-            return;
-        }
-        cancelling = true;
-        if (!client) {
-            return;
-        }
-        client.beginCancellation();
-        void client.cancel().catch(() => { });
-        cancelEscalationTimer = setTimeout(() => {
-            client?.terminateChild("SIGTERM");
-        }, 1_500);
-        cancelEscalationTimer.unref();
-    };
-    process.once("SIGTERM", requestCancellation);
-    process.once("SIGINT", requestCancellation);
-    signalsRegistered = true;
+    // v0.3.1: shared cancellation handler — see runtime/cancellation.ts.
+    const handlers = createCancellationHandlers({ escalationMs: 1_500 });
     try {
         client = await buildAndStartWireClient({
             cwd: context.cwd,
@@ -89,8 +71,9 @@ export async function runReview(argv, context, commandType) {
             thinking: parsed.thinking,
             logPath,
             approvalPolicy: rejectAllApprovals(`${commandType} is read-only; unexpected approval requests fail the command.`),
-        }, KIMI_START_TIMEOUT_MS, `${commandType}.start`, { shouldRetry: () => !cancelling });
-        if (cancelling) {
+        }, KIMI_START_TIMEOUT_MS, `${commandType}.start`, { shouldRetry: () => !handlers.cancelling });
+        handlers.attachClient(client);
+        if (handlers.cancelling) {
             throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled during startup.`, `${commandType}.start`);
         }
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
@@ -107,14 +90,14 @@ export async function runReview(argv, context, commandType) {
         // Cancel-after-prompt-success check: SIGTERM could have fired between
         // prompt completion and our terminal-state writes. Honour it instead of
         // silently committing markCompleted.
-        if (cancelling) {
+        if (handlers.cancelling) {
             throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request after prompt completion.`, `${commandType}.runtime`);
         }
         const rendered = renderManagedJobOutput(job, completed.finalText);
         const artifactPath = await writeArtifact(paths, job, rendered.rendered);
         // Re-check after the disk write (writeArtifact awaits I/O) — cancel could
         // have landed during that window too.
-        if (cancelling) {
+        if (handlers.cancelling) {
             throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request after artifact write.`, `${commandType}.runtime`);
         }
         store.markCompleted(job.job_id, {
@@ -125,15 +108,12 @@ export async function runReview(argv, context, commandType) {
         return rendered.output;
     }
     catch (error) {
-        if (cancelling) {
+        if (handlers.cancelling) {
             // Clear the escalation timer NOW, before awaiting markJobCancelled
             // (which writes a failure artifact to disk and can take >1.5s under
             // load). Otherwise the timer fires SIGTERM on a client that's already
             // being cancelled — double-signal race.
-            if (cancelEscalationTimer) {
-                clearTimeout(cancelEscalationTimer);
-                cancelEscalationTimer = undefined;
-            }
+            handlers.clearEscalation();
             // Always wrap into a canonical *_CANCELLED RuntimeError, even when the
             // underlying error is already a RuntimeError. Otherwise infrastructure
             // failure codes (WIRE_PROCESS_EXITED, TIMEOUT) leak into job.error.code
@@ -147,13 +127,7 @@ export async function runReview(argv, context, commandType) {
         throw classified;
     }
     finally {
-        if (signalsRegistered) {
-            process.removeListener("SIGTERM", requestCancellation);
-            process.removeListener("SIGINT", requestCancellation);
-        }
-        if (cancelEscalationTimer) {
-            clearTimeout(cancelEscalationTimer);
-        }
+        handlers.dispose();
         await client?.close();
         store.close();
     }
