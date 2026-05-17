@@ -11,7 +11,7 @@ import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../kimi-errors.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
 import type { WireClient } from "../wire/client.js";
-import { KIMI_REVIEW_GATE_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
+import { KIMI_REVIEW_GATE_TIMEOUT_MS, isTimeoutCode, withTimeout } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import {
@@ -193,6 +193,10 @@ async function executeReviewGate(
         })(),
         KIMI_REVIEW_GATE_TIMEOUT_MS,
         "review_gate.runtime",
+        // review_gate budgets the entire startup+initialize+prompt round-trip
+        // under one 8s deadline — the prompt phase dominates, so attribute
+        // expirations to the response-timeout family.
+        "response",
       );
 
       // Cancel-vs-completed race: /kimi:cancel pre-marks the row as
@@ -269,9 +273,18 @@ function buildBlockReason(output: ReviewGateOutput): string {
 }
 
 function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof RuntimeError)) {
+    return false;
+  }
+  // Reuse the shared timeout-code predicate for the generic family; the
+  // REVIEW_GATE_KIMI_*_TIMEOUT codes are the prefixed forms emitted by
+  // classifyManagedCommandFailure and stay local.
   return (
-    error instanceof RuntimeError &&
-    (error.code === "TIMEOUT" || error.code === "REVIEW_GATE_KIMI_TIMEOUT")
+    isTimeoutCode(error.code) ||
+    error.code === "REVIEW_GATE_KIMI_TIMEOUT" ||
+    error.code === "REVIEW_GATE_KIMI_STARTUP_TIMEOUT" ||
+    error.code === "REVIEW_GATE_KIMI_INITIALIZE_TIMEOUT" ||
+    error.code === "REVIEW_GATE_KIMI_RESPONSE_TIMEOUT"
   );
 }
 
@@ -287,6 +300,10 @@ function buildWarningMessage(error: unknown): string {
       error.code === "TURN_INTERRUPTED"
     ) {
       return "Kimi review gate returned malformed output; allowing stop.";
+    }
+
+    if (error.code === "MAX_STEPS_REACHED") {
+      return "Kimi review gate exhausted its step budget; allowing stop.";
     }
 
     if (

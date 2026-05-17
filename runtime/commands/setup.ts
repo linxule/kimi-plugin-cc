@@ -91,12 +91,14 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
       }),
       KIMI_SETUP_INITIALIZE_TIMEOUT_MS,
       "setup.initialize",
+      "initialize",
     );
 
     const completedTurn = await withTimeout(
       wireClient.prompt("Reply with the single word READY. Do not use tools.", "setup"),
       KIMI_SETUP_PROMPT_TIMEOUT_MS,
       "setup.prompt",
+      "response",
     );
     const reply = completedTurn.finalText.trim();
 

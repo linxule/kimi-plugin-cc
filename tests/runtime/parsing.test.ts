@@ -83,6 +83,76 @@ describe("argument parsing", () => {
     expect(parsed.focus).toBe("focus on rollback");
   });
 
+  test("parseReviewArgs warns on unknown flags but still preserves them as focus text", () => {
+    // v0.3.0 task #11: typos like `--from HEAD~2 --to HEAD` (instead of
+    // `--base HEAD~2`) used to silently become focus text and waste a
+    // long Kimi run. Now an advisory warning is emitted to stderr, but
+    // behavior is unchanged so legitimate `--foo`-shaped focus text
+    // still works after a `--` separator.
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: typeof process.stderr.write }).write = ((
+      chunk: string | Uint8Array,
+    ) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const parsed = parseReviewArgs(["--from", "HEAD~2", "--to", "HEAD"], "review");
+      expect(parsed.base).toBeUndefined();
+      expect(parsed.focus).toBe("--from HEAD~2 --to HEAD");
+    } finally {
+      (process.stderr as { write: typeof process.stderr.write }).write = original;
+    }
+
+    const joined = writes.join("");
+    expect(joined).toContain("unknown flag --from for review");
+  });
+
+  test("parseAskArgs `--` sentinel suppresses unknown-flag warning for tokens after it", () => {
+    // The warning fires only when a flag-shaped token appears BEFORE the
+    // `--` sentinel. `parseAskArgs` already had a `--` separator and the
+    // v0.3.0 warning shouldn't undercut its escape-hatch role.
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: typeof process.stderr.write }).write = ((
+      chunk: string | Uint8Array,
+    ) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const parsed = parseAskArgs(["--", "--mystery", "tail"]);
+      expect(parsed.prompt).toBe("--mystery tail");
+    } finally {
+      (process.stderr as { write: typeof process.stderr.write }).write = original;
+    }
+
+    expect(writes.join("")).not.toContain("unknown flag");
+  });
+
+  test("parseAskArgs warns on unknown flags but keeps trailing text as the prompt", () => {
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: typeof process.stderr.write }).write = ((
+      chunk: string | Uint8Array,
+    ) => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const parsed = parseAskArgs(["--mystery", "tail"]);
+      expect(parsed.prompt).toBe("--mystery tail");
+    } finally {
+      (process.stderr as { write: typeof process.stderr.write }).write = original;
+    }
+
+    expect(writes.join("")).toContain("unknown flag --mystery for ask");
+  });
+
   test("parseRescueArgs handles explicit resume targets and flags", () => {
     const parsed = parseRescueArgs(["--resume", "job-123", "--background"]);
 

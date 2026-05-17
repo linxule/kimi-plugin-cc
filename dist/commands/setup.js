@@ -57,8 +57,8 @@ export async function runSetup(argv, context) {
                 supports_question: false,
                 supports_plan_mode: false,
             },
-        }), KIMI_SETUP_INITIALIZE_TIMEOUT_MS, "setup.initialize");
-        const completedTurn = await withTimeout(wireClient.prompt("Reply with the single word READY. Do not use tools.", "setup"), KIMI_SETUP_PROMPT_TIMEOUT_MS, "setup.prompt");
+        }), KIMI_SETUP_INITIALIZE_TIMEOUT_MS, "setup.initialize", "initialize");
+        const completedTurn = await withTimeout(wireClient.prompt("Reply with the single word READY. Do not use tools.", "setup"), KIMI_SETUP_PROMPT_TIMEOUT_MS, "setup.prompt", "response");
         const reply = completedTurn.finalText.trim();
         if (!reply) {
             throw new RuntimeError("EMPTY_SETUP_REPLY", "Kimi runtime returned an empty final reply during setup probe.", "setup.prompt");

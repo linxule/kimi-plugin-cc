@@ -167,7 +167,7 @@ export async function executeAskJob(jobId, prompt, context, options) {
                 supports_question: false,
                 supports_plan_mode: false,
             },
-        }), KIMI_INITIALIZE_TIMEOUT_MS, "ask.initialize");
+        }), KIMI_INITIALIZE_TIMEOUT_MS, "ask.initialize", "initialize");
         // Skip the title announcement on resumed sessions: the title was set by the
         // original ask call and the current prompt here is either a continuation or
         // refinement — neither should clobber the original identifying title in
@@ -183,7 +183,7 @@ export async function executeAskJob(jobId, prompt, context, options) {
                 env: context.env,
             });
         }
-        const completed = await withTimeout(client.prompt(prompt, "ask"), KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
+        const completed = await withTimeout(client.prompt(prompt, "ask"), KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt", "response");
         // Cancel-after-prompt-success check: SIGTERM could have fired between
         // prompt completion and our terminal-state writes. Honour it.
         if (cancelling) {

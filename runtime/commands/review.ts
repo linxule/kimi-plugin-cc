@@ -32,7 +32,7 @@ export async function runReview(
   context: CommandContext,
   commandType: "review" | "challenge",
 ): Promise<string> {
-  const parsed = parseReviewArgs(argv);
+  const parsed = parseReviewArgs(argv, commandType);
 
   if (parsed.background || parsed.wait) {
     throw new RuntimeError(
@@ -139,6 +139,7 @@ export async function runReview(
       }),
       KIMI_INITIALIZE_TIMEOUT_MS,
       `${commandType}.initialize`,
+      "initialize",
     );
 
     await announceSessionTitle(
@@ -151,6 +152,7 @@ export async function runReview(
       client.prompt(previewPrompt, commandType),
       KIMI_REVIEW_PROMPT_TIMEOUT_MS,
       `${commandType}.prompt`,
+      "response",
     );
     // Cancel-after-prompt-success check: SIGTERM could have fired between
     // prompt completion and our terminal-state writes. Honour it instead of

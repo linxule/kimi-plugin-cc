@@ -60,6 +60,81 @@ describe("classifyManagedCommandFailure", () => {
     expect((result as RuntimeError).stage).toBe("rescue.runtime");
   });
 
+  test("distinguishes startup, initialize, and response timeouts per command type", () => {
+    // v0.3.0 task #10: separate codes for "Kimi never started" vs "Kimi
+    // started but never responded" so users can tell apart a dead binary
+    // from a thinking-on finalization hang.
+    const startup = classifyManagedCommandFailure(
+      new RuntimeError("STARTUP_TIMEOUT", "review.start timed out after 10000ms.", "review.start"),
+      "review",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(startup.code).toBe("REVIEW_KIMI_STARTUP_TIMEOUT");
+
+    const init = classifyManagedCommandFailure(
+      new RuntimeError(
+        "INITIALIZE_TIMEOUT",
+        "ask.initialize timed out after 15000ms.",
+        "ask.initialize",
+      ),
+      "ask",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(init.code).toBe("ASK_KIMI_INITIALIZE_TIMEOUT");
+
+    const response = classifyManagedCommandFailure(
+      new RuntimeError(
+        "RESPONSE_TIMEOUT",
+        "review.prompt timed out after 600000ms.",
+        "review.prompt",
+      ),
+      "review",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(response.code).toBe("REVIEW_KIMI_RESPONSE_TIMEOUT");
+  });
+
+  test("legacy `TIMEOUT` code still maps to `${COMMAND}_KIMI_TIMEOUT` for back-compat", () => {
+    const legacy = classifyManagedCommandFailure(
+      new RuntimeError("TIMEOUT", "ask.start timed out after 10000ms.", "ask.start"),
+      "ask",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(legacy.code).toBe("ASK_KIMI_TIMEOUT");
+  });
+
+  test("plain Error with `timed out` substring falls through the legacy string-match branch", () => {
+    const plain = classifyManagedCommandFailure(
+      new Error("Kimi initialize timed out"),
+      "review",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(plain.code).toBe("REVIEW_KIMI_TIMEOUT");
+  });
+
+  test("MAX_STEPS_REACHED is mapped to a command-prefixed code", () => {
+    // v0.3.0 task #14 — Kimi adversarial reviewer flagged that managed
+    // commands were getting the bare `MAX_STEPS_REACHED` while timeouts
+    // got `${PREFIX}_KIMI_*_TIMEOUT`. Now consistent.
+    const ask = classifyManagedCommandFailure(
+      new RuntimeError(
+        "MAX_STEPS_REACHED",
+        "Kimi reached its step budget (50 steps) before finalizing this turn.",
+        "wire.prompt",
+      ),
+      "ask",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(ask.code).toBe("ASK_KIMI_MAX_STEPS_REACHED");
+
+    const review = classifyManagedCommandFailure(
+      new RuntimeError("MAX_STEPS_REACHED", "Kimi reached step budget.", "wire.prompt"),
+      "review",
+      "job-xyz",
+    ) as RuntimeError;
+    expect(review.code).toBe("REVIEW_KIMI_MAX_STEPS_REACHED");
+  });
+
   test("ask, review, challenge, and review_gate default behavior is unchanged (preserveStage opt-in)", () => {
     const inner = new RuntimeError(
       "TIMEOUT",

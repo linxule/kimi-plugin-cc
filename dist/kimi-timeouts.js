@@ -6,11 +6,23 @@ export const KIMI_REVIEW_PROMPT_TIMEOUT_MS = 600_000;
 export const KIMI_REVIEW_GATE_TIMEOUT_MS = 8_000;
 export const KIMI_SETUP_INITIALIZE_TIMEOUT_MS = 5_000;
 export const KIMI_SETUP_PROMPT_TIMEOUT_MS = 10_000;
-export async function withTimeout(promise, timeoutMs, stage) {
+const TIMEOUT_KIND_CODES = {
+    startup: "STARTUP_TIMEOUT",
+    initialize: "INITIALIZE_TIMEOUT",
+    response: "RESPONSE_TIMEOUT",
+};
+export function isTimeoutCode(code) {
+    return (code === "TIMEOUT" ||
+        code === "STARTUP_TIMEOUT" ||
+        code === "INITIALIZE_TIMEOUT" ||
+        code === "RESPONSE_TIMEOUT");
+}
+export async function withTimeout(promise, timeoutMs, stage, kind) {
+    const code = kind ? TIMEOUT_KIND_CODES[kind] : "TIMEOUT";
     let timer;
     const timeout = new Promise((_, reject) => {
         timer = setTimeout(() => {
-            reject(new RuntimeError("TIMEOUT", `${stage} timed out after ${timeoutMs}ms.`, stage));
+            reject(new RuntimeError(code, `${stage} timed out after ${timeoutMs}ms.`, stage));
         }, timeoutMs);
         timer.unref();
     });

@@ -212,6 +212,7 @@ export async function executeRescueJob(
       }),
       KIMI_INITIALIZE_TIMEOUT_MS,
       "rescue.initialize",
+      "initialize",
     );
 
     // Skip the rename on resumed sessions: the title was set by the original

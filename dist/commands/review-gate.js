@@ -9,7 +9,7 @@ import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../kimi-errors.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
-import { KIMI_REVIEW_GATE_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
+import { KIMI_REVIEW_GATE_TIMEOUT_MS, isTimeoutCode, withTimeout } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { renderManagedJobOutput, writeArtifact, } from "../render.js";
@@ -139,7 +139,11 @@ async function executeReviewGate(payload, assistantMessage, context) {
                 });
                 const completed = await activeClient.prompt(prompt, "review_gate");
                 return renderManagedJobOutput(job, completed.finalText);
-            })(), KIMI_REVIEW_GATE_TIMEOUT_MS, "review_gate.runtime");
+            })(), KIMI_REVIEW_GATE_TIMEOUT_MS, "review_gate.runtime", 
+            // review_gate budgets the entire startup+initialize+prompt round-trip
+            // under one 8s deadline — the prompt phase dominates, so attribute
+            // expirations to the response-timeout family.
+            "response");
             // Cancel-vs-completed race: /kimi:cancel pre-marks the row as
             // `cancelled` and SIGTERMs the kimi child. If the prompt managed to
             // return in the SIGTERM→exit window before our wire client picked
@@ -202,8 +206,17 @@ function buildBlockReason(output) {
     ].join("\n");
 }
 function isTimeoutError(error) {
-    return (error instanceof RuntimeError &&
-        (error.code === "TIMEOUT" || error.code === "REVIEW_GATE_KIMI_TIMEOUT"));
+    if (!(error instanceof RuntimeError)) {
+        return false;
+    }
+    // Reuse the shared timeout-code predicate for the generic family; the
+    // REVIEW_GATE_KIMI_*_TIMEOUT codes are the prefixed forms emitted by
+    // classifyManagedCommandFailure and stay local.
+    return (isTimeoutCode(error.code) ||
+        error.code === "REVIEW_GATE_KIMI_TIMEOUT" ||
+        error.code === "REVIEW_GATE_KIMI_STARTUP_TIMEOUT" ||
+        error.code === "REVIEW_GATE_KIMI_INITIALIZE_TIMEOUT" ||
+        error.code === "REVIEW_GATE_KIMI_RESPONSE_TIMEOUT");
 }
 function buildWarningMessage(error) {
     if (isTimeoutError(error)) {
@@ -214,6 +227,9 @@ function buildWarningMessage(error) {
             error.code === "MISSING_TURN_END" ||
             error.code === "TURN_INTERRUPTED") {
             return "Kimi review gate returned malformed output; allowing stop.";
+        }
+        if (error.code === "MAX_STEPS_REACHED") {
+            return "Kimi review gate exhausted its step budget; allowing stop.";
         }
         if (error.code === "WIRE_SPAWN_FAILED" ||
             error.code === "WIRE_PROCESS_EXITED" ||

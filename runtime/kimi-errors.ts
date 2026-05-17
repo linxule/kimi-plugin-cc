@@ -5,7 +5,11 @@ type AvailabilityKind =
   | "auth_unavailable"
   | "binary_unavailable"
   | "startup_failed"
+  | "startup_timeout"
+  | "initialize_timeout"
+  | "response_timeout"
   | "timeout"
+  | "max_steps_reached"
   | null;
 
 interface AvailabilityClassification {
@@ -117,6 +121,48 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
     };
   }
 
+  if (error instanceof RuntimeError && error.code === "MAX_STEPS_REACHED") {
+    return {
+      kind: "max_steps_reached",
+      summary: "Kimi exhausted its step budget before finalizing the turn.",
+      nextStep: "Retry with a more focused prompt or a higher step budget, or rerun with --no-thinking.",
+      runtimeProbe: "ok",
+      authProbe: "ok",
+    };
+  }
+
+  if (error instanceof RuntimeError) {
+    if (error.code === "STARTUP_TIMEOUT") {
+      return {
+        kind: "startup_timeout",
+        summary: "the Kimi CLI did not respond to the wire handshake within the startup budget.",
+        nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
+        runtimeProbe: "failed",
+        authProbe: "failed",
+      };
+    }
+
+    if (error.code === "INITIALIZE_TIMEOUT") {
+      return {
+        kind: "initialize_timeout",
+        summary: "the Kimi wire session started but did not complete `initialize` in time.",
+        nextStep: "Run `/kimi:setup` to verify local Kimi auth and protocol-version compatibility, then retry.",
+        runtimeProbe: "failed",
+        authProbe: "failed",
+      };
+    }
+
+    if (error.code === "RESPONSE_TIMEOUT") {
+      return {
+        kind: "response_timeout",
+        summary: "Kimi started and accepted the prompt but never returned a final response.",
+        nextStep: "Retry with `--no-thinking`; if the response still hangs, check local Kimi version and report upstream.",
+        runtimeProbe: "ok",
+        authProbe: "ok",
+      };
+    }
+  }
+
   if (message.includes("timed out")) {
     return {
       kind: "timeout",
@@ -134,15 +180,24 @@ function mapAvailabilityCode(
   kind: Exclude<AvailabilityKind, null>,
   commandType: ManagedCommandType | "review_gate",
 ): string {
+  const prefix = commandType.toUpperCase();
   switch (kind) {
     case "auth_unavailable":
-      return `${commandType.toUpperCase()}_KIMI_AUTH_UNAVAILABLE`;
+      return `${prefix}_KIMI_AUTH_UNAVAILABLE`;
     case "binary_unavailable":
-      return `${commandType.toUpperCase()}_KIMI_BINARY_UNAVAILABLE`;
+      return `${prefix}_KIMI_BINARY_UNAVAILABLE`;
     case "startup_failed":
-      return `${commandType.toUpperCase()}_KIMI_STARTUP_FAILED`;
+      return `${prefix}_KIMI_STARTUP_FAILED`;
+    case "startup_timeout":
+      return `${prefix}_KIMI_STARTUP_TIMEOUT`;
+    case "initialize_timeout":
+      return `${prefix}_KIMI_INITIALIZE_TIMEOUT`;
+    case "response_timeout":
+      return `${prefix}_KIMI_RESPONSE_TIMEOUT`;
     case "timeout":
-      return `${commandType.toUpperCase()}_KIMI_TIMEOUT`;
+      return `${prefix}_KIMI_TIMEOUT`;
+    case "max_steps_reached":
+      return `${prefix}_KIMI_MAX_STEPS_REACHED`;
   }
 }
 

@@ -1,4 +1,32 @@
+import process from "node:process";
+
 import { RuntimeError } from "./errors.js";
+
+/**
+ * Tokens like `--foo` or `-x` that aren't in a command's known-flags set are
+ * almost certainly typos (e.g. `--from HEAD~2` instead of `--base HEAD~2`).
+ * The historical behavior — silently treating them as free-form trailing
+ * prompt — produced misleading runs (Kimi exploring the repo, hitting the
+ * step budget, or returning empty findings). v0.3.0 emits an advisory
+ * warning to stderr but does not fail the command, so users with legitimate
+ * `--foo`-shaped content in their question can still use `--` to silence it.
+ */
+function looksLikeFlag(token: string): boolean {
+  if (!token.startsWith("-")) {
+    return false;
+  }
+  if (token.startsWith("--") && token.length > 2) {
+    return true;
+  }
+  // Short flag: a single dash followed by exactly one letter (`-r`, `-m`).
+  return /^-[a-zA-Z]$/.test(token);
+}
+
+function warnUnknownFlag(commandName: string, token: string): void {
+  process.stderr.write(
+    `[kimi-plugin-cc] warning: unknown flag ${token} for ${commandName}; treating as prompt/focus text. Use \`--\` to silence this warning.\n`,
+  );
+}
 
 export interface KimiFlagState {
   model?: string;
@@ -110,6 +138,9 @@ export function parseAskArgs(argv: string[]): AskArgs {
         thinking = false;
         break;
       default:
+        if (looksLikeFlag(token)) {
+          warnUnknownFlag("ask", token);
+        }
         trailingTokens = argv.slice(index);
         index = argv.length;
         break;
@@ -144,10 +175,11 @@ export function parseAskArgs(argv: string[]): AskArgs {
   };
 }
 
-export function parseReviewArgs(argv: string[]): ReviewArgs {
+export function parseReviewArgs(argv: string[], commandName: string = "review"): ReviewArgs {
   const parsed = parseKnownFlags(
     argv,
     new Set(["--base", "--background", "--wait", "-m", "--model", "--thinking", "--no-thinking"]),
+    commandName,
   );
 
   return {
@@ -229,6 +261,9 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
         thinking = false;
         break;
       default:
+        if (looksLikeFlag(token)) {
+          warnUnknownFlag("rescue", token);
+        }
         trailingTokens = argv.slice(index);
         index = argv.length;
         break;
@@ -322,7 +357,11 @@ function isManagedCommandType(value: string): value is import("./types.js").Mana
   );
 }
 
-function parseKnownFlags(argv: string[], knownFlags: Set<string>): ParsedKnownFlags {
+function parseKnownFlags(
+  argv: string[],
+  knownFlags: Set<string>,
+  commandName: string,
+): ParsedKnownFlags {
   let model: string | undefined;
   let thinking: boolean | undefined = true;
   let base: string | undefined;
@@ -339,6 +378,9 @@ function parseKnownFlags(argv: string[], knownFlags: Set<string>): ParsedKnownFl
     }
 
     if (!knownFlags.has(token)) {
+      if (looksLikeFlag(token)) {
+        warnUnknownFlag(commandName, token);
+      }
       trailingTokens = argv.slice(index);
       break;
     }
@@ -382,10 +424,10 @@ function parseKnownFlags(argv: string[], knownFlags: Set<string>): ParsedKnownFl
       case "--no-thinking":
         thinking = false;
         break;
-      default:
-        trailingTokens = argv.slice(index);
-        index = argv.length;
-        break;
+      // The early `if (!knownFlags.has(token))` gate above means we only
+      // reach this switch with tokens that ARE in knownFlags, and every
+      // member is handled above. A `default` arm would be unreachable
+      // (Claude reviewer caught the dead code in v0.3.0 review).
     }
   }
 

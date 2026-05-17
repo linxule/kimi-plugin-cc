@@ -166,7 +166,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
                 supports_question: false,
                 supports_plan_mode: false,
             },
-        }), KIMI_INITIALIZE_TIMEOUT_MS, "rescue.initialize");
+        }), KIMI_INITIALIZE_TIMEOUT_MS, "rescue.initialize", "initialize");
         // Skip the rename on resumed sessions: the title was set by the original
         // rescue call and the current prompt here is either the generic
         // "Continue the previous rescue task..." string or a user-supplied

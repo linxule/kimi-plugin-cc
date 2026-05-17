@@ -73,6 +73,18 @@ export function finalizeTurnCapture(
   state: TurnCaptureState,
   promptResult: PromptResult,
 ): CompletedTurn {
+  if (promptResult.status === "max_steps_reached") {
+    // Kimi hit the step budget before reaching a natural turn end. Distinct
+    // from a wire-level interruption (cancelled, missing TurnEnd) because the
+    // remedy is different: the user typically wants to retry with a focused
+    // prompt or a higher step budget, not retry Kimi as a whole.
+    throw new RuntimeError(
+      "MAX_STEPS_REACHED",
+      `Kimi reached its step budget (${promptResult.steps ?? "unknown"} steps) before finalizing this turn.`,
+      "wire.prompt",
+    );
+  }
+
   if (promptResult.status !== "finished") {
     throw new RuntimeError(
       "TURN_INTERRUPTED",

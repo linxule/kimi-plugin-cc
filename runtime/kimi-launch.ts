@@ -96,7 +96,7 @@ export async function buildAndStartWithFactory(
   // Attempt 1
   const client1 = factory();
   try {
-    await withTimeout(client1.start(), startTimeoutMs, stage);
+    await withTimeout(client1.start(), startTimeoutMs, stage, "startup");
     return client1;
   } catch (err) {
     // Always clean up the first process regardless of error type. The
@@ -104,11 +104,13 @@ export async function buildAndStartWithFactory(
     // if close() returns before this.child is assigned.
     await client1.close().catch(() => {});
 
-    // Only retry on timeout errors from this specific stage; re-throw everything else
+    // Only retry on startup timeouts from this specific stage; re-throw everything else.
+    // v0.3.0 changed the code from generic TIMEOUT to STARTUP_TIMEOUT; accept both
+    // so a stale Kimi binary that still emits the legacy code keeps working.
     if (
       retryDisabled ||
       !(err instanceof RuntimeError) ||
-      err.code !== "TIMEOUT" ||
+      (err.code !== "STARTUP_TIMEOUT" && err.code !== "TIMEOUT") ||
       err.stage !== stage
     ) {
       throw err;
@@ -125,7 +127,7 @@ export async function buildAndStartWithFactory(
   // Attempt 2 (timeout retry only)
   const client2 = factory();
   try {
-    await withTimeout(client2.start(), startTimeoutMs, stage);
+    await withTimeout(client2.start(), startTimeoutMs, stage, "startup");
     return client2;
   } catch (err) {
     await client2.close().catch(() => {});

@@ -218,6 +218,7 @@ export async function executeAskJob(
       }),
       KIMI_INITIALIZE_TIMEOUT_MS,
       "ask.initialize",
+      "initialize",
     );
 
     // Skip the title announcement on resumed sessions: the title was set by the
@@ -240,6 +241,7 @@ export async function executeAskJob(
       client.prompt(prompt, "ask"),
       KIMI_ASK_PROMPT_TIMEOUT_MS,
       "ask.prompt",
+      "response",
     );
     // Cancel-after-prompt-success check: SIGTERM could have fired between
     // prompt completion and our terminal-state writes. Honour it.

@@ -19,7 +19,7 @@ import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 export async function runReview(argv, context, commandType) {
-    const parsed = parseReviewArgs(argv);
+    const parsed = parseReviewArgs(argv, commandType);
     if (parsed.background || parsed.wait) {
         throw new RuntimeError("INVALID_FLAGS", `${commandType} does not support --background or --wait in v1; review runs foreground-synchronously.`, `${commandType}.parse`);
     }
@@ -101,9 +101,9 @@ export async function runReview(argv, context, commandType) {
                 supports_question: false,
                 supports_plan_mode: false,
             },
-        }), KIMI_INITIALIZE_TIMEOUT_MS, `${commandType}.initialize`);
+        }), KIMI_INITIALIZE_TIMEOUT_MS, `${commandType}.initialize`, "initialize");
         await announceSessionTitle(reviewSessionId, buildSessionTitle(commandType, buildReviewTitleExcerpt(commandType, parsed.focus)), { env: context.env });
-        const completed = await withTimeout(client.prompt(previewPrompt, commandType), KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`);
+        const completed = await withTimeout(client.prompt(previewPrompt, commandType), KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`, "response");
         // Cancel-after-prompt-success check: SIGTERM could have fired between
         // prompt completion and our terminal-state writes. Honour it instead of
         // silently committing markCompleted.
