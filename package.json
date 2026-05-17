@@ -1,6 +1,6 @@
 {
   "name": "kimi-plugin-cc",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "Claude Code plugin that delegates review, challenge, ask, and rescue work to the local Kimi CLI.",
   "type": "module",

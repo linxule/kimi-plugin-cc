@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { createCancellationHandlers } from "../cancellation.js";
+import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
@@ -32,6 +33,9 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
+  // Registry-driven cancellation and failure messages — see
+  // runtime/commands/registry.ts.
+  const rescueConfig = getManagedCommandConfig("rescue");
   const store = new JobStore(paths);
 
   try {
@@ -77,7 +81,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
         "rescue.log-header",
         error instanceof Error ? { cause: error } : undefined,
       );
-      await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+      await markJobFailed(store, paths, job, classified, rescueConfig.cancellation.failedSummary, { phase: "failed" });
       throw classified;
     }
 
@@ -88,7 +92,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
         promptEnvVar: "KIMI_PLUGIN_CC_RESCUE_PROMPT_B64",
         reusedSessionEnvVar: "KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION",
         reusedSession: sessionResolution.reusedSession,
-        failedSummary: "Rescue failed.",
+        failedSummary: rescueConfig.cancellation.failedSummary,
         missingResultErrorCode: "RESCUE_RESULT_MISSING",
         spawnFailedErrorCode: "RESCUE_WORKER_SPAWN_FAILED",
         earlyExitErrorCode: "RESCUE_WORKER_EXITED_EARLY",
@@ -128,8 +132,12 @@ export async function executeRescueJob(
 
   // Shared cancellation handler — registers SIGTERM/SIGINT immediately
   // so a signal during wire-client startup still latches
-  // cancelling=true. See runtime/cancellation.ts.
-  const handlers = createCancellationHandlers({ escalationMs: 1_500 });
+  // cancelling=true. See runtime/cancellation.ts. Cancellation constants
+  // (codes, messages, escalation timing) come from the command registry
+  // so error-code drift across commands is impossible.
+  const rescueConfig = getManagedCommandConfig("rescue");
+  const cancel = rescueConfig.cancellation;
+  const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
   let client: WireClient | undefined;
 
   try {
@@ -143,7 +151,7 @@ export async function executeRescueJob(
         "rescue.setup",
         error instanceof Error ? { cause: error } : undefined,
       );
-      return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+      return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
     }
 
     client = await buildAndStartWireClient(
@@ -168,8 +176,8 @@ export async function executeRescueJob(
       // retry gate could short-circuit. Synthesize a throw so the normal
       // cancellation teardown path runs.
       throw new RuntimeError(
-        "RESCUE_CANCELLED_DURING_START",
-        "Rescue cancelled during startup.",
+        cancel.errorCodes.cancelledDuringStart,
+        cancel.cancelMessages.duringStart,
         "rescue.start",
       );
     }
@@ -214,8 +222,8 @@ export async function executeRescueJob(
     // prompt completion and our terminal-state writes. Honour it.
     if (handlers.cancelling) {
       throw new RuntimeError(
-        "RESCUE_CANCELLED",
-        "Rescue cancelled by user request after prompt completion.",
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.afterPrompt,
         "rescue.runtime",
       );
     }
@@ -235,15 +243,15 @@ export async function executeRescueJob(
         "rescue.artifact",
         writeError instanceof Error ? { cause: writeError } : undefined,
       );
-      return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+      return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
     }
 
     // Re-check after the artifact write (disk I/O window) — cancel could
     // have landed there too.
     if (handlers.cancelling) {
       throw new RuntimeError(
-        "RESCUE_CANCELLED",
-        "Rescue cancelled by user request after artifact write.",
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.afterArtifact,
         "rescue.runtime",
       );
     }
@@ -260,11 +268,11 @@ export async function executeRescueJob(
       // Clear escalation timer NOW, before awaiting markJobCancelled
       // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
       handlers.clearEscalation();
-      // Always wrap into a canonical RESCUE_CANCELLED RuntimeError so callers
+      // Always wrap into a canonical *_CANCELLED RuntimeError so callers
       // can distinguish user-cancel from infra failure via error.code.
       const cancelledError = new RuntimeError(
-        "RESCUE_CANCELLED",
-        "Rescue cancelled by user request.",
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.default,
         "rescue.runtime",
         error instanceof Error ? { cause: error } : undefined,
       );
@@ -272,7 +280,7 @@ export async function executeRescueJob(
         store,
         paths,
         job,
-        "Rescue cancelled by user request.",
+        cancel.cancelledSummary,
         cancelledError,
         { phase: "cancelled" },
       );
@@ -281,7 +289,7 @@ export async function executeRescueJob(
     const classified = classifyManagedCommandFailure(error, "rescue", job.job_id, {
       preserveStage: true,
     });
-    return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+    return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
   } finally {
     handlers.dispose();
 

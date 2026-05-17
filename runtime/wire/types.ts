@@ -73,6 +73,29 @@ export interface WireRequest {
 
 export type IncomingWireMessage = WireNotification | WireRequest;
 
+/**
+ * Returns true if the event is a reasoning-only `ContentPart` (i.e.
+ * `params.type === "ContentPart"` carrying `payload.type === "think"`).
+ *
+ * Lives next to the wire types because the predicate is determined by
+ * the wire schema, not by any downstream consumer: if kimi-cli adds a
+ * new reasoning subtype, the update belongs here in lockstep with the
+ * `WireNotification` shape, not in a downstream watchdog. Every other
+ * event type (StepBegin, StepRetry, text ContentPart, ToolCall,
+ * ToolResult, StatusUpdate, TurnEnd, ...) is "forward progress" from
+ * the watchdog's perspective and should return false.
+ *
+ * Used by `ThinkStallGuard.observeEvent` to route think-only payloads
+ * to the duplicate-hash window and everything else to the
+ * forward-progress reset path.
+ */
+export function isThinkOnlyEvent(type: string, payload: Record<string, unknown>): boolean {
+  if (type !== "ContentPart") {
+    return false;
+  }
+  return payload.type === "think";
+}
+
 // Emitted by kimi-cli when a step's LLM call fails with a retryable error and tenacity is
 // about to sleep before re-running the attempt. The retried step reuses the same step
 // number, so any text streamed before the retry must be discarded.

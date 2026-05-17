@@ -5,10 +5,10 @@ import path from "node:path";
 import { RuntimeError, formatError } from "../errors.js";
 import type { RuntimeCommandType } from "../types.js";
 import { ApprovalDispatcher } from "./approval-dispatcher.js";
+import { ApprovalRequestRouter } from "./approval-request-router.js";
 import { TurnEventBuffer } from "./event-buffer.js";
 import { ThinkStallGuard } from "./think-stall-guard.js";
 import type {
-  ApprovalRequestPayload,
   CancelResult,
   CompletedTurn,
   IncomingWireMessage,
@@ -79,7 +79,7 @@ export class WireClient {
   private readonly command: string;
   private readonly args: string[];
   private readonly logPath?: string;
-  private readonly approvalDispatcher: ApprovalDispatcher;
+  private readonly approvalRouter: ApprovalRequestRouter;
   private child?: ChildProcessWithoutNullStreams;
   // closed latches true the first time close() is called. Guards the race where
   // start() is mid-flight (e.g. awaiting mkdir or the spawn event) and close()
@@ -131,7 +131,7 @@ export class WireClient {
     this.command = options.command ?? "kimi";
     this.args = options.args ?? ["--wire"];
     this.logPath = options.logPath;
-    this.approvalDispatcher = options.approvalDispatcher;
+    this.approvalRouter = new ApprovalRequestRouter(options.approvalDispatcher);
     this.thinkStallMs = options.thinkStallMs;
     this.thinkLoopDuplicateThreshold = options.thinkLoopDuplicateThreshold;
   }
@@ -291,7 +291,14 @@ export class WireClient {
     this.thinkStallGuard = new ThinkStallGuard({
       thinkStallMs: this.thinkStallMs,
       thinkLoopDuplicateThreshold: this.thinkLoopDuplicateThreshold,
-      onCancel: () => this.maybeCancelInFlight(),
+      // Guard reports the verdict; WireClient decides the action. The
+      // current action is "cancel the in-flight prompt," but the guard
+      // does not own that decision — a future caller could choose to
+      // log-and-continue, retry with --no-thinking, etc. Accept the
+      // `reason` argument even though the current action is uniform, so
+      // the contract is honest and a future per-reason handler doesn't
+      // need a signature widening.
+      onStallVerdict: (_reason) => this.maybeCancelInFlight(),
       onUnknownPayloadShape: () => this.warnOnUnknownThinkPayloadShape(),
     });
 
@@ -465,17 +472,13 @@ export class WireClient {
 
     if ("method" in message) {
       if (message.method === "event") {
-        // Route every event through the stall guard: think payloads feed
-        // the duplicate detector; anything else counts as forward progress
-        // and re-arms the stall timer + clears the hash window.
+        // WireClient is transport-only here: hand every event to the
+        // guard, which owns the routing policy (think-only vs
+        // forward-progress). The subtype warning stays in WireClient
+        // because it's about ContentPart subtype telemetry, not stall
+        // detection.
         this.warnOnUnknownContentPartSubtype(message.params.type, message.params.payload);
-        if (this.thinkStallGuard) {
-          if (isThinkOnlyEvent(message.params.type, message.params.payload)) {
-            this.thinkStallGuard.observeThinkPart(message.params.payload);
-          } else {
-            this.thinkStallGuard.observeForwardProgress();
-          }
-        }
+        this.thinkStallGuard?.observeEvent(message.params.type, message.params.payload);
         this.currentTurn?.observeEvent(message.params.type, message.params.payload);
         return;
       }
@@ -522,108 +525,27 @@ export class WireClient {
       return;
     }
 
-    try {
-      await this.dispatchWireRequest(message);
-    } catch (error) {
-      // Any throw from payload parsing, approval dispatch, or realpath calls in the policy must
-      // still unblock Kimi. Send a JSON-RPC error response so the peer drops the pending request,
-      // and stash the failure so prompt() surfaces it to the command layer.
-      this.approvalFailure =
-        error instanceof RuntimeError
-          ? error
-          : new RuntimeError(
-              "APPROVAL_DISPATCHER_FAILED",
-              `Approval dispatcher threw: ${formatError(error)}`,
-              "wire.approval",
-              error instanceof Error ? { cause: error } : undefined,
-            );
+    const child = this.child;
 
-      if (this.child) {
-        const errorResponse = {
-          jsonrpc: "2.0" as const,
-          id: message.id,
-          error: {
-            code: -32603,
-            message: this.approvalFailure.message,
-          },
-        };
-        await this.logWire("out", errorResponse).catch(() => {});
+    const result = await this.approvalRouter.route(
+      message,
+      {
+        getCurrentCommandType: () => this.currentCommandType,
+        getRejectApprovals: () => this.rejectApprovals,
+      },
+      async (frame) => {
+        await this.logWire("out", frame).catch(() => {});
         try {
-          this.child.stdin.write(`${JSON.stringify(errorResponse)}\n`);
+          child.stdin.write(`${JSON.stringify(frame)}\n`);
         } catch {
           // stdin may already be closed during cancellation; ignore.
         }
-      }
-    }
-  }
-
-  private async dispatchWireRequest(
-    message: Extract<IncomingWireMessage, { method: "request" }>,
-  ): Promise<void> {
-    if (!this.child) {
-      return;
-    }
-
-    if (message.params.type !== "ApprovalRequest") {
-      const error = {
-        jsonrpc: "2.0" as const,
-        id: message.id,
-        error: {
-          code: -32601,
-          message: `${message.params.type} is not supported by the plugin runtime.`,
-        },
-      };
-      await this.logWire("out", error);
-      this.child.stdin.write(`${JSON.stringify(error)}\n`);
-      return;
-    }
-
-    if (!this.currentCommandType) {
-      throw new RuntimeError(
-        "WIRE_PROTOCOL_ERROR",
-        "Received an ApprovalRequest outside an active command turn.",
-        "wire.approval",
-      );
-    }
-
-    const payload = parseApprovalRequestPayload(message.params.payload);
-    const decision = this.rejectApprovals
-      ? {
-          response: "reject" as const,
-          feedback: "Command cancellation is in progress.",
-        }
-      : await this.approvalDispatcher.handle(payload, {
-          commandType: this.currentCommandType,
-        });
-
-    const finalDecision =
-      this.rejectApprovals && decision.response !== "reject"
-        ? {
-            response: "reject" as const,
-            feedback: "Command cancellation is in progress.",
-          }
-        : decision;
-
-    const response = {
-      jsonrpc: "2.0" as const,
-      id: message.id,
-      result: {
-        request_id: payload.id,
-        response: finalDecision.response,
-        ...(finalDecision.feedback ? { feedback: finalDecision.feedback } : {}),
       },
-    };
+    );
 
-    if (finalDecision.response === "reject") {
-      this.approvalFailure = new RuntimeError(
-        "APPROVAL_REJECTED",
-        finalDecision.feedback ?? `Approval rejected for ${payload.action}.`,
-        "wire.approval",
-      );
+    if (result.failure) {
+      this.approvalFailure = result.failure;
     }
-
-    await this.logWire("out", response);
-    this.child.stdin.write(`${JSON.stringify(response)}\n`);
   }
 
   private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
@@ -673,35 +595,4 @@ export class WireClient {
       }
     }
   }
-}
-
-/**
- * Returns true if the event is a reasoning-only `ContentPart`. Drives
- * routing into ThinkStallGuard: every other event type (StepBegin,
- * StepRetry, text ContentPart, ToolCall, ToolResult, StatusUpdate,
- * TurnEnd, ...) counts as "forward progress" and resets the guard.
- */
-function isThinkOnlyEvent(type: string, payload: Record<string, unknown>): boolean {
-  if (type !== "ContentPart") {
-    return false;
-  }
-  return payload.type === "think";
-}
-
-function parseApprovalRequestPayload(payload: Record<string, unknown>): ApprovalRequestPayload {
-  if (
-    typeof payload.id !== "string" ||
-    typeof payload.sender !== "string" ||
-    typeof payload.action !== "string" ||
-    typeof payload.description !== "string" ||
-    !Array.isArray(payload.display)
-  ) {
-    throw new RuntimeError(
-      "WIRE_PROTOCOL_ERROR",
-      "Received an ApprovalRequest with an invalid payload shape.",
-      "wire.approval",
-    );
-  }
-
-  return payload as unknown as ApprovalRequestPayload;
 }

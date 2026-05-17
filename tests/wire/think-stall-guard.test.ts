@@ -1,9 +1,23 @@
 import { describe, expect, test } from "bun:test";
 
 import { ThinkStallGuard } from "../../runtime/wire/think-stall-guard.js";
+import { isThinkOnlyEvent } from "../../runtime/wire/types.js";
 
-function thinkPayload(text: string): Record<string, unknown> {
-  return { type: "think", text };
+// Helpers construct the (type, payload) tuples that observeEvent
+// accepts — same shape WireClient hands to the guard from handleLine.
+function observeThink(guard: ThinkStallGuard, text: string): void {
+  guard.observeEvent("ContentPart", { type: "think", text });
+}
+
+function observeThinkRaw(guard: ThinkStallGuard, payload: Record<string, unknown>): void {
+  guard.observeEvent("ContentPart", payload);
+}
+
+function observeProgress(guard: ThinkStallGuard): void {
+  // Any non-think event counts as forward progress. StepBegin is the
+  // canonical example, but TurnEnd, ToolCall, text ContentParts, etc.
+  // all route through the same branch in observeEvent.
+  guard.observeEvent("StepBegin", { n: 1 });
 }
 
 describe("ThinkStallGuard", () => {
@@ -11,7 +25,7 @@ describe("ThinkStallGuard", () => {
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 8,
-      onCancel: () => {},
+      onStallVerdict: () => {},
     });
     try {
       expect(guard.stallReason).toBeNull();
@@ -21,22 +35,22 @@ describe("ThinkStallGuard", () => {
     }
   });
 
-  test("latches `stall` and invokes onCancel when only think events arrive past the deadline", async () => {
-    let cancelCount = 0;
+  test("latches `stall` and notifies onStallVerdict when only think events arrive past the deadline", async () => {
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 50,
       thinkLoopDuplicateThreshold: 0, // disable loop detector to isolate stall
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     try {
       // Even feeding diverse think payloads should NOT count as forward
       // progress — the time-based watchdog should fire regardless.
-      guard.observeThinkPart(thinkPayload("alpha"));
+      observeThink(guard, "alpha");
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(guard.stallReason).toBe("stall");
-      expect(cancelCount).toBe(1);
+      expect(verdicts).toEqual(["stall"]);
       const err = guard.stallError();
       expect(err).not.toBeNull();
       expect(err?.code).toBe("KIMI_THINK_STALLED");
@@ -46,30 +60,30 @@ describe("ThinkStallGuard", () => {
     }
   });
 
-  test("observeForwardProgress re-arms the timer and clears the hash window", async () => {
-    let cancelCount = 0;
+  test("forward-progress events re-arm the timer and clear the hash window", async () => {
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 80,
       thinkLoopDuplicateThreshold: 3,
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     try {
       // Accumulate 2 identical hashes (one short of threshold), then a
       // non-think event clears them. Two more identical hashes after
       // the reset should NOT trip the loop detector.
-      guard.observeThinkPart(thinkPayload("looped"));
-      guard.observeThinkPart(thinkPayload("looped"));
-      guard.observeForwardProgress();
-      guard.observeThinkPart(thinkPayload("looped"));
-      guard.observeThinkPart(thinkPayload("looped"));
+      observeThink(guard, "looped");
+      observeThink(guard, "looped");
+      observeProgress(guard);
+      observeThink(guard, "looped");
+      observeThink(guard, "looped");
       expect(guard.stallReason).toBeNull();
-      expect(cancelCount).toBe(0);
-      // The re-arm in observeForwardProgress should keep the timer
-      // alive past the original 80ms deadline.
+      expect(verdicts).toHaveLength(0);
+      // Forward-progress should also keep the timer alive past the
+      // original 80ms deadline.
       await new Promise((resolve) => setTimeout(resolve, 50));
-      guard.observeForwardProgress();
+      observeProgress(guard);
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(guard.stallReason).toBeNull();
     } finally {
@@ -77,129 +91,129 @@ describe("ThinkStallGuard", () => {
     }
   });
 
-  test("latches `loop` and invokes onCancel once on N consecutive identical think payloads", () => {
-    let cancelCount = 0;
+  test("latches `loop` and notifies onStallVerdict once on N consecutive identical think payloads", () => {
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 4,
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     try {
       for (let i = 0; i < 4; i += 1) {
-        guard.observeThinkPart(thinkPayload("stuck-payload"));
+        observeThink(guard, "stuck-payload");
       }
       expect(guard.stallReason).toBe("loop");
-      expect(cancelCount).toBe(1);
+      expect(verdicts).toEqual(["loop"]);
       const err = guard.stallError();
       expect(err?.code).toBe("KIMI_THINK_LOOP_DETECTED");
       expect(err?.message).toContain("4 consecutive identical");
-      // Subsequent observations are no-ops; cancelCount stays at 1.
-      guard.observeThinkPart(thinkPayload("stuck-payload"));
-      guard.observeForwardProgress();
-      expect(cancelCount).toBe(1);
+      // Subsequent observations are no-ops; the verdict is one-shot.
+      observeThink(guard, "stuck-payload");
+      observeProgress(guard);
+      expect(verdicts).toEqual(["loop"]);
     } finally {
       guard.dispose();
     }
   });
 
   test("diverse think payloads do not trigger the loop detector", () => {
-    let cancelCount = 0;
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 3,
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     try {
       for (let i = 0; i < 30; i += 1) {
-        guard.observeThinkPart(thinkPayload(`chunk-${i}`));
+        observeThink(guard, `chunk-${i}`);
       }
       expect(guard.stallReason).toBeNull();
-      expect(cancelCount).toBe(0);
+      expect(verdicts).toHaveLength(0);
     } finally {
       guard.dispose();
     }
   });
 
   test("thinkStallMs <= 0 disables the time-based watchdog", async () => {
-    let cancelCount = 0;
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 0,
       thinkLoopDuplicateThreshold: 0,
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     try {
-      guard.observeThinkPart(thinkPayload("only-think"));
+      observeThink(guard, "only-think");
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(guard.stallReason).toBeNull();
-      expect(cancelCount).toBe(0);
+      expect(verdicts).toHaveLength(0);
     } finally {
       guard.dispose();
     }
   });
 
   test("thinkLoopDuplicateThreshold <= 0 disables the duplicate detector", () => {
-    let cancelCount = 0;
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 0,
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     try {
       for (let i = 0; i < 50; i += 1) {
-        guard.observeThinkPart(thinkPayload("dup"));
+        observeThink(guard, "dup");
       }
       expect(guard.stallReason).toBeNull();
-      expect(cancelCount).toBe(0);
+      expect(verdicts).toHaveLength(0);
     } finally {
       guard.dispose();
     }
   });
 
   test("dispose clears the timer; later expirations cannot latch a stall", async () => {
-    let cancelCount = 0;
+    const verdicts: string[] = [];
     const guard = new ThinkStallGuard({
       thinkStallMs: 50,
       thinkLoopDuplicateThreshold: 0,
-      onCancel: () => {
-        cancelCount += 1;
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
       },
     });
     guard.dispose();
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(guard.stallReason).toBeNull();
-    expect(cancelCount).toBe(0);
+    expect(verdicts).toHaveLength(0);
   });
 
   test("dispose is idempotent", () => {
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 8,
-      onCancel: () => {},
+      onStallVerdict: () => {},
     });
     guard.dispose();
     expect(() => guard.dispose()).not.toThrow();
   });
 
-  test("onCancel throw does not escape the guard", () => {
+  test("onStallVerdict throw does not escape the guard", () => {
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 2,
-      onCancel: () => {
-        throw new Error("cancel callback exploded");
+      onStallVerdict: () => {
+        throw new Error("verdict callback exploded");
       },
     });
     try {
       expect(() => {
-        guard.observeThinkPart(thinkPayload("dup"));
-        guard.observeThinkPart(thinkPayload("dup"));
+        observeThink(guard, "dup");
+        observeThink(guard, "dup");
       }).not.toThrow();
       expect(guard.stallReason).toBe("loop");
     } finally {
@@ -209,23 +223,22 @@ describe("ThinkStallGuard", () => {
 
   test("payload missing text field skips loop-detection and invokes onUnknownPayloadShape per observation", () => {
     // The guard delegates suppression to the caller via the callback —
-    // unlike the v0.3.4-prerelease design that owned a process-wide
-    // flag, the guard now fires the callback on EVERY unrecognized
-    // payload and the caller (WireClient) handles one-shot semantics.
-    // That keeps the guard pure and lets the suppression scope match
-    // its sibling `warnedUnknownContentPartSubtypes` (per-WireClient).
+    // it fires the callback on EVERY unrecognized payload and the
+    // caller (WireClient) handles one-shot semantics. That keeps the
+    // guard pure and matches the per-WireClient scope of its sibling
+    // `warnedUnknownContentPartSubtypes`.
     let unknownCount = 0;
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 2,
-      onCancel: () => {},
+      onStallVerdict: () => {},
       onUnknownPayloadShape: () => {
         unknownCount += 1;
       },
     });
     try {
-      guard.observeThinkPart({ type: "think", delta: "no-text-field" });
-      guard.observeThinkPart({ type: "think", delta: "still-no-text" });
+      observeThinkRaw(guard, { type: "think", delta: "no-text-field" });
+      observeThinkRaw(guard, { type: "think", delta: "still-no-text" });
       expect(guard.stallReason).toBeNull();
       expect(unknownCount).toBe(2);
     } finally {
@@ -234,18 +247,98 @@ describe("ThinkStallGuard", () => {
   });
 
   test("payload missing text field is a no-op when no onUnknownPayloadShape callback is provided", () => {
-    // Callback is optional — the guard must not crash when a caller
-    // (e.g., a future consumer) omits the telemetry hook.
     const guard = new ThinkStallGuard({
       thinkStallMs: 60_000,
       thinkLoopDuplicateThreshold: 2,
-      onCancel: () => {},
+      onStallVerdict: () => {},
     });
     try {
       expect(() => {
-        guard.observeThinkPart({ type: "think", delta: "no-text-field" });
+        observeThinkRaw(guard, { type: "think", delta: "no-text-field" });
       }).not.toThrow();
       expect(guard.stallReason).toBeNull();
+    } finally {
+      guard.dispose();
+    }
+  });
+
+  test("observeEvent routes via isThinkOnlyEvent: non-ContentPart events count as forward progress", () => {
+    // Pins the routing seam: StepBegin, ToolCall, TurnEnd, etc. must
+    // all route to observeForwardProgress, NOT observeThinkPart. If
+    // the routing inverts, 4 identical "StepBegin" events would
+    // accumulate hashes and trip the loop detector — which would be
+    // wrong.
+    const verdicts: string[] = [];
+    const guard = new ThinkStallGuard({
+      thinkStallMs: 60_000,
+      thinkLoopDuplicateThreshold: 3,
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
+      },
+    });
+    try {
+      for (let i = 0; i < 10; i += 1) {
+        guard.observeEvent("StepBegin", { n: 1 });
+        guard.observeEvent("ToolCall", { name: "shell" });
+        guard.observeEvent("TurnEnd", {});
+      }
+      expect(guard.stallReason).toBeNull();
+      expect(verdicts).toHaveLength(0);
+    } finally {
+      guard.dispose();
+    }
+  });
+
+  describe("isThinkOnlyEvent (routing predicate)", () => {
+    // Direct unit tests on the exported predicate so the routing rule
+    // can be verified at the function level, independently of the
+    // ThinkStallGuard.observeEvent integration. If a future refactor
+    // changes the predicate's truth table, these tests catch it
+    // synchronously instead of relying on the integration seam test.
+
+    test("returns true for ContentPart with type:think", () => {
+      expect(isThinkOnlyEvent("ContentPart", { type: "think", text: "x" })).toBeTrue();
+    });
+
+    test("returns false for ContentPart with type:text", () => {
+      expect(isThinkOnlyEvent("ContentPart", { type: "text", text: "x" })).toBeFalse();
+    });
+
+    test("returns false for ContentPart with unknown subtype", () => {
+      expect(isThinkOnlyEvent("ContentPart", { type: "speculation", text: "x" })).toBeFalse();
+    });
+
+    test("returns false for ContentPart with no `type` field", () => {
+      expect(isThinkOnlyEvent("ContentPart", { text: "x" })).toBeFalse();
+    });
+
+    test("returns false for non-ContentPart event types", () => {
+      expect(isThinkOnlyEvent("StepBegin", { n: 1 })).toBeFalse();
+      expect(isThinkOnlyEvent("ToolCall", { type: "think" })).toBeFalse();
+      expect(isThinkOnlyEvent("TurnEnd", {})).toBeFalse();
+      expect(isThinkOnlyEvent("StatusUpdate", { type: "think" })).toBeFalse();
+    });
+  });
+
+  test("observeEvent routes via isThinkOnlyEvent: text ContentPart counts as forward progress, not think", () => {
+    // The `payload.type` discriminant matters even when wire type is
+    // "ContentPart". 4 identical text ContentParts must NOT trip the
+    // loop detector — that scenario is the integration seam test in
+    // interrupted-turn.test.ts; this unit pins the same routing.
+    const verdicts: string[] = [];
+    const guard = new ThinkStallGuard({
+      thinkStallMs: 60_000,
+      thinkLoopDuplicateThreshold: 3,
+      onStallVerdict: (reason) => {
+        verdicts.push(reason);
+      },
+    });
+    try {
+      for (let i = 0; i < 10; i += 1) {
+        guard.observeEvent("ContentPart", { type: "text", text: "identical" });
+      }
+      expect(guard.stallReason).toBeNull();
+      expect(verdicts).toHaveLength(0);
     } finally {
       guard.dispose();
     }

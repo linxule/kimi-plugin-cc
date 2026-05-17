@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createCancellationHandlers } from "../cancellation.js";
+import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
@@ -26,6 +27,9 @@ export async function runRescue(argv, context) {
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
+    // Registry-driven cancellation and failure messages — see
+    // runtime/commands/registry.ts.
+    const rescueConfig = getManagedCommandConfig("rescue");
     const store = new JobStore(paths);
     try {
         await sweepStaleJobs(store, paths);
@@ -63,7 +67,7 @@ export async function runRescue(argv, context) {
         }
         catch (error) {
             const classified = new RuntimeError("RESCUE_LOG_HEADER_FAILED", `Failed to write rescue invocation log header: ${error.message ?? String(error)}`, "rescue.log-header", error instanceof Error ? { cause: error } : undefined);
-            await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+            await markJobFailed(store, paths, job, classified, rescueConfig.cancellation.failedSummary, { phase: "failed" });
             throw classified;
         }
         if (parsed.background) {
@@ -73,7 +77,7 @@ export async function runRescue(argv, context) {
                 promptEnvVar: "KIMI_PLUGIN_CC_RESCUE_PROMPT_B64",
                 reusedSessionEnvVar: "KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION",
                 reusedSession: sessionResolution.reusedSession,
-                failedSummary: "Rescue failed.",
+                failedSummary: rescueConfig.cancellation.failedSummary,
                 missingResultErrorCode: "RESCUE_RESULT_MISSING",
                 spawnFailedErrorCode: "RESCUE_WORKER_SPAWN_FAILED",
                 earlyExitErrorCode: "RESCUE_WORKER_EXITED_EARLY",
@@ -105,8 +109,12 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     }
     // Shared cancellation handler — registers SIGTERM/SIGINT immediately
     // so a signal during wire-client startup still latches
-    // cancelling=true. See runtime/cancellation.ts.
-    const handlers = createCancellationHandlers({ escalationMs: 1_500 });
+    // cancelling=true. See runtime/cancellation.ts. Cancellation constants
+    // (codes, messages, escalation timing) come from the command registry
+    // so error-code drift across commands is impossible.
+    const rescueConfig = getManagedCommandConfig("rescue");
+    const cancel = rescueConfig.cancellation;
+    const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
     let client;
     try {
         let approvalPolicy;
@@ -115,7 +123,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         }
         catch (error) {
             const classified = new RuntimeError("RESCUE_SETUP_FAILED", `Rescue setup failed: ${error.message ?? String(error)}`, "rescue.setup", error instanceof Error ? { cause: error } : undefined);
-            return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+            return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
         }
         client = await buildAndStartWireClient({
             cwd: job.cwd,
@@ -132,7 +140,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             // Signal fired during startup; the first attempt succeeded before the
             // retry gate could short-circuit. Synthesize a throw so the normal
             // cancellation teardown path runs.
-            throw new RuntimeError("RESCUE_CANCELLED_DURING_START", "Rescue cancelled during startup.", "rescue.start");
+            throw new RuntimeError(cancel.errorCodes.cancelledDuringStart, cancel.cancelMessages.duringStart, "rescue.start");
         }
         if (options?.workerPid) {
             store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
@@ -165,7 +173,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         // Cancel-after-prompt-success check: SIGTERM could have fired between
         // prompt completion and our terminal-state writes. Honour it.
         if (handlers.cancelling) {
-            throw new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request after prompt completion.", "rescue.runtime");
+            throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "rescue.runtime");
         }
         let artifactPath;
         try {
@@ -177,12 +185,12 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         catch (writeError) {
             process.stderr.write(`[kimi-plugin-cc] rescue artifact write failed for job ${job.job_id}; raw output follows:\n${completedTurn.finalText}\n`);
             const classified = new RuntimeError("RESCUE_ARTIFACT_WRITE_FAILED", `Failed to write rescue artifact: ${writeError.message ?? String(writeError)}`, "rescue.artifact", writeError instanceof Error ? { cause: writeError } : undefined);
-            return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+            return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
         }
         // Re-check after the artifact write (disk I/O window) — cancel could
         // have landed there too.
         if (handlers.cancelling) {
-            throw new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request after artifact write.", "rescue.runtime");
+            throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterArtifact, "rescue.runtime");
         }
         return (store.markCompleted(job.job_id, {
             summary: firstMeaningfulLine(completedTurn.finalText),
@@ -196,15 +204,15 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             // Clear escalation timer NOW, before awaiting markJobCancelled
             // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
             handlers.clearEscalation();
-            // Always wrap into a canonical RESCUE_CANCELLED RuntimeError so callers
+            // Always wrap into a canonical *_CANCELLED RuntimeError so callers
             // can distinguish user-cancel from infra failure via error.code.
-            const cancelledError = new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request.", "rescue.runtime", error instanceof Error ? { cause: error } : undefined);
-            return await markJobCancelled(store, paths, job, "Rescue cancelled by user request.", cancelledError, { phase: "cancelled" });
+            const cancelledError = new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.default, "rescue.runtime", error instanceof Error ? { cause: error } : undefined);
+            return await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError, { phase: "cancelled" });
         }
         const classified = classifyManagedCommandFailure(error, "rescue", job.job_id, {
             preserveStage: true,
         });
-        return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
+        return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
     }
     finally {
         handlers.dispose();

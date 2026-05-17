@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readPluginConfig } from "../config.js";
+import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
@@ -153,7 +154,12 @@ async function executeReviewGate(payload, assistantMessage, context) {
             // pattern already in ask/rescue/review.
             const persisted = activeStore.getJob(job.job_id);
             if (persisted && persisted.status !== "running") {
-                throw new RuntimeError("REVIEW_GATE_CANCELLED", "review_gate cancelled before completion artifact was written.", "review_gate.runtime");
+                throw new RuntimeError(getManagedCommandConfig("review_gate").cancellation.errorCodes.cancelled, 
+                // Keep the bespoke "before completion artifact was written"
+                // wording — this is a different cancel flow (status-precheck,
+                // not SIGTERM-driven), so the standard cancelMessages don't
+                // describe it accurately.
+                "review_gate cancelled before completion artifact was written.", "review_gate.runtime");
             }
             const artifactPath = await writeArtifact(paths, job, rendered.rendered);
             activeStore.markCompleted(job.job_id, {

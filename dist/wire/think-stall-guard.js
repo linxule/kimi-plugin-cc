@@ -1,15 +1,16 @@
 import { RuntimeError } from "../errors.js";
+import { isThinkOnlyEvent } from "./types.js";
 /**
  * Watchdog over a single prompt() turn's reasoning stream. Owns the
  * stall timer, the duplicate-payload hash window, and the resulting
  * stall verdict so WireClient can stay focused on transport.
  *
  * Construction arms the time-based watchdog at `thinkStallMs`. Each
- * `observeForwardProgress()` call (any non-think event) re-arms the
- * timer and clears the hash window. Each `observeThinkPart()` call
- * pushes a payload hash onto a bounded ring and, if the last
- * `thinkLoopDuplicateThreshold` hashes match, latches the
- * "loop" verdict and invokes `onCancel` once.
+ * forward-progress event (any non-think event) re-arms the timer and
+ * clears the hash window. Each think-only event pushes a payload hash
+ * onto a bounded ring and, if the last `thinkLoopDuplicateThreshold`
+ * hashes match, latches the "loop" verdict and invokes
+ * `onStallVerdict` once with the reason.
  *
  * The guard is constructed fresh per prompt and disposed in the
  * caller's `finally` so timers never outlive their turn.
@@ -19,37 +20,49 @@ const DEFAULT_THINK_LOOP_DUPLICATE_THRESHOLD = 8;
 export class ThinkStallGuard {
     thinkStallMs;
     thinkLoopDuplicateThreshold;
-    onCancel;
+    onStallVerdict;
     onUnknownPayloadShape;
     timer;
     hashes = [];
     reason = null;
-    cancelFired = false;
+    verdictFired = false;
     disposed = false;
     constructor(options) {
         this.thinkStallMs = options.thinkStallMs ?? DEFAULT_THINK_STALL_MS;
         this.thinkLoopDuplicateThreshold =
             options.thinkLoopDuplicateThreshold ?? DEFAULT_THINK_LOOP_DUPLICATE_THRESHOLD;
-        this.onCancel = options.onCancel;
+        this.onStallVerdict = options.onStallVerdict;
         this.onUnknownPayloadShape = options.onUnknownPayloadShape;
         this.arm();
     }
-    /** Any non-think event arrived. Reset the stall timer and clear the
-     *  duplicate-think buffer so think-then-text-then-think cannot
-     *  accumulate enough identical hashes to look like a loop. */
-    observeForwardProgress() {
+    /** High-level entry point: forward EVERY wire event through here.
+     *  The guard owns the routing policy (think-only vs forward-progress)
+     *  so WireClient stays transport-only — no longer needs to know
+     *  which subtype is the magic one. */
+    observeEvent(type, payload) {
         if (this.disposed || this.reason !== null) {
             return;
         }
+        if (isThinkOnlyEvent(type, payload)) {
+            this.observeThinkPart(payload);
+        }
+        else {
+            this.observeForwardProgress();
+        }
+    }
+    /** Any non-think event arrived. Reset the stall timer and clear the
+     *  duplicate-think buffer so think-then-text-then-think cannot
+     *  accumulate enough identical hashes to look like a loop.
+     *  Private — call `observeEvent` from production code. Exposed via
+     *  protected-ish naming for tests that need direct routing. */
+    observeForwardProgress() {
         this.hashes = [];
         this.arm();
     }
     /** A `ContentPart{type:"think"}` event arrived. Hash its text payload
-     *  and check whether the last N hashes are all identical. */
+     *  and check whether the last N hashes are all identical. Private —
+     *  call `observeEvent` from production code. */
     observeThinkPart(payload) {
-        if (this.disposed || this.reason !== null) {
-            return;
-        }
         const text = extractThinkPayloadText(payload);
         if (text === null) {
             this.onUnknownPayloadShape?.();
@@ -95,7 +108,7 @@ export class ThinkStallGuard {
             }
             this.reason = "stall";
             process.stderr.write(`[kimi-plugin-cc] think-stall watchdog fired after ${this.thinkStallMs}ms with no non-think events; cancelling.\n`);
-            this.fireCancel();
+            this.fireVerdict();
         }, this.thinkStallMs);
         this.timer.unref();
     }
@@ -122,25 +135,25 @@ export class ThinkStallGuard {
         if (this.hashes.every((h) => h === first)) {
             this.reason = "loop";
             process.stderr.write(`[kimi-plugin-cc] think-loop detected: ${threshold} consecutive identical think payloads; cancelling.\n`);
-            this.fireCancel();
+            this.fireVerdict();
         }
     }
-    fireCancel() {
-        if (this.cancelFired) {
+    fireVerdict() {
+        if (this.verdictFired || this.reason === null) {
             return;
         }
-        this.cancelFired = true;
+        this.verdictFired = true;
         try {
-            this.onCancel();
+            this.onStallVerdict(this.reason);
         }
         catch (error) {
-            // onCancel is a fire-and-forget bridge to wire-side cancellation;
-            // its throws must not abort the guard. Log to stderr so a broken
-            // cancel path is visible — silent swallow would hide real
+            // onStallVerdict is a fire-and-forget notification — the caller's
+            // throw must not abort the guard. Log to stderr so a broken
+            // verdict-handler is visible; silent swallow would hide real
             // failures, especially when combined with cancel-coalescing
             // flags that suppress retries.
             const message = error instanceof Error ? error.message : String(error);
-            process.stderr.write(`[kimi-plugin-cc] ThinkStallGuard onCancel callback threw: ${message}\n`);
+            process.stderr.write(`[kimi-plugin-cc] ThinkStallGuard onStallVerdict callback threw: ${message}\n`);
         }
     }
 }

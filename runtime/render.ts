@@ -2,11 +2,12 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { JobRecord } from "./job-store.js";
+import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
 import type { PluginPaths } from "./paths.js";
-import type { JobError } from "./types.js";
+import type { JobError, ManagedCommandType } from "./types.js";
 
 export type RenderedManagedOutput =
   | {
@@ -34,6 +35,8 @@ export async function readArtifact(artifactPath: string): Promise<string> {
 }
 
 export function renderManagedJobOutput(job: JobRecord, finalText: string): RenderedManagedOutput {
+  assertOutputModeConsistency(job.command_type, finalText);
+
   switch (job.command_type) {
     case "ask": {
       const trimmed = finalText.trim();
@@ -84,6 +87,29 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
     }
     default:
       return assertNever(job.command_type);
+  }
+}
+
+export function assertOutputModeConsistency(commandType: ManagedCommandType, finalText: string): void {
+  const { outputMode } = getManagedCommandConfig(commandType);
+
+  switch (outputMode) {
+    case "passthrough":
+      return;
+    case "parsed":
+      try {
+        JSON.parse(finalText);
+      } catch (error) {
+        throw new RuntimeError(
+          `${commandType.toUpperCase()}_PARSE_FAILED`,
+          `${commandType} is configured for parsed output but returned malformed JSON: ${(error as Error).message}`,
+          `${commandType}.parse`,
+          error instanceof Error ? { cause: error } : undefined,
+        );
+      }
+      return;
+    default:
+      return assertNever(outputMode);
   }
 }
 

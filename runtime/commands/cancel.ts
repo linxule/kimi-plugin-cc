@@ -6,6 +6,7 @@ import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
 import { JobStore, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
+import { getManagedCommandConfig } from "./registry.js";
 import type { CommandContext } from "../types.js";
 
 export async function runCancel(argv: string[], context: CommandContext): Promise<string> {
@@ -74,14 +75,15 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       let preMarkError: unknown;
       try {
         await withJobStore(paths, async (preMarkStore) => {
+          const reviewGateCancel = getManagedCommandConfig("review_gate").cancellation;
           await markJobCancelled(
             preMarkStore,
             paths,
             job,
-            "review_gate cancelled by user request.",
+            reviewGateCancel.cancelledSummary,
             new RuntimeError(
-              "REVIEW_GATE_CANCELLED",
-              "review_gate cancelled by user request.",
+              reviewGateCancel.errorCodes.cancelled,
+              reviewGateCancel.cancelMessages.default,
               "cancel.runtime",
             ),
           );

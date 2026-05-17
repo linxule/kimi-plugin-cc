@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { createCancellationHandlers } from "../cancellation.js";
+import { getManagedCommandConfig } from "./registry.js";
 import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
@@ -60,7 +61,11 @@ export async function runReview(argv, context, commandType) {
     });
     let client;
     // Shared cancellation handler — see runtime/cancellation.ts.
-    const handlers = createCancellationHandlers({ escalationMs: 1_500 });
+    // Registry lookup keyed on commandType so "review" and "challenge"
+    // each get their own error codes + messages without a local helper.
+    const reviewConfig = getManagedCommandConfig(commandType);
+    const cancel = reviewConfig.cancellation;
+    const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
     try {
         client = await buildAndStartWireClient({
             cwd: context.cwd,
@@ -74,7 +79,7 @@ export async function runReview(argv, context, commandType) {
         }, KIMI_START_TIMEOUT_MS, `${commandType}.start`, { shouldRetry: () => !handlers.cancelling });
         handlers.attachClient(client);
         if (handlers.cancelling) {
-            throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled during startup.`, `${commandType}.start`);
+            throw new RuntimeError(cancel.errorCodes.cancelledDuringStart, cancel.cancelMessages.duringStart, `${commandType}.start`);
         }
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
         await withTimeout(client.initialize({
@@ -91,14 +96,14 @@ export async function runReview(argv, context, commandType) {
         // prompt completion and our terminal-state writes. Honour it instead of
         // silently committing markCompleted.
         if (handlers.cancelling) {
-            throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request after prompt completion.`, `${commandType}.runtime`);
+            throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, `${commandType}.runtime`);
         }
         const rendered = renderManagedJobOutput(job, completed.finalText);
         const artifactPath = await writeArtifact(paths, job, rendered.rendered);
         // Re-check after the disk write (writeArtifact awaits I/O) — cancel could
         // have landed during that window too.
         if (handlers.cancelling) {
-            throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request after artifact write.`, `${commandType}.runtime`);
+            throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterArtifact, `${commandType}.runtime`);
         }
         store.markCompleted(job.job_id, {
             summary: rendered.summary,
@@ -118,12 +123,12 @@ export async function runReview(argv, context, commandType) {
             // underlying error is already a RuntimeError. Otherwise infrastructure
             // failure codes (WIRE_PROCESS_EXITED, TIMEOUT) leak into job.error.code
             // and callers can't distinguish user-cancel from infra failure.
-            const cancelledError = new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request.`, `${commandType}.runtime`, error instanceof Error ? { cause: error } : undefined);
-            await markJobCancelled(store, paths, job, `${commandType} cancelled by user request.`, cancelledError);
+            const cancelledError = new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.default, `${commandType}.runtime`, error instanceof Error ? { cause: error } : undefined);
+            await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError);
             throw cancelledError;
         }
         const classified = classifyManagedCommandFailure(error, commandType, job.job_id);
-        await markJobFailed(store, paths, job, classified, `${commandType} failed.`);
+        await markJobFailed(store, paths, job, classified, cancel.failedSummary);
         throw classified;
     }
     finally {
@@ -131,9 +136,6 @@ export async function runReview(argv, context, commandType) {
         await client?.close();
         store.close();
     }
-}
-function reviewCancellationCode(commandType) {
-    return commandType === "review" ? "REVIEW_CANCELLED" : "CHALLENGE_CANCELLED";
 }
 function buildReviewTitleExcerpt(commandType, focus) {
     const trimmed = focus?.trim();

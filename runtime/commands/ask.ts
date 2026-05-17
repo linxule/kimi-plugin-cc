@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { createCancellationHandlers } from "../cancellation.js";
+import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
@@ -34,6 +35,9 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
+  // Registry-driven cancellation and failure messages — see
+  // runtime/commands/registry.ts.
+  const askConfig = getManagedCommandConfig("ask");
   const store = new JobStore(paths);
   try {
     await sweepStaleJobs(store, paths);
@@ -84,7 +88,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
         "ask.log-header",
         error instanceof Error ? { cause: error } : undefined,
       );
-      await markJobFailed(store, paths, job, classified, "Ask failed.", { phase: "failed" });
+      await markJobFailed(store, paths, job, classified, askConfig.cancellation.failedSummary, { phase: "failed" });
       throw classified;
     }
 
@@ -97,7 +101,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
         promptEnvVar: "KIMI_PLUGIN_CC_ASK_PROMPT_B64",
         reusedSessionEnvVar: "KIMI_PLUGIN_CC_ASK_REUSED_SESSION",
         reusedSession: sessionResolution.reusedSession,
-        failedSummary: "Ask failed.",
+        failedSummary: askConfig.cancellation.failedSummary,
         missingResultErrorCode: "ASK_RESULT_MISSING",
         spawnFailedErrorCode: "ASK_WORKER_SPAWN_FAILED",
         earlyExitErrorCode: "ASK_WORKER_EXITED_EARLY",
@@ -148,8 +152,12 @@ export async function executeAskJob(
   // SIGTERM/SIGINT plumbing extracted into a shared helper so the
   // 30-line dance no longer drifts between ask/rescue/review. The helper
   // registers the listeners IMMEDIATELY so a signal during wire-client
-  // startup still latches cancelling=true.
-  const handlers = createCancellationHandlers({ escalationMs: 1_500 });
+  // startup still latches cancelling=true. Cancellation constants
+  // (codes, messages, escalation timing) come from the command
+  // registry so error-code drift across commands is impossible.
+  const askConfig = getManagedCommandConfig("ask");
+  const cancel = askConfig.cancellation;
+  const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
   let client: WireClient | undefined;
 
   try {
@@ -176,8 +184,8 @@ export async function executeAskJob(
       // fall through the catch via a synthetic throw so the normal cancellation
       // teardown path (markJobCancelled + signal deregistration) runs.
       throw new RuntimeError(
-        "ASK_CANCELLED_DURING_START",
-        "Ask cancelled during startup.",
+        cancel.errorCodes.cancelledDuringStart,
+        cancel.cancelMessages.duringStart,
         "ask.start",
       );
     }
@@ -227,8 +235,8 @@ export async function executeAskJob(
     // prompt completion and our terminal-state writes. Honour it.
     if (handlers.cancelling) {
       throw new RuntimeError(
-        "ASK_CANCELLED",
-        "Ask cancelled by user request after prompt completion.",
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.afterPrompt,
         "ask.runtime",
       );
     }
@@ -236,8 +244,8 @@ export async function executeAskJob(
     const artifactPath = await writeArtifact(paths, job, rendered.rendered);
     if (handlers.cancelling) {
       throw new RuntimeError(
-        "ASK_CANCELLED",
-        "Ask cancelled by user request after artifact write.",
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.afterArtifact,
         "ask.runtime",
       );
     }
@@ -254,11 +262,11 @@ export async function executeAskJob(
       // Clear escalation timer NOW, before awaiting markJobCancelled
       // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
       handlers.clearEscalation();
-      // Always wrap into a canonical ASK_CANCELLED RuntimeError so callers
+      // Always wrap into a canonical *_CANCELLED RuntimeError so callers
       // can distinguish user-cancel from infra failure via error.code.
       const cancelledError = new RuntimeError(
-        "ASK_CANCELLED",
-        "Ask cancelled by user request.",
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.default,
         "ask.runtime",
         error instanceof Error ? { cause: error } : undefined,
       );
@@ -266,13 +274,13 @@ export async function executeAskJob(
         store,
         paths,
         job,
-        "Ask cancelled by user request.",
+        cancel.cancelledSummary,
         cancelledError,
         { phase: "cancelled" },
       );
     }
     const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
-    await markJobFailed(store, paths, job, classified, "Ask failed.", { phase: "failed" });
+    await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
     throw classified;
   } finally {
     handlers.dispose();

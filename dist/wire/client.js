@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { RuntimeError, formatError } from "../errors.js";
+import { ApprovalRequestRouter } from "./approval-request-router.js";
 import { TurnEventBuffer } from "./event-buffer.js";
 import { ThinkStallGuard } from "./think-stall-guard.js";
 /** Maximum recognized ContentPart subtypes we treat as "forward progress". */
@@ -15,7 +16,7 @@ export class WireClient {
     command;
     args;
     logPath;
-    approvalDispatcher;
+    approvalRouter;
     child;
     // closed latches true the first time close() is called. Guards the race where
     // start() is mid-flight (e.g. awaiting mkdir or the spawn event) and close()
@@ -66,7 +67,7 @@ export class WireClient {
         this.command = options.command ?? "kimi";
         this.args = options.args ?? ["--wire"];
         this.logPath = options.logPath;
-        this.approvalDispatcher = options.approvalDispatcher;
+        this.approvalRouter = new ApprovalRequestRouter(options.approvalDispatcher);
         this.thinkStallMs = options.thinkStallMs;
         this.thinkLoopDuplicateThreshold = options.thinkLoopDuplicateThreshold;
     }
@@ -186,7 +187,14 @@ export class WireClient {
         this.thinkStallGuard = new ThinkStallGuard({
             thinkStallMs: this.thinkStallMs,
             thinkLoopDuplicateThreshold: this.thinkLoopDuplicateThreshold,
-            onCancel: () => this.maybeCancelInFlight(),
+            // Guard reports the verdict; WireClient decides the action. The
+            // current action is "cancel the in-flight prompt," but the guard
+            // does not own that decision — a future caller could choose to
+            // log-and-continue, retry with --no-thinking, etc. Accept the
+            // `reason` argument even though the current action is uniform, so
+            // the contract is honest and a future per-reason handler doesn't
+            // need a signature widening.
+            onStallVerdict: (_reason) => this.maybeCancelInFlight(),
             onUnknownPayloadShape: () => this.warnOnUnknownThinkPayloadShape(),
         });
         try {
@@ -332,18 +340,13 @@ export class WireClient {
         }
         if ("method" in message) {
             if (message.method === "event") {
-                // Route every event through the stall guard: think payloads feed
-                // the duplicate detector; anything else counts as forward progress
-                // and re-arms the stall timer + clears the hash window.
+                // WireClient is transport-only here: hand every event to the
+                // guard, which owns the routing policy (think-only vs
+                // forward-progress). The subtype warning stays in WireClient
+                // because it's about ContentPart subtype telemetry, not stall
+                // detection.
                 this.warnOnUnknownContentPartSubtype(message.params.type, message.params.payload);
-                if (this.thinkStallGuard) {
-                    if (isThinkOnlyEvent(message.params.type, message.params.payload)) {
-                        this.thinkStallGuard.observeThinkPart(message.params.payload);
-                    }
-                    else {
-                        this.thinkStallGuard.observeForwardProgress();
-                    }
-                }
+                this.thinkStallGuard?.observeEvent(message.params.type, message.params.payload);
                 this.currentTurn?.observeEvent(message.params.type, message.params.payload);
                 return;
             }
@@ -375,85 +378,22 @@ export class WireClient {
         if (!this.child) {
             return;
         }
-        try {
-            await this.dispatchWireRequest(message);
-        }
-        catch (error) {
-            // Any throw from payload parsing, approval dispatch, or realpath calls in the policy must
-            // still unblock Kimi. Send a JSON-RPC error response so the peer drops the pending request,
-            // and stash the failure so prompt() surfaces it to the command layer.
-            this.approvalFailure =
-                error instanceof RuntimeError
-                    ? error
-                    : new RuntimeError("APPROVAL_DISPATCHER_FAILED", `Approval dispatcher threw: ${formatError(error)}`, "wire.approval", error instanceof Error ? { cause: error } : undefined);
-            if (this.child) {
-                const errorResponse = {
-                    jsonrpc: "2.0",
-                    id: message.id,
-                    error: {
-                        code: -32603,
-                        message: this.approvalFailure.message,
-                    },
-                };
-                await this.logWire("out", errorResponse).catch(() => { });
-                try {
-                    this.child.stdin.write(`${JSON.stringify(errorResponse)}\n`);
-                }
-                catch {
-                    // stdin may already be closed during cancellation; ignore.
-                }
+        const child = this.child;
+        const result = await this.approvalRouter.route(message, {
+            getCurrentCommandType: () => this.currentCommandType,
+            getRejectApprovals: () => this.rejectApprovals,
+        }, async (frame) => {
+            await this.logWire("out", frame).catch(() => { });
+            try {
+                child.stdin.write(`${JSON.stringify(frame)}\n`);
             }
-        }
-    }
-    async dispatchWireRequest(message) {
-        if (!this.child) {
-            return;
-        }
-        if (message.params.type !== "ApprovalRequest") {
-            const error = {
-                jsonrpc: "2.0",
-                id: message.id,
-                error: {
-                    code: -32601,
-                    message: `${message.params.type} is not supported by the plugin runtime.`,
-                },
-            };
-            await this.logWire("out", error);
-            this.child.stdin.write(`${JSON.stringify(error)}\n`);
-            return;
-        }
-        if (!this.currentCommandType) {
-            throw new RuntimeError("WIRE_PROTOCOL_ERROR", "Received an ApprovalRequest outside an active command turn.", "wire.approval");
-        }
-        const payload = parseApprovalRequestPayload(message.params.payload);
-        const decision = this.rejectApprovals
-            ? {
-                response: "reject",
-                feedback: "Command cancellation is in progress.",
+            catch {
+                // stdin may already be closed during cancellation; ignore.
             }
-            : await this.approvalDispatcher.handle(payload, {
-                commandType: this.currentCommandType,
-            });
-        const finalDecision = this.rejectApprovals && decision.response !== "reject"
-            ? {
-                response: "reject",
-                feedback: "Command cancellation is in progress.",
-            }
-            : decision;
-        const response = {
-            jsonrpc: "2.0",
-            id: message.id,
-            result: {
-                request_id: payload.id,
-                response: finalDecision.response,
-                ...(finalDecision.feedback ? { feedback: finalDecision.feedback } : {}),
-            },
-        };
-        if (finalDecision.response === "reject") {
-            this.approvalFailure = new RuntimeError("APPROVAL_REJECTED", finalDecision.feedback ?? `Approval rejected for ${payload.action}.`, "wire.approval");
+        });
+        if (result.failure) {
+            this.approvalFailure = result.failure;
         }
-        await this.logWire("out", response);
-        this.child.stdin.write(`${JSON.stringify(response)}\n`);
     }
     handleExit(code, signal) {
         if (this.suppressExitError) {
@@ -498,26 +438,4 @@ export class WireClient {
             }
         }
     }
-}
-/**
- * Returns true if the event is a reasoning-only `ContentPart`. Drives
- * routing into ThinkStallGuard: every other event type (StepBegin,
- * StepRetry, text ContentPart, ToolCall, ToolResult, StatusUpdate,
- * TurnEnd, ...) counts as "forward progress" and resets the guard.
- */
-function isThinkOnlyEvent(type, payload) {
-    if (type !== "ContentPart") {
-        return false;
-    }
-    return payload.type === "think";
-}
-function parseApprovalRequestPayload(payload) {
-    if (typeof payload.id !== "string" ||
-        typeof payload.sender !== "string" ||
-        typeof payload.action !== "string" ||
-        typeof payload.description !== "string" ||
-        !Array.isArray(payload.display)) {
-        throw new RuntimeError("WIRE_PROTOCOL_ERROR", "Received an ApprovalRequest with an invalid payload shape.", "wire.approval");
-    }
-    return payload;
 }

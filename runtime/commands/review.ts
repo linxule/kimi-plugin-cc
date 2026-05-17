@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { createCancellationHandlers } from "../cancellation.js";
+import { getManagedCommandConfig } from "./registry.js";
 import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
@@ -81,7 +82,11 @@ export async function runReview(
 
   let client: WireClient | undefined;
   // Shared cancellation handler — see runtime/cancellation.ts.
-  const handlers = createCancellationHandlers({ escalationMs: 1_500 });
+  // Registry lookup keyed on commandType so "review" and "challenge"
+  // each get their own error codes + messages without a local helper.
+  const reviewConfig = getManagedCommandConfig(commandType);
+  const cancel = reviewConfig.cancellation;
+  const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
 
   try {
     client = await buildAndStartWireClient(
@@ -104,8 +109,8 @@ export async function runReview(
     handlers.attachClient(client);
     if (handlers.cancelling) {
       throw new RuntimeError(
-        reviewCancellationCode(commandType),
-        `${commandType} cancelled during startup.`,
+        cancel.errorCodes.cancelledDuringStart,
+        cancel.cancelMessages.duringStart,
         `${commandType}.start`,
       );
     }
@@ -141,8 +146,8 @@ export async function runReview(
     // silently committing markCompleted.
     if (handlers.cancelling) {
       throw new RuntimeError(
-        reviewCancellationCode(commandType),
-        `${commandType} cancelled by user request after prompt completion.`,
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.afterPrompt,
         `${commandType}.runtime`,
       );
     }
@@ -152,8 +157,8 @@ export async function runReview(
     // have landed during that window too.
     if (handlers.cancelling) {
       throw new RuntimeError(
-        reviewCancellationCode(commandType),
-        `${commandType} cancelled by user request after artifact write.`,
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.afterArtifact,
         `${commandType}.runtime`,
       );
     }
@@ -175,26 +180,22 @@ export async function runReview(
       // failure codes (WIRE_PROCESS_EXITED, TIMEOUT) leak into job.error.code
       // and callers can't distinguish user-cancel from infra failure.
       const cancelledError = new RuntimeError(
-        reviewCancellationCode(commandType),
-        `${commandType} cancelled by user request.`,
+        cancel.errorCodes.cancelled,
+        cancel.cancelMessages.default,
         `${commandType}.runtime`,
         error instanceof Error ? { cause: error } : undefined,
       );
-      await markJobCancelled(store, paths, job, `${commandType} cancelled by user request.`, cancelledError);
+      await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError);
       throw cancelledError;
     }
     const classified = classifyManagedCommandFailure(error, commandType, job.job_id);
-    await markJobFailed(store, paths, job, classified, `${commandType} failed.`);
+    await markJobFailed(store, paths, job, classified, cancel.failedSummary);
     throw classified;
   } finally {
     handlers.dispose();
     await client?.close();
     store.close();
   }
-}
-
-function reviewCancellationCode(commandType: "review" | "challenge"): "REVIEW_CANCELLED" | "CHALLENGE_CANCELLED" {
-  return commandType === "review" ? "REVIEW_CANCELLED" : "CHALLENGE_CANCELLED";
 }
 
 function buildReviewTitleExcerpt(

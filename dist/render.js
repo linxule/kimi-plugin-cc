@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
 const EMPTY_RESCUE_FALLBACK = "Kimi did not return a final message.\n";
@@ -13,6 +14,7 @@ export async function readArtifact(artifactPath) {
     return readFile(artifactPath, "utf8");
 }
 export function renderManagedJobOutput(job, finalText) {
+    assertOutputModeConsistency(job.command_type, finalText);
     switch (job.command_type) {
         case "ask": {
             const trimmed = finalText.trim();
@@ -58,6 +60,23 @@ export function renderManagedJobOutput(job, finalText) {
         }
         default:
             return assertNever(job.command_type);
+    }
+}
+export function assertOutputModeConsistency(commandType, finalText) {
+    const { outputMode } = getManagedCommandConfig(commandType);
+    switch (outputMode) {
+        case "passthrough":
+            return;
+        case "parsed":
+            try {
+                JSON.parse(finalText);
+            }
+            catch (error) {
+                throw new RuntimeError(`${commandType.toUpperCase()}_PARSE_FAILED`, `${commandType} is configured for parsed output but returned malformed JSON: ${error.message}`, `${commandType}.parse`, error instanceof Error ? { cause: error } : undefined);
+            }
+            return;
+        default:
+            return assertNever(outputMode);
     }
 }
 export function renderAskArtifact(output) {
