@@ -124,7 +124,10 @@ function killPid(pid, signal) {
         process.kill(pid, signal);
     }
     catch (error) {
-        if (error.code !== "ESRCH") {
+        const code = error.code;
+        // ESRCH: process already gone. EPERM: pid was likely reused by an
+        // unrelated process we don't own — silently skip.
+        if (code !== "ESRCH" && code !== "EPERM") {
             throw error;
         }
     }

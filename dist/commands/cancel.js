@@ -74,7 +74,11 @@ function signalJobProcesses(job, signal) {
             process.kill(pid, signal);
         }
         catch (error) {
-            if (error.code !== "ESRCH") {
+            const code = error.code;
+            // ESRCH: process already gone. EPERM: pid was likely reused by an
+            // unrelated process we don't own — silently skip rather than surface a
+            // confusing "operation not permitted" to the user.
+            if (code !== "ESRCH" && code !== "EPERM") {
                 throw error;
             }
         }

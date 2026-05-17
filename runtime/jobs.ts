@@ -189,7 +189,10 @@ function killPid(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(pid, signal);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+    const code = (error as NodeJS.ErrnoException).code;
+    // ESRCH: process already gone. EPERM: pid was likely reused by an
+    // unrelated process we don't own — silently skip.
+    if (code !== "ESRCH" && code !== "EPERM") {
       throw error;
     }
   }

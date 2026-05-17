@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import process from "node:process";
 
 import { readPluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
@@ -121,7 +120,12 @@ async function executeReviewGate(
     model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
     thinking: false,
     background: false,
-    pid: process.pid,
+    // review_gate runs inside Claude Code's Stop hook. Its companion lifecycle
+    // is bounded by the hook itself, so recording pid here would let
+    // signalJobProcesses() and sweepStaleJobs() SIGTERM the hook companion
+    // mid-flight. kimi_pid is still recorded once the wire client starts, so
+    // orphaned Kimi children remain reachable to the sweeper.
+    pid: null,
     kimi_pid: null,
     status: "running",
     kimi_session_id: kimiSessionId,

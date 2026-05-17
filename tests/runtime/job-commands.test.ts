@@ -440,6 +440,63 @@ describe("job-backed ask/status/result", () => {
     }
   });
 
+  test("cancel on a review_gate job signals only kimi_pid, never the hook companion", async () => {
+    // Regression: review_gate records pid: null because its companion lifecycle
+    // is bounded by the Stop hook; cancel must SIGTERM only the recorded
+    // kimi_pid. If pid were set to process.pid, this test would terminate the
+    // test runner mid-flight.
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-review-gate-cancel");
+    const repoRoot = await createTestPluginDataRoot("job-store-review-gate-cancel-repo");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const child = spawnLongRunningProcess();
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-review-gate-cancel",
+          repo_id: repoRoot,
+          command_type: "review_gate",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: false,
+          pid: null,
+          kimi_pid: child.pid ?? null,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review gate.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-gate-job-review-gate-cancel.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const output = JSON.parse(await runCancel(["job-review-gate-cancel"], makeContext(repoRoot, env))) as {
+        status: string;
+        message: string;
+      };
+
+      expect(output.status).toBe("cancelled");
+      await waitForChildExit(child);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
   test("cancel can force-cancel a foreground job with a recorded process", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-cancel");
     const repoRoot = await createTestPluginDataRoot("job-store-foreground-cancel-repo");
