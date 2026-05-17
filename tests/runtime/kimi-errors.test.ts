@@ -113,9 +113,9 @@ describe("classifyManagedCommandFailure", () => {
   });
 
   test("MAX_STEPS_REACHED is mapped to a command-prefixed code", () => {
-    // v0.3.0 task #14 — Kimi adversarial reviewer flagged that managed
-    // commands were getting the bare `MAX_STEPS_REACHED` while timeouts
-    // got `${PREFIX}_KIMI_*_TIMEOUT`. Now consistent.
+    // Managed commands map MAX_STEPS_REACHED to a command-prefixed code
+    // for parity with the timeout codes (which already prefix as
+    // `${PREFIX}_KIMI_*_TIMEOUT`).
     const ask = classifyManagedCommandFailure(
       new RuntimeError(
         "MAX_STEPS_REACHED",

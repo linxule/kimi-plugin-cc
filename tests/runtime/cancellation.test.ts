@@ -5,10 +5,10 @@ import { createCancellationHandlers } from "../../runtime/cancellation.js";
 import type { WireClient } from "../../runtime/wire/client.js";
 
 /**
- * Tests for the v0.3.1 cancellation helper. Pre-v0.3.2 there were zero
- * direct tests (Claude reviewer flagged this gap). The eager
- * fire-on-attach path is a behavior expansion over v0.3.0's "cancelled
- * during start" handling, so it gets explicit coverage here.
+ * Tests for the cancellation helper. The eager fire-on-attach path
+ * (firing the wire-side cancel when a signal arrived before the client
+ * was attached) is the most easily-regressed branch, so it gets
+ * explicit coverage.
  */
 
 interface MockStats {
@@ -82,9 +82,9 @@ describe("createCancellationHandlers", () => {
   });
 
   test("SIGTERM before attachClient latches cancelling; attachClient then eagerly fires the wire-side cancel", async () => {
-    // The "cancel landed during start" path Claude flagged as
-    // behaviorally new in v0.3.1 — pre-v0.3.1 the synthetic throw was
-    // the only path; v0.3.1+ also fans the cancel out to the wire.
+    // The "cancel landed during start" path. The helper latches
+    // cancelling immediately, but the wire-side cancel only fires once
+    // a client is attached — this test pins both halves.
     const mock = makeMockClient();
     const handlers = createCancellationHandlers({ escalationMs: 30 });
     try {
@@ -116,18 +116,17 @@ describe("createCancellationHandlers", () => {
     }
   });
 
-  test("sequential create+dispose × 50 keeps SIGTERM/SIGINT listener counts at baseline (Kimi adversarial stress)", () => {
-    // v0.3.3 (Kimi adversarial): the v0.2.x bug class was signal
-    // listeners leaking after job termination. The unit test verifies
-    // exactly one create/dispose pair, which doesn't catch a per-iter
-    // leak. This stress test loops 50 times and asserts that both
-    // counts return to baseline after all handlers dispose.
+  test("sequential create+dispose × 50 keeps SIGTERM/SIGINT listener counts at baseline", () => {
+    // The historical bug class for cancellation was signal listeners
+    // leaking after job termination. The unit test above verifies a
+    // single create/dispose pair, which doesn't catch a per-iter leak.
+    // This stress test loops 50 times and asserts both counts return
+    // to baseline after all handlers dispose.
     //
-    // Codex audit risk #5: Node's default maxListeners is 10, so 50
-    // concurrent registrations trigger MaxListenersExceededWarning
-    // noise in CI logs. Raise the limit temporarily for the test
-    // window so we exercise the real handler count without polluting
-    // output. Restore on the way out.
+    // Node's default maxListeners is 10, so 50 concurrent registrations
+    // trigger MaxListenersExceededWarning noise in CI logs. Raise the
+    // limit temporarily for the test window so we exercise the real
+    // handler count without polluting output. Restore on the way out.
     const priorSigtermMax = process.getMaxListeners();
     process.setMaxListeners(Math.max(priorSigtermMax, 100));
     const sigtermBase = process.listenerCount("SIGTERM");

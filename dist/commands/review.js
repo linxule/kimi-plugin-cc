@@ -59,7 +59,7 @@ export async function runReview(argv, context, commandType) {
         cwd: context.cwd,
     });
     let client;
-    // v0.3.1: shared cancellation handler — see runtime/cancellation.ts.
+    // Shared cancellation handler — see runtime/cancellation.ts.
     const handlers = createCancellationHandlers({ escalationMs: 1_500 });
     try {
         client = await buildAndStartWireClient({

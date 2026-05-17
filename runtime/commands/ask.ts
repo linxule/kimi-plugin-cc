@@ -145,7 +145,7 @@ export async function executeAskJob(
     throw new RuntimeError("JOB_NOT_FOUND", `Ask job ${jobId} was not found.`, "ask.worker");
   }
 
-  // v0.3.1: SIGTERM/SIGINT plumbing extracted into a shared helper so the
+  // SIGTERM/SIGINT plumbing extracted into a shared helper so the
   // 30-line dance no longer drifts between ask/rescue/review. The helper
   // registers the listeners IMMEDIATELY so a signal during wire-client
   // startup still latches cancelling=true.

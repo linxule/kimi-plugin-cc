@@ -155,11 +155,11 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
     }
     case "think-stall": {
       // Emit ContentPart{type:"think"} events forever and never send
-      // PromptResult. The mock used to emit IDENTICAL text payloads, which
-      // tripped the v0.3.2 duplicate-content detector before the
-      // time-based stall watchdog could fire — Claude H2 caught the test
-      // race in v0.3.2 review. v0.3.3 diversifies the payloads so this
-      // scenario exercises ONLY the time-based watchdog.
+      // PromptResult. Payloads are DIVERSIFIED (`chunk-${n++}`) so the
+      // duplicate-content detector cannot win the race against the
+      // time-based stall watchdog — this scenario exercises ONLY the
+      // time-based watchdog. (See the `think-loop` scenario below for
+      // the duplicate-detector test.)
       pendingPromptId = request.id;
       sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
       sendEvent("StepBegin", { n: 1 });
@@ -177,8 +177,8 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
     case "think-loop": {
       // Emit IDENTICAL ContentPart{type:"think"} events. The duplicate
       // detector should fire KIMI_THINK_LOOP_DETECTED after N matching
-      // payload hashes (default 8). Used by the v0.3.3 test that
-      // verifies the loop detector independently of the stall timer.
+      // payload hashes (default 8) regardless of the time-based
+      // watchdog deadline.
       pendingPromptId = request.id;
       sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
       sendEvent("StepBegin", { n: 1 });
@@ -190,6 +190,44 @@ async function handleMessage(request: JsonRpcRequest): Promise<void> {
         sendEvent("ContentPart", { type: "think", text: "stuck-payload" });
       }, 5);
       interval.unref();
+      return;
+    }
+    case "unknown-think-shape": {
+      // Emits two `ContentPart{type:"think"}` events whose payload
+      // shape lacks the recognized `text` field — exercising the
+      // unknown-shape callback path in ThinkStallGuard. Followed by a
+      // text part and TurnEnd so the prompt completes cleanly.
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      sendEvent("StepBegin", { n: 1 });
+      sendEvent("ContentPart", { type: "think", delta: "no-text-field-1" });
+      sendEvent("ContentPart", { type: "think", delta: "no-text-field-2" });
+      sendEvent("ContentPart", { type: "text", text: "done" });
+      sendEvent("TurnEnd", {});
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { status: "finished" },
+      });
+      return;
+    }
+    case "text-loop": {
+      // Emit MANY identical `ContentPart{type:"text"}` payloads, then
+      // finish cleanly. The handleLine seam in WireClient must route
+      // these to `observeForwardProgress` (which clears the hash window)
+      // rather than `observeThinkPart` — otherwise N identical text
+      // payloads would spuriously trip the loop detector. This is the
+      // routing-policy test that the per-guard unit tests cannot reach.
+      sendEvent("TurnBegin", { user_input: request.params?.user_input ?? "" });
+      sendEvent("StepBegin", { n: 1 });
+      for (let i = 0; i < 20; i += 1) {
+        sendEvent("ContentPart", { type: "text", text: "identical-text" });
+      }
+      sendEvent("TurnEnd", {});
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { status: "finished" },
+      });
       return;
     }
     case "unknown-subtype": {

@@ -59,13 +59,11 @@ export class JobStore {
   private readonly db: SqliteAdapter;
 
   constructor(paths: PluginPaths) {
-    // v0.3.3 final audit (Claude H1.1 + Kimi defect HIGH #1): open the
-    // adapter into a local before assigning to this.db so the catch
-    // can release the handle even if pragma throws AFTER the adapter
-    // opened. Pre-audit fix wrapped only the schema-migration block;
-    // a `journal_mode = WAL` failure on a read-only mount would leak
-    // the open handle because the constructor exits via throw before
-    // `new JobStore` can return a reference for withJobStore to close.
+    // Open the adapter into a local before assigning to this.db so the
+    // catch can release the handle even if pragma throws AFTER the
+    // adapter opened — `journal_mode = WAL` on a read-only mount, for
+    // example, would otherwise leak the handle because the constructor
+    // exits via throw before any caller reference exists for cleanup.
     let db: SqliteAdapter | undefined;
     try {
       db = createSqliteAdapter(paths.stateDbPath);
@@ -80,13 +78,10 @@ export class JobStore {
       throw translateSqliteError(error);
     }
     this.db = db;
-    // v0.3.3 (Claude H1): every `this.db.exec` / `tableHasColumn` below can
-    // throw on a corrupt DB, full disk, mid-migration failure, etc. Before
-    // this wrap, a throw here leaked the SQLite handle because the
-    // constructor exited with `this.db` open but the new JobStore reference
-    // never reached the caller. Catch internally, close the adapter, and
-    // rethrow the translated error so withJobStore's `store?.close()`
-    // path doesn't end up as the only line of defense.
+    // Every `this.db.exec` / `tableHasColumn` below can throw on a
+    // corrupt DB, full disk, mid-migration failure, etc. Catch
+    // internally, close the adapter, and rethrow the translated error
+    // so the SQLite handle never leaks past a failed migration.
     try {
       this.db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -646,13 +641,12 @@ function translateSqliteError(error: unknown): RuntimeError {
  * the function returns OR when the function throws after construction
  * succeeded.
  *
- * Note on construction failures (v0.3.3): if `new JobStore(paths)` itself
- * throws, this helper cannot close anything — the constructor's own
- * try/catch (lines 61–166) is what owns adapter-handle cleanup on
- * mid-migration failures. The helper handles the common case of "store
- * opened cleanly, function threw"; JobStore handles "open or migrate
- * failed mid-construction." Together they make the leak class
- * unreachable.
+ * Construction-failure note: if `new JobStore(paths)` itself throws,
+ * this helper cannot close anything — the constructor's own try/catch
+ * owns adapter-handle cleanup on mid-migration failures. The helper
+ * handles "store opened cleanly, function threw"; the constructor
+ * handles "open or migrate failed mid-construction." Together they
+ * make the leak class unreachable.
  *
  * Consolidates the repeated
  *
@@ -669,10 +663,12 @@ export async function withJobStore<T>(
   paths: PluginPaths,
   fn: (store: JobStore) => Promise<T>,
 ): Promise<T> {
-  // v0.3.2: construct inside the try so a constructor throw that opens
-  // the SQLite adapter and then fails during pragma/exec doesn't leak
-  // the handle. Pre-v0.3.2 the JSDoc claimed this safety but `new
-  // JobStore` lived above the try block.
+  // Construct INSIDE the try. `new JobStore` must not live above this
+  // line — the constructor can throw after opening the SQLite adapter
+  // (pragma failure, schema migration), and the helper's `finally`
+  // is the second line of defense behind the constructor's own
+  // cleanup. Moving `new JobStore` above the try would silently
+  // reintroduce a handle leak the JSDoc above promises against.
   let store: JobStore | undefined;
   try {
     store = new JobStore(paths);

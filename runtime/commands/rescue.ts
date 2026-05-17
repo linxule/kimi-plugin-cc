@@ -126,8 +126,8 @@ export async function executeRescueJob(
     throw new RuntimeError("JOB_NOT_FOUND", `Rescue job ${jobId} was not found.`, "rescue.worker");
   }
 
-  // v0.3.1: shared cancellation handler — registers SIGTERM/SIGINT
-  // immediately so a signal during wire-client startup still latches
+  // Shared cancellation handler — registers SIGTERM/SIGINT immediately
+  // so a signal during wire-client startup still latches
   // cancelling=true. See runtime/cancellation.ts.
   const handlers = createCancellationHandlers({ escalationMs: 1_500 });
   let client: WireClient | undefined;

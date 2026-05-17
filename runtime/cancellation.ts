@@ -4,13 +4,8 @@ import type { WireClient } from "./wire/client.js";
 
 /**
  * Shared SIGTERM/SIGINT plumbing for managed commands that need to be
- * interruptable mid-flight.
- *
- * Before v0.3.1 this 30-line dance lived in `ask.ts`, `rescue.ts`, and
- * `review.ts` as three near-identical copies. Drift between the copies
- * caused real bugs (v0.2.3 review.ts didn't clear `cancelEscalationTimer`
- * before awaiting `markJobCancelled`, which could trigger a redundant
- * SIGTERM). Centralizing here makes that class of drift impossible.
+ * interruptable mid-flight. Centralized here so cancel/escalation logic
+ * cannot drift across the three call sites (ask, rescue, review).
  *
  * Usage:
  *
@@ -65,9 +60,9 @@ export function createCancellationHandlers(options: {
    * Single chokepoint for fanning a cancel out to the wire client.
    * Called from BOTH `requestCancellation` (when the signal fires AFTER
    * the client is attached) and `attachClient` (when the signal fired
-   * BEFORE the client existed). Pre-v0.3.2 these paths duplicated the
-   * `beginCancellation → cancel → setTimeout(SIGTERM)` sequence, which
-   * Kimi adversarial reviewer flagged as drift waiting to happen.
+   * BEFORE the client existed) so the
+   * `beginCancellation → cancel → setTimeout(SIGTERM)` sequence cannot
+   * drift between paths.
    */
   const scheduleEscalation = (client: WireClient): void => {
     client.beginCancellation();
@@ -92,13 +87,15 @@ export function createCancellationHandlers(options: {
     scheduleEscalation(attachedClient);
   };
 
-  // v0.3.2: switched from `process.once` to `process.on` so dispose()
-  // can reliably remove the listener via the original function
-  // reference. (Node's `once` internally wraps the listener, and
-  // removeListener happens to work via `_originalListener`, but that's
-  // an implementation detail.) The handler is idempotent via the
-  // `if (cancelling) return` short-circuit, so a single registered `on`
-  // listener behaves identically to `once`.
+  // Use `process.on` (not `once`) so dispose() can reliably remove the
+  // listener via the original function reference. DO NOT "simplify"
+  // back to `process.once` — Node's `once` internally wraps the
+  // listener, and the only reason `removeListener(once-wrapped-fn)`
+  // works is via the `_originalListener` implementation detail.
+  // Reverting would silently reintroduce a SIGTERM/SIGINT listener
+  // leak on every dispose. The handler is idempotent via the
+  // `if (cancelling) return` short-circuit, so a single registered
+  // `on` listener behaves identically to `once` for our purposes.
   process.on("SIGTERM", requestCancellation);
   process.on("SIGINT", requestCancellation);
 
@@ -107,10 +104,10 @@ export function createCancellationHandlers(options: {
       return cancelling;
     },
     attachClient(client) {
-      // v0.3.3 (Kimi defect + Claude N1): if the handler was already
-      // disposed (e.g., command finally ran before the wire client
-      // finished starting in some racy teardown path), bail before
-      // scheduling a fresh escalation timer that would survive disposal.
+      // If the handler was already disposed (e.g., command finally ran
+      // before the wire client finished starting in some racy teardown
+      // path), bail before scheduling a fresh escalation timer that
+      // would survive disposal.
       if (disposed) {
         return;
       }

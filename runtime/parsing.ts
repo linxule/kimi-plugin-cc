@@ -426,8 +426,7 @@ function parseKnownFlags(
         break;
       // The early `if (!knownFlags.has(token))` gate above means we only
       // reach this switch with tokens that ARE in knownFlags, and every
-      // member is handled above. A `default` arm would be unreachable
-      // (Claude reviewer caught the dead code in v0.3.0 review).
+      // member is handled above. A `default` arm would be unreachable.
     }
   }
 

@@ -4,7 +4,7 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 0.3.3 (tagged `v0.3.3`)
+- **Version**: 0.3.4 (tagged `v0.3.4`)
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 
@@ -25,7 +25,7 @@ runtime/            TypeScript source — the real runtime
   ├── schemas/      Structured output contract for review_gate (review/challenge dropped theirs in v0.2.3)
   └── hooks/        Stop hook entry point
 dist/               Compiled JS — committed for zero-build install
-tests/              bun test suite (146 tests / 22 files)
+tests/              bun test suite (192 tests / 24 files)
 ```
 
 ## Commands
