@@ -440,6 +440,139 @@ describe("job-backed ask/status/result", () => {
     }
   });
 
+  test("sweep skips foreground jobs whose companion is still alive (no SIGTERM mid-render)", async () => {
+    // Regression for v0.2.3: a sibling shell running /kimi:status while the
+    // foreground review is mid-render would previously SIGTERM the live
+    // companion when kimi_pid had just died. The sweeper must skip the
+    // termination/markFailed step while the companion is still alive — it
+    // will write its own terminal state.
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-sweep-live-companion");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const liveCompanion = spawnLongRunningProcess();
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const deadKimi = findDefinitelyDeadPid();
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-live-companion-dead-kimi",
+          repo_id: "repo-x",
+          command_type: "review",
+          cwd: "/tmp/fake",
+          model: null,
+          thinking: null,
+          background: false,
+          pid: liveCompanion.pid ?? null,
+          kimi_pid: deadKimi,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-job-live-companion-dead-kimi.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed
+          .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
+          .run("2026-04-14T10:00:00.000Z", "job-live-companion-dead-kimi");
+      } finally {
+        seed.close();
+      }
+
+      const sweepStore = new JobStore(paths);
+      try {
+        await sweepStaleJobs(sweepStore, paths);
+        const swept = sweepStore.getJob("job-live-companion-dead-kimi");
+        // Should stay running — companion is alive and will finish on its own.
+        expect(swept?.status).toBe("running");
+      } finally {
+        sweepStore.close();
+      }
+      // And the companion must still be alive — we did NOT SIGTERM it.
+      expect(liveCompanion.exitCode).toBe(null);
+      expect(liveCompanion.signalCode).toBe(null);
+    } finally {
+      if (liveCompanion.exitCode === null && liveCompanion.signalCode === null) {
+        liveCompanion.kill("SIGKILL");
+      }
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("sweep marks a stale review_gate row as failed without trying to signal a null pid", async () => {
+    // Regression: review_gate records pid: null. If the hook companion crashes
+    // after kimi_pid is recorded, the row sits with pid=null,kimi_pid=<dead>.
+    // Sweeper should mark it failed cleanly, terminate any (already-dead) kimi
+    // process, and not touch the hook caller's pid.
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-review-gate-sweep");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const deadKimi = findDefinitelyDeadPid();
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-review-gate-stale",
+          repo_id: "repo-x",
+          command_type: "review_gate",
+          cwd: "/tmp/fake",
+          model: null,
+          thinking: null,
+          background: false,
+          pid: null,
+          kimi_pid: deadKimi,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review gate.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-gate-job-review-gate-stale.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed
+          .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
+          .run("2026-04-14T10:00:00.000Z", "job-review-gate-stale");
+      } finally {
+        seed.close();
+      }
+
+      const sweepStore = new JobStore(paths);
+      try {
+        await sweepStaleJobs(sweepStore, paths);
+        const swept = sweepStore.getJob("job-review-gate-stale");
+        expect(swept?.status).toBe("failed");
+        expect(swept?.error?.code).toBe("FOREGROUND_PROCESS_DISAPPEARED");
+        expect(swept?.final_output_path).toBeTruthy();
+      } finally {
+        sweepStore.close();
+      }
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
   test("cancel on a review_gate job signals only kimi_pid, never the hook companion", async () => {
     // Regression: review_gate records pid: null because its companion lifecycle
     // is bounded by the Stop hook; cancel must SIGTERM only the recorded

@@ -103,7 +103,6 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         throw new RuntimeError("JOB_NOT_FOUND", `Rescue job ${jobId} was not found.`, "rescue.worker");
     }
     let cancelling = false;
-    let clientClosed = false;
     let cancelEscalationTimer;
     let client;
     let signalsRegistered = false;
@@ -181,6 +180,11 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             });
         }
         const completedTurn = await client.prompt(prompt, "rescue");
+        // Cancel-after-prompt-success check: SIGTERM could have fired between
+        // prompt completion and our terminal-state writes. Honour it.
+        if (cancelling) {
+            throw new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request after prompt completion.", "rescue.runtime");
+        }
         let artifactPath;
         try {
             if (context.env.KIMI_PLUGIN_CC_TEST_FAIL_WRITE_ARTIFACT === "1") {
@@ -193,6 +197,11 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             const classified = new RuntimeError("RESCUE_ARTIFACT_WRITE_FAILED", `Failed to write rescue artifact: ${writeError.message ?? String(writeError)}`, "rescue.artifact", writeError instanceof Error ? { cause: writeError } : undefined);
             return await markJobFailed(store, paths, job, classified, "Rescue failed.", { phase: "failed" });
         }
+        // Re-check after the artifact write (disk I/O window) — cancel could
+        // have landed there too.
+        if (cancelling) {
+            throw new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request after prompt completion.", "rescue.runtime");
+        }
         return (store.markCompleted(job.job_id, {
             summary: firstMeaningfulLine(completedTurn.finalText),
             phase: "done",
@@ -202,7 +211,16 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     }
     catch (error) {
         if (cancelling) {
-            return await markJobCancelled(store, paths, job, "Rescue cancelled by user request.", error, { phase: "cancelled" });
+            // Clear escalation timer NOW, before awaiting markJobCancelled
+            // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
+            if (cancelEscalationTimer) {
+                clearTimeout(cancelEscalationTimer);
+                cancelEscalationTimer = undefined;
+            }
+            // Always wrap into a canonical RESCUE_CANCELLED RuntimeError so callers
+            // can distinguish user-cancel from infra failure via error.code.
+            const cancelledError = new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request.", "rescue.runtime", error instanceof Error ? { cause: error } : undefined);
+            return await markJobCancelled(store, paths, job, "Rescue cancelled by user request.", cancelledError, { phase: "cancelled" });
         }
         const classified = classifyManagedCommandFailure(error, "rescue", job.job_id, {
             preserveStage: true,
@@ -217,10 +235,9 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         if (cancelEscalationTimer) {
             clearTimeout(cancelEscalationTimer);
         }
-        if (client && !clientClosed) {
-            await client.close().catch(() => { });
-            clientClosed = true;
-        }
+        // WireClient.close() has an internal `closed` latch so a second call
+        // is a no-op — drop the separate clientClosed flag (dead code).
+        await client?.close().catch(() => { });
         store.close();
     }
 }

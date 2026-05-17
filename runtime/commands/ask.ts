@@ -145,7 +145,6 @@ export async function executeAskJob(
   }
 
   let cancelling = false;
-  let clientClosed = false;
   let cancelEscalationTimer: ReturnType<typeof setTimeout> | undefined;
   let signalsRegistered = false;
   let client: WireClient | undefined;
@@ -242,8 +241,24 @@ export async function executeAskJob(
       KIMI_ASK_PROMPT_TIMEOUT_MS,
       "ask.prompt",
     );
+    // Cancel-after-prompt-success check: SIGTERM could have fired between
+    // prompt completion and our terminal-state writes. Honour it.
+    if (cancelling) {
+      throw new RuntimeError(
+        "ASK_CANCELLED",
+        "Ask cancelled by user request after prompt completion.",
+        "ask.runtime",
+      );
+    }
     const rendered = renderManagedJobOutput(job, completed.finalText);
     const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+    if (cancelling) {
+      throw new RuntimeError(
+        "ASK_CANCELLED",
+        "Ask cancelled by user request after prompt completion.",
+        "ask.runtime",
+      );
+    }
     return (
       store.markCompleted(job.job_id, {
         summary: rendered.summary,
@@ -254,12 +269,26 @@ export async function executeAskJob(
     );
   } catch (error) {
     if (cancelling) {
+      // Clear escalation timer NOW, before awaiting markJobCancelled
+      // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
+      if (cancelEscalationTimer) {
+        clearTimeout(cancelEscalationTimer);
+        cancelEscalationTimer = undefined;
+      }
+      // Always wrap into a canonical ASK_CANCELLED RuntimeError so callers
+      // can distinguish user-cancel from infra failure via error.code.
+      const cancelledError = new RuntimeError(
+        "ASK_CANCELLED",
+        "Ask cancelled by user request.",
+        "ask.runtime",
+        error instanceof Error ? { cause: error } : undefined,
+      );
       return await markJobCancelled(
         store,
         paths,
         job,
         "Ask cancelled by user request.",
-        error,
+        cancelledError,
         { phase: "cancelled" },
       );
     }
@@ -274,10 +303,9 @@ export async function executeAskJob(
     if (cancelEscalationTimer) {
       clearTimeout(cancelEscalationTimer);
     }
-    if (!clientClosed && client) {
-      await client.close().catch(() => {});
-      clientClosed = true;
-    }
+    // WireClient.close() has an internal `closed` latch (wire/client.ts:182)
+    // that makes a second call a no-op, so we don't need a separate flag.
+    await client?.close().catch(() => {});
     store.close();
   }
 }

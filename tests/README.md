@@ -9,8 +9,7 @@ Coverage:
 - `wire/interrupted-turn.test.ts` — fail-closed approval handling during cancellation, plus partial-turn behavior
 - `wire/live-kimi.integration.test.ts` — env-gated smoke test against a real `kimi --wire` install (skipped unless `KIMI_PLUGIN_CC_LIVE_TEST` is set)
 - `runtime/parsing.test.ts` — argument parsing for ask, review, rescue, and job-lookup commands
-- `runtime/review-output.test.ts` — review JSON schema validation
-- `runtime/read-only-commands.test.ts` — end-to-end ask/review flows against the mock Wire server
+- `runtime/read-only-commands.test.ts` — end-to-end ask/review flows against the mock Wire server (review output is prose pass-through as of v0.2.3)
 - `runtime/rescue-approval.test.ts` — file-edit policy and the shell allowlist table (accept + reject paths)
 - `runtime/rescue-command.test.ts` — rescue lifecycle: foreground, background, resume, cancellation edge cases
 - `runtime/replay-command.test.ts` — replay reproducing stored outputs and handling missing/malformed logs

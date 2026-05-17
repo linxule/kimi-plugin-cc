@@ -50,6 +50,31 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       );
     }
 
+    // review_gate runs in a Stop hook; SIGTERMing kimi_pid causes the wire
+    // process to exit with WIRE_PROCESS_EXITED, which the hook's catch path
+    // would persist as `failed`. Pre-mark the row as `cancelled` here so the
+    // user's intent is recorded canonically — the subsequent wire exit is a
+    // no-op against an already-terminal row (markFailed has a WHERE
+    // status='running' guard).
+    if (job.command_type === "review_gate") {
+      const preMarkStore = new JobStore(paths);
+      try {
+        await markJobCancelled(
+          preMarkStore,
+          paths,
+          job,
+          "review_gate cancelled by user request.",
+          new RuntimeError(
+            "REVIEW_GATE_CANCELLED",
+            "review_gate cancelled by user request.",
+            "cancel.runtime",
+          ),
+        );
+      } finally {
+        preMarkStore.close();
+      }
+    }
+
     signalJobProcesses(job, "SIGTERM");
 
     const cancelled = await waitForCancellation(paths, job.job_id);
@@ -156,7 +181,11 @@ function hasLiveRecordedProcess(job: { pid: number | null; kimi_pid: number | nu
       process.kill(pid, 0);
       return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      const code = (error as NodeJS.ErrnoException).code;
+      // ESRCH: definitively dead. EPERM: pid likely reused by an
+      // unrelated process — treat as dead for our purposes (consistent
+      // with isPidAlive in jobs.ts and signalJobProcesses above).
+      if (code !== "ESRCH" && code !== "EPERM") {
         return true;
       }
     }

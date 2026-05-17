@@ -68,6 +68,17 @@ async function executeReviewGate(payload, assistantMessage, context) {
         cwd: payload.cwd,
         repoRoot: repoIdentity.repoRoot,
     });
+    // Write the invocation log header BEFORE creating the job row. If the
+    // header write fails (disk full, permission denied), we'd otherwise leave
+    // a running job row with pid=null,kimi_pid=null that the sweeper can't
+    // see (listRunningJobsWithProcessHints requires at least one non-null pid)
+    // — orphan row + leaked store handle. With the header first, a write
+    // failure throws before any row is created.
+    await writeInvocationLogHeader(logPath, {
+        commandType: "review_gate",
+        kimiSessionId,
+        cwd: payload.cwd,
+    });
     const job = store.createJob({
         job_id: jobId,
         repo_id: repoIdentity.repoId,
@@ -91,11 +102,6 @@ async function executeReviewGate(payload, assistantMessage, context) {
         final_output_path: null,
         stream_log_path: logPath,
         error: null,
-    });
-    await writeInvocationLogHeader(logPath, {
-        commandType: "review_gate",
-        kimiSessionId,
-        cwd: payload.cwd,
     });
     const client = buildWireClient({
         cwd: payload.cwd,

@@ -112,7 +112,6 @@ export async function executeAskJob(jobId, prompt, context, options) {
         throw new RuntimeError("JOB_NOT_FOUND", `Ask job ${jobId} was not found.`, "ask.worker");
     }
     let cancelling = false;
-    let clientClosed = false;
     let cancelEscalationTimer;
     let signalsRegistered = false;
     let client;
@@ -185,8 +184,16 @@ export async function executeAskJob(jobId, prompt, context, options) {
             });
         }
         const completed = await withTimeout(client.prompt(prompt, "ask"), KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
+        // Cancel-after-prompt-success check: SIGTERM could have fired between
+        // prompt completion and our terminal-state writes. Honour it.
+        if (cancelling) {
+            throw new RuntimeError("ASK_CANCELLED", "Ask cancelled by user request after prompt completion.", "ask.runtime");
+        }
         const rendered = renderManagedJobOutput(job, completed.finalText);
         const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+        if (cancelling) {
+            throw new RuntimeError("ASK_CANCELLED", "Ask cancelled by user request after prompt completion.", "ask.runtime");
+        }
         return (store.markCompleted(job.job_id, {
             summary: rendered.summary,
             phase: "done",
@@ -196,7 +203,16 @@ export async function executeAskJob(jobId, prompt, context, options) {
     }
     catch (error) {
         if (cancelling) {
-            return await markJobCancelled(store, paths, job, "Ask cancelled by user request.", error, { phase: "cancelled" });
+            // Clear escalation timer NOW, before awaiting markJobCancelled
+            // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
+            if (cancelEscalationTimer) {
+                clearTimeout(cancelEscalationTimer);
+                cancelEscalationTimer = undefined;
+            }
+            // Always wrap into a canonical ASK_CANCELLED RuntimeError so callers
+            // can distinguish user-cancel from infra failure via error.code.
+            const cancelledError = new RuntimeError("ASK_CANCELLED", "Ask cancelled by user request.", "ask.runtime", error instanceof Error ? { cause: error } : undefined);
+            return await markJobCancelled(store, paths, job, "Ask cancelled by user request.", cancelledError, { phase: "cancelled" });
         }
         const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
         await markJobFailed(store, paths, job, classified, "Ask failed.", { phase: "failed" });
@@ -210,10 +226,9 @@ export async function executeAskJob(jobId, prompt, context, options) {
         if (cancelEscalationTimer) {
             clearTimeout(cancelEscalationTimer);
         }
-        if (!clientClosed && client) {
-            await client.close().catch(() => { });
-            clientClosed = true;
-        }
+        // WireClient.close() has an internal `closed` latch (wire/client.ts:182)
+        // that makes a second call a no-op, so we don't need a separate flag.
+        await client?.close().catch(() => { });
         store.close();
     }
 }

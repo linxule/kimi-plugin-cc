@@ -5,14 +5,12 @@ import type { JobRecord } from "./job-store.js";
 import { RuntimeError } from "./errors.js";
 import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
-import type { ReviewOutput } from "./schemas/review-output.js";
-import { parseReviewOutput } from "./schemas/review-output.js";
 import type { PluginPaths } from "./paths.js";
 import type { JobError } from "./types.js";
 
 export type RenderedManagedOutput =
   | {
-      output: string | ReviewOutput | ReviewGateOutput | null;
+      output: string | ReviewGateOutput | null;
       rendered: string;
       summary: string;
       error: JobError | null;
@@ -52,11 +50,18 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
     }
     case "review":
     case "challenge": {
-      const output = parseReviewOutput(finalText);
+      const trimmed = finalText.trim();
+      if (!trimmed) {
+        throw new RuntimeError(
+          job.command_type === "challenge" ? "CHALLENGE_EMPTY_OUTPUT" : "REVIEW_EMPTY_OUTPUT",
+          `${job.command_type} returned an empty final response.`,
+          `${job.command_type}.prompt`,
+        );
+      }
       return {
-        output,
-        rendered: renderReviewArtifact(job, output),
-        summary: output.summary,
+        output: trimmed,
+        rendered: renderReviewArtifact(job, trimmed),
+        summary: firstMeaningfulLine(trimmed),
         error: null,
       };
     }
@@ -86,38 +91,15 @@ export function renderAskArtifact(output: string): string {
   return output.trim();
 }
 
-export function renderReviewArtifact(job: JobRecord, output: ReviewOutput): string {
-  const lines = [
+export function renderReviewArtifact(job: JobRecord, output: string): string {
+  const header = [
     `# ${job.command_type === "challenge" ? "Challenge" : "Review"} Result`,
     "",
     `- Job: ${job.job_id}`,
-    `- Verdict: ${output.verdict}`,
-    `- Summary: ${output.summary}`,
     ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
-  ];
-
-  if (output.findings.length === 0) {
-    lines.push("", "No findings.");
-    return lines.join("\n");
-  }
-
-  lines.push("", "## Findings");
-  for (const finding of output.findings) {
-    lines.push(
-      "",
-      `### ${finding.title}`,
-      `- Severity: ${finding.severity}`,
-      `- Confidence: ${finding.confidence}`,
-      `- File: ${finding.file}:${finding.start_line}-${finding.end_line}`,
-      finding.body,
-    );
-
-    if (finding.suggested_fix) {
-      lines.push("", `Suggested fix: ${finding.suggested_fix}`);
-    }
-  }
-
-  return lines.join("\n");
+    "",
+  ].join("\n");
+  return `${header}${output.trim()}`;
 }
 
 export function renderRescueArtifact(rawOutput: string): string {

@@ -21,7 +21,6 @@ import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
-import type { ReviewOutput } from "../schemas/review-output.js";
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
@@ -32,7 +31,7 @@ export async function runReview(
   argv: string[],
   context: CommandContext,
   commandType: "review" | "challenge",
-): Promise<ReviewOutput> {
+): Promise<string> {
   const parsed = parseReviewArgs(argv);
 
   if (parsed.background || parsed.wait) {
@@ -153,25 +152,53 @@ export async function runReview(
       KIMI_REVIEW_PROMPT_TIMEOUT_MS,
       `${commandType}.prompt`,
     );
+    // Cancel-after-prompt-success check: SIGTERM could have fired between
+    // prompt completion and our terminal-state writes. Honour it instead of
+    // silently committing markCompleted.
+    if (cancelling) {
+      throw new RuntimeError(
+        reviewCancellationCode(commandType),
+        `${commandType} cancelled by user request after prompt completion.`,
+        `${commandType}.runtime`,
+      );
+    }
     const rendered = renderManagedJobOutput(job, completed.finalText);
     const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+    // Re-check after the disk write (writeArtifact awaits I/O) — cancel could
+    // have landed during that window too.
+    if (cancelling) {
+      throw new RuntimeError(
+        reviewCancellationCode(commandType),
+        `${commandType} cancelled by user request after prompt completion.`,
+        `${commandType}.runtime`,
+      );
+    }
     store.markCompleted(job.job_id, {
       summary: rendered.summary,
       final_output_path: artifactPath,
       error: null,
     });
-    return rendered.output as ReviewOutput;
+    return rendered.output as string;
   } catch (error) {
     if (cancelling) {
-      const cancelledError =
-        error instanceof RuntimeError
-          ? error
-          : new RuntimeError(
-              reviewCancellationCode(commandType),
-              `${commandType} cancelled by user request.`,
-              `${commandType}.runtime`,
-              error instanceof Error ? { cause: error } : undefined,
-            );
+      // Clear the escalation timer NOW, before awaiting markJobCancelled
+      // (which writes a failure artifact to disk and can take >1.5s under
+      // load). Otherwise the timer fires SIGTERM on a client that's already
+      // being cancelled — double-signal race.
+      if (cancelEscalationTimer) {
+        clearTimeout(cancelEscalationTimer);
+        cancelEscalationTimer = undefined;
+      }
+      // Always wrap into a canonical *_CANCELLED RuntimeError, even when the
+      // underlying error is already a RuntimeError. Otherwise infrastructure
+      // failure codes (WIRE_PROCESS_EXITED, TIMEOUT) leak into job.error.code
+      // and callers can't distinguish user-cancel from infra failure.
+      const cancelledError = new RuntimeError(
+        reviewCancellationCode(commandType),
+        `${commandType} cancelled by user request.`,
+        `${commandType}.runtime`,
+        error instanceof Error ? { cause: error } : undefined,
+      );
       await markJobCancelled(store, paths, job, `${commandType} cancelled by user request.`, cancelledError);
       throw cancelledError;
     }
@@ -209,23 +236,6 @@ function buildReviewPrompt(
   reviewContext: Awaited<ReturnType<typeof collectReviewContext>>,
   focus?: string,
 ): string {
-  const schemaReminder = `{
-  "summary": "string",
-  "verdict": "approve|concern|block",
-  "findings": [
-    {
-      "severity": "low|medium|high",
-      "confidence": "low|medium|high",
-      "title": "string",
-      "file": "string",
-      "start_line": 1,
-      "end_line": 1,
-      "body": "string",
-      "suggested_fix": "string|null"
-    }
-  ]
-}`;
-
   const modeInstructions =
     commandType === "challenge"
       ? [
@@ -238,9 +248,8 @@ function buildReviewPrompt(
     "Perform a read-only code review of the supplied repository changes.",
     ...modeInstructions,
     "Use repository read tools as needed, but do not attempt any write, shell, background, or delegated operations.",
-    "Return exactly one JSON object with no prose wrapper and no code fences.",
-    "If there are no findings, set verdict to approve and findings to an empty array.",
-    "Each finding must refer to exactly one file and must include confidence.",
+    "Return your review as plain markdown — a short verdict line (approve / concern / block), then a brief summary, then one section per finding with file:line refs. No JSON wrapper, no code fences around the whole response.",
+    "If the supplied diff context is empty or shows no changes to review, return immediately with a one-line note that there were no changes — do not explore the repository.",
     focus ? `Review focus: ${focus}` : undefined,
     "",
     `Target: ${reviewContext.targetDescription}`,
@@ -251,9 +260,6 @@ function buildReviewPrompt(
     "",
     "Unified diff context:",
     reviewContext.diffText || "(no diff text available)",
-    "",
-    "Required output schema:",
-    schemaReminder,
   ]
     .filter((line): line is string => typeof line === "string")
     .join("\n");

@@ -89,6 +89,14 @@ export async function sweepStaleJobs(store, paths) {
         if (!companionMissing && !kimiMissing) {
             continue;
         }
+        // Sweep-vs-live-companion race fix: if the foreground companion pid is
+        // still alive, the companion process is microseconds-to-seconds away
+        // from writing its own terminal state. SIGTERMing it here would kill
+        // its render path mid-flight (and from a sibling shell's read-only
+        // /kimi:status, no less). Skip — let the companion finish on its own.
+        if (!companionMissing && job.pid !== null) {
+            continue;
+        }
         terminateRecordedProcesses(job);
         await markJobFailed(store, paths, job, new RuntimeError("FOREGROUND_PROCESS_DISAPPEARED", describeMissingForegroundProcess(job, companionMissing, kimiMissing), "jobs.sweep"), "Foreground Kimi job disappeared before reporting a terminal state.", job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined);
     }
@@ -114,9 +122,21 @@ function terminateRecordedProcesses(job) {
     if (job.kimi_pid !== null)
         pids.add(job.kimi_pid);
     for (const pid of pids) {
-        if (isPidAlive(pid)) {
-            killPid(pid, "SIGTERM");
+        if (!isPidAlive(pid)) {
+            continue;
         }
+        killPid(pid, "SIGTERM");
+        // SIGKILL escalation: if the process ignores SIGTERM (stuck Kimi child,
+        // uninterruptible sleep, signal mask), force-kill after 2s. The job is
+        // already determined stale at this point, so leaving a survivor running
+        // would just orphan resources. Timer is unref'd so it doesn't keep the
+        // process alive.
+        const timer = setTimeout(() => {
+            if (isPidAlive(pid)) {
+                killPid(pid, "SIGKILL");
+            }
+        }, 2_000);
+        timer.unref();
     }
 }
 function killPid(pid, signal) {
@@ -139,7 +159,16 @@ function isPidAlive(pid) {
     }
     catch (error) {
         const code = error.code;
-        if (code === "ESRCH") {
+        // ESRCH: no such process — definitively dead.
+        // EPERM: process exists but we can't signal it. We treat this as "dead
+        // for our purposes" because it most likely means the pid was reused by
+        // an unrelated higher-privilege process. The companion stores its own
+        // pid in v0.2.2+; under normal usage we should always have permission
+        // to signal our own descendants. Returning true here lets stale jobs
+        // hide forever (the sweeper relies on isPidAlive=false to flip them to
+        // failed). signalJobProcesses and killPid already swallow EPERM
+        // consistently — this brings the read path in line with the write path.
+        if (code === "ESRCH" || code === "EPERM") {
             return false;
         }
         return true;
