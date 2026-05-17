@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleBackgroundJobs } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
@@ -35,7 +35,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
   const repoIdentity = await resolveRepoIdentity(context.cwd);
   const store = new JobStore(paths);
   try {
-    await sweepStaleBackgroundJobs(store, paths);
+    await sweepStaleJobs(store, paths);
 
     const jobId = randomUUID();
     const sessionResolution = resolveAskSession(
@@ -57,7 +57,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       model: parsed.model ?? null,
       thinking: parsed.thinking ?? null,
       background: parsed.background,
-      pid: null,
+      pid: parsed.background ? null : process.pid,
       kimi_pid: null,
       status: "running",
       kimi_session_id: kimiSessionId,

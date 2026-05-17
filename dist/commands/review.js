@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import process from "node:process";
 import { collectReviewContext } from "../git.js";
-import { digestPrompt, markJobFailed } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
@@ -40,7 +41,7 @@ export async function runReview(argv, context, commandType) {
         model: parsed.model ?? null,
         thinking: parsed.thinking ?? null,
         background: false,
-        pid: null,
+        pid: process.pid,
         kimi_pid: null,
         status: "running",
         kimi_session_id: reviewSessionId,
@@ -57,6 +58,27 @@ export async function runReview(argv, context, commandType) {
         cwd: context.cwd,
     });
     let client;
+    let cancelling = false;
+    let cancelEscalationTimer;
+    let signalsRegistered = false;
+    const requestCancellation = () => {
+        if (cancelling) {
+            return;
+        }
+        cancelling = true;
+        if (!client) {
+            return;
+        }
+        client.beginCancellation();
+        void client.cancel().catch(() => { });
+        cancelEscalationTimer = setTimeout(() => {
+            client?.terminateChild("SIGTERM");
+        }, 1_500);
+        cancelEscalationTimer.unref();
+    };
+    process.once("SIGTERM", requestCancellation);
+    process.once("SIGINT", requestCancellation);
+    signalsRegistered = true;
     try {
         client = await buildAndStartWireClient({
             cwd: context.cwd,
@@ -67,7 +89,10 @@ export async function runReview(argv, context, commandType) {
             thinking: parsed.thinking,
             logPath,
             approvalPolicy: rejectAllApprovals(`${commandType} is read-only; unexpected approval requests fail the command.`),
-        }, KIMI_START_TIMEOUT_MS, `${commandType}.start`);
+        }, KIMI_START_TIMEOUT_MS, `${commandType}.start`, { shouldRetry: () => !cancelling });
+        if (cancelling) {
+            throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled during startup.`, `${commandType}.start`);
+        }
         store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
         await withTimeout(client.initialize({
             protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
@@ -89,14 +114,31 @@ export async function runReview(argv, context, commandType) {
         return rendered.output;
     }
     catch (error) {
+        if (cancelling) {
+            const cancelledError = error instanceof RuntimeError
+                ? error
+                : new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request.`, `${commandType}.runtime`, error instanceof Error ? { cause: error } : undefined);
+            await markJobCancelled(store, paths, job, `${commandType} cancelled by user request.`, cancelledError);
+            throw cancelledError;
+        }
         const classified = classifyManagedCommandFailure(error, commandType, job.job_id);
         await markJobFailed(store, paths, job, classified, `${commandType} failed.`);
         throw classified;
     }
     finally {
+        if (signalsRegistered) {
+            process.removeListener("SIGTERM", requestCancellation);
+            process.removeListener("SIGINT", requestCancellation);
+        }
+        if (cancelEscalationTimer) {
+            clearTimeout(cancelEscalationTimer);
+        }
         await client?.close();
         store.close();
     }
+}
+function reviewCancellationCode(commandType) {
+    return commandType === "review" ? "REVIEW_CANCELLED" : "CHALLENGE_CANCELLED";
 }
 function buildReviewTitleExcerpt(commandType, focus) {
     const trimmed = focus?.trim();

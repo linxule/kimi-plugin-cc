@@ -147,8 +147,8 @@ export class JobStore {
         const row = this.db.get(`SELECT * FROM jobs WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC LIMIT 1`, params);
         return row ? hydrateRow(row) : null;
     }
-    listRunningBackgroundJobs() {
-        const rows = this.db.all(`SELECT * FROM jobs WHERE status = 'running' AND background = 1 AND pid IS NOT NULL`);
+    listRunningJobsWithProcessHints() {
+        const rows = this.db.all(`SELECT * FROM jobs WHERE status = 'running' AND (pid IS NOT NULL OR kimi_pid IS NOT NULL)`);
         return rows.map(hydrateRow);
     }
     findRescueJobBySession(repoId, sessionId) {

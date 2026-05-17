@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
 import { readPluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
@@ -76,7 +77,7 @@ async function executeReviewGate(payload, assistantMessage, context) {
         model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
         thinking: false,
         background: false,
-        pid: null,
+        pid: process.pid,
         kimi_pid: null,
         status: "running",
         kimi_session_id: kimiSessionId,

@@ -1,7 +1,7 @@
 import process from "node:process";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { markJobCancelled, sweepStaleBackgroundJobs } from "../jobs.js";
+import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
@@ -12,7 +12,7 @@ export async function runCancel(argv, context) {
     const repoIdentity = await resolveRepoIdentity(context.cwd);
     const store = new JobStore(paths);
     try {
-        await sweepStaleBackgroundJobs(store, paths);
+        await sweepStaleJobs(store, paths);
         const job = parsed.jobId
             ? store.getJob(parsed.jobId)
             : store.findLatestJob({
@@ -30,17 +30,10 @@ export async function runCancel(argv, context) {
                 message: "cancel is a no-op for terminal jobs.",
             }, null, 2)}\n`;
         }
-        if (!job.background || job.pid === null) {
-            throw new RuntimeError("CANCEL_NOT_SUPPORTED", `Job ${job.job_id} is not a cancellable background worker.`, "cancel.runtime");
+        if (job.pid === null && job.kimi_pid === null) {
+            throw new RuntimeError("CANCEL_NOT_SUPPORTED", `Job ${job.job_id} does not have a recorded process id to cancel.`, "cancel.runtime");
         }
-        try {
-            process.kill(job.pid, "SIGTERM");
-        }
-        catch (error) {
-            if (error.code !== "ESRCH") {
-                throw error;
-            }
-        }
+        signalJobProcesses(job, "SIGTERM");
         const cancelled = await waitForCancellation(paths, job.job_id);
         if (cancelled) {
             return `${JSON.stringify({
@@ -49,19 +42,12 @@ export async function runCancel(argv, context) {
                 message: "Cancellation completed.",
             }, null, 2)}\n`;
         }
-        try {
-            process.kill(job.pid, "SIGKILL");
-        }
-        catch (error) {
-            if (error.code !== "ESRCH") {
-                throw error;
-            }
-        }
+        signalJobProcesses(job, "SIGKILL");
         const forcedStore = new JobStore(paths);
         try {
             const current = forcedStore.getJob(job.job_id);
             if (current?.status === "running") {
-                await markJobCancelled(forcedStore, paths, current, "Background rescue was force-cancelled after worker termination.", undefined, current.command_type === "rescue" ? { phase: "cancelled" } : undefined);
+                await markJobCancelled(forcedStore, paths, current, "Job was force-cancelled after recorded process termination.", undefined, current.command_type === "ask" || current.command_type === "rescue" ? { phase: "cancelled" } : undefined);
             }
         }
         finally {
@@ -77,6 +63,23 @@ export async function runCancel(argv, context) {
         store.close();
     }
 }
+function signalJobProcesses(job, signal) {
+    const pids = new Set();
+    if (job.pid !== null)
+        pids.add(job.pid);
+    if (job.kimi_pid !== null)
+        pids.add(job.kimi_pid);
+    for (const pid of pids) {
+        try {
+            process.kill(pid, signal);
+        }
+        catch (error) {
+            if (error.code !== "ESRCH") {
+                throw error;
+            }
+        }
+    }
+}
 async function waitForCancellation(paths, jobId) {
     const deadline = Date.now() + 4_000;
     while (Date.now() < deadline) {
@@ -85,6 +88,9 @@ async function waitForCancellation(paths, jobId) {
             const current = store.getJob(jobId);
             if (current && current.status !== "running") {
                 return current;
+            }
+            if (current && !hasLiveRecordedProcess(current)) {
+                return null;
             }
         }
         finally {
@@ -95,4 +101,23 @@ async function waitForCancellation(paths, jobId) {
         });
     }
     return null;
+}
+function hasLiveRecordedProcess(job) {
+    const pids = new Set();
+    if (job.pid !== null)
+        pids.add(job.pid);
+    if (job.kimi_pid !== null)
+        pids.add(job.kimi_pid);
+    for (const pid of pids) {
+        try {
+            process.kill(pid, 0);
+            return true;
+        }
+        catch (error) {
+            if (error.code !== "ESRCH") {
+                return true;
+            }
+        }
+    }
+    return false;
 }

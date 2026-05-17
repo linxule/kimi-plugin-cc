@@ -5,7 +5,7 @@ import { resolveRepoIdentity } from "../git.js";
 import { JobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { renderManagedJobOutput } from "../render.js";
-import { sweepStaleBackgroundJobs } from "../jobs.js";
+import { sweepStaleJobs } from "../jobs.js";
 import { createTurnCapture, finalizeTurnCapture, observeTurnEvent, } from "../wire/turn-capture.js";
 const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
 export async function runReplay(argv, context) {
@@ -18,7 +18,7 @@ export async function runReplay(argv, context) {
     const repoIdentity = await resolveRepoIdentity(context.cwd);
     const store = new JobStore(paths);
     try {
-        await sweepStaleBackgroundJobs(store, paths);
+        await sweepStaleJobs(store, paths);
         const job = store.getJob(jobId);
         if (!job || job.repo_id !== repoIdentity.repoId) {
             throw new RuntimeError("JOB_NOT_FOUND", `No job matched ${jobId} for replay.`, "replay.lookup");

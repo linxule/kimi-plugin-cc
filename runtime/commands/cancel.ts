@@ -2,7 +2,7 @@ import process from "node:process";
 
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { markJobCancelled, sweepStaleBackgroundJobs } from "../jobs.js";
+import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
@@ -16,7 +16,7 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
   const store = new JobStore(paths);
 
   try {
-    await sweepStaleBackgroundJobs(store, paths);
+    await sweepStaleJobs(store, paths);
 
     const job = parsed.jobId
       ? store.getJob(parsed.jobId)
@@ -42,21 +42,15 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       )}\n`;
     }
 
-    if (!job.background || job.pid === null) {
+    if (job.pid === null && job.kimi_pid === null) {
       throw new RuntimeError(
         "CANCEL_NOT_SUPPORTED",
-        `Job ${job.job_id} is not a cancellable background worker.`,
+        `Job ${job.job_id} does not have a recorded process id to cancel.`,
         "cancel.runtime",
       );
     }
 
-    try {
-      process.kill(job.pid, "SIGTERM");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-        throw error;
-      }
-    }
+    signalJobProcesses(job, "SIGTERM");
 
     const cancelled = await waitForCancellation(paths, job.job_id);
     if (cancelled) {
@@ -71,13 +65,7 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       )}\n`;
     }
 
-    try {
-      process.kill(job.pid, "SIGKILL");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-        throw error;
-      }
-    }
+    signalJobProcesses(job, "SIGKILL");
 
     const forcedStore = new JobStore(paths);
     try {
@@ -87,9 +75,9 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
           forcedStore,
           paths,
           current,
-          "Background rescue was force-cancelled after worker termination.",
+          "Job was force-cancelled after recorded process termination.",
           undefined,
-          current.command_type === "rescue" ? { phase: "cancelled" } : undefined,
+          current.command_type === "ask" || current.command_type === "rescue" ? { phase: "cancelled" } : undefined,
         );
       }
     } finally {
@@ -110,6 +98,25 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
   }
 }
 
+function signalJobProcesses(
+  job: { pid: number | null; kimi_pid: number | null },
+  signal: NodeJS.Signals,
+): void {
+  const pids = new Set<number>();
+  if (job.pid !== null) pids.add(job.pid);
+  if (job.kimi_pid !== null) pids.add(job.kimi_pid);
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        throw error;
+      }
+    }
+  }
+}
+
 async function waitForCancellation(paths: ReturnType<typeof resolvePluginPaths>, jobId: string) {
   const deadline = Date.now() + 4_000;
 
@@ -119,6 +126,9 @@ async function waitForCancellation(paths: ReturnType<typeof resolvePluginPaths>,
       const current = store.getJob(jobId);
       if (current && current.status !== "running") {
         return current;
+      }
+      if (current && !hasLiveRecordedProcess(current)) {
+        return null;
       }
     } finally {
       store.close();
@@ -130,4 +140,23 @@ async function waitForCancellation(paths: ReturnType<typeof resolvePluginPaths>,
   }
 
   return null;
+}
+
+function hasLiveRecordedProcess(job: { pid: number | null; kimi_pid: number | null }): boolean {
+  const pids = new Set<number>();
+  if (job.pid !== null) pids.add(job.pid);
+  if (job.kimi_pid !== null) pids.add(job.kimi_pid);
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }

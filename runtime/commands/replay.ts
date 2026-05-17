@@ -7,7 +7,7 @@ import { JobStore, type JobRecord } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { renderManagedJobOutput } from "../render.js";
 import type { CommandContext } from "../types.js";
-import { sweepStaleBackgroundJobs } from "../jobs.js";
+import { sweepStaleJobs } from "../jobs.js";
 import type { IncomingWireMessage, PromptResult } from "../wire/types.js";
 import {
   createTurnCapture,
@@ -44,7 +44,7 @@ export async function runReplay(argv: string[], context: CommandContext): Promis
   const store = new JobStore(paths);
 
   try {
-    await sweepStaleBackgroundJobs(store, paths);
+    await sweepStaleJobs(store, paths);
 
     const job = store.getJob(jobId);
     if (!job || job.repo_id !== repoIdentity.repoId) {

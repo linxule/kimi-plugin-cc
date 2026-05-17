@@ -1,6 +1,6 @@
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { sweepStaleBackgroundJobs } from "../jobs.js";
+import { sweepStaleJobs } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
@@ -12,7 +12,7 @@ export async function runResult(argv, context) {
     const repoIdentity = await resolveRepoIdentity(context.cwd);
     const store = new JobStore(paths);
     try {
-        await sweepStaleBackgroundJobs(store, paths);
+        await sweepStaleJobs(store, paths);
         const job = parsed.jobId
             ? store.getJob(parsed.jobId)
             : store.findLatestJob({

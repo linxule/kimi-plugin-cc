@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleBackgroundJobs } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { announceSessionTitle } from "../kimi-web-client.js";
 import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
@@ -34,7 +34,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
   const store = new JobStore(paths);
 
   try {
-    await sweepStaleBackgroundJobs(store, paths);
+    await sweepStaleJobs(store, paths);
 
     const sessionResolution = resolveRescueSession(store, repoIdentity.repoId, parsed.prompt, parsed.fresh, parsed.resume, parsed.resumeTarget);
     const prompt = buildRescuePrompt(parsed.prompt, sessionResolution.reusedSession);
@@ -50,7 +50,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       model: parsed.model ?? null,
       thinking: parsed.thinking ?? null,
       background: parsed.background,
-      pid: null,
+      pid: parsed.background ? null : process.pid,
       kimi_pid: null,
       status: "running",
       kimi_session_id: sessionResolution.sessionId,

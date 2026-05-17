@@ -1,11 +1,14 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsk } from "../../runtime/commands/ask.js";
+import { runCancel } from "../../runtime/commands/cancel.js";
 import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
+import { sweepStaleJobs } from "../../runtime/jobs.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
@@ -70,6 +73,8 @@ describe("job-backed ask/status/result", () => {
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
 
       // Seed a 0.1.3-shaped database: jobs table with the old rescue-only unique
       // index, plus two running ask rows that share a (repo_id, kimi_session_id).
@@ -188,6 +193,306 @@ describe("job-backed ask/status/result", () => {
       await cleanupTestPath(pluginDataRoot);
     }
   });
+
+  test("sweeps stale foreground jobs whose Kimi process disappeared", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-sweep");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const deadPid = findDefinitelyDeadPid();
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-stale-foreground",
+          repo_id: "repo-x",
+          command_type: "review",
+          cwd: "/tmp/fake",
+          model: null,
+          thinking: null,
+          background: false,
+          pid: null,
+          kimi_pid: deadPid,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-job-stale-foreground.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed
+          .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
+          .run("2026-04-14T10:00:00.000Z", "job-stale-foreground");
+      } finally {
+        seed.close();
+      }
+
+      const sweepStore = new JobStore(paths);
+      try {
+        await sweepStaleJobs(sweepStore, paths);
+        const swept = sweepStore.getJob("job-stale-foreground");
+        expect(swept?.status).toBe("failed");
+        expect(swept?.error?.code).toBe("FOREGROUND_PROCESS_DISAPPEARED");
+        expect(swept?.final_output_path).toBeTruthy();
+        expect(await readFile(swept!.final_output_path!, "utf8")).toContain(
+          "Foreground Kimi job disappeared before reporting a terminal state.",
+        );
+      } finally {
+        sweepStore.close();
+      }
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("sweeps stale foreground jobs that died before Kimi pid was recorded", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-pre-kimi-sweep");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const deadPid = findDefinitelyDeadPid();
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-stale-before-kimi",
+          repo_id: "repo-x",
+          command_type: "ask",
+          cwd: "/tmp/fake",
+          model: null,
+          thinking: null,
+          background: false,
+          pid: deadPid,
+          kimi_pid: null,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running ask.",
+          phase: "starting",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "ask-job-stale-before-kimi.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed
+          .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
+          .run("2026-04-14T10:00:00.000Z", "job-stale-before-kimi");
+      } finally {
+        seed.close();
+      }
+
+      const sweepStore = new JobStore(paths);
+      try {
+        await sweepStaleJobs(sweepStore, paths);
+        const swept = sweepStore.getJob("job-stale-before-kimi");
+        expect(swept?.status).toBe("failed");
+        expect(swept?.phase).toBe("failed");
+        expect(swept?.error?.message).toContain("Foreground companion pid");
+      } finally {
+        sweepStore.close();
+      }
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("status and result sweep stale foreground jobs through the user-facing path", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-user-facing-sweep");
+    const repoRoot = await createTestPluginDataRoot("job-store-user-facing-sweep-repo");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const deadPid = findDefinitelyDeadPid();
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-user-facing-stale",
+          repo_id: repoRoot,
+          command_type: "review",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: false,
+          pid: deadPid,
+          kimi_pid: null,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-job-user-facing-stale.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed
+          .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
+          .run("2026-04-14T10:00:00.000Z", "job-user-facing-stale");
+      } finally {
+        seed.close();
+      }
+
+      const status = JSON.parse(await runStatus(["job-user-facing-stale"], makeContext(repoRoot, env))) as {
+        status: string;
+        error: { code: string };
+      };
+      const result = await runResult(["job-user-facing-stale"], makeContext(repoRoot, env));
+
+      expect(status.status).toBe("failed");
+      expect(status.error.code).toBe("FOREGROUND_PROCESS_DISAPPEARED");
+      expect(result).toContain("Foreground Kimi job disappeared before reporting a terminal state.");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("sweeping a stale foreground companion terminates an orphaned Kimi child", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-orphan-kimi-sweep");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const orphan = spawnLongRunningProcess();
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-orphan-kimi",
+          repo_id: "repo-x",
+          command_type: "review",
+          cwd: "/tmp/fake",
+          model: null,
+          thinking: null,
+          background: false,
+          pid: findDefinitelyDeadPid(),
+          kimi_pid: orphan.pid ?? null,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-job-orphan-kimi.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const seed = new Database(paths.stateDbPath);
+      try {
+        seed
+          .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
+          .run("2026-04-14T10:00:00.000Z", "job-orphan-kimi");
+      } finally {
+        seed.close();
+      }
+
+      const sweepStore = new JobStore(paths);
+      try {
+        await sweepStaleJobs(sweepStore, paths);
+        const swept = sweepStore.getJob("job-orphan-kimi");
+        expect(swept?.status).toBe("failed");
+      } finally {
+        sweepStore.close();
+      }
+
+      await waitForChildExit(orphan);
+      expect(orphan.exitCode !== null || orphan.signalCode !== null).toBe(true);
+    } finally {
+      if (orphan.exitCode === null && orphan.signalCode === null) {
+        orphan.kill("SIGKILL");
+      }
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("cancel can force-cancel a foreground job with a recorded process", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-cancel");
+    const repoRoot = await createTestPluginDataRoot("job-store-foreground-cancel-repo");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const child = spawnLongRunningProcess();
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-foreground-cancel",
+          repo_id: repoRoot,
+          command_type: "review",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: false,
+          pid: child.pid ?? null,
+          kimi_pid: null,
+          status: "running",
+          kimi_session_id: "session-x",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review.",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "review-job-foreground-cancel.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const output = JSON.parse(await runCancel(["job-foreground-cancel"], makeContext(repoRoot, env))) as {
+        status: string;
+        message: string;
+      };
+
+      expect(output.status).toBe("cancelled");
+      expect(output.message).toContain("Cancellation");
+      await waitForChildExit(child);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
 });
 
 function getJobTableColumns(dbPath: string): string[] {
@@ -198,4 +503,42 @@ function getJobTableColumns(dbPath: string): string[] {
   } finally {
     db.close();
   }
+}
+
+function findDefinitelyDeadPid(): number {
+  for (let pid = 999_999; pid > 900_000; pid -= 1) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return pid;
+      }
+    }
+  }
+
+  throw new Error("Unable to find an unused pid for stale-job test.");
+}
+
+function spawnLongRunningProcess(): ChildProcess {
+  return spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000);"], {
+    stdio: "ignore",
+  });
+}
+
+async function waitForChildExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out waiting for child pid ${child.pid ?? "<unknown>"} to exit.`));
+    }, 2_000);
+    timer.unref();
+
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }

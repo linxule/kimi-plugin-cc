@@ -230,9 +230,9 @@ export class JobStore {
     return row ? hydrateRow(row) : null;
   }
 
-  listRunningBackgroundJobs(): JobRecord[] {
+  listRunningJobsWithProcessHints(): JobRecord[] {
     const rows = this.db.all<DbRow>(
-      `SELECT * FROM jobs WHERE status = 'running' AND background = 1 AND pid IS NOT NULL`,
+      `SELECT * FROM jobs WHERE status = 'running' AND (pid IS NOT NULL OR kimi_pid IS NOT NULL)`,
     );
     return rows.map(hydrateRow);
   }

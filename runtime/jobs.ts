@@ -98,30 +98,100 @@ export async function markJobCancelled(
   );
 }
 
-export async function sweepStaleBackgroundJobs(store: JobStore, paths: PluginPaths): Promise<void> {
-  for (const job of store.listRunningBackgroundJobs()) {
-    if (job.pid === null) {
+export async function sweepStaleJobs(store: JobStore, paths: PluginPaths): Promise<void> {
+  for (const job of store.listRunningJobsWithProcessHints()) {
+    if (!isStaleEnoughToSweep(job)) {
       continue;
     }
 
-    // This is still vulnerable to PID reuse races. Fixing that needs pidfds or a worker heartbeat,
-    // which is out of scope for phase 3b.
-    if (isPidAlive(job.pid)) {
+    const companionMissing = job.pid !== null && !isPidAlive(job.pid);
+    const kimiMissing = job.kimi_pid !== null && !isPidAlive(job.kimi_pid);
+
+    if (job.background) {
+      if (!companionMissing && !kimiMissing) {
+        continue;
+      }
+
+      terminateRecordedProcesses(job);
+      await markJobFailed(
+        store,
+        paths,
+        job,
+        new RuntimeError(
+          companionMissing ? "WORKER_DISAPPEARED" : "KIMI_PROCESS_DISAPPEARED",
+          companionMissing
+            ? `Background worker pid ${job.pid} is no longer running.`
+            : `Kimi pid ${job.kimi_pid} is no longer running while background worker pid ${job.pid} is still recorded.`,
+          "jobs.sweep",
+        ),
+        companionMissing
+          ? "Background worker disappeared before reporting a terminal state."
+          : "Kimi process disappeared before reporting a terminal state.",
+        job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined,
+      );
       continue;
     }
 
+    if (!companionMissing && !kimiMissing) {
+      continue;
+    }
+
+    terminateRecordedProcesses(job);
     await markJobFailed(
       store,
       paths,
       job,
       new RuntimeError(
-        "WORKER_DISAPPEARED",
-        `Background worker pid ${job.pid} is no longer running.`,
+        "FOREGROUND_PROCESS_DISAPPEARED",
+        describeMissingForegroundProcess(job, companionMissing, kimiMissing),
         "jobs.sweep",
       ),
-      "Background worker disappeared before reporting a terminal state.",
-      job.command_type === "rescue" ? { phase: "failed" } : undefined,
+      "Foreground Kimi job disappeared before reporting a terminal state.",
+      job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined,
     );
+  }
+}
+
+const STALE_SWEEP_GRACE_MS = 15_000;
+
+function isStaleEnoughToSweep(job: JobRecord): boolean {
+  const updatedAt = Date.parse(job.updated_at);
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt >= STALE_SWEEP_GRACE_MS;
+}
+
+function describeMissingForegroundProcess(
+  job: JobRecord,
+  companionMissing: boolean,
+  kimiMissing: boolean,
+): string {
+  if (companionMissing && kimiMissing) {
+    return `Foreground companion pid ${job.pid} and Kimi pid ${job.kimi_pid} are no longer running.`;
+  }
+  if (companionMissing) {
+    return `Foreground companion pid ${job.pid} is no longer running.`;
+  }
+  return `Kimi pid ${job.kimi_pid} is no longer running.`;
+}
+
+function terminateRecordedProcesses(job: JobRecord): void {
+  const pids = new Set<number>();
+  if (job.pid !== null) pids.add(job.pid);
+  if (job.kimi_pid !== null) pids.add(job.kimi_pid);
+
+  for (const pid of pids) {
+    if (isPidAlive(pid)) {
+      killPid(pid, "SIGTERM");
+    }
+  }
+}
+
+function killPid(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
   }
 }
 

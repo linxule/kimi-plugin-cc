@@ -7,4 +7,6 @@ Run the companion with any user-supplied flags appended after `result`:
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh result <args>`
 
+This command also reconciles stale jobs whose recorded worker or Kimi process has disappeared before looking up a terminal result.
+
 Return the companion stdout verbatim.
