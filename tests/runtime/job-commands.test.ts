@@ -630,6 +630,74 @@ describe("job-backed ask/status/result", () => {
     }
   });
 
+  test("cancel of a review_gate job escalates SIGTERM→SIGKILL when the child ignores SIGTERM", async () => {
+    // v0.2.4 regression test: the v0.2.3 cancel.ts pre-marked the row as
+    // `cancelled`, which made waitForCancellation return on the status
+    // check and skip SIGKILL escalation entirely. v0.2.4 runs unconditional
+    // SIGTERM → 1s wait → SIGKILL on the recorded pids for review_gate.
+    // Use a child that traps SIGTERM so only SIGKILL can end it.
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-review-gate-sigkill");
+    const repoRoot = await createTestPluginDataRoot("job-store-review-gate-sigkill-repo");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const child = spawnSigtermIgnoringProcess();
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-review-gate-sigkill",
+          repo_id: repoRoot,
+          command_type: "review_gate",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: false,
+          pid: null,
+          kimi_pid: child.pid ?? null,
+          status: "running",
+          kimi_session_id: "session-sigkill",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running review gate.",
+          final_output_path: null,
+          stream_log_path: path.join(
+            paths.logsDir,
+            "review-gate-job-review-gate-sigkill.jsonl",
+          ),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      const start = Date.now();
+      const output = JSON.parse(
+        await runCancel(["job-review-gate-sigkill"], makeContext(repoRoot, env)),
+      ) as { status: string; message: string };
+      const elapsed = Date.now() - start;
+
+      expect(output.status).toBe("cancelled");
+      // The escalation window is 1s sleep between SIGTERM and SIGKILL.
+      // Require at least 900ms to confirm the path actually waited rather
+      // than short-circuiting on the pre-marked status.
+      expect(elapsed).toBeGreaterThan(900);
+      await waitForChildExit(child);
+      // SIGKILL exit reports via signalCode (or exit code 137 / null exitCode + signalCode === 'SIGKILL').
+      expect(child.signalCode).toBe("SIGKILL");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
   test("cancel can force-cancel a foreground job with a recorded process", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-cancel");
     const repoRoot = await createTestPluginDataRoot("job-store-foreground-cancel-repo");
@@ -713,6 +781,17 @@ function spawnLongRunningProcess(): ChildProcess {
   return spawn(process.execPath, ["-e", "setTimeout(() => {}, 30_000);"], {
     stdio: "ignore",
   });
+}
+
+function spawnSigtermIgnoringProcess(): ChildProcess {
+  // Long-running child that explicitly traps SIGTERM. Used to verify that
+  // /kimi:cancel of a review_gate job escalates to SIGKILL when SIGTERM is
+  // ignored — the v0.2.4 fix for the wait-loop-skips-escalation bug.
+  return spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); setTimeout(() => {}, 30_000);"],
+    { stdio: "ignore" },
+  );
 }
 
 async function waitForChildExit(child: ChildProcess): Promise<void> {

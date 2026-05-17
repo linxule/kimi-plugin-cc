@@ -69,9 +69,10 @@ export function renderReviewArtifact(job, output) {
         "",
         `- Job: ${job.job_id}`,
         ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
-        "",
     ].join("\n");
-    return `${header}${output.trim()}`;
+    // Blank line between header and body, plus trailing newline so the rendered
+    // string is well-formed even before writeArtifact's newline normalization.
+    return `${header}\n\n${output.trim()}\n`;
 }
 export function renderRescueArtifact(rawOutput) {
     const trimmed = rawOutput.trim();
@@ -99,13 +100,13 @@ export function renderReviewGateArtifact(job, output) {
     ];
     if (output.issues.length === 0) {
         lines.push("", "No issues.");
-        return lines.join("\n");
+        return `${lines.join("\n")}\n`;
     }
     lines.push("", "## Issues");
     for (const issue of output.issues) {
         lines.push("", `### ${issue.title}`, `- Severity: ${issue.severity}`, issue.body);
     }
-    return lines.join("\n");
+    return `${lines.join("\n")}\n`;
 }
 export function renderTerminalJobArtifact(job) {
     const lines = [

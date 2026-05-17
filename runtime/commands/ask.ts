@@ -255,7 +255,7 @@ export async function executeAskJob(
     if (cancelling) {
       throw new RuntimeError(
         "ASK_CANCELLED",
-        "Ask cancelled by user request after prompt completion.",
+        "Ask cancelled by user request after artifact write.",
         "ask.runtime",
       );
     }

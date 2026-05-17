@@ -7,7 +7,7 @@ tools: Bash
 
 # kimi:challenge
 
-Forward an adversarial challenge-review request to the shared companion runtime and return the structured output verbatim. The framing is "is this approach right?" not "are there bugs?".
+Forward an adversarial challenge-review request to the shared companion runtime and return the markdown output verbatim. The framing is "is this approach right?" not "are there bugs?".
 
 <example>
 Context: The user says, "Have Kimi challenge this design before I commit it."
@@ -38,6 +38,6 @@ When challenge completes:
 
 - return the companion stdout verbatim — do not soften the adversarial framing or rewrite findings into defect form
 - if Kimi returns no findings, surface that explicitly rather than implying the challenge was skipped
-- treat malformed output as a hard failure and surface it
+- treat an empty companion stdout as a hard failure and surface it (challenge output is pass-through prose; the runtime only fails on empty final text)
 
 Do not inspect the repository yourself, do not implement the alternatives Kimi raises, and do not turn challenge into a planning agent. If the user wants edits, switch to the `kimi-rescue` agent or `/kimi:rescue`.

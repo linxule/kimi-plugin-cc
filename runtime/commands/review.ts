@@ -169,7 +169,7 @@ export async function runReview(
     if (cancelling) {
       throw new RuntimeError(
         reviewCancellationCode(commandType),
-        `${commandType} cancelled by user request after prompt completion.`,
+        `${commandType} cancelled by user request after artifact write.`,
         `${commandType}.runtime`,
       );
     }

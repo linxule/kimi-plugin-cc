@@ -56,7 +56,22 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
     // user's intent is recorded canonically — the subsequent wire exit is a
     // no-op against an already-terminal row (markFailed has a WHERE
     // status='running' guard).
+    //
+    // Because the row is now terminal, waitForCancellation returns
+    // immediately on the status check and never escalates to SIGKILL. Run
+    // an unconditional SIGTERM→1s→SIGKILL sequence on the recorded pids
+    // here and return early so the lower-level wait/escalation path does
+    // not skip cleanup. (v0.2.4)
     if (job.command_type === "review_gate") {
+      // Pre-mark before signaling so the row persists as `cancelled` rather
+      // than the `failed` the hook's catch path would write on WIRE_PROCESS_EXITED.
+      //
+      // If the pre-mark itself fails (disk I/O, SQLite contention), we must
+      // STILL signal the Kimi child — otherwise the user's cancel command
+      // produces an alive-but-marked-cancelled stuck state. Capture the
+      // pre-mark failure, run the SIGTERM→SIGKILL escalation unconditionally,
+      // and rethrow at the end so the user sees the underlying error.
+      let preMarkError: unknown;
       const preMarkStore = new JobStore(paths);
       try {
         await markJobCancelled(
@@ -70,9 +85,31 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
             "cancel.runtime",
           ),
         );
+      } catch (error) {
+        preMarkError = error;
       } finally {
         preMarkStore.close();
       }
+
+      signalJobProcesses(job, "SIGTERM");
+      await sleep(1_000);
+      if (hasLiveRecordedProcess(job)) {
+        signalJobProcesses(job, "SIGKILL");
+      }
+
+      if (preMarkError) {
+        throw preMarkError;
+      }
+
+      return `${JSON.stringify(
+        {
+          job_id: job.job_id,
+          status: "cancelled",
+          message: "review_gate cancelled; SIGTERM→SIGKILL escalation completed.",
+        },
+        null,
+        2,
+      )}\n`;
     }
 
     signalJobProcesses(job, "SIGTERM");
@@ -144,6 +181,12 @@ function signalJobProcesses(
       }
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function waitForCancellation(paths: ReturnType<typeof resolvePluginPaths>, jobId: string) {

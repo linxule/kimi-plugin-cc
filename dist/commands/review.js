@@ -115,7 +115,7 @@ export async function runReview(argv, context, commandType) {
         // Re-check after the disk write (writeArtifact awaits I/O) — cancel could
         // have landed during that window too.
         if (cancelling) {
-            throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request after prompt completion.`, `${commandType}.runtime`);
+            throw new RuntimeError(reviewCancellationCode(commandType), `${commandType} cancelled by user request after artifact write.`, `${commandType}.runtime`);
         }
         store.markCompleted(job.job_id, {
             summary: rendered.summary,

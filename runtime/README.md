@@ -5,7 +5,7 @@ Local runtime implementation for `kimi-plugin-cc`. Feature-complete through phas
 Command surface exposed via `companion.ts`:
 
 - `setup` — verify `kimi --wire` round-trip and manage review-gate config
-- `review` / `task challenge` — read-only reviews with fixed JSON schemas
+- `review` / `task challenge` — read-only reviews; Kimi output is pass-through markdown prose (no schema parsing as of v0.2.3)
 - `ask` — read-only free-form Q&A (fresh session per call)
 - `task rescue` — write-capable delegated task channel with a companion-side approval allowlist and resumable Kimi sessions; output is pass-through prose (no schema)
 - `status` / `result` / `cancel` — SQLite-backed job lifecycle commands
@@ -32,7 +32,7 @@ Behavior notes:
 - `start()`, `initialize()`, and (for ask/review) `prompt()` are wrapped in `withTimeout` so a Kimi that starts but never becomes usable surfaces a clean timeout instead of hanging forever
 - Rescue session resume is guarded by a partial unique index; two concurrent `/kimi:rescue --resume` calls against the same session id cannot both enter the running state
 - The Stop hook is disabled by default and reads `reviewGateEnabled` from plugin config; enable via `/kimi:setup --enable-review-gate`
-- Parse failure is a hard failure for `review`/`challenge` and a warn-allow for `review_gate`; `rescue` has no schema to parse against — Kimi's raw final output is stored verbatim and rendered as-is
+- `review`/`challenge`/`ask`/`rescue` are prose pass-through — Kimi's raw final output is stored verbatim and rendered as-is; only empty output is a hard failure. `review_gate` is the lone command that still parses Kimi output (JSON allow/block decision) and is warn-allow on parse failure
 - Raw Wire traffic is logged to `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/logs/<command>-<job-id>.jsonl` for replay and debugging
 - The companion runs on Node from precompiled `dist/companion.js` in production; `tsx` is used only in development. Bun is the package manager and test runner (ADR 003)
 
@@ -40,7 +40,7 @@ Subdirectories:
 
 - `agents/` — Kimi agent profiles (read-only: review, ask, review-gate; write-capable: rescue)
 - `prompts/` — system prompts per command type
-- `schemas/` — structured output contracts (review, review-gate); rescue is pass-through prose and has no schema
+- `schemas/` — structured output contract for `review_gate` only (review/challenge dropped their schema in v0.2.3; rescue and ask are pass-through prose)
 - `hooks/` — Stop hook entry point for the review gate
 - `commands/` — one file per companion subcommand
 - `wire/` — Wire client + turn capture

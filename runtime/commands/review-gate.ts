@@ -10,6 +10,7 @@ import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../kimi-errors.js";
 import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
+import type { WireClient } from "../wire/client.js";
 import { KIMI_REVIEW_GATE_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
@@ -98,105 +99,134 @@ async function executeReviewGate(
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(payload.cwd);
-  const store = new JobStore(paths);
-  const userRequest = await extractLastUserMessage(payload.transcript_path);
-
-  const jobId = randomUUID();
-  const kimiSessionId = randomUUID();
-  const logPath = path.join(paths.logsDir, `review-gate-${jobId}.jsonl`);
-  const agentProfile = resolveAgentFile("runtime/agents/review-gate.yaml");
-  const prompt = buildReviewGatePrompt({
-    assistantMessage,
-    userRequest,
-    cwd: payload.cwd,
-    repoRoot: repoIdentity.repoRoot,
-  });
-
-  // Write the invocation log header BEFORE creating the job row. If the
-  // header write fails (disk full, permission denied), we'd otherwise leave
-  // a running job row with pid=null,kimi_pid=null that the sweeper can't
-  // see (listRunningJobsWithProcessHints requires at least one non-null pid)
-  // — orphan row + leaked store handle. With the header first, a write
-  // failure throws before any row is created.
-  await writeInvocationLogHeader(logPath, {
-    commandType: "review_gate",
-    kimiSessionId,
-    cwd: payload.cwd,
-  });
-  const job = store.createJob({
-    job_id: jobId,
-    repo_id: repoIdentity.repoId,
-    command_type: "review_gate",
-    cwd: payload.cwd,
-    model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
-    thinking: false,
-    background: false,
-    // review_gate runs inside Claude Code's Stop hook. Its companion lifecycle
-    // is bounded by the hook itself, so recording pid here would let
-    // signalJobProcesses() and sweepStaleJobs() SIGTERM the hook companion
-    // mid-flight. kimi_pid is still recorded once the wire client starts, so
-    // orphaned Kimi children remain reachable to the sweeper.
-    pid: null,
-    kimi_pid: null,
-    status: "running",
-    kimi_session_id: kimiSessionId,
-    agent_profile: agentProfile,
-    prompt_digest: digestPrompt(prompt),
-    summary: "Running review gate.",
-    final_output_path: null,
-    stream_log_path: logPath,
-    error: null,
-  });
-
-  const client = buildWireClient({
-    cwd: payload.cwd,
-    env: context.env,
-    sessionId: kimiSessionId,
-    agentFile: agentProfile,
-    model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
-    thinking: false,
-    logPath,
-    approvalPolicy: rejectAllApprovals(
-      "review_gate is read-only; unexpected approval requests fail the command.",
-    ),
-  });
-
+  // One try/finally for the store + client lifetime. Everything that can
+  // throw — including JobStore construction itself (pragma/exec can fail
+  // after the adapter is open), header write, createJob, buildWireClient,
+  // the wire round-trip — must happen inside it; otherwise an early throw
+  // leaks the SQLite handle. v0.2.3 ordered header-first to close an
+  // orphan-row hole but reopened a store-leak hole. v0.2.4 wraps everything.
+  let store: JobStore | undefined;
+  let client: WireClient | undefined;
   try {
-    const rendered = await withTimeout(
-      (async () => {
-        await client.start();
-        store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
-        await client.initialize({
-          protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
-          client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
-          capabilities: {
-            supports_question: false,
-            supports_plan_mode: false,
-          },
-        });
+    store = new JobStore(paths);
+    const userRequest = await extractLastUserMessage(payload.transcript_path);
 
-        const completed = await client.prompt(prompt, "review_gate");
-        return renderManagedJobOutput(job, completed.finalText);
-      })(),
-      KIMI_REVIEW_GATE_TIMEOUT_MS,
-      "review_gate.runtime",
-    );
+    const jobId = randomUUID();
+    const kimiSessionId = randomUUID();
+    const logPath = path.join(paths.logsDir, `review-gate-${jobId}.jsonl`);
+    const agentProfile = resolveAgentFile("runtime/agents/review-gate.yaml");
+    const prompt = buildReviewGatePrompt({
+      assistantMessage,
+      userRequest,
+      cwd: payload.cwd,
+      repoRoot: repoIdentity.repoRoot,
+    });
 
-    const artifactPath = await writeArtifact(paths, job, rendered.rendered);
-    store.markCompleted(job.job_id, {
-      summary: rendered.summary,
-      final_output_path: artifactPath,
+    // Write the invocation log header BEFORE creating the job row. If the
+    // header write fails (disk full, permission denied), we'd otherwise leave
+    // a running job row with pid=null,kimi_pid=null that the sweeper can't
+    // see (listRunningJobsWithProcessHints requires at least one non-null pid)
+    // — orphan row. With the header first, a write failure throws before any
+    // row is created. Both paths are now inside the outer try, so the store
+    // handle is closed regardless.
+    await writeInvocationLogHeader(logPath, {
+      commandType: "review_gate",
+      kimiSessionId,
+      cwd: payload.cwd,
+    });
+    const job = store.createJob({
+      job_id: jobId,
+      repo_id: repoIdentity.repoId,
+      command_type: "review_gate",
+      cwd: payload.cwd,
+      model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
+      thinking: false,
+      background: false,
+      // review_gate runs inside Claude Code's Stop hook. Its companion lifecycle
+      // is bounded by the hook itself, so recording pid here would let
+      // signalJobProcesses() and sweepStaleJobs() SIGTERM the hook companion
+      // mid-flight. kimi_pid is still recorded once the wire client starts, so
+      // orphaned Kimi children remain reachable to the sweeper.
+      pid: null,
+      kimi_pid: null,
+      status: "running",
+      kimi_session_id: kimiSessionId,
+      agent_profile: agentProfile,
+      prompt_digest: digestPrompt(prompt),
+      summary: "Running review gate.",
+      final_output_path: null,
+      stream_log_path: logPath,
       error: null,
     });
-    return rendered.output as ReviewGateOutput;
-  } catch (error) {
-    const classified = classifyManagedCommandFailure(error, "review_gate", job.job_id);
-    const summary = isTimeoutError(classified) ? "Review gate timed out." : "Review gate failed.";
-    await markJobFailed(store, paths, job, classified, summary);
-    throw classified;
+
+    client = buildWireClient({
+      cwd: payload.cwd,
+      env: context.env,
+      sessionId: kimiSessionId,
+      agentFile: agentProfile,
+      model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
+      thinking: false,
+      logPath,
+      approvalPolicy: rejectAllApprovals(
+        "review_gate is read-only; unexpected approval requests fail the command.",
+      ),
+    });
+
+    try {
+      const activeClient = client;
+      const activeStore = store;
+      const rendered = await withTimeout(
+        (async () => {
+          await activeClient.start();
+          activeStore.updateRunningJob(job.job_id, { kimi_pid: activeClient.getChildPid() });
+          await activeClient.initialize({
+            protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
+            client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
+            capabilities: {
+              supports_question: false,
+              supports_plan_mode: false,
+            },
+          });
+
+          const completed = await activeClient.prompt(prompt, "review_gate");
+          return renderManagedJobOutput(job, completed.finalText);
+        })(),
+        KIMI_REVIEW_GATE_TIMEOUT_MS,
+        "review_gate.runtime",
+      );
+
+      // Cancel-vs-completed race: /kimi:cancel pre-marks the row as
+      // `cancelled` and SIGTERMs the kimi child. If the prompt managed to
+      // return in the SIGTERM→exit window before our wire client picked
+      // up the close, we'd overwrite the cancellation artifact and confuse
+      // the hook's allow/block decision. Check the persisted status before
+      // committing the success path. Mirrors the cancel-after-prompt
+      // pattern already in ask/rescue/review.
+      const persisted = activeStore.getJob(job.job_id);
+      if (persisted && persisted.status !== "running") {
+        throw new RuntimeError(
+          "REVIEW_GATE_CANCELLED",
+          "review_gate cancelled before completion artifact was written.",
+          "review_gate.runtime",
+        );
+      }
+
+      const artifactPath = await writeArtifact(paths, job, rendered.rendered);
+      activeStore.markCompleted(job.job_id, {
+        summary: rendered.summary,
+        final_output_path: artifactPath,
+        error: null,
+      });
+      return rendered.output as ReviewGateOutput;
+    } catch (error) {
+      const classified = classifyManagedCommandFailure(error, "review_gate", job.job_id);
+      const summary = isTimeoutError(classified) ? "Review gate timed out." : "Review gate failed.";
+      await markJobFailed(store, paths, job, classified, summary);
+      throw classified;
+    }
   } finally {
-    await client.close();
-    store.close();
+    await client?.close().catch(() => {});
+    store?.close();
   }
 }
 

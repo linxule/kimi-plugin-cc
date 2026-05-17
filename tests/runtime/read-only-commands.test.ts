@@ -88,7 +88,7 @@ const pluginDataRoot = await createTestPluginDataRoot("ask-command");
     }
   });
 
-  test("runReview fails on empty final output", async () => {
+  test("runReview accepts review output without enforcing a schema", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-empty");
     const repoRoot = await createGitRepoFixture("review-git-empty");
     const invocationPath = path.join(pluginDataRoot, "review-empty-invocation.jsonl");
@@ -96,11 +96,10 @@ const pluginDataRoot = await createTestPluginDataRoot("ask-command");
 
     try {
       // The "review-missing-confidence" mock scenario emits JSON without a
-      // confidence field. Pre-v0.2.3 this failed schema parsing; post-v0.2.3 we
-      // accept any non-empty text. The only remaining hard failure is empty
-      // output, which the mock doesn't currently produce, so this scenario now
-      // simply succeeds — assert the call returns something rather than the
-      // previous "missing a required field" parse error.
+      // confidence field. Before v0.2.3 this failed schema parsing; v0.2.3
+      // dropped the schema and review now accepts any non-empty text. The
+      // only remaining hard failure is empty output, which this mock does
+      // not produce — so the call should succeed with non-empty stdout.
       const result = await runReview([], makeContext(repoRoot, env), "review");
       expect(result.length).toBeGreaterThan(0);
     } finally {

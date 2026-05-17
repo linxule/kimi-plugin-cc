@@ -200,7 +200,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         // Re-check after the artifact write (disk I/O window) — cancel could
         // have landed there too.
         if (cancelling) {
-            throw new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request after prompt completion.", "rescue.runtime");
+            throw new RuntimeError("RESCUE_CANCELLED", "Rescue cancelled by user request after artifact write.", "rescue.runtime");
         }
         return (store.markCompleted(job.job_id, {
             summary: firstMeaningfulLine(completedTurn.finalText),

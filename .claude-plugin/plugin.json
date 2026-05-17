@@ -1,7 +1,7 @@
 {
   "name": "kimi",
   "description": "Delegate read-only review, challenge, free-form ask, and write-capable rescue work to the local Kimi CLI. Includes an opt-in stop-time review gate.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "homepage": "https://github.com/linxule/kimi-plugin-cc",
   "repository": "https://github.com/linxule/kimi-plugin-cc",
   "license": "Apache-2.0",

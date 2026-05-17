@@ -88,7 +88,10 @@ describe("replay command", () => {
             },
           ],
         });
-        expect(replayed.rendered).toBe(artifact.trimEnd());
+        // v0.2.4: renderReviewGateArtifact now emits a trailing newline,
+        // so writeArtifact's normalization is a no-op and the on-disk file
+        // is byte-identical to the in-memory rendered string.
+        expect(replayed.rendered).toBe(artifact);
         expect(replayOutput).toContain("# Review Gate Result");
         expect(replayOutput).toContain("Requested fix still missing");
       } finally {

@@ -4,7 +4,7 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 0.2.3 (tagged `v0.2.3`)
+- **Version**: 0.2.4 (tagged `v0.2.4`)
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 
@@ -22,7 +22,7 @@ runtime/            TypeScript source — the real runtime
   ├── commands/     One file per companion subcommand
   ├── agents/       Kimi agent profiles (YAML)
   ├── prompts/      System prompts per command type
-  ├── schemas/      Structured output contracts (review, review-gate)
+  ├── schemas/      Structured output contract for review_gate (review/challenge dropped theirs in v0.2.3)
   └── hooks/        Stop hook entry point
 dist/               Compiled JS — committed for zero-build install
 tests/              bun test suite (146 tests / 22 files)
@@ -51,7 +51,7 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 - Rescue is the only write-capable profile. Shell access bounded by allowlist in `runtime/rescue-approval.ts`.
 - Rescue cannot mutate git state. The main Claude thread owns branch/commit.
 - Jobs in SQLite are the source of truth. Terminal states are permanent.
-- Review/challenge emit structured JSON. Ask/rescue are prose pass-through.
+- Review/challenge/ask/rescue are all prose pass-through (review/challenge dropped their JSON schemas in v0.2.3). Review gate is the only command that still parses Kimi output (JSON allow/block).
 - Review gate is a Stop hook, disabled by default, fail-open on malformed output.
 
 ## When editing

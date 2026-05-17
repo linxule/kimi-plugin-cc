@@ -261,7 +261,7 @@ export async function executeRescueJob(
     if (cancelling) {
       throw new RuntimeError(
         "RESCUE_CANCELLED",
-        "Rescue cancelled by user request after prompt completion.",
+        "Rescue cancelled by user request after artifact write.",
         "rescue.runtime",
       );
     }

@@ -192,7 +192,7 @@ export async function executeAskJob(jobId, prompt, context, options) {
         const rendered = renderManagedJobOutput(job, completed.finalText);
         const artifactPath = await writeArtifact(paths, job, rendered.rendered);
         if (cancelling) {
-            throw new RuntimeError("ASK_CANCELLED", "Ask cancelled by user request after prompt completion.", "ask.runtime");
+            throw new RuntimeError("ASK_CANCELLED", "Ask cancelled by user request after artifact write.", "ask.runtime");
         }
         return (store.markCompleted(job.job_id, {
             summary: rendered.summary,
