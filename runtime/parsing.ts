@@ -4,12 +4,16 @@ import { RuntimeError } from "./errors.js";
 
 /**
  * Tokens like `--foo` or `-x` that aren't in a command's known-flags set are
- * almost certainly typos (e.g. `--from HEAD~2` instead of `--base HEAD~2`).
- * The historical behavior — silently treating them as free-form trailing
- * prompt — produced misleading runs (Kimi exploring the repo, hitting the
- * step budget, or returning empty findings). v0.3.0 emits an advisory
- * warning to stderr but does not fail the command, so users with legitimate
- * `--foo`-shaped content in their question can still use `--` to silence it.
+ * almost certainly typos (e.g. `--from HEAD~2` instead of `--base HEAD~2`)
+ * or — for agent-mediated callers — hallucinated flag names (e.g. wrappers
+ * inventing `--file` / `--context` because that shape is common in other
+ * CLIs). The historical behavior — silently treating them as free-form
+ * trailing prompt with an advisory stderr warning — produced misleading
+ * runs (Kimi chewing on a bloated focus blob, or hitting the prompt
+ * timeout). v0.3.6 hard-fails for `review`/`challenge` (see
+ * `parseKnownFlags`); `ask` / `rescue` keep the warn-and-swallow behavior
+ * because their trailing position is legitimately free-form prose where
+ * `--foo`-shaped tokens may belong (use `--` to silence the warning).
  */
 function looksLikeFlag(token: string): boolean {
   if (!token.startsWith("-")) {
@@ -379,7 +383,16 @@ function parseKnownFlags(
 
     if (!knownFlags.has(token)) {
       if (looksLikeFlag(token)) {
-        warnUnknownFlag(commandName, token);
+        // Wrapper agents routinely hallucinate flags like `--file` /
+        // `--context` because that shape is common in other CLIs. Silently
+        // slurping them into focus text produced a bloated prompt that
+        // looked like a hang. Hard-fail with the supported list inline so
+        // the error message itself is the correction.
+        throw new RuntimeError(
+          "INVALID_ARGS",
+          `Unknown flag ${token} for ${commandName}. Supported flags: --base <ref>, -m/--model <name>, --thinking, --no-thinking. Use \`--\` before flag-shaped focus text to pass it through.`,
+          "args.parse",
+        );
       }
       trailingTokens = argv.slice(index);
       break;

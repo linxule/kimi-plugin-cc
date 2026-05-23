@@ -4,7 +4,7 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 0.3.5 (tagged `v0.3.5`)
+- **Version**: 0.3.6 (tagged `v0.3.6`)
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 

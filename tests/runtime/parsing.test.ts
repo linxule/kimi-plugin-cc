@@ -83,31 +83,30 @@ describe("argument parsing", () => {
     expect(parsed.focus).toBe("focus on rollback");
   });
 
-  test("parseReviewArgs warns on unknown flags but still preserves them as focus text", () => {
-    // v0.3.0 task #11: typos like `--from HEAD~2 --to HEAD` (instead of
-    // `--base HEAD~2`) used to silently become focus text and waste a
-    // long Kimi run. Now an advisory warning is emitted to stderr, but
-    // behavior is unchanged so legitimate `--foo`-shaped focus text
-    // still works after a `--` separator.
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: typeof process.stderr.write }).write = ((
-      chunk: string | Uint8Array,
-    ) => {
-      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    }) as typeof process.stderr.write;
+  test("parseReviewArgs hard-fails on unknown flags in flag-position", () => {
+    // v0.3.6: warn-and-swallow was producing invisible-to-agent corruption
+    // when wrappers invented flags like `--file` / `--context`. The bloated
+    // focus blob made Kimi spin inside the 10-min timeout, looking like a
+    // hang. Now any flag-shaped token that isn't in the known set throws
+    // INVALID_ARGS, with the supported list and `--` escape hatch in the
+    // error message. Applies to review/challenge only — ask/rescue still
+    // warn-and-swallow since their trailing position is free-form prose.
+    expect(() => parseReviewArgs(["--from", "HEAD~2", "--to", "HEAD"], "review")).toThrow(
+      /Unknown flag --from for review.*Use `--` before flag-shaped focus text/s,
+    );
+    expect(() => parseReviewArgs(["--file", "/tmp/x.md"], "challenge")).toThrow(
+      /Unknown flag --file for challenge/,
+    );
+  });
 
-    try {
-      const parsed = parseReviewArgs(["--from", "HEAD~2", "--to", "HEAD"], "review");
-      expect(parsed.base).toBeUndefined();
-      expect(parsed.focus).toBe("--from HEAD~2 --to HEAD");
-    } finally {
-      (process.stderr as { write: typeof process.stderr.write }).write = original;
-    }
+  test("parseReviewArgs `--` sentinel still escapes flag-shaped focus text", () => {
+    // The escape hatch documented in the error message must actually work.
+    // After `--`, all remaining tokens are joined verbatim as focus, even
+    // ones that look like flags.
+    const parsed = parseReviewArgs(["--base", "main", "--", "--file", "/tmp/x.md"], "review");
 
-    const joined = writes.join("");
-    expect(joined).toContain("unknown flag --from for review");
+    expect(parsed.base).toBe("main");
+    expect(parsed.focus).toBe("--file /tmp/x.md");
   });
 
   test("parseAskArgs `--` sentinel suppresses unknown-flag warning for tokens after it", () => {
