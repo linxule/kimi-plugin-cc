@@ -17,28 +17,23 @@ This is a [Claude Code](https://claude.ai/code) plugin that connects to [Kimi CL
 /kimi:review "review my current diff"
 ```
 
-Kimi reads your working-tree diff and returns structured findings:
+Kimi reads your working-tree diff and returns a review as markdown:
 
-```json
-{
-  "summary": "One high-confidence issue in the auth middleware.",
-  "verdict": "concern",
-  "findings": [
-    {
-      "severity": "high",
-      "confidence": "high",
-      "title": "JWT expiry not checked before token refresh",
-      "file": "src/middleware/auth.ts",
-      "start_line": 42,
-      "end_line": 47,
-      "body": "The refresh handler calls getNewToken() without first checking whether the current token has actually expired...",
-      "suggested_fix": "Add an expiry check before the refresh call."
-    }
-  ]
-}
+```markdown
+## Verdict: concern
+
+One high-confidence issue in the auth middleware; the rest looks fine.
+
+### src/middleware/auth.ts:42-47 — JWT expiry not checked before token refresh
+
+The refresh handler calls `getNewToken()` without first checking whether the
+current token has actually expired. On a slow-clock client this triggers a
+refresh on every request.
+
+Suggested fix: add an expiry check before the refresh call.
 ```
 
-Claude reads these findings and can act on them directly. To go further:
+Claude reads the review and can act on it directly. For programmatic access to the same content plus job metadata, `companion.sh result <jobId> --json` returns a structured envelope `{job_id, kind, status, summary, error, artifact_path, body, ...}` where `body` is the full markdown. To go further:
 
 ```
 /kimi:rescue "fix the top review finding"

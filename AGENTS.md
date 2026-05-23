@@ -25,7 +25,7 @@ runtime/            TypeScript source — the real runtime
   ├── schemas/      Structured output contract for review_gate (review/challenge dropped theirs in v0.2.3)
   └── hooks/        Stop hook entry point
 dist/               Compiled JS — committed for zero-build install
-tests/              bun test suite (192 tests / 24 files)
+tests/              bun test suite (265 tests / 29 files)
 ```
 
 ## Commands
@@ -52,7 +52,9 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 - Rescue cannot mutate git state. The main Claude thread owns branch/commit.
 - Jobs in SQLite are the source of truth. Terminal states are permanent.
 - Review/challenge/ask/rescue are all prose pass-through (review/challenge dropped their JSON schemas in v0.2.3). Review gate is the only command that still parses Kimi output (JSON allow/block).
-- Review gate is a Stop hook, disabled by default, fail-open on malformed output.
+- Review gate is a Stop hook, disabled by default, fail-open on malformed output. When the gate skips (missing assistant message, unreadable transcript), `systemMessage` surfaces the reason.
+- LLM-caller discipline (v0.3.6+): stderr is for humans only; anything load-bearing for an agent caller goes in stdout, exit codes, or persisted SQLite state. Parsers hard-fail on unknown flag-shaped tokens (INVALID_ARGS) instead of warn-and-swallowing — wrappers never see stderr warnings. `RuntimeError` carries an optional `details: Record<string, unknown>` for structured failure context.
+- Default command stdout: review/challenge/ask/rescue emit raw prose; status emits raw job-row JSON; result emits raw artifact markdown. `result <jobId> --json` opts into a structured envelope (`{job_id, kind, status, summary, error, artifact_path, body, created_at, completed_at}`) for downstream automation.
 
 ## When editing
 
