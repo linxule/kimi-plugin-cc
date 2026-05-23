@@ -8,7 +8,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import { RuntimeError } from "../../runtime/errors.js";
-import { buildAndStartWithFactory } from "../../runtime/kimi-launch.js";
+import { buildAndStartWithFactory, buildWireClient } from "../../runtime/kimi-launch.js";
+import { rejectAllApprovals } from "../../runtime/wire/approval-dispatcher.js";
 import type { WireClient } from "../../runtime/wire/client.js";
 
 // ---------------------------------------------------------------------------
@@ -253,5 +254,52 @@ describe("buildAndStartWithFactory", () => {
 
     expect(result).toBe(fake2 as unknown as WireClient);
     expect(callCount).toBe(2);
+  });
+});
+
+describe("buildWireClient env validation", () => {
+  test("absent watchdog env vars keep WireClient defaults", () => {
+    expect(() =>
+      buildWireClient({
+        cwd: process.cwd(),
+        env: {},
+        sessionId: "session",
+        agentFile: "agent.yaml",
+        logPath: "/tmp/kimi-plugin-cc-test.log",
+        approvalPolicy: rejectAllApprovals("test"),
+      }),
+    ).not.toThrow();
+  });
+
+  test.each([
+    ["KIMI_PLUGIN_CC_THINK_STALL_MS", ""],
+    ["KIMI_PLUGIN_CC_THINK_STALL_MS", "-1"],
+    ["KIMI_PLUGIN_CC_THINK_STALL_MS", "1.5"],
+    ["KIMI_PLUGIN_CC_THINK_LOOP_DUPLICATES", "abc"],
+  ])("throws INVALID_ENV for malformed %s=%s", (name, value) => {
+    expect(() =>
+      buildWireClient({
+        cwd: process.cwd(),
+        env: { [name]: value },
+        sessionId: "session",
+        agentFile: "agent.yaml",
+        logPath: "/tmp/kimi-plugin-cc-test.log",
+        approvalPolicy: rejectAllApprovals("test"),
+      }),
+    ).toThrow(RuntimeError);
+
+    try {
+      buildWireClient({
+        cwd: process.cwd(),
+        env: { [name]: value },
+        sessionId: "session",
+        agentFile: "agent.yaml",
+        logPath: "/tmp/kimi-plugin-cc-test.log",
+        approvalPolicy: rejectAllApprovals("test"),
+      });
+    } catch (error) {
+      expect((error as RuntimeError).code).toBe("INVALID_ENV");
+      expect((error as RuntimeError).details).toMatchObject({ env_var: name, value });
+    }
   });
 });

@@ -25,12 +25,15 @@ export async function runReviewGateStopHook(payload, context) {
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const config = await readPluginConfig(paths);
-    if (!config.reviewGateEnabled || payload.stop_hook_active) {
-        return {};
+    if (!config.reviewGateEnabled) {
+        return reviewGateSkipped("disabled");
+    }
+    if (payload.stop_hook_active) {
+        return reviewGateSkipped("stop hook already active");
     }
     const assistantMessage = await extractLastAssistantMessage(payload.transcript_path);
     if (!assistantMessage) {
-        return {};
+        return reviewGateSkipped("no assistant message");
     }
     try {
         const output = await executeReviewGate(payload, assistantMessage, context);
@@ -52,6 +55,9 @@ export async function runReviewGateStopHook(payload, context) {
             systemMessage: buildWarningMessage(error),
         };
     }
+}
+function reviewGateSkipped(reason) {
+    return { systemMessage: `review-gate skipped: ${reason}` };
 }
 async function executeReviewGate(payload, assistantMessage, context) {
     const paths = resolvePluginPaths(context.env);

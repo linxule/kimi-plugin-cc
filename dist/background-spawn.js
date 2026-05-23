@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { access, constants as fsConstants } from "node:fs/promises";
+import { access, appendFile, constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RuntimeError } from "./errors.js";
+import { RuntimeError, formatError } from "./errors.js";
 import { markJobFailed, waitForTerminalJob } from "./jobs.js";
 import { JobStore } from "./job-store.js";
 import { readArtifact } from "./render.js";
@@ -12,6 +12,7 @@ import { readArtifact } from "./render.js";
 const isCompiledRuntime = import.meta.url.endsWith(".js");
 const companionEntrypoint = fileURLToPath(new URL(isCompiledRuntime ? "./companion.js" : "./companion.ts", import.meta.url));
 const companionProjectRoot = path.resolve(path.dirname(companionEntrypoint), "..");
+const FAILURE_PERSIST_RETRY_DELAYS_MS = [100, 200, 400];
 export async function startBackgroundJob(job, prompt, context, paths, options) {
     const nodeBinary = context.env.KIMI_PLUGIN_CC_NODE_BIN || process.execPath;
     // Only fast-path the `fs.access` check for absolute/relative paths. A bare
@@ -26,13 +27,7 @@ export async function startBackgroundJob(job, prompt, context, paths, options) {
             const code = accessError.code;
             if (code === "ENOENT" || code === "EACCES" || code === "EPERM") {
                 const classified = new RuntimeError(options.nodeBinInvalidErrorCode, `Configured Node binary is not executable: ${nodeBinary}. Set KIMI_PLUGIN_CC_NODE_BIN to a valid Node >=22.5 executable and retry.`, options.spawnStage, accessError instanceof Error ? { cause: accessError } : undefined);
-                const failStore = new JobStore(paths);
-                try {
-                    await markJobFailed(failStore, paths, job, classified, options.failedSummary, { phase: "failed" });
-                }
-                finally {
-                    failStore.close();
-                }
+                await persistBackgroundFailure(paths, job.job_id, classified, options.failedSummary, "node-bin-invalid");
                 throw classified;
             }
             // Any other errno (EIO, etc.) — fall through to the spawn attempt and let the
@@ -115,42 +110,70 @@ export async function startBackgroundJob(job, prompt, context, paths, options) {
     }, null, 2)}\n`;
 }
 async function markSpawnFailure(paths, jobId, classified, failedSummary) {
-    const store = new JobStore(paths);
-    try {
-        const current = store.getJob(jobId);
-        if (!current || current.status !== "running") {
-            return;
-        }
-        await markJobFailed(store, paths, current, classified, failedSummary, { phase: "failed" });
-    }
-    catch (writeError) {
-        process.stderr.write(`[kimi-plugin-cc] failed to mark job ${jobId} as spawn-failed: ${writeError.message ?? String(writeError)}\n`);
-    }
-    finally {
-        store.close();
-    }
+    await persistBackgroundFailure(paths, jobId, classified, failedSummary, "spawn-failed");
 }
 async function markEarlyExit(paths, jobId, classified, failedSummary) {
-    const store = new JobStore(paths);
-    try {
-        const current = store.getJob(jobId);
-        if (!current || current.status !== "running") {
-            return;
-        }
+    await persistBackgroundFailure(paths, jobId, classified, failedSummary, "early-exit", (current) => {
         // Only mark failure if the worker exited before advancing past the spawn phase.
         // Once the worker reaches worker-running or turn-running, the child owns the
         // job state and the parent's close listener must not race with it.
-        if (current.phase !== "worker-spawned" && current.phase !== "queued") {
+        return current.phase === "worker-spawned" || current.phase === "queued";
+    });
+}
+async function persistBackgroundFailure(paths, jobId, classified, failedSummary, event, shouldMark = () => true) {
+    let lastWriteError;
+    for (let attempt = 0; attempt <= FAILURE_PERSIST_RETRY_DELAYS_MS.length; attempt += 1) {
+        let store;
+        try {
+            store = new JobStore(paths);
+            const current = store.getJob(jobId);
+            if (!current || current.status !== "running" || !shouldMark(current)) {
+                return;
+            }
+            await markJobFailed(store, paths, current, classified, failedSummary, { phase: "failed" });
             return;
         }
-        await markJobFailed(store, paths, current, classified, failedSummary, { phase: "failed" });
+        catch (writeError) {
+            lastWriteError = writeError;
+            if (attempt < FAILURE_PERSIST_RETRY_DELAYS_MS.length) {
+                await sleep(FAILURE_PERSIST_RETRY_DELAYS_MS[attempt]);
+            }
+        }
+        finally {
+            try {
+                store?.close();
+            }
+            catch {
+                // The persistence attempt outcome above is the signal that matters.
+            }
+        }
     }
-    catch (writeError) {
-        process.stderr.write(`[kimi-plugin-cc] failed to mark job ${jobId} as early-exit: ${writeError.message ?? String(writeError)}\n`);
+    await appendStuckJobTelemetry(paths, {
+        event,
+        job_id: jobId,
+        failed_summary: failedSummary,
+        error: {
+            code: classified.code,
+            stage: classified.stage,
+            message: classified.message,
+            details: classified.details,
+        },
+        persistence_error: formatError(lastWriteError),
+    });
+}
+async function appendStuckJobTelemetry(paths, entry) {
+    const stuckPath = path.join(paths.pluginRoot, "stuck-jobs.jsonl");
+    try {
+        await appendFile(stuckPath, `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`, "utf8");
     }
-    finally {
-        store.close();
+    catch (appendError) {
+        process.stderr.write(`[kimi-plugin-cc] failed to append stuck job telemetry at ${stuckPath}: ${formatError(appendError)}\n`);
     }
+}
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 /**
  * Builds a descriptive message for the rare edge case where `waitForTerminalJob`

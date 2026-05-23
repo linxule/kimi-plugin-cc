@@ -361,7 +361,12 @@ export class WireClient {
         }
         this.pendingRequests.delete(message.id);
         if ("error" in message) {
-            pending.reject(new RuntimeError("WIRE_REQUEST_FAILED", `${message.error.message} (code ${message.error.code})`, "wire.request"));
+            pending.reject(new RuntimeError("WIRE_REQUEST_FAILED", `${message.error.message} (code ${message.error.code})`, "wire.request", {
+                details: {
+                    wire_error_code: message.error.code,
+                    wire_error_data: message.error.data ?? null,
+                },
+            }));
             return;
         }
         pending.resolve(message.result);
@@ -403,7 +408,13 @@ export class WireClient {
         const message = stderr
             ? `Wire process exited unexpectedly (code=${String(code)}, signal=${String(signal)}). ${stderr}`
             : `Wire process exited unexpectedly (code=${String(code)}, signal=${String(signal)}).`;
-        this.rejectAll(new RuntimeError("WIRE_PROCESS_EXITED", message, "wire.process"));
+        this.rejectAll(new RuntimeError("WIRE_PROCESS_EXITED", message, "wire.process", {
+            details: {
+                exit_code: code,
+                signal,
+                stderr,
+            },
+        }));
     }
     rejectAll(error) {
         for (const pending of this.pendingRequests.values()) {

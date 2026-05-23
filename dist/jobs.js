@@ -6,11 +6,15 @@ export function digestPrompt(prompt) {
 }
 export function normalizeJobError(error) {
     if (error instanceof RuntimeError) {
-        return {
+        const normalized = {
             code: error.code,
             message: error.message,
             stage: error.stage,
         };
+        if (Object.keys(error.details).length > 0) {
+            normalized.details = error.details;
+        }
+        return normalized;
     }
     if (error instanceof Error) {
         return {

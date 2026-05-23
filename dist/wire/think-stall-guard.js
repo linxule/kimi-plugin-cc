@@ -24,6 +24,9 @@ export class ThinkStallGuard {
     onUnknownPayloadShape;
     timer;
     hashes = [];
+    thinkEventsSeen = 0;
+    duplicatePayloadsSeen = 0;
+    unknownPayloadsSeen = 0;
     reason = null;
     verdictFired = false;
     disposed = false;
@@ -63,8 +66,10 @@ export class ThinkStallGuard {
      *  and check whether the last N hashes are all identical. Private —
      *  call `observeEvent` from production code. */
     observeThinkPart(payload) {
+        this.thinkEventsSeen += 1;
         const text = extractThinkPayloadText(payload);
         if (text === null) {
+            this.unknownPayloadsSeen += 1;
             this.onUnknownPayloadShape?.();
             return;
         }
@@ -83,11 +88,27 @@ export class ThinkStallGuard {
         if (this.reason === "loop") {
             return new RuntimeError("KIMI_THINK_LOOP_DETECTED", `Kimi emitted ${this.thinkLoopDuplicateThreshold} consecutive identical \`think\` payloads; ` +
                 `cancelled to recover the session. Likely an upstream reasoning-loop bug (kimi-cli ≥1.44.0). ` +
-                `Retry with --no-thinking or a more focused prompt.`, "wire.prompt");
+                `Retry with --no-thinking or a more focused prompt.`, "wire.prompt", {
+                details: {
+                    stall_kind: "loop",
+                    duplicates_seen: this.duplicatePayloadsSeen,
+                    duplicate_threshold: this.thinkLoopDuplicateThreshold,
+                    think_events_seen: this.thinkEventsSeen,
+                    unknown_payloads_seen: this.unknownPayloadsSeen,
+                },
+            });
         }
         if (this.reason === "stall") {
             return new RuntimeError("KIMI_THINK_STALLED", `Kimi reasoning stream produced only \`think\` events for over ${this.thinkStallMs}ms; ` +
-                `cancelled to recover the session. Retry with --no-thinking or a more focused prompt.`, "wire.prompt");
+                `cancelled to recover the session. Retry with --no-thinking or a more focused prompt.`, "wire.prompt", {
+                details: {
+                    stall_kind: "stall",
+                    stall_ms: this.thinkStallMs,
+                    think_events_seen: this.thinkEventsSeen,
+                    duplicate_threshold: this.thinkLoopDuplicateThreshold,
+                    unknown_payloads_seen: this.unknownPayloadsSeen,
+                },
+            });
         }
         return null;
     }
@@ -134,6 +155,7 @@ export class ThinkStallGuard {
         const first = this.hashes[0];
         if (this.hashes.every((h) => h === first)) {
             this.reason = "loop";
+            this.duplicatePayloadsSeen = threshold;
             process.stderr.write(`[kimi-plugin-cc] think-loop detected: ${threshold} consecutive identical think payloads; cancelling.\n`);
             this.fireVerdict();
         }

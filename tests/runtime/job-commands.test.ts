@@ -1,18 +1,19 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsk } from "../../runtime/commands/ask.js";
 import { runCancel } from "../../runtime/commands/cancel.js";
 import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
+import { resolveRepoIdentity } from "../../runtime/git.js";
 import { sweepStaleJobs } from "../../runtime/jobs.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
-import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
+import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
@@ -64,6 +65,133 @@ describe("job-backed ask/status/result", () => {
       expect(resultOutput).toContain("Ask answer from mock Kimi.");
     } finally {
       await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("result returns raw markdown by default and a structured envelope with --json", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("result-json-envelope");
+    const repoRoot = await createGitRepoFixture("result-json-envelope-repo");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const repoIdentity = await resolveRepoIdentity(repoRoot);
+      const artifactPath = path.join(paths.artifactsDir, "ask-job-json.md");
+      const body = "# Result\n\nRaw markdown body.\n";
+      await writeFile(artifactPath, body, "utf8");
+
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-json",
+          repo_id: repoIdentity.repoId,
+          command_type: "ask",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: false,
+          pid: null,
+          kimi_pid: null,
+          status: "completed",
+          kimi_session_id: "session-json",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Raw markdown body.",
+          phase: "done",
+          final_output_path: artifactPath,
+          stream_log_path: path.join(paths.logsDir, "ask-job-json.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      expect(await runResult(["job-json"], makeContext(repoRoot, env))).toBe(body);
+
+      const envelope = JSON.parse(await runResult(["job-json", "--json"], makeContext(repoRoot, env))) as {
+        job_id: string;
+        kind: string;
+        status: string;
+        summary: string;
+        error: unknown;
+        artifact_path: string;
+        body: string;
+        created_at: string;
+        completed_at: string;
+      };
+      expect(envelope).toMatchObject({
+        job_id: "job-json",
+        kind: "ask",
+        status: "completed",
+        summary: "Raw markdown body.",
+        error: null,
+        artifact_path: artifactPath,
+        body,
+      });
+      expect(envelope.created_at).toBeString();
+      expect(envelope.completed_at).toBeString();
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("result --json rejects unknown flags before lookup", async () => {
+    await expect(
+      runResult(["job-json", "--json", "--gibberish"], makeContext(process.cwd(), process.env)),
+    ).rejects.toMatchObject({
+      code: "INVALID_ARGS",
+    });
+  });
+
+  test("result --json rejects running jobs as not terminal", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("result-json-running");
+    const repoRoot = await createGitRepoFixture("result-json-running-repo");
+    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+
+    try {
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await mkdir(paths.logsDir, { recursive: true });
+      await mkdir(paths.artifactsDir, { recursive: true });
+      const repoIdentity = await resolveRepoIdentity(repoRoot);
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: "job-running-json",
+          repo_id: repoIdentity.repoId,
+          command_type: "ask",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: false,
+          pid: null,
+          kimi_pid: null,
+          status: "running",
+          kimi_session_id: "session-running",
+          agent_profile: "read-only",
+          prompt_digest: "digest",
+          summary: "Running ask.",
+          phase: "turn-running",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, "ask-job-running-json.jsonl"),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        runResult(["job-running-json", "--json"], makeContext(repoRoot, env)),
+      ).rejects.toMatchObject({
+        code: "JOB_NOT_TERMINAL",
+      });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
     }
   });
 

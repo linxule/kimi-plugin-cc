@@ -221,11 +221,19 @@ describe("argument parsing", () => {
 
     expect(parsed.type).toBe("rescue");
     expect(parsed.jobId).toBe("job-123");
+    expect(parsed.json).toBeFalse();
+  });
+
+  test("parseJobLookupArgs accepts --json", () => {
+    const parsed = parseJobLookupArgs(["job-123", "--json"]);
+
+    expect(parsed.jobId).toBe("job-123");
+    expect(parsed.json).toBeTrue();
   });
 
   test("parseJobLookupArgs unknown flag error includes supported flags", () => {
     expect(() => parseJobLookupArgs(["--kind", "rescue"])).toThrow(
-      "Unknown flag --kind. Supported flags: --type <review|challenge|rescue|review_gate|ask>.",
+      "Unknown flag --kind. Supported flags: --type <review|challenge|rescue|review_gate|ask>, --json.",
     );
   });
 });

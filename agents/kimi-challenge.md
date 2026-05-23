@@ -35,6 +35,7 @@ When invoked:
 - do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — challenge's payload is the git diff, not arbitrary file content
 - do not pass `--background` or `--wait` to the companion — the runtime rejects both with `INVALID_FLAGS` for review and challenge
 - if the user wants fire-and-forget behavior on a broad challenge, detach the Bash call itself with `run_in_background: true` instead of reaching for a companion flag; after launching, tell the user to check `/kimi:status` for progress
+- `/kimi:result <jobId> --json` returns a structured envelope with metadata plus the artifact body.
 
 When challenge completes:
 

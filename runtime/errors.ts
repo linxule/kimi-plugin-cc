@@ -1,12 +1,14 @@
 export class RuntimeError extends Error {
   readonly code: string;
   readonly stage: string;
+  readonly details: Record<string, unknown>;
 
-  constructor(code: string, message: string, stage: string, options?: ErrorOptions) {
+  constructor(code: string, message: string, stage: string, options?: ErrorOptions & { details?: Record<string, unknown> }) {
     super(message, options);
     this.name = "RuntimeError";
     this.code = code;
     this.stage = stage;
+    this.details = options?.details ?? {};
   }
 }
 

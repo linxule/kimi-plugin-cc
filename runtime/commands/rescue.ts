@@ -242,7 +242,10 @@ export async function executeRescueJob(
         "RESCUE_ARTIFACT_WRITE_FAILED",
         `Failed to write rescue artifact: ${(writeError as Error).message ?? String(writeError)}`,
         "rescue.artifact",
-        writeError instanceof Error ? { cause: writeError } : undefined,
+        {
+          ...(writeError instanceof Error ? { cause: writeError } : {}),
+          details: { rawOutput: completedTurn.finalText },
+        },
       );
       return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
     }

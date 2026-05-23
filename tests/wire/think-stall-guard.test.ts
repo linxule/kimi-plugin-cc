@@ -55,6 +55,11 @@ describe("ThinkStallGuard", () => {
       expect(err).not.toBeNull();
       expect(err?.code).toBe("KIMI_THINK_STALLED");
       expect(err?.message).toContain("over 50ms");
+      expect(err?.details).toMatchObject({
+        stall_kind: "stall",
+        stall_ms: 50,
+        think_events_seen: 1,
+      });
     } finally {
       guard.dispose();
     }
@@ -109,6 +114,12 @@ describe("ThinkStallGuard", () => {
       const err = guard.stallError();
       expect(err?.code).toBe("KIMI_THINK_LOOP_DETECTED");
       expect(err?.message).toContain("4 consecutive identical");
+      expect(err?.details).toMatchObject({
+        stall_kind: "loop",
+        duplicates_seen: 4,
+        duplicate_threshold: 4,
+        think_events_seen: 4,
+      });
       // Subsequent observations are no-ops; the verdict is one-shot.
       observeThink(guard, "stuck-payload");
       observeProgress(guard);

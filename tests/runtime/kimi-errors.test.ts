@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { RuntimeError } from "../../runtime/errors.js";
-import { classifyManagedCommandFailure } from "../../runtime/kimi-errors.js";
+import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../../runtime/kimi-errors.js";
 
 describe("classifyManagedCommandFailure", () => {
   test("returns the original error when classification does not recognize it", () => {
@@ -152,5 +152,44 @@ describe("classifyManagedCommandFailure", () => {
 
     const gateResult = classifyManagedCommandFailure(inner, "review_gate", "job-xyz");
     expect((gateResult as RuntimeError).stage).toBe("review_gate.runtime");
+  });
+});
+
+describe("summarizeKimiAvailabilityWarning", () => {
+  test.each([
+    {
+      error: new Error("LLM is not set"),
+      expected: "Kimi review gate is not configured for model access; allowing stop.",
+    },
+    {
+      error: new RuntimeError("WIRE_SPAWN_FAILED", "Failed to spawn kimi.", "wire.start"),
+      expected: "Kimi review gate could not find the Kimi CLI; allowing stop.",
+    },
+    {
+      error: new RuntimeError("WIRE_PROCESS_EXITED", "exited", "wire.process"),
+      expected: "Kimi review gate could not start a usable Wire session; allowing stop.",
+    },
+    {
+      error: new RuntimeError("STARTUP_TIMEOUT", "startup timed out", "wire.start"),
+      expected: "Kimi review gate did not respond during startup; allowing stop.",
+    },
+    {
+      error: new RuntimeError("INITIALIZE_TIMEOUT", "initialize timed out", "wire.initialize"),
+      expected: "Kimi review gate did not complete Wire initialization; allowing stop.",
+    },
+    {
+      error: new RuntimeError("RESPONSE_TIMEOUT", "prompt timed out", "wire.prompt"),
+      expected: "Kimi review gate did not return a final response; allowing stop.",
+    },
+    {
+      error: new RuntimeError("MAX_STEPS_REACHED", "max steps", "wire.prompt"),
+      expected: "Kimi review gate exhausted its step budget; allowing stop.",
+    },
+    {
+      error: new Error("operation timed out"),
+      expected: "Kimi review gate timed out; allowing stop.",
+    },
+  ])("returns an explicit warning for $expected", ({ error, expected }) => {
+    expect(summarizeKimiAvailabilityWarning(error, "review_gate")).toBe(expected);
   });
 });

@@ -503,6 +503,12 @@ export class WireClient {
           "WIRE_REQUEST_FAILED",
           `${message.error.message} (code ${message.error.code})`,
           "wire.request",
+          {
+            details: {
+              wire_error_code: message.error.code,
+              wire_error_data: message.error.data ?? null,
+            },
+          },
         ),
       );
       return;
@@ -558,7 +564,15 @@ export class WireClient {
       ? `Wire process exited unexpectedly (code=${String(code)}, signal=${String(signal)}). ${stderr}`
       : `Wire process exited unexpectedly (code=${String(code)}, signal=${String(signal)}).`;
 
-    this.rejectAll(new RuntimeError("WIRE_PROCESS_EXITED", message, "wire.process"));
+    this.rejectAll(
+      new RuntimeError("WIRE_PROCESS_EXITED", message, "wire.process", {
+        details: {
+          exit_code: code,
+          signal,
+          stderr,
+        },
+      }),
+    );
   }
 
   private rejectAll(error: Error): void {

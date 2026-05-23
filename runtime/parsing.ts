@@ -64,6 +64,7 @@ export interface JobLookupArgs {
     import("./types.js").ManagedCommandType,
     never
   >;
+  json: boolean;
 }
 
 export function parseAskArgs(argv: string[]): AskArgs {
@@ -323,6 +324,7 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
 export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
   let type: JobLookupArgs["type"];
   let jobId: string | undefined;
+  let json = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -341,10 +343,15 @@ export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
       continue;
     }
 
+    if (token === "--json") {
+      json = true;
+      continue;
+    }
+
     if (token.startsWith("-")) {
       throw new RuntimeError(
         "INVALID_ARGS",
-        `Unknown flag ${token}. Supported flags: --type <review|challenge|rescue|review_gate|ask>.`,
+        `Unknown flag ${token}. Supported flags: --type <review|challenge|rescue|review_gate|ask>, --json.`,
         "args.parse",
       );
     }
@@ -363,6 +370,7 @@ export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
   return {
     jobId,
     type,
+    json,
   };
 }
 

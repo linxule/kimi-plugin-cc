@@ -515,7 +515,7 @@ describe("rescue command lifecycle", () => {
       const status = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoRoot, env))) as {
         status: string;
         phase: string | null;
-        error: { code?: string; stage?: string } | null;
+        error: { code?: string; stage?: string; details?: { rawOutput?: string } } | null;
       };
       expect(status.status).toBe("failed");
       expect(status.phase).toBe("failed");
@@ -539,7 +539,7 @@ describe("rescue command lifecycle", () => {
       const status = JSON.parse(await runStatus(["--type", "rescue"], makeContext(repoRoot, env))) as {
         status: string;
         phase: string | null;
-        error: { code?: string; stage?: string } | null;
+        error: { code?: string; stage?: string; details?: Record<string, unknown> } | null;
       };
 
       expect(output).toContain("# Failed Job");
@@ -547,6 +547,7 @@ describe("rescue command lifecycle", () => {
       expect(status.phase).toBe("failed");
       expect(status.error?.code).toBe("RESCUE_ARTIFACT_WRITE_FAILED");
       expect(status.error?.stage).toBe("rescue.artifact");
+      expect(status.error?.details?.rawOutput).toBe(RESCUE_SUCCESS_OUTPUT.trimEnd());
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -583,7 +584,7 @@ describe("rescue command lifecycle", () => {
       ) as {
         status: string;
         phase: string | null;
-        error: { code?: string; stage?: string } | null;
+        error: { code?: string; stage?: string; details?: Record<string, unknown> } | null;
       };
 
       expect(persistedStatus.status).toBe("failed");

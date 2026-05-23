@@ -65,7 +65,18 @@ export function summarizeKimiAvailabilityWarning(
     return `Kimi ${formatCommandLabel(commandType).toLowerCase()} could not start a usable Wire session; allowing stop.`;
   }
 
-  return null;
+  switch (classification.kind) {
+    case "startup_timeout":
+      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not respond during startup; allowing stop.`;
+    case "initialize_timeout":
+      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not complete Wire initialization; allowing stop.`;
+    case "response_timeout":
+      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not return a final response; allowing stop.`;
+    case "max_steps_reached":
+      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} exhausted its step budget; allowing stop.`;
+    case "timeout":
+      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} timed out; allowing stop.`;
+  }
 }
 
 export function classifySetupFailure(error: unknown): AvailabilityClassification | null {

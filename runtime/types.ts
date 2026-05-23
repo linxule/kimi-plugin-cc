@@ -30,6 +30,7 @@ export interface JobError {
   code: string;
   message: string;
   stage: string;
+  details?: Record<string, unknown>;
 }
 
 export interface CommandContext {

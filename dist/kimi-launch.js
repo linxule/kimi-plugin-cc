@@ -28,22 +28,21 @@ export function buildWireClient(options) {
     });
 }
 /**
- * Generic non-negative-integer env reader. Returns undefined when the
- * env var is unset or unparseable so the WireClient default applies.
+ * Generic non-negative-integer env reader. Returns undefined only when
+ * the env var is absent so the WireClient default applies.
  * Used for both the think-stall watchdog threshold
  * (`KIMI_PLUGIN_CC_THINK_STALL_MS`) and the duplicate-loop count
  * (`KIMI_PLUGIN_CC_THINK_LOOP_DUPLICATES`).
  */
 function resolveNonNegativeIntEnv(env, name) {
     const raw = env[name];
-    if (!raw) {
+    if (raw === undefined) {
         return undefined;
     }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-        return undefined;
+    if (!/^\d+$/.test(raw)) {
+        throw new RuntimeError("INVALID_ENV", `${name} must be a non-negative integer.`, "kimi-launch.env", { details: { env_var: name, value: raw } });
     }
-    return Math.floor(parsed);
+    return Number(raw);
 }
 /**
  * Build a WireClient and start it, with one automatic retry on start-timeout.

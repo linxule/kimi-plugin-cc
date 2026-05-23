@@ -35,6 +35,7 @@ When invoked:
 - choose foreground for focused, bounded questions that are likely to complete quickly
 - choose background (`--background`) for broad, open-ended, or long-running questions where the user does not need an immediate answer
 - when ask starts in background, return the `job_id` so the main thread can use `/kimi:status`, `/kimi:result`, or `/kimi:cancel`
+- `/kimi:result <jobId> --json` returns a structured envelope with metadata plus the artifact body.
 - as an alternative to `--background`, Claude Code's Bash-tool `run_in_background: true` is a valid fire-and-forget mechanism when the user wants to detach without tracking via the job store
 
 When ask completes:

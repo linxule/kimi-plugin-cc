@@ -218,6 +218,7 @@ export function parseRescueArgs(argv) {
 export function parseJobLookupArgs(argv) {
     let type;
     let jobId;
+    let json = false;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
         if (token === "--type") {
@@ -229,8 +230,12 @@ export function parseJobLookupArgs(argv) {
             index += 1;
             continue;
         }
+        if (token === "--json") {
+            json = true;
+            continue;
+        }
         if (token.startsWith("-")) {
-            throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token}. Supported flags: --type <review|challenge|rescue|review_gate|ask>.`, "args.parse");
+            throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token}. Supported flags: --type <review|challenge|rescue|review_gate|ask>, --json.`, "args.parse");
         }
         if (jobId) {
             throw new RuntimeError("INVALID_ARGS", "Only one optional job id may be supplied.", "args.parse");
@@ -240,6 +245,7 @@ export function parseJobLookupArgs(argv) {
     return {
         jobId,
         type,
+        json,
     };
 }
 function isManagedCommandType(value) {

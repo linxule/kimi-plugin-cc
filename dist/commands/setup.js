@@ -11,10 +11,22 @@ import { ApprovalDispatcher, rejectAllApprovals } from "../wire/approval-dispatc
 import { WireClient } from "../wire/client.js";
 import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
 export async function runSetup(argv, context) {
-    const enableReviewGate = argv.includes("--enable-review-gate");
-    const disableReviewGate = argv.includes("--disable-review-gate");
+    let enableReviewGate = false;
+    let disableReviewGate = false;
+    for (const token of argv) {
+        switch (token) {
+            case "--enable-review-gate":
+                enableReviewGate = true;
+                break;
+            case "--disable-review-gate":
+                disableReviewGate = true;
+                break;
+            default:
+                throw new RuntimeError("INVALID_ARGS", `Unknown setup flag ${token}. Supported flags: --enable-review-gate, --disable-review-gate.`, "setup.parse");
+        }
+    }
     if (enableReviewGate && disableReviewGate) {
-        throw new RuntimeError("INVALID_FLAGS", "setup accepts either --enable-review-gate or --disable-review-gate, not both.", "setup");
+        throw new RuntimeError("INVALID_ARGS", "setup accepts either --enable-review-gate or --disable-review-gate, not both.", "setup.parse");
     }
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);

@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { access, constants as fsConstants } from "node:fs/promises";
+import { access, appendFile, constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { RuntimeError } from "./errors.js";
+import { RuntimeError, formatError } from "./errors.js";
 import { markJobFailed, waitForTerminalJob } from "./jobs.js";
 import { JobStore, type JobRecord } from "./job-store.js";
 import { readArtifact } from "./render.js";
@@ -18,6 +18,7 @@ const companionEntrypoint = fileURLToPath(
   new URL(isCompiledRuntime ? "./companion.js" : "./companion.ts", import.meta.url),
 );
 const companionProjectRoot = path.resolve(path.dirname(companionEntrypoint), "..");
+const FAILURE_PERSIST_RETRY_DELAYS_MS = [100, 200, 400] as const;
 
 export interface BackgroundSpawnOptions {
   workerKind: "rescue" | "ask";
@@ -63,12 +64,7 @@ export async function startBackgroundJob(
           options.spawnStage,
           accessError instanceof Error ? { cause: accessError } : undefined,
         );
-        const failStore = new JobStore(paths);
-        try {
-          await markJobFailed(failStore, paths, job, classified, options.failedSummary, { phase: "failed" });
-        } finally {
-          failStore.close();
-        }
+        await persistBackgroundFailure(paths, job.job_id, classified, options.failedSummary, "node-bin-invalid");
         throw classified;
       }
       // Any other errno (EIO, etc.) — fall through to the spawn attempt and let the
@@ -183,20 +179,7 @@ async function markSpawnFailure(
   classified: RuntimeError,
   failedSummary: string,
 ): Promise<void> {
-  const store = new JobStore(paths);
-  try {
-    const current = store.getJob(jobId);
-    if (!current || current.status !== "running") {
-      return;
-    }
-    await markJobFailed(store, paths, current, classified, failedSummary, { phase: "failed" });
-  } catch (writeError) {
-    process.stderr.write(
-      `[kimi-plugin-cc] failed to mark job ${jobId} as spawn-failed: ${(writeError as Error).message ?? String(writeError)}\n`,
-    );
-  } finally {
-    store.close();
-  }
+  await persistBackgroundFailure(paths, jobId, classified, failedSummary, "spawn-failed");
 }
 
 async function markEarlyExit(
@@ -205,26 +188,84 @@ async function markEarlyExit(
   classified: RuntimeError,
   failedSummary: string,
 ): Promise<void> {
-  const store = new JobStore(paths);
-  try {
-    const current = store.getJob(jobId);
-    if (!current || current.status !== "running") {
-      return;
-    }
+  await persistBackgroundFailure(paths, jobId, classified, failedSummary, "early-exit", (current) => {
     // Only mark failure if the worker exited before advancing past the spawn phase.
     // Once the worker reaches worker-running or turn-running, the child owns the
     // job state and the parent's close listener must not race with it.
-    if (current.phase !== "worker-spawned" && current.phase !== "queued") {
+    return current.phase === "worker-spawned" || current.phase === "queued";
+  });
+}
+
+async function persistBackgroundFailure(
+  paths: PluginPaths,
+  jobId: string,
+  classified: RuntimeError,
+  failedSummary: string,
+  event: string,
+  shouldMark: (job: JobRecord) => boolean = () => true,
+): Promise<void> {
+  let lastWriteError: unknown;
+
+  for (let attempt = 0; attempt <= FAILURE_PERSIST_RETRY_DELAYS_MS.length; attempt += 1) {
+    let store: JobStore | undefined;
+    try {
+      store = new JobStore(paths);
+      const current = store.getJob(jobId);
+      if (!current || current.status !== "running" || !shouldMark(current)) {
+        return;
+      }
+      await markJobFailed(store, paths, current, classified, failedSummary, { phase: "failed" });
       return;
+    } catch (writeError) {
+      lastWriteError = writeError;
+      if (attempt < FAILURE_PERSIST_RETRY_DELAYS_MS.length) {
+        await sleep(FAILURE_PERSIST_RETRY_DELAYS_MS[attempt]);
+      }
+    } finally {
+      try {
+        store?.close();
+      } catch {
+        // The persistence attempt outcome above is the signal that matters.
+      }
     }
-    await markJobFailed(store, paths, current, classified, failedSummary, { phase: "failed" });
-  } catch (writeError) {
-    process.stderr.write(
-      `[kimi-plugin-cc] failed to mark job ${jobId} as early-exit: ${(writeError as Error).message ?? String(writeError)}\n`,
-    );
-  } finally {
-    store.close();
   }
+
+  await appendStuckJobTelemetry(paths, {
+    event,
+    job_id: jobId,
+    failed_summary: failedSummary,
+    error: {
+      code: classified.code,
+      stage: classified.stage,
+      message: classified.message,
+      details: classified.details,
+    },
+    persistence_error: formatError(lastWriteError),
+  });
+}
+
+async function appendStuckJobTelemetry(
+  paths: PluginPaths,
+  entry: Record<string, unknown>,
+): Promise<void> {
+  const stuckPath = path.join(paths.pluginRoot, "stuck-jobs.jsonl");
+  try {
+    await appendFile(
+      stuckPath,
+      `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`,
+      "utf8",
+    );
+  } catch (appendError) {
+    process.stderr.write(
+      `[kimi-plugin-cc] failed to append stuck job telemetry at ${stuckPath}: ${formatError(appendError)}\n`,
+    );
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**

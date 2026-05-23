@@ -39,6 +39,7 @@ When invoked:
 - choose background for open-ended debugging, multi-step implementation, or anything likely to run long
 - call the shared companion runtime instead of inspecting the repository or orchestrating the task yourself
 - when rescue starts, return the `job_id` so the main thread can use `/kimi:status`, `/kimi:result`, or `/kimi:cancel`
+- `/kimi:result <jobId> --json` returns a structured envelope with metadata plus the artifact body.
 
 When rescue completes:
 

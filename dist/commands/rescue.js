@@ -185,7 +185,10 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         }
         catch (writeError) {
             process.stderr.write(`[kimi-plugin-cc] rescue artifact write failed for job ${job.job_id}; raw output follows:\n${completedTurn.finalText}\n`);
-            const classified = new RuntimeError("RESCUE_ARTIFACT_WRITE_FAILED", `Failed to write rescue artifact: ${writeError.message ?? String(writeError)}`, "rescue.artifact", writeError instanceof Error ? { cause: writeError } : undefined);
+            const classified = new RuntimeError("RESCUE_ARTIFACT_WRITE_FAILED", `Failed to write rescue artifact: ${writeError.message ?? String(writeError)}`, "rescue.artifact", {
+                ...(writeError instanceof Error ? { cause: writeError } : {}),
+                details: { rawOutput: completedTurn.finalText },
+            });
             return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
         }
         // Re-check after the artifact write (disk I/O window) — cancel could

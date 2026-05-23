@@ -12,11 +12,15 @@ export function digestPrompt(prompt: string): string {
 
 export function normalizeJobError(error: unknown): JobError {
   if (error instanceof RuntimeError) {
-    return {
+    const normalized: JobError = {
       code: error.code,
       message: error.message,
       stage: error.stage,
     };
+    if (Object.keys(error.details).length > 0) {
+      normalized.details = error.details;
+    }
+    return normalized;
   }
 
   if (error instanceof Error) {

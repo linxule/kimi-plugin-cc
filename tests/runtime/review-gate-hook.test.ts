@@ -45,7 +45,7 @@ describe("review gate stop hook", () => {
         },
       );
 
-      expect(output).toEqual({});
+      expect(output).toEqual({ systemMessage: "review-gate skipped: disabled" });
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
@@ -251,7 +251,7 @@ describe("review gate stop hook", () => {
         },
       );
 
-      expect(output).toEqual({});
+      expect(output).toEqual({ systemMessage: "review-gate skipped: no assistant message" });
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
