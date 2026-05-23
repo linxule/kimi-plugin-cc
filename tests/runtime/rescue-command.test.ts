@@ -25,7 +25,6 @@ const RESCUE_SUCCESS_OUTPUT = [
   "- Mock verification passed.",
   "",
 ].join("\n");
-const RESCUE_EMPTY_FALLBACK = "Kimi did not return a final message.\n";
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -308,7 +307,7 @@ describe("rescue command lifecycle", () => {
     }
   });
 
-  test("empty rescue output falls back to the default artifact and summary", async () => {
+  test("empty rescue output fails with RESCUE_EMPTY_OUTPUT", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("rescue-empty");
     const repoRoot = await createGitRepoFixture("rescue-empty-repo");
     const invocationPath = path.join(pluginDataRoot, "rescue-empty.jsonl");
@@ -320,12 +319,18 @@ describe("rescue command lifecycle", () => {
         status: string;
         summary: string;
         phase: string | null;
+        error: { code?: string; stage?: string; message?: string } | null;
       };
 
-      expect(output).toBe(RESCUE_EMPTY_FALLBACK);
-      expect(status.status).toBe("completed");
-      expect(status.summary).toBe("Rescue did not return a final message.");
-      expect(status.phase).toBe("done");
+      expect(output).toContain("# Failed Job");
+      expect(output).toContain("RESCUE_EMPTY_OUTPUT");
+      expect(output).toContain("rescue.runtime");
+      expect(output).toContain("Rescue returned empty output.");
+      expect(status.status).toBe("failed");
+      expect(status.summary).toBe("Rescue failed.");
+      expect(status.phase).toBe("failed");
+      expect(status.error?.code).toBe("RESCUE_EMPTY_OUTPUT");
+      expect(status.error?.stage).toBe("rescue.runtime");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);

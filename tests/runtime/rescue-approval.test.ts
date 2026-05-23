@@ -42,6 +42,22 @@ function shellApproval(command: string): ApprovalRequestPayload {
   };
 }
 
+function shellLikeApproval(sender: string, action: string, command: string): ApprovalRequestPayload {
+  return {
+    id: "approval-1",
+    sender,
+    action,
+    description: `Run command \`${command}\``,
+    display: [
+      {
+        type: "shell",
+        language: "bash",
+        command,
+      },
+    ],
+  };
+}
+
 describe("rescue approval policy", () => {
   test("allows workspace-local edits and root .gitignore, but rejects traversal, symlink escape, and .git", async () => {
     const repoRoot = await createGitRepoFixture("approval-workspace");
@@ -132,6 +148,34 @@ describe("rescue approval policy", () => {
           policy(shellApproval(command), { commandType: "rescue" }),
         ).resolves.toMatchObject({ response: "approve" });
       }
+    } finally {
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("classifies shell approvals by sender or exact observed action only", async () => {
+    const repoRoot = await createGitRepoFixture("approval-shell-action");
+    const policy = await createRescueApprovalPolicy(repoRoot);
+
+    try {
+      await expect(
+        policy(shellLikeApproval("Tool", "execute commandless query", "pwd"), {
+          commandType: "rescue",
+        }),
+      ).resolves.toMatchObject({
+        response: "reject",
+        feedback: "Rescue does not allow Tool approvals in v1.",
+      });
+
+      await expect(
+        policy(shellLikeApproval("Tool", "run command", "pwd"), { commandType: "rescue" }),
+      ).resolves.toMatchObject({ response: "approve" });
+
+      await expect(
+        policy(shellLikeApproval("Shell", "execute commandless query", "pwd"), {
+          commandType: "rescue",
+        }),
+      ).resolves.toMatchObject({ response: "approve" });
     } finally {
       await cleanupTestPath(repoRoot);
     }

@@ -11,6 +11,10 @@ export class RuntimeError extends Error {
 }
 
 export function formatError(error: unknown): string {
+  if (error instanceof RuntimeError) {
+    return `[${error.code}] [${error.stage}] ${error.message}`;
+  }
+
   if (error instanceof Error) {
     return error.message;
   }

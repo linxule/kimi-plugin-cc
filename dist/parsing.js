@@ -1,4 +1,3 @@
-import process from "node:process";
 import { RuntimeError } from "./errors.js";
 /**
  * Tokens like `--foo` or `-x` that aren't in a command's known-flags set are
@@ -6,12 +5,11 @@ import { RuntimeError } from "./errors.js";
  * or — for agent-mediated callers — hallucinated flag names (e.g. wrappers
  * inventing `--file` / `--context` because that shape is common in other
  * CLIs). The historical behavior — silently treating them as free-form
- * trailing prompt with an advisory stderr warning — produced misleading
- * runs (Kimi chewing on a bloated focus blob, or hitting the prompt
- * timeout). v0.3.6 hard-fails for `review`/`challenge` (see
- * `parseKnownFlags`); `ask` / `rescue` keep the warn-and-swallow behavior
- * because their trailing position is legitimately free-form prose where
- * `--foo`-shaped tokens may belong (use `--` to silence the warning).
+ * trailing prompt/focus text with an advisory stderr warning — produced
+ * misleading runs (Kimi chewing on a bloated blob, or hitting the prompt
+ * timeout). All command parsers now hard-fail on unknown flag-shaped tokens
+ * while still preserving prose mode after the first non-flag token and the
+ * `--` escape.
  */
 function looksLikeFlag(token) {
     if (!token.startsWith("-")) {
@@ -23,9 +21,8 @@ function looksLikeFlag(token) {
     // Short flag: a single dash followed by exactly one letter (`-r`, `-m`).
     return /^-[a-zA-Z]$/.test(token);
 }
-function warnUnknownFlag(commandName, token) {
-    process.stderr.write(`[kimi-plugin-cc] warning: unknown flag ${token} for ${commandName}; treating as prompt/focus text. Use \`--\` to silence this warning.\n`);
-}
+const ASK_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>, --thinking, --no-thinking";
+const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>, --thinking, --no-thinking";
 export function parseAskArgs(argv) {
     let model;
     // Thinking is on by default across ask/review/challenge/rescue. Users opt out
@@ -55,6 +52,9 @@ export function parseAskArgs(argv) {
                 const value = argv[index + 1];
                 if (!value) {
                     throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
+                }
+                if (value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", `${token} value cannot start with '-'; pass a model name`, "args.parse");
                 }
                 model = value;
                 index += 1;
@@ -91,7 +91,7 @@ export function parseAskArgs(argv) {
                 break;
             default:
                 if (looksLikeFlag(token)) {
-                    warnUnknownFlag("ask", token);
+                    throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ask. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
                 }
                 trailingTokens = argv.slice(index);
                 index = argv.length;
@@ -153,6 +153,9 @@ export function parseRescueArgs(argv) {
                 if (!value) {
                     throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
                 }
+                if (value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", `${token} value cannot start with '-'; pass a model name`, "args.parse");
+                }
                 model = value;
                 index += 1;
                 break;
@@ -188,7 +191,7 @@ export function parseRescueArgs(argv) {
                 break;
             default:
                 if (looksLikeFlag(token)) {
-                    warnUnknownFlag("rescue", token);
+                    throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for rescue. Supported flags: ${RESCUE_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
                 }
                 trailingTokens = argv.slice(index);
                 index = argv.length;
@@ -227,7 +230,7 @@ export function parseJobLookupArgs(argv) {
             continue;
         }
         if (token.startsWith("-")) {
-            throw new RuntimeError("INVALID_ARGS", `Unknown flag: ${token}`, "args.parse");
+            throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token}. Supported flags: --type <review|challenge|rescue|review_gate|ask>.`, "args.parse");
         }
         if (jobId) {
             throw new RuntimeError("INVALID_ARGS", "Only one optional job id may be supplied.", "args.parse");
@@ -277,6 +280,9 @@ function parseKnownFlags(argv, knownFlags, commandName) {
                 const value = argv[index + 1];
                 if (!value) {
                     throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
+                }
+                if (value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", `${token} value cannot start with '-'; pass a model name`, "args.parse");
                 }
                 model = value;
                 index += 1;

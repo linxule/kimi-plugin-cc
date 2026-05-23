@@ -17,7 +17,7 @@ import { buildSessionTitle } from "../session-title.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
-import { firstMeaningfulLine, readArtifact, renderRescueArtifact, writeArtifact } from "../render.js";
+import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { createRescueApprovalPolicy } from "../rescue-approval.js";
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
@@ -227,12 +227,13 @@ export async function executeRescueJob(
         "rescue.runtime",
       );
     }
+    const rendered = renderManagedJobOutput(job, completedTurn.finalText);
     let artifactPath: string;
     try {
       if (context.env.KIMI_PLUGIN_CC_TEST_FAIL_WRITE_ARTIFACT === "1") {
         throw new Error("Simulated artifact write failure (test seam).");
       }
-      artifactPath = await writeArtifact(paths, job, renderRescueArtifact(completedTurn.finalText));
+      artifactPath = await writeArtifact(paths, job, rendered.rendered);
     } catch (writeError) {
       process.stderr.write(
         `[kimi-plugin-cc] rescue artifact write failed for job ${job.job_id}; raw output follows:\n${completedTurn.finalText}\n`,
@@ -257,7 +258,7 @@ export async function executeRescueJob(
     }
     return (
       store.markCompleted(job.job_id, {
-        summary: firstMeaningfulLine(completedTurn.finalText),
+        summary: rendered.summary,
         phase: "done",
         final_output_path: artifactPath,
         error: null,

@@ -17,7 +17,6 @@ export type RenderedManagedOutput =
       error: JobError | null;
     };
 
-const EMPTY_RESCUE_FALLBACK = "Kimi did not return a final message.\n";
 const EMPTY_SUMMARY_FALLBACK = "Rescue did not return a final message.";
 
 export async function writeArtifact(
@@ -78,6 +77,11 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
       };
     }
     case "rescue": {
+      const trimmed = finalText.trim();
+      if (!trimmed) {
+        throw new RuntimeError("RESCUE_EMPTY_OUTPUT", "Rescue returned empty output.", "rescue.runtime");
+      }
+
       return {
         output: finalText,
         rendered: renderRescueArtifact(finalText),
@@ -130,11 +134,6 @@ export function renderReviewArtifact(job: JobRecord, output: string): string {
 }
 
 export function renderRescueArtifact(rawOutput: string): string {
-  const trimmed = rawOutput.trim();
-  if (!trimmed) {
-    return EMPTY_RESCUE_FALLBACK;
-  }
-
   return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
 }
 

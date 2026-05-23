@@ -25,7 +25,7 @@ async function main(argv) {
         }
         case "review": {
             const result = await runReview(rest, context, "review");
-            context.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+            context.stdout.write(`${result}\n`);
             return;
         }
         case "task": {
@@ -37,7 +37,7 @@ async function main(argv) {
             }
             if (taskType === "challenge") {
                 const result = await runReview(taskArgs, context, "challenge");
-                context.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+                context.stdout.write(`${result}\n`);
                 return;
             }
             notImplementedCompanionCommand(taskType ? `task ${taskType}` : "task");

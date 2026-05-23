@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { RuntimeError } from "../../runtime/errors.js";
 import { parseAskArgs, parseJobLookupArgs, parseRescueArgs, parseReviewArgs } from "../../runtime/parsing.js";
 
 describe("argument parsing", () => {
@@ -12,13 +13,10 @@ describe("argument parsing", () => {
     expect(parsed.fresh).toBeFalse();
   });
 
-  test("parseAskArgs treats unknown flags as prompt text start", () => {
-    const parsed = parseAskArgs(["-m", "kimi-k2", "--mystery", "tail"]);
-
-    expect(parsed.model).toBe("kimi-k2");
-    expect(parsed.prompt).toBe("--mystery tail");
-    expect(parsed.resume).toBeFalse();
-    expect(parsed.fresh).toBeFalse();
+  test("parseAskArgs rejects unknown flag-shaped tokens in flag-position", () => {
+    expect(() => parseAskArgs(["-m", "kimi-k2", "--mystery", "tail"])).toThrow(
+      /Unknown flag --mystery for ask.*Supported flags:.*Use `--` before flag-shaped prompt text/s,
+    );
   });
 
   test("parseAskArgs handles explicit resume targets", () => {
@@ -51,6 +49,18 @@ describe("argument parsing", () => {
     });
   });
 
+  test("parseAskArgs preserves trailing-mode prose with flag-shaped tokens", () => {
+    const parsed = parseAskArgs(["explain", "git", "log", "-1"]);
+
+    expect(parsed.prompt).toBe("explain git log -1");
+  });
+
+  test("parseAskArgs `--` sentinel passes through flag-shaped prompt text", () => {
+    const parsed = parseAskArgs(["--", "--mystery", "foo"]);
+
+    expect(parsed.prompt).toBe("--mystery foo");
+  });
+
   test("parseAskArgs rejects bare --resume without a target", () => {
     expect(() => parseAskArgs(["--resume"])).toThrow(
       "--resume requires a job-id or session-id. Use -r to resume the latest ask session for this repo.",
@@ -61,6 +71,19 @@ describe("argument parsing", () => {
     expect(() => parseAskArgs(["--resume", "--fresh"])).toThrow(
       "--resume requires a job-id or session-id. Use -r to resume the latest ask session for this repo.",
     );
+  });
+
+  test("parseAskArgs rejects --model followed by another flag", () => {
+    expect(() => parseAskArgs(["--model", "--background", "question"])).toThrow(RuntimeError);
+
+    try {
+      parseAskArgs(["--model", "--background", "question"]);
+    } catch (error) {
+      expect((error as RuntimeError).code).toBe("INVALID_ARGS");
+      expect((error as RuntimeError).message).toBe(
+        "--model value cannot start with '-'; pass a model name",
+      );
+    }
   });
 
   test("parseAskArgs rejects prompt text after --resume <id>", () => {
@@ -83,14 +106,26 @@ describe("argument parsing", () => {
     expect(parsed.focus).toBe("focus on rollback");
   });
 
+  test("parseReviewArgs rejects --model followed by another flag", () => {
+    expect(() => parseReviewArgs(["--model", "--background", "focus"])).toThrow(RuntimeError);
+
+    try {
+      parseReviewArgs(["--model", "--background", "focus"]);
+    } catch (error) {
+      expect((error as RuntimeError).code).toBe("INVALID_ARGS");
+      expect((error as RuntimeError).message).toBe(
+        "--model value cannot start with '-'; pass a model name",
+      );
+    }
+  });
+
   test("parseReviewArgs hard-fails on unknown flags in flag-position", () => {
     // v0.3.6: warn-and-swallow was producing invisible-to-agent corruption
     // when wrappers invented flags like `--file` / `--context`. The bloated
     // focus blob made Kimi spin inside the 10-min timeout, looking like a
     // hang. Now any flag-shaped token that isn't in the known set throws
     // INVALID_ARGS, with the supported list and `--` escape hatch in the
-    // error message. Applies to review/challenge only — ask/rescue still
-    // warn-and-swallow since their trailing position is free-form prose.
+    // error message.
     expect(() => parseReviewArgs(["--from", "HEAD~2", "--to", "HEAD"], "review")).toThrow(
       /Unknown flag --from for review.*Use `--` before flag-shaped focus text/s,
     );
@@ -109,47 +144,10 @@ describe("argument parsing", () => {
     expect(parsed.focus).toBe("--file /tmp/x.md");
   });
 
-  test("parseAskArgs `--` sentinel suppresses unknown-flag warning for tokens after it", () => {
-    // The warning fires only when a flag-shaped token appears BEFORE the
-    // `--` sentinel. `parseAskArgs` already had a `--` separator and the
-    // v0.3.0 warning shouldn't undercut its escape-hatch role.
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: typeof process.stderr.write }).write = ((
-      chunk: string | Uint8Array,
-    ) => {
-      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    }) as typeof process.stderr.write;
-
-    try {
-      const parsed = parseAskArgs(["--", "--mystery", "tail"]);
-      expect(parsed.prompt).toBe("--mystery tail");
-    } finally {
-      (process.stderr as { write: typeof process.stderr.write }).write = original;
-    }
-
-    expect(writes.join("")).not.toContain("unknown flag");
-  });
-
-  test("parseAskArgs warns on unknown flags but keeps trailing text as the prompt", () => {
-    const writes: string[] = [];
-    const original = process.stderr.write.bind(process.stderr);
-    (process.stderr as { write: typeof process.stderr.write }).write = ((
-      chunk: string | Uint8Array,
-    ) => {
-      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    }) as typeof process.stderr.write;
-
-    try {
-      const parsed = parseAskArgs(["--mystery", "tail"]);
-      expect(parsed.prompt).toBe("--mystery tail");
-    } finally {
-      (process.stderr as { write: typeof process.stderr.write }).write = original;
-    }
-
-    expect(writes.join("")).toContain("unknown flag --mystery for ask");
+  test("parseAskArgs hard-fails on unknown flag-shaped tokens at position 0", () => {
+    expect(() => parseAskArgs(["--mystery", "tail"])).toThrow(
+      /Unknown flag --mystery for ask.*Supported flags:.*Use `--` before flag-shaped prompt text/s,
+    );
   });
 
   test("parseRescueArgs handles explicit resume targets and flags", () => {
@@ -169,6 +167,18 @@ describe("argument parsing", () => {
     expect(parsed.prompt).toBe("continue work");
   });
 
+  test("parseRescueArgs preserves trailing-mode prose with flag-shaped tokens", () => {
+    const parsed = parseRescueArgs(["explain", "git", "log", "-1"]);
+
+    expect(parsed.prompt).toBe("explain git log -1");
+  });
+
+  test("parseRescueArgs `--` sentinel passes through flag-shaped prompt text", () => {
+    const parsed = parseRescueArgs(["--", "--mystery", "foo"]);
+
+    expect(parsed.prompt).toBe("--mystery foo");
+  });
+
   test("parseRescueArgs rejects bare --resume without a target", () => {
     expect(() => parseRescueArgs(["--resume"])).toThrow(
       "--resume requires a job-id or session-id. Use -r to resume the latest rescue session for this repo.",
@@ -178,6 +188,25 @@ describe("argument parsing", () => {
   test("parseRescueArgs rejects --resume followed by another flag", () => {
     expect(() => parseRescueArgs(["--resume", "--fresh"])).toThrow(
       "--resume requires a job-id or session-id. Use -r to resume the latest rescue session for this repo.",
+    );
+  });
+
+  test("parseRescueArgs rejects --model followed by another flag", () => {
+    expect(() => parseRescueArgs(["--model", "--background", "task"])).toThrow(RuntimeError);
+
+    try {
+      parseRescueArgs(["--model", "--background", "task"]);
+    } catch (error) {
+      expect((error as RuntimeError).code).toBe("INVALID_ARGS");
+      expect((error as RuntimeError).message).toBe(
+        "--model value cannot start with '-'; pass a model name",
+      );
+    }
+  });
+
+  test("parseRescueArgs rejects unknown flag-shaped tokens in flag-position", () => {
+    expect(() => parseRescueArgs(["--mystery", "tail"])).toThrow(
+      /Unknown flag --mystery for rescue.*Supported flags:.*Use `--` before flag-shaped prompt text/s,
     );
   });
 
@@ -192,5 +221,11 @@ describe("argument parsing", () => {
 
     expect(parsed.type).toBe("rescue");
     expect(parsed.jobId).toBe("job-123");
+  });
+
+  test("parseJobLookupArgs unknown flag error includes supported flags", () => {
+    expect(() => parseJobLookupArgs(["--kind", "rescue"])).toThrow(
+      "Unknown flag --kind. Supported flags: --type <review|challenge|rescue|review_gate|ask>.",
+    );
   });
 });

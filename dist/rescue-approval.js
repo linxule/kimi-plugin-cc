@@ -7,6 +7,7 @@ const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);
 const GIT_READONLY_SUBCOMMANDS = new Set(["status", "diff", "show", "log", "grep", "blame"]);
 const CARGO_SUBCOMMANDS = new Set(["check", "clippy", "test"]);
 const GO_SUBCOMMANDS = new Set(["build", "vet", "test"]);
+const SHELL_ACTIONS = new Set(["run command", "run shell command"]);
 const BANNED_FIND_ACTIONS = new Set([
     "-exec",
     "-execdir",
@@ -39,7 +40,7 @@ function isFileEditRequest(request) {
     return request.sender === "WriteFile" || request.sender === "StrReplaceFile" || request.action === "edit file";
 }
 function isShellRequest(request) {
-    return request.sender === "Shell" || request.action.includes("command");
+    return request.sender === "Shell" || SHELL_ACTIONS.has(request.action);
 }
 async function evaluateFileEdit(workspaceRoot, request) {
     const targets = request.display

@@ -9,6 +9,9 @@ export class RuntimeError extends Error {
     }
 }
 export function formatError(error) {
+    if (error instanceof RuntimeError) {
+        return `[${error.code}] [${error.stage}] ${error.message}`;
+    }
     if (error instanceof Error) {
         return error.message;
     }

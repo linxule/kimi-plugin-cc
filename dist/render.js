@@ -3,7 +3,6 @@ import path from "node:path";
 import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
-const EMPTY_RESCUE_FALLBACK = "Kimi did not return a final message.\n";
 const EMPTY_SUMMARY_FALLBACK = "Rescue did not return a final message.";
 export async function writeArtifact(paths, job, markdown) {
     const artifactPath = path.join(paths.artifactsDir, `${job.command_type}-${job.job_id}.md`);
@@ -51,6 +50,10 @@ export function renderManagedJobOutput(job, finalText) {
             };
         }
         case "rescue": {
+            const trimmed = finalText.trim();
+            if (!trimmed) {
+                throw new RuntimeError("RESCUE_EMPTY_OUTPUT", "Rescue returned empty output.", "rescue.runtime");
+            }
             return {
                 output: finalText,
                 rendered: renderRescueArtifact(finalText),
@@ -94,10 +97,6 @@ export function renderReviewArtifact(job, output) {
     return `${header}\n\n${output.trim()}\n`;
 }
 export function renderRescueArtifact(rawOutput) {
-    const trimmed = rawOutput.trim();
-    if (!trimmed) {
-        return EMPTY_RESCUE_FALLBACK;
-    }
     return rawOutput.endsWith("\n") ? rawOutput : `${rawOutput}\n`;
 }
 export function firstMeaningfulLine(text, fallback = EMPTY_SUMMARY_FALLBACK) {
