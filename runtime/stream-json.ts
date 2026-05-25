@@ -51,6 +51,8 @@ export interface StreamJsonOutcome {
   readonly malformedReason?: string;
 }
 
+export const MAX_STREAM_JSON_LINE_BYTES = 1_048_576;
+
 /**
  * Stateful line-buffer parser. Hold partial-line bytes across chunk boundaries.
  *
@@ -72,7 +74,18 @@ export class StreamJsonParser {
 
   push(chunk: string | Buffer): StreamJsonOutcome[] {
     this.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    return this.drainCompleteLines();
+    const outcomes = this.drainCompleteLines();
+    if (
+      this.buffer.indexOf("\n") === -1 &&
+      Buffer.byteLength(this.buffer, "utf8") > MAX_STREAM_JSON_LINE_BYTES
+    ) {
+      outcomes.push({
+        malformedLine: makeOversizePreview(this.buffer),
+        malformedReason: `stream-json line exceeded ${MAX_STREAM_JSON_LINE_BYTES} bytes without newline`,
+      });
+      this.buffer = "";
+    }
+    return outcomes;
   }
 
   flush(): StreamJsonOutcome[] {
@@ -207,6 +220,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Returns the captured session id, or undefined if no match.
  */
 export function extractSessionIdFromStderr(stderr: string): string | undefined {
-  const match = stderr.match(/To resume this session:\s+kimi\s+-r\s+([0-9a-f-]{8,})/);
-  return match?.[1];
+  const pattern =
+    /^To resume this session:\s+kimi\s+-r\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/im;
+  return stderr.match(pattern)?.[1];
+}
+
+function makeOversizePreview(line: string): string {
+  return `${line.slice(0, 200)}[truncated]`;
 }

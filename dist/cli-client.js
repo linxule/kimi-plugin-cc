@@ -51,6 +51,9 @@ export async function runCliPrompt(opts) {
             cwd: opts.cwd,
             env,
             stdio: "pipe",
+            // POSIX gets a fresh process group so cancellation reaches kimi's
+            // descendants; Windows has no negative-pid process-group signaling.
+            detached: process.platform !== "win32",
         });
     }
     catch (err) {
@@ -80,6 +83,7 @@ export async function runCliPrompt(opts) {
     // long-running kimi process emitting megabytes of stderr (tool.progress,
     // thinking deltas) doesn't grow our RSS unboundedly.
     let stderrTail = "";
+    let announcedSessionId;
     let logChain = Promise.resolve();
     const appendLogLine = (payload) => {
         if (opts.logPath === undefined)
@@ -115,7 +119,7 @@ export async function runCliPrompt(opts) {
             }
             else if (outcome.malformedLine !== undefined) {
                 const entry = {
-                    line: outcome.malformedLine,
+                    line: truncateChars(outcome.malformedLine, 200),
                     reason: outcome.malformedReason ?? "unknown",
                 };
                 malformed.push(entry);
@@ -149,14 +153,30 @@ export async function runCliPrompt(opts) {
         // queued at close time could observe `settled === false` and fire
         // a redundant SIGKILL during the drain window.
         let processClosed = false;
-        const onAbort = () => {
-            aborted = true;
+        const signalChildTree = (signal) => {
+            if (process.platform !== "win32" && child.pid !== undefined) {
+                try {
+                    process.kill(-child.pid, signal);
+                    return;
+                }
+                catch (err) {
+                    // ESRCH means the process group is already gone; EPERM means this
+                    // environment rejected group signaling. Other errors also fall
+                    // through because cancellation is best-effort.
+                    const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
+                    void ignored;
+                }
+            }
             try {
-                child.kill("SIGTERM");
+                child.kill(signal);
             }
             catch {
                 // Best-effort.
             }
+        };
+        const onAbort = () => {
+            aborted = true;
+            signalChildTree("SIGTERM");
             // Escalate to SIGKILL if the process doesn't exit promptly.
             // v0.4 had this on the wire-client side; v1 inherits the same
             // 1500ms default so a stuck-kimi rescue/ask/review feels
@@ -166,12 +186,7 @@ export async function runCliPrompt(opts) {
                 escalationTimer = setTimeout(() => {
                     if (processClosed || settled)
                         return;
-                    try {
-                        child.kill("SIGKILL");
-                    }
-                    catch {
-                        // Best-effort.
-                    }
+                    signalChildTree("SIGKILL");
                 }, escalationMs);
                 escalationTimer.unref();
             }
@@ -223,7 +238,7 @@ export async function runCliPrompt(opts) {
                 escalationTimer = undefined;
             }
             consumeOutcomes(parser.flush());
-            const sessionId = extractSessionIdFromStderr(stderrTail);
+            const sessionId = announcedSessionId ?? extractSessionIdFromStderr(stderrTail);
             appendLogLine({
                 event: "exit",
                 exit_code: exitCode,
@@ -256,6 +271,10 @@ export async function runCliPrompt(opts) {
                 consumeOutcomes(parser.push(chunk));
             });
             child.stderr.on("data", (chunk) => {
+                const nextSessionId = extractSessionIdFromStderr(stderrTail + chunk);
+                if (nextSessionId !== undefined) {
+                    announcedSessionId = nextSessionId;
+                }
                 stderrTail = appendToTail(stderrTail, chunk, STDERR_TAIL_BYTES);
             });
             child.stdin.end();
@@ -389,6 +408,12 @@ function appendToTail(tail, chunk, maxBytes) {
     if (combined.length <= maxBytes)
         return combined;
     return combined.slice(combined.length - maxBytes);
+}
+function truncateChars(value, maxChars) {
+    return value.length <= maxChars ? value : value.slice(0, maxChars);
+}
+function isErrnoException(err, code) {
+    return typeof err === "object" && err !== null && "code" in err && err.code === code;
 }
 function raceWithTimeout(promise, timeoutMs) {
     let timer;

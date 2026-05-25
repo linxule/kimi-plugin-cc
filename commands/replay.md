@@ -1,5 +1,6 @@
 ---
 description: Re-render a stored Wire event log for a completed plugin-managed Kimi job.
+argument-hint: "<job-id>"
 disable-model-invocation: true
 ---
 

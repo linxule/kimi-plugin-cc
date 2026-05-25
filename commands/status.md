@@ -1,5 +1,6 @@
 ---
 description: Show the latest or selected plugin-managed Kimi job for the current repository.
+argument-hint: "[<job-id>] [--type <review|challenge|rescue|review_gate|ask>]"
 disable-model-invocation: true
 ---
 

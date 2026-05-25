@@ -9,6 +9,8 @@
 //                             stream-json shape.
 //   KIMI_MOCK_STDERR_PREFIX   Optional stderr text emitted before the
 //                             session announce. Defaults to empty.
+//   KIMI_MOCK_STDERR_SUFFIX   Optional stderr text emitted after the
+//                             session announce. Defaults to empty.
 //   KIMI_MOCK_SESSION_ID      Session id to embed in the stderr announce
 //                             line. Defaults to a fixed UUID.
 //   KIMI_MOCK_EMIT_ANNOUNCE   "0" to skip the announce line (simulate early
@@ -34,6 +36,7 @@ const records: unknown[] = (() => {
 })();
 
 const stderrPrefix = process.env.KIMI_MOCK_STDERR_PREFIX ?? "";
+const stderrSuffix = process.env.KIMI_MOCK_STDERR_SUFFIX ?? "";
 const sessionId = process.env.KIMI_MOCK_SESSION_ID ?? "00000000-0000-0000-0000-000000000000";
 const emitAnnounce = process.env.KIMI_MOCK_EMIT_ANNOUNCE !== "0";
 const exitCode = Number.parseInt(process.env.KIMI_MOCK_EXIT_CODE ?? "0", 10) || 0;
@@ -63,6 +66,9 @@ async function main(): Promise<void> {
 
   if (emitAnnounce) {
     process.stderr.write(`To resume this session: kimi -r ${sessionId}\n`);
+  }
+  if (stderrSuffix.length > 0) {
+    process.stderr.write(stderrSuffix.endsWith("\n") ? stderrSuffix : `${stderrSuffix}\n`);
   }
 
   process.exit(exitCode);

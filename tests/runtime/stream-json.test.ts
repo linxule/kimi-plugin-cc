@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  MAX_STREAM_JSON_LINE_BYTES,
   StreamJsonParser,
   extractSessionIdFromStderr,
   type AssistantRecord,
@@ -170,6 +171,20 @@ describe("StreamJsonParser", () => {
     expect(outcomes[0]!.record).toEqual({ role: "assistant", content: "b" });
   });
 
+  test("emits malformed on line exceeding MAX_STREAM_JSON_LINE_BYTES", () => {
+    const parser = new StreamJsonParser();
+    const oversized = "x".repeat(MAX_STREAM_JSON_LINE_BYTES + 1);
+    const malformed = parser.push(oversized);
+    expect(malformed).toHaveLength(1);
+    expect(malformed[0]!.record).toBeUndefined();
+    expect(malformed[0]!.malformedReason).toContain("exceeded");
+    expect(malformed[0]!.malformedLine).toBe(`${"x".repeat(200)}[truncated]`);
+
+    const valid = parser.push('{"role":"assistant","content":"after"}\n');
+    expect(valid).toHaveLength(1);
+    expect(valid[0]!.record).toEqual({ role: "assistant", content: "after" });
+  });
+
   test("handles a kimi-code-shaped multi-step sequence", () => {
     // Simulates one assistant message with a tool_call, the tool result, then
     // a final assistant content message — the shape v0.4 commands need to
@@ -202,17 +217,54 @@ describe("extractSessionIdFromStderr", () => {
     expect(extractSessionIdFromStderr("")).toBeUndefined();
   });
 
-  test("captures even when the announce line is the only content", () => {
-    expect(extractSessionIdFromStderr("To resume this session: kimi -r abcdef01234567\n")).toBe(
-      "abcdef01234567",
-    );
+  test("captures a full UUID when the announce line is the only content", () => {
+    expect(
+      extractSessionIdFromStderr(
+        "To resume this session: kimi -r abcdef01-2345-6789-abcd-ef0123456789\n",
+      ),
+    ).toBe("abcdef01-2345-6789-abcd-ef0123456789");
   });
 
-  test("ignores commentary appearing after the session id", () => {
+  test("rejects commentary appearing after the session id", () => {
     const stderr =
       "To resume this session: kimi -r deadbeef-cafe-1234-5678-90abcdef0000 (latest)\n";
+    expect(extractSessionIdFromStderr(stderr)).toBeUndefined();
+  });
+
+  test("rejects mid-line and unanchored announce matches", () => {
+    expect(
+      extractSessionIdFromStderr(
+        "prefix To resume this session: kimi -r deadbeef-cafe-1234-5678-90abcdef0000\n",
+      ),
+    ).toBeUndefined();
+    expect(
+      extractSessionIdFromStderr(
+        "To resume this session: kimi -r deadbeef-cafe-1234-5678-90abcdef0000 suffix\n",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("requires full UUID shape", () => {
+    expect(extractSessionIdFromStderr("To resume this session: kimi -r abcdef01234567\n")).toBeUndefined();
+    expect(
+      extractSessionIdFromStderr("To resume this session: kimi -r deadbeef-cafe-1234-5678-90abcdef000\n"),
+    ).toBeUndefined();
+  });
+
+  test("requires the announce text at the start of a line", () => {
+    expect(
+      extractSessionIdFromStderr(
+        "warning: To resume this session: kimi -r deadbeef-cafe-1234-5678-90abcdef0000\n",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("returns the first canonical session id when stderr contains multiple announces", () => {
+    const stderr =
+      "To resume this session: kimi -r 11111111-1111-1111-1111-111111111111\n" +
+      "To resume this session: kimi -r 22222222-2222-2222-2222-222222222222\n";
     expect(extractSessionIdFromStderr(stderr)).toBe(
-      "deadbeef-cafe-1234-5678-90abcdef0000",
+      "11111111-1111-1111-1111-111111111111",
     );
   });
 });

@@ -1,5 +1,6 @@
 ---
 description: Return the stored rendered result for the latest or selected terminal Kimi job.
+argument-hint: "[<job-id>] [--type <review|challenge|rescue|review_gate|ask>] [--json]"
 disable-model-invocation: true
 ---
 

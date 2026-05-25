@@ -1,5 +1,6 @@
 ---
 description: Cancel an active plugin-managed Kimi job for the current repository.
+argument-hint: "[<job-id>]"
 disable-model-invocation: true
 ---
 

@@ -72,7 +72,7 @@ Key constraints (verified by [`runtime/hooks/managed-block.ts`](../runtime/hooks
 | `ask` | `Read`, `Grep`, `Glob`, `ReadMediaFile`, `TaskList`, `TaskOutput` | everything else, including `Bash`, `Write`, `Edit` |
 | `review`, `challenge`, `review_gate` | same as `ask` | same as `ask` |
 | `rescue` | governed by [`evaluateRescueHookRequest`](../runtime/rescue-approval.ts) — workspace-bound shell allowlist, symlink-aware path containment, mutating-flag detection on `git`/`find`/`sed`, etc. | every shell command, file edit, or write that the allowlist rejects |
-| unknown label | `Read`, `Grep`, `Glob` only | everything else (conservative-deny for stale/misconfigured callers) |
+| unknown label | `Read`, `Grep`, `Glob`, `ReadMediaFile`, `TaskList`, `TaskOutput` | everything else (conservative-deny for stale/misconfigured callers) |
 
 Denied tool calls exit the hook with code 2 and write a reason to stderr. kimi-code surfaces the reason to the model, which can adapt and try a different approach (e.g., use `Read` instead of `Bash cat`).
 
@@ -126,7 +126,7 @@ The block should match the template at the top of this document. If the `[[hooks
 Removes the managed block from `~/.kimi-code/config.toml`. Subsequent kimi-plugin-cc command invocations:
 
 - `/kimi:rescue` will refuse to run (`RESCUE_HOOK_NOT_INSTALLED`).
-- `/kimi:ask`, `/kimi:review`, `/kimi:challenge`, review gate will emit a one-time stderr warning per Claude Code session and then run anyway — but with kimi-code's default `permission: auto` posture, which auto-approves every tool. This is intentionally loud rather than silent.
+- `/kimi:ask`, `/kimi:review`, `/kimi:challenge`, review gate will emit a one-time stderr warning per companion invocation (each slash-command spawn is a fresh Node process) and then run anyway — but with kimi-code's default `permission: auto` posture, which auto-approves every tool. This is intentionally loud rather than silent.
 
 If you want to silence the warning (e.g., you're running tests, or you've deliberately accepted the risk), set `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` in the env block for your kimi-plugin-cc invocations.
 

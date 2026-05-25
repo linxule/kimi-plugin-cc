@@ -246,7 +246,7 @@ async function runInstall(
   }
 
   const lineEnding = detectLineEnding(existing);
-  const block = buildManagedBlock(hookScriptPath, lineEnding);
+  const block = buildManagedBlock(hookScriptPath, context.env, lineEnding);
   const next = state.kind === "found"
     ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
     : appendBlock(existing, block, lineEnding);
@@ -625,8 +625,12 @@ function isEndMarker(trimmedLine: string): boolean {
 
 // ----- Block content -----------------------------------------------------
 
-function buildManagedBlock(hookScriptPath: string, lineEnding: "\n" | "\r\n" = "\n"): string {
-  const shellCommand = buildHookShellCommand(hookScriptPath, process.env);
+function buildManagedBlock(
+  hookScriptPath: string,
+  env: NodeJS.ProcessEnv,
+  lineEnding: "\n" | "\r\n" = "\n",
+): string {
+  const shellCommand = buildHookShellCommand(hookScriptPath, env);
   const commandLine = `command = ${tomlBasicString(shellCommand)}`;
   return [
     `${BEGIN_MARKER_PREFIX} (v${KIMI_PLUGIN_CC_VERSION}) ===`,

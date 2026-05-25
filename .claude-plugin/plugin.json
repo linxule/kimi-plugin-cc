@@ -8,5 +8,16 @@
   "keywords": ["kimi", "kimi-code", "review", "code-review", "delegation", "multi-model"],
   "author": {
     "name": "linxule"
-  }
+  },
+  "commands": [
+    "./commands/ask.md",
+    "./commands/cancel.md",
+    "./commands/challenge.md",
+    "./commands/replay.md",
+    "./commands/rescue.md",
+    "./commands/result.md",
+    "./commands/review.md",
+    "./commands/setup.md",
+    "./commands/status.md"
+  ]
 }

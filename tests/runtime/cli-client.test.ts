@@ -26,11 +26,12 @@ function mockOptions(overrides: {
   exitCode?: number;
   interleave?: boolean;
   commandLabel?: string;
-  logPath?: string;
-  stderrPrefix?: string;
-  prompt?: string;
-  signal?: AbortSignal;
-  delayMs?: number;
+    logPath?: string;
+    stderrPrefix?: string;
+    stderrSuffix?: string;
+    prompt?: string;
+    signal?: AbortSignal;
+    delayMs?: number;
   onRecord?: (r: StreamJsonRecord) => void;
 }) {
   const env: NodeJS.ProcessEnv = {
@@ -45,6 +46,9 @@ function mockOptions(overrides: {
     ...(overrides.stderrPrefix !== undefined && {
       KIMI_MOCK_STDERR_PREFIX: overrides.stderrPrefix,
     }),
+    ...(overrides.stderrSuffix !== undefined && {
+      KIMI_MOCK_STDERR_SUFFIX: overrides.stderrSuffix,
+    }),
   };
   return {
     cwd: overrides.cwd,
@@ -57,6 +61,40 @@ function mockOptions(overrides: {
     signal: overrides.signal,
     onRecord: overrides.onRecord,
   };
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pidFromStderr(stderr: string, label: string): number {
+  const match = stderr.match(new RegExp(`${label}=(\\d+)`));
+  expect(match).not.toBeNull();
+  return Number(match![1]);
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if (isErrnoException(err, "ESRCH")) return false;
+    if (isErrnoException(err, "EPERM")) return true;
+    throw err;
+  }
+}
+
+async function waitForPidToExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return;
+    await sleepMs(50);
+  }
+  throw new Error(`pid ${pid} is still alive after ${timeoutMs}ms`);
+}
+
+function isErrnoException(err: unknown, code: string): boolean {
+  return typeof err === "object" && err !== null && "code" in err && err.code === code;
 }
 
 describe("runCliPrompt", () => {
@@ -413,6 +451,47 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("session id is captured when announce arrives before stderr overflows", async () => {
+    const root = await createTestPluginDataRoot("cli-client-session-before-overflow");
+    try {
+      const sessionId = "33333333-3333-3333-3333-333333333333";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "ok" }],
+          sessionId,
+          stderrSuffix: "j".repeat(9000),
+        }),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.sessionId).toBe(sessionId);
+      expect(result.stderrTail.length).toBeLessThanOrEqual(8192);
+      expect(result.stderrTail).not.toContain(sessionId);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("captures the session id incrementally before stderr tail truncation", async () => {
+    const root = await createTestPluginDataRoot("cli-client-session-before-large-tail");
+    try {
+      const sessionId = "40000000-0000-0000-0000-000000000000";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "ok" }],
+          sessionId,
+          stderrSuffix: "x".repeat(20_000),
+        }),
+      );
+      expect(result.stderrTail.length).toBeLessThanOrEqual(8192);
+      expect(result.stderrTail).not.toContain(sessionId);
+      expect(result.sessionId).toBe(sessionId);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("classifies an unspawnable binary as CLI_SPAWN_FAILED or CLI_PROCESS_ERROR", async () => {
     const root = await createTestPluginDataRoot("cli-client-no-bin");
     try {
@@ -447,9 +526,9 @@ describe("SIGKILL escalation", () => {
     try {
       const controller = new AbortController();
       const start = Date.now();
-      // Fire abort 200ms into the run; child traps SIGTERM, so cli-client
-      // must escalate to SIGKILL after the escalationMs window (250ms).
-      setTimeout(() => controller.abort(), 200).unref();
+      // Fire abort 100ms into the run; child traps SIGTERM, so cli-client
+      // must escalate to SIGKILL after the escalationMs window (50ms).
+      setTimeout(() => controller.abort(), 100).unref();
 
       const result = await runCliPrompt({
         cwd: root,
@@ -462,7 +541,7 @@ describe("SIGKILL escalation", () => {
         prefixArgs: ["run", stubKimiPath],
         prompt: "x",
         signal: controller.signal,
-        escalationMs: 250,
+        escalationMs: 50,
       });
 
       const elapsed = Date.now() - start;
@@ -505,6 +584,80 @@ describe("SIGKILL escalation", () => {
       // SIGKILL must NOT have been delivered — the stub self-exited.
       expect(result.signal).not.toBe("SIGKILL");
     } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  const testPosix = process.platform === "win32" ? test.skip : test;
+
+  testPosix("process group is killed on cancellation on posix", async () => {
+    const root = await createTestPluginDataRoot("cli-process-group-cancel");
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100).unref();
+
+      const result = await runCliPrompt({
+        cwd: root,
+        env: { ...process.env },
+        command: "sh",
+        prefixArgs: [
+          "-c",
+          'echo "child_pid=$$" >&2; sleep 60 & echo "grandchild_pid=$!" >&2; wait',
+        ],
+        prompt: "x",
+        signal: controller.signal,
+      });
+
+      const childPid = pidFromStderr(result.stderrTail, "child_pid");
+      const grandchildPid = pidFromStderr(result.stderrTail, "grandchild_pid");
+      expect(result.aborted).toBe(true);
+      await waitForPidToExit(childPid, 3_000);
+      await waitForPidToExit(grandchildPid, 3_000);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+});
+
+describe("process-group cancellation", () => {
+  const processGroupGrandchildPath = path.join(
+    process.cwd(),
+    "tests/helpers/process-group-grandchild.ts",
+  );
+
+  test("kills a live grandchild in the kimi process group on abort", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-process-group-grandchild");
+    let grandchildPid: number | undefined;
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100).unref();
+
+      const result = await runCliPrompt({
+        cwd: root,
+        env: { ...process.env },
+        command: "bun",
+        prefixArgs: ["run", processGroupGrandchildPath],
+        prompt: "x",
+        signal: controller.signal,
+      });
+
+      const match = result.stderrTail.match(/KIMI_MOCK_GRANDCHILD_PID=(\d+)/);
+      expect(match).not.toBeNull();
+      grandchildPid = Number.parseInt(match![1]!, 10);
+      expect(result.aborted).toBe(true);
+      await expect(waitForPidExit(grandchildPid, 3_000)).resolves.toBeUndefined();
+    } finally {
+      if (grandchildPid !== undefined) {
+        try {
+          process.kill(grandchildPid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
       await cleanupTestPath(root);
     }
   });
@@ -582,3 +735,21 @@ describe("runCliPromptWithBudget", () => {
     }
   });
 });
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ESRCH") return;
+      throw err;
+    }
+    await sleep(50);
+  }
+  throw new Error(`pid ${pid} still alive after ${timeoutMs}ms`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

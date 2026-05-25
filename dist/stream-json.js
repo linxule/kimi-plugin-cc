@@ -21,6 +21,7 @@
 //   - assistant messages are only emitted when content OR tool_calls are
 //     non-empty (run-prompt.ts:537-545); we still defend against the empty
 //     case for resilience.
+export const MAX_STREAM_JSON_LINE_BYTES = 1_048_576;
 /**
  * Stateful line-buffer parser. Hold partial-line bytes across chunk boundaries.
  *
@@ -41,7 +42,16 @@ export class StreamJsonParser {
     buffer = "";
     push(chunk) {
         this.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-        return this.drainCompleteLines();
+        const outcomes = this.drainCompleteLines();
+        if (this.buffer.indexOf("\n") === -1 &&
+            Buffer.byteLength(this.buffer, "utf8") > MAX_STREAM_JSON_LINE_BYTES) {
+            outcomes.push({
+                malformedLine: makeOversizePreview(this.buffer),
+                malformedReason: `stream-json line exceeded ${MAX_STREAM_JSON_LINE_BYTES} bytes without newline`,
+            });
+            this.buffer = "";
+        }
+        return outcomes;
     }
     flush() {
         const remainder = this.buffer;
@@ -176,6 +186,9 @@ function isRecord(value) {
  * Returns the captured session id, or undefined if no match.
  */
 export function extractSessionIdFromStderr(stderr) {
-    const match = stderr.match(/To resume this session:\s+kimi\s+-r\s+([0-9a-f-]{8,})/);
-    return match?.[1];
+    const pattern = /^To resume this session:\s+kimi\s+-r\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/im;
+    return stderr.match(pattern)?.[1];
+}
+function makeOversizePreview(line) {
+    return `${line.slice(0, 200)}[truncated]`;
 }
