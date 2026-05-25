@@ -15,7 +15,7 @@ import {
 } from "../helpers/test-env.js";
 
 const companionPath = path.join(process.cwd(), "runtime/companion.ts");
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 const rawReviewOutput = JSON.stringify({
   summary: "One correctness issue found.",
   verdict: "concern",

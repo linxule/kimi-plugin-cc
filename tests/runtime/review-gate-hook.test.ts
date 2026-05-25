@@ -11,7 +11,7 @@ import {
   createTestPluginDataRoot,
 } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 const hookScriptPath = path.join(process.cwd(), "runtime/hooks/review-gate-stop.ts");
 
 describe("review gate stop hook", () => {
@@ -93,23 +93,22 @@ describe("review gate stop hook", () => {
         },
       );
 
-      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
-      const sessionIndex = invocation.argv.indexOf("--session");
-      const agentIndex = invocation.argv.indexOf("--agent-file");
+      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
+        argv: string[];
+        env: { KIMI_PLUGIN_CC_CMD: string | null };
+      };
 
       expect(output.decision).toBe("block");
       expect(output.reason).toContain("Kimi review gate blocked stop");
       expect(output.reason).toContain("Requested fix still missing");
-      expect(sessionIndex).toBeGreaterThan(-1);
-      expect(invocation.argv[sessionIndex + 1]).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-      );
-      expect(invocation.argv[agentIndex + 1]).toBe(
-        path.join(process.cwd(), "runtime/agents/review-gate.yaml"),
-      );
-      expect(invocation.argv).toContain("--model");
+      // v1.0: review_gate command label propagates via env, not argv.
+      // The agent-file / --session flags are gone — kimi-code does not
+      // load YAML agent profiles and assigns its own session id.
+      expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("review_gate");
+      expect(invocation.argv).toContain("--output-format");
+      expect(invocation.argv).toContain("stream-json");
+      expect(invocation.argv).toContain("-m");
       expect(invocation.argv).toContain("kimi-for-coding");
-      expect(invocation.argv).toContain("--no-thinking");
 
       const repoIdentity = await resolveRepoIdentity(process.cwd());
       const store = new JobStore(paths);

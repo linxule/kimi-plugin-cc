@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runCliPrompt, requireSessionId } from "../../runtime/cli-client.js";
+import { runCliPrompt, runCliPromptWithBudget, requireSessionId } from "../../runtime/cli-client.js";
 import type {
   AssistantRecord,
   StreamJsonRecord,
@@ -393,6 +393,79 @@ describe("runCliPrompt", () => {
       ).rejects.toMatchObject({
         code: expect.stringMatching(/^CLI_(SPAWN_FAILED|PROCESS_ERROR)$/),
       });
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+});
+
+describe("runCliPromptWithBudget", () => {
+  test("returns the result when kimi finishes inside the budget", async () => {
+    const root = await createTestPluginDataRoot("cli-budget-ok");
+    try {
+      const result = await runCliPromptWithBudget(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "ok" }],
+        }),
+        2_000,
+        "test.budget-ok",
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.records).toHaveLength(1);
+      expect(result.aborted).toBe(false);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("aborts the subprocess when the budget expires", async () => {
+    const root = await createTestPluginDataRoot("cli-budget-timeout");
+    try {
+      // Mock holds for 5s; budget is 300ms — we should observe a
+      // RESPONSE_TIMEOUT and the subprocess should be SIGTERMed.
+      const start = Date.now();
+      await expect(
+        runCliPromptWithBudget(
+          mockOptions({
+            cwd: root,
+            records: [{ role: "assistant", content: "late" }],
+            delayMs: 5_000,
+          }),
+          300,
+          "test.budget-timeout",
+        ),
+      ).rejects.toMatchObject({
+        code: "RESPONSE_TIMEOUT",
+        stage: "test.budget-timeout",
+      });
+      const elapsed = Date.now() - start;
+      // We must NOT wait for the full 5s delay — the controller must
+      // have killed the subprocess. Allow generous slack for CI but
+      // hard-bound at 2.5s so a regression where the timeout doesn't
+      // kill the child surfaces obviously.
+      expect(elapsed).toBeLessThan(2_500);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("respects a caller-supplied pre-aborted signal", async () => {
+    const root = await createTestPluginDataRoot("cli-budget-preabort");
+    try {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        runCliPromptWithBudget(
+          mockOptions({
+            cwd: root,
+            records: [{ role: "assistant", content: "x" }],
+            signal: controller.signal,
+          }),
+          2_000,
+          "test.budget-preabort",
+        ),
+      ).rejects.toMatchObject({ code: "CLI_ABORTED" });
     } finally {
       await cleanupTestPath(root);
     }

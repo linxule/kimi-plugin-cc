@@ -11,7 +11,7 @@ import {
   createTestPluginDataRoot,
 } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -38,32 +38,32 @@ function makeMockEnv(
 }
 
 describe("read-only command handlers", () => {
-  test("runAsk returns prose and passes fresh session plus ask profile", async () => {
-const pluginDataRoot = await createTestPluginDataRoot("ask-command");
+  test("runAsk returns prose and forwards the v1 cli flags + command label", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-command");
     const invocationPath = path.join(pluginDataRoot, "ask-invocation.jsonl");
     const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
 
     try {
       const result = await runAsk(["--no-thinking", "What", "changed?"], makeContext(process.cwd(), env));
-      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
-      const sessionIndex = invocation.argv.indexOf("--session");
-      const agentIndex = invocation.argv.indexOf("--agent-file");
+      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
+        argv: string[];
+        env: { KIMI_PLUGIN_CC_CMD: string | null };
+      };
 
+      // v1.0 cli-client passes `--output-format stream-json` and `-p <prompt>`.
+      // No `--session <uuid>` (kimi-code assigns the id) and no
+      // `--agent-file` (kimi-code has no YAML agent profiles).
       expect(result).toBe("Ask answer from mock Kimi.");
-      expect(sessionIndex).toBeGreaterThan(-1);
-      expect(invocation.argv[sessionIndex + 1]).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-      );
-      expect(invocation.argv[agentIndex + 1]).toBe(
-        path.join(process.cwd(), "runtime/agents/ask.yaml"),
-      );
-      expect(invocation.argv).toContain("--no-thinking");
+      expect(invocation.argv).toContain("--output-format");
+      expect(invocation.argv).toContain("stream-json");
+      expect(invocation.argv).toContain("-p");
+      expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("ask");
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
   });
 
-  test("runReview returns the final text as prose and passes the review profile", async () => {
+  test("runReview returns prose passthrough and sets the review command label", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-command");
     const repoRoot = await createGitRepoFixture("review-git");
     const invocationPath = path.join(pluginDataRoot, "review-invocation.jsonl");
@@ -71,17 +71,15 @@ const pluginDataRoot = await createTestPluginDataRoot("ask-command");
 
     try {
       const result = await runReview(["--no-thinking"], makeContext(repoRoot, env), "review");
-      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
-      const agentIndex = invocation.argv.indexOf("--agent-file");
+      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
+        argv: string[];
+        env: { KIMI_PLUGIN_CC_CMD: string | null };
+      };
 
-      // Output is now passed through as prose — verify content reaches the caller
-      // verbatim, no schema parsing in the middle. (Mock happens to emit a JSON
-      // blob; after v0.2.3 we keep it as-is rather than reshape it.)
+      // Output passes through as prose — no schema parsing.
       expect(result).toContain("concern");
       expect(result).toContain("Incorrect answer constant");
-      expect(invocation.argv[agentIndex + 1]).toBe(
-        path.join(process.cwd(), "runtime/agents/review.yaml"),
-      );
+      expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("review");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -108,17 +106,12 @@ const pluginDataRoot = await createTestPluginDataRoot("ask-command");
     }
   });
 
-  test("read-only commands fail when Kimi requests approval", async () => {
-    const pluginDataRoot = await createTestPluginDataRoot("approval-reject");
-    const invocationPath = path.join(pluginDataRoot, "approval-invocation.jsonl");
-    const env = makeMockEnv(pluginDataRoot, "approval-request", invocationPath);
-
-    try {
-      await expect(runAsk(["Is", "this", "safe?"], makeContext(process.cwd(), env))).rejects.toThrow(
-        "ask is read-only; approval requests fail the command.",
-      );
-    } finally {
-      await cleanupTestPath(pluginDataRoot);
-    }
-  });
+  // v0.4 surfaced a wire-protocol Approval Request through the runtime's
+  // ApprovalDispatcher (rejectAllApprovals) so read-only commands would
+  // fail loudly if kimi asked for permission. v1.0 moves that enforcement
+  // out-of-band into the PreToolUse hook (runtime/hooks/approval-policy.ts),
+  // which is exercised by approval-policy.test.ts. There is no
+  // runtime-side equivalent in v1: the hook denies before the model can
+  // emit a tool call, the model adapts, and the assistant prose comes
+  // back as normal. Tests of the deny path live with the hook policy.
 });

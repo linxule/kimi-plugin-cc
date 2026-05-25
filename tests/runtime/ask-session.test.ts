@@ -14,7 +14,7 @@ import {
   createTestPluginDataRoot,
 } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -127,7 +127,7 @@ describe("ask session resume", () => {
         await runStatus(["--type", "ask"], makeContext(repoRoot, env)),
       ) as { job_id: string; kimi_session_id: string };
       const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
-      const sessionIndex = invocation.argv.indexOf("--session");
+      const sessionIndex = invocation.argv.indexOf("-r");
 
       expect(latestJob.job_id).not.toBe(firstJob?.job_id);
       expect(latestJob.kimi_session_id).toBe(firstSession);
@@ -161,7 +161,7 @@ describe("ask session resume", () => {
       const latestJob = store.findLatestJob({ repoId, commandType: "ask" });
       store.close();
       const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
-      const sessionIndex = invocation.argv.indexOf("--session");
+      const sessionIndex = invocation.argv.indexOf("-r");
       const firstSession = firstJob?.kimi_session_id;
       if (!firstSession) {
         throw new Error("Expected the first ask job to persist a session id.");

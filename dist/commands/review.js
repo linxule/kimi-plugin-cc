@@ -1,25 +1,51 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
-import { createCancellationHandlers } from "../cancellation.js";
+import { createCliCancellationHandlers } from "../cli-cancellation.js";
+import { runCliPromptWithBudget } from "../cli-client.js";
+import { resolveKimiCliCommand } from "../kimi-command.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
-import { announceSessionTitle } from "../kimi-web-client.js";
-import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
-import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
-import { KIMI_INITIALIZE_TIMEOUT_MS, KIMI_REVIEW_PROMPT_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout, } from "../kimi-timeouts.js";
-import { buildSessionTitle } from "../session-title.js";
+import { KIMI_REVIEW_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
-import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
-import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
+import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
+import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
+// v1.0 cutover note (PR 2):
+//
+//   Replaced the v0.4 wire client + initialize + prompt sequence with a
+//   single `runCliPrompt` call against `kimi -p --output-format
+//   stream-json`. The PreToolUse hook (installed via /kimi:setup) reads
+//   `KIMI_PLUGIN_CC_CMD=review` (or `=challenge`) and denies anything
+//   but Read/Grep/Glob — so the read-only contract that v0.4 enforced
+//   via WireClient.approvalPolicy is now enforced out-of-band by the
+//   hook. The command no longer needs to wire its own approval policy.
+//
+// What stays:
+//
+//   - SQLite job store, prompt digest, artifact rendering, withTimeout
+//     for the prompt phase.
+//   - Cancellation: still SIGTERM/SIGINT-driven, but via AbortController
+//     instead of WireClient.cancel().
+//   - Job error classification via classifyManagedCommandFailure.
+//
+// What's gone:
+//
+//   - announceSessionTitle — vis-server has no PATCH endpoint; the
+//     kimi-web title cannot be written from the plugin in v1.0.
+//   - agent_profile — kimi-code doesn't load YAML agent profiles. The
+//     SQLite column stays for backward compatibility; we write a
+//     placeholder "<cli-client>" until PR 4 makes it nullable.
+//   - KIMI_INITIALIZE_TIMEOUT_MS / KIMI_START_TIMEOUT_MS — there's no
+//     separate initialize/start phase under -p mode.
+const REVIEW_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 export async function runReview(argv, context, commandType) {
     const parsed = parseReviewArgs(argv, commandType);
     if (parsed.background || parsed.wait) {
@@ -30,10 +56,19 @@ export async function runReview(argv, context, commandType) {
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
     const store = new JobStore(paths);
+    // Hook installation warning surfaces BEFORE any kimi spawn so the
+    // user notices it on every command, not just on a successful run.
+    if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
+        const installStatus = await verifyHookInstalled(context.env);
+        maybeWarnHookMissing(installStatus, commandType, context.stderr);
+    }
     const jobId = randomUUID();
-    const reviewSessionId = randomUUID();
+    // kimi-code mints the actual session id and announces it on stderr;
+    // we leave the row's kimi_session_id NULL until the call returns to
+    // avoid storing a fictional id that no on-disk session matches.
+    // (See PR 2 review feedback in reports/17-pr2-claude-review.md.)
+    const reviewSessionId = null;
     const logPath = path.join(paths.logsDir, `${commandType}-${jobId}.jsonl`);
-    const agentProfile = resolveAgentFile("runtime/agents/review.yaml");
     const previewPrompt = buildReviewPrompt(commandType, reviewContext, parsed.focus);
     const job = store.createJob({
         job_id: jobId,
@@ -47,7 +82,7 @@ export async function runReview(argv, context, commandType) {
         kimi_pid: null,
         status: "running",
         kimi_session_id: reviewSessionId,
-        agent_profile: agentProfile,
+        agent_profile: REVIEW_AGENT_PROFILE_PLACEHOLDER,
         prompt_digest: digestPrompt(previewPrompt),
         summary: `Running ${commandType}.`,
         final_output_path: null,
@@ -56,52 +91,38 @@ export async function runReview(argv, context, commandType) {
     });
     await writeInvocationLogHeader(logPath, {
         commandType,
-        kimiSessionId: reviewSessionId,
+        kimiSessionId: reviewSessionId ?? "(pending)",
         cwd: context.cwd,
     });
-    let client;
-    // Shared cancellation handler — see runtime/cancellation.ts.
-    // Registry lookup keyed on commandType so "review" and "challenge"
-    // each get their own error codes + messages without a local helper.
     const reviewConfig = getManagedCommandConfig(commandType);
     const cancel = reviewConfig.cancellation;
-    const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
+    const handlers = createCliCancellationHandlers();
+    const kimi = resolveKimiCliCommand(context.env);
     try {
-        client = await buildAndStartWireClient({
+        const result = await runCliPromptWithBudget({
             cwd: context.cwd,
             env: context.env,
-            sessionId: reviewSessionId,
-            agentFile: agentProfile,
+            command: kimi.command,
+            prefixArgs: kimi.prefixArgs,
+            prompt: previewPrompt,
+            commandLabel: commandType,
             model: parsed.model,
-            thinking: parsed.thinking,
             logPath,
-            approvalPolicy: rejectAllApprovals(`${commandType} is read-only; unexpected approval requests fail the command.`),
-        }, KIMI_START_TIMEOUT_MS, `${commandType}.start`, { shouldRetry: () => !handlers.cancelling });
-        handlers.attachClient(client);
-        if (handlers.cancelling) {
-            throw new RuntimeError(cancel.errorCodes.cancelledDuringStart, cancel.cancelMessages.duringStart, `${commandType}.start`);
-        }
-        store.updateRunningJob(job.job_id, { kimi_pid: client.getChildPid() });
-        await withTimeout(client.initialize({
-            protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
-            client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
-            capabilities: {
-                supports_question: false,
-                supports_plan_mode: false,
-            },
-        }), KIMI_INITIALIZE_TIMEOUT_MS, `${commandType}.initialize`, "initialize");
-        await announceSessionTitle(reviewSessionId, buildSessionTitle(commandType, buildReviewTitleExcerpt(commandType, parsed.focus)), { env: context.env });
-        const completed = await withTimeout(client.prompt(previewPrompt, commandType), KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`, "response");
-        // Cancel-after-prompt-success check: SIGTERM could have fired between
-        // prompt completion and our terminal-state writes. Honour it instead of
-        // silently committing markCompleted.
+            signal: handlers.signal,
+        }, KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`);
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, `${commandType}.runtime`);
         }
-        const rendered = renderManagedJobOutput(job, completed.finalText);
+        assertCliResultSuccess(result, `${commandType}.runtime`);
+        // Persist whichever session id kimi announced. Review never resumes,
+        // but the id is the only handle for post-hoc replay against
+        // ~/.kimi-code/sessions/.
+        if (result.sessionId !== undefined) {
+            store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+        }
+        const finalText = reassembleProseFromRecords(result.records);
+        const rendered = renderManagedJobOutput(job, finalText);
         const artifactPath = await writeArtifact(paths, job, rendered.rendered);
-        // Re-check after the disk write (writeArtifact awaits I/O) — cancel could
-        // have landed during that window too.
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterArtifact, `${commandType}.runtime`);
         }
@@ -114,15 +135,6 @@ export async function runReview(argv, context, commandType) {
     }
     catch (error) {
         if (handlers.cancelling) {
-            // Clear the escalation timer NOW, before awaiting markJobCancelled
-            // (which writes a failure artifact to disk and can take >1.5s under
-            // load). Otherwise the timer fires SIGTERM on a client that's already
-            // being cancelled — double-signal race.
-            handlers.clearEscalation();
-            // Always wrap into a canonical *_CANCELLED RuntimeError, even when the
-            // underlying error is already a RuntimeError. Otherwise infrastructure
-            // failure codes (WIRE_PROCESS_EXITED, TIMEOUT) leak into job.error.code
-            // and callers can't distinguish user-cancel from infra failure.
             const cancelledError = new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.default, `${commandType}.runtime`, error instanceof Error ? { cause: error } : undefined);
             await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError);
             throw cancelledError;
@@ -133,15 +145,8 @@ export async function runReview(argv, context, commandType) {
     }
     finally {
         handlers.dispose();
-        await client?.close();
         store.close();
     }
-}
-function buildReviewTitleExcerpt(commandType, focus) {
-    const trimmed = focus?.trim();
-    if (trimmed)
-        return trimmed;
-    return commandType === "challenge" ? "pending changes (challenge)" : "pending changes";
 }
 function buildReviewPrompt(commandType, reviewContext, focus) {
     const modeInstructions = commandType === "challenge"

@@ -98,7 +98,25 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
 
   if (
     error instanceof RuntimeError &&
-    error.code === "WIRE_SPAWN_FAILED"
+    (error.code === "WIRE_SPAWN_FAILED" || error.code === "CLI_SPAWN_FAILED")
+  ) {
+    return {
+      kind: "binary_unavailable",
+      summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
+      nextStep: "Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.",
+      runtimeProbe: "failed",
+      authProbe: "failed",
+    };
+  }
+
+  // v1.0 cli-client surfaces async ENOENT (Bun) as CLI_PROCESS_ERROR with
+  // "spawn ... ENOENT" in the message. Map that to binary_unavailable so
+  // the failure message points users at /kimi:setup the same way the v0.4
+  // WIRE_SPAWN_FAILED path did.
+  if (
+    error instanceof RuntimeError &&
+    error.code === "CLI_PROCESS_ERROR" &&
+    /\bENOENT\b/.test(message)
   ) {
     return {
       kind: "binary_unavailable",
@@ -126,6 +144,24 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
     return {
       kind: "startup_failed",
       summary: "the Kimi Wire process exited before the session initialized.",
+      nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
+      runtimeProbe: "failed",
+      authProbe: "failed",
+    };
+  }
+
+  // v1.0 cli-client surfaces non-ENOENT process errors and non-zero
+  // exits as CLI_PROCESS_ERROR / CLI_NONZERO_EXIT. Treat both as
+  // startup-failed for classifier purposes — the next step is the same
+  // (run /kimi:setup) and the distinction between "kimi crashed during
+  // init" vs "kimi exited with status 1" is post-hoc.
+  if (
+    error instanceof RuntimeError &&
+    (error.code === "CLI_PROCESS_ERROR" || error.code === "CLI_NONZERO_EXIT")
+  ) {
+    return {
+      kind: "startup_failed",
+      summary: "the Kimi CLI exited before completing the requested operation.",
       nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
       runtimeProbe: "failed",
       authProbe: "failed",

@@ -15,7 +15,7 @@ import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -48,13 +48,17 @@ describe("job-backed ask/status/result", () => {
       const statusOutput = await runStatus(["--type", "ask"], makeContext(process.cwd(), env));
       const resultOutput = await runResult(["--type", "ask"], makeContext(process.cwd(), env));
       const status = JSON.parse(statusOutput) as { job_id: string; status: string; command_type: string };
-      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
-      const sessionIndex = invocation.argv.indexOf("--session");
       const store = new JobStore(resolvePluginPaths(env));
 
       try {
         const storedJob = store.getJob(status.job_id);
-        expect(storedJob?.kimi_session_id).toBe(invocation.argv[sessionIndex + 1]);
+        // v1.0: kimi-code mints the session id and announces it on stderr;
+        // cli-client captures it and we persist what we received. We can't
+        // pre-correlate it with an argv flag (no --session anymore), so
+        // just verify the row carries a uuid-shaped value.
+        expect(storedJob?.kimi_session_id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        );
       } finally {
         store.close();
       }

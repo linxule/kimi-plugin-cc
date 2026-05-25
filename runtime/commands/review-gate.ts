@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { runCliPromptWithBudget } from "../cli-client.js";
+import { resolveKimiCliCommand } from "../kimi-command.js";
 import { readPluginConfig } from "../config.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
@@ -10,9 +12,7 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobFailed } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../kimi-errors.js";
-import { buildWireClient, resolveAgentFile } from "../kimi-launch.js";
-import type { WireClient } from "../wire/client.js";
-import { KIMI_REVIEW_GATE_TIMEOUT_MS, isTimeoutCode, withTimeout } from "../kimi-timeouts.js";
+import { KIMI_REVIEW_GATE_TIMEOUT_MS, isTimeoutCode } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import {
@@ -23,11 +23,11 @@ import {
   writeArtifact,
 } from "../render.js";
 import type { CommandContext } from "../types.js";
-import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
-import { rejectAllApprovals } from "../wire/approval-dispatcher.js";
-import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
+import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
+import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
 
 const DEFAULT_REVIEW_GATE_MODEL = "kimi-for-coding";
+const REVIEW_GATE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 
 export interface StopHookInput {
   session_id?: string;
@@ -42,6 +42,17 @@ export interface StopHookOutput {
   reason?: string;
   systemMessage?: string;
 }
+
+// v1.0 cutover note (PR 2):
+//
+//   review_gate is the only command that still parses Kimi's stdout
+//   (JSON allow/block decision). The transport switched from
+//   `kimi --wire` to `kimi -p --output-format stream-json`; the parser
+//   stayed.
+//
+//   No cancellation handler — the 8s timeout is the only governor.
+//   review_gate is invoked from Claude Code's Stop hook and runs
+//   strictly foreground-synchronous.
 
 export async function runReviewGateStopHook(
   payload: StopHookInput,
@@ -70,6 +81,11 @@ export async function runReviewGateStopHook(
   const assistantMessage = await extractLastAssistantMessage(payload.transcript_path);
   if (!assistantMessage) {
     return reviewGateSkipped("no assistant message");
+  }
+
+  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
+    const installStatus = await verifyHookInstalled(context.env);
+    maybeWarnHookMissing(installStatus, "review_gate", context.stderr);
   }
 
   try {
@@ -108,39 +124,33 @@ async function executeReviewGate(
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(payload.cwd);
-  // One try/finally for the store + client lifetime. Everything that can
-  // throw — including JobStore construction itself (pragma/exec can fail
-  // after the adapter is open), header write, createJob, buildWireClient,
-  // the wire round-trip — must happen inside it; otherwise an early throw
-  // leaks the SQLite handle. v0.2.3 ordered header-first to close an
-  // orphan-row hole but reopened a store-leak hole. v0.2.4 wraps everything.
   let store: JobStore | undefined;
-  let client: WireClient | undefined;
   try {
     store = new JobStore(paths);
     const userRequest = await extractLastUserMessage(payload.transcript_path);
 
     const jobId = randomUUID();
-    const kimiSessionId = randomUUID();
     const logPath = path.join(paths.logsDir, `review-gate-${jobId}.jsonl`);
-    const agentProfile = resolveAgentFile("runtime/agents/review-gate.yaml");
     const prompt = buildReviewGatePrompt({
       assistantMessage,
       userRequest,
       cwd: payload.cwd,
       repoRoot: repoIdentity.repoRoot,
     });
+    const model =
+      context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL;
 
-    // Write the invocation log header BEFORE creating the job row. If the
-    // header write fails (disk full, permission denied), we'd otherwise leave
-    // a running job row with pid=null,kimi_pid=null that the sweeper can't
-    // see (listRunningJobsWithProcessHints requires at least one non-null pid)
-    // — orphan row. With the header first, a write failure throws before any
-    // row is created. Both paths are now inside the outer try, so the store
-    // handle is closed regardless.
+    // Header-before-job-row mirrors v0.4's reordering (the comment
+    // chain there explains why). If the disk-bound writeInvocationLogHeader
+    // throws (full disk, permission), we'd otherwise leave an orphan
+    // running row with pid=null,kimi_pid=null that the sweeper can't
+    // see. Keep the header first.
     await writeInvocationLogHeader(logPath, {
       commandType: "review_gate",
-      kimiSessionId,
+      // kimi-code assigns the session id; we don't know it until the
+      // call returns. The header carries a "(pending)" placeholder so
+      // post-mortem log diffing still finds the right row.
+      kimiSessionId: "(pending)",
       cwd: payload.cwd,
     });
     const job = store.createJob({
@@ -148,19 +158,14 @@ async function executeReviewGate(
       repo_id: repoIdentity.repoId,
       command_type: "review_gate",
       cwd: payload.cwd,
-      model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
+      model,
       thinking: false,
       background: false,
-      // review_gate runs inside Claude Code's Stop hook. Its companion lifecycle
-      // is bounded by the hook itself, so recording pid here would let
-      // signalJobProcesses() and sweepStaleJobs() SIGTERM the hook companion
-      // mid-flight. kimi_pid is still recorded once the wire client starts, so
-      // orphaned Kimi children remain reachable to the sweeper.
       pid: null,
       kimi_pid: null,
       status: "running",
-      kimi_session_id: kimiSessionId,
-      agent_profile: agentProfile,
+      kimi_session_id: null,
+      agent_profile: REVIEW_GATE_AGENT_PROFILE_PLACEHOLDER,
       prompt_digest: digestPrompt(prompt),
       summary: "Running review gate.",
       final_output_path: null,
@@ -168,61 +173,48 @@ async function executeReviewGate(
       error: null,
     });
 
-    client = buildWireClient({
-      cwd: payload.cwd,
-      env: context.env,
-      sessionId: kimiSessionId,
-      agentFile: agentProfile,
-      model: context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL ?? DEFAULT_REVIEW_GATE_MODEL,
-      thinking: false,
-      logPath,
-      approvalPolicy: rejectAllApprovals(
-        "review_gate is read-only; unexpected approval requests fail the command.",
-      ),
-    });
+    const kimi = resolveKimiCliCommand(context.env);
 
     try {
-      const activeClient = client;
       const activeStore = store;
-      const rendered = await withTimeout(
-        (async () => {
-          await activeClient.start();
-          activeStore.updateRunningJob(job.job_id, { kimi_pid: activeClient.getChildPid() });
-          await activeClient.initialize({
-            protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
-            client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
-            capabilities: {
-              supports_question: false,
-              supports_plan_mode: false,
-            },
-          });
-
-          const completed = await activeClient.prompt(prompt, "review_gate");
-          return renderManagedJobOutput(job, completed.finalText);
-        })(),
+      // runCliPromptWithBudget ties the 8 s timeout to an AbortController
+      // that kills the kimi child on expiry — review_gate runs inside
+      // Claude Code's Stop hook, so a runaway kimi after timeout would
+      // hold model tokens with no way for /kimi:cancel to reach it
+      // (the SQLite row's kimi_pid is null). See reports/17 and 18.
+      const result = await runCliPromptWithBudget(
+        {
+          cwd: payload.cwd,
+          env: context.env,
+          command: kimi.command,
+          prefixArgs: kimi.prefixArgs,
+          prompt,
+          commandLabel: "review_gate",
+          model,
+          logPath,
+        },
         KIMI_REVIEW_GATE_TIMEOUT_MS,
         "review_gate.runtime",
-        // review_gate budgets the entire startup+initialize+prompt round-trip
-        // under one 8s deadline — the prompt phase dominates, so attribute
-        // expirations to the response-timeout family.
-        "response",
       );
+      assertCliResultSuccess(result, "review_gate.runtime");
+      if (result.sessionId !== undefined) {
+        activeStore.updateRunningJob(job.job_id, {
+          kimi_session_id: result.sessionId,
+        });
+      }
+      const finalText = reassembleProseFromRecords(result.records);
+      const rendered = renderManagedJobOutput(job, finalText);
 
       // Cancel-vs-completed race: /kimi:cancel pre-marks the row as
-      // `cancelled` and SIGTERMs the kimi child. If the prompt managed to
-      // return in the SIGTERM→exit window before our wire client picked
-      // up the close, we'd overwrite the cancellation artifact and confuse
-      // the hook's allow/block decision. Check the persisted status before
-      // committing the success path. Mirrors the cancel-after-prompt
-      // pattern already in ask/rescue/review.
+      // `cancelled` and SIGTERMs the worker. If kimi managed to return
+      // in the SIGTERM→exit window before our wire-equivalent picked
+      // up the close, we'd overwrite the cancellation artifact and
+      // confuse the hook's allow/block decision. Check the persisted
+      // status before committing the success path.
       const persisted = activeStore.getJob(job.job_id);
       if (persisted && persisted.status !== "running") {
         throw new RuntimeError(
           getManagedCommandConfig("review_gate").cancellation.errorCodes.cancelled,
-          // Keep the bespoke "before completion artifact was written"
-          // wording — this is a different cancel flow (status-precheck,
-          // not SIGTERM-driven), so the standard cancelMessages don't
-          // describe it accurately.
           "review_gate cancelled before completion artifact was written.",
           "review_gate.runtime",
         );
@@ -242,7 +234,6 @@ async function executeReviewGate(
       throw classified;
     }
   } finally {
-    await client?.close().catch(() => {});
     store?.close();
   }
 }
@@ -289,9 +280,6 @@ function isTimeoutError(error: unknown): boolean {
   if (!(error instanceof RuntimeError)) {
     return false;
   }
-  // Reuse the shared timeout-code predicate for the generic family; the
-  // REVIEW_GATE_KIMI_*_TIMEOUT codes are the prefixed forms emitted by
-  // classifyManagedCommandFailure and stay local.
   return (
     isTimeoutCode(error.code) ||
     error.code === "REVIEW_GATE_KIMI_TIMEOUT" ||
@@ -319,10 +307,20 @@ function buildWarningMessage(error: unknown): string {
       return "Kimi review gate exhausted its step budget; allowing stop.";
     }
 
+    // v0.4 codes from the deleted wire/* path. Kept here so a stale
+    // job row or in-flight test that still produces them maps to the
+    // same allowing-stop language. The v1.0 equivalents
+    // (CLI_NONZERO_EXIT, CLI_PROCESS_ERROR, CLI_ABORTED) get the same
+    // user-visible warning.
     if (
       error.code === "WIRE_SPAWN_FAILED" ||
       error.code === "WIRE_PROCESS_EXITED" ||
-      error.code === "WIRE_REQUEST_FAILED"
+      error.code === "WIRE_REQUEST_FAILED" ||
+      error.code === "CLI_SPAWN_FAILED" ||
+      error.code === "CLI_PROCESS_ERROR" ||
+      error.code === "CLI_NONZERO_EXIT" ||
+      error.code === "CLI_ABORTED" ||
+      error.code === "CLI_NO_SESSION_ID"
     ) {
       return "Kimi review gate is unavailable in this environment; allowing stop.";
     }

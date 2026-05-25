@@ -236,6 +236,73 @@ export function requireSessionId(result, context) {
         },
     });
 }
+/**
+ * Run `kimi -p` under a budget that also tells the subprocess to die
+ * when the budget expires.
+ *
+ * Why this exists separately from `withTimeout`:
+ *
+ *   The generic `withTimeout` (runtime/kimi-timeouts.ts) only rejects
+ *   the outer Promise — it has no handle on the kimi child process.
+ *   review/ask/review-gate previously wrapped `runCliPrompt` with
+ *   `withTimeout` and let the orphaned subprocess keep running until
+ *   it crashed or finished on its own. The reviewers (reports 17 +
+ *   18) flagged this as critical for review_gate in particular: the
+ *   8 s budget fires inside Claude Code's Stop hook, the parent
+ *   returns "allow stop", and a runaway kimi keeps holding the
+ *   SQLite row + model tokens. Subsequent `/kimi:cancel` can't reach
+ *   it because `kimi_pid` is null.
+ *
+ * Behavior:
+ *
+ *   - Owns an internal AbortController. If the caller passes
+ *     `opts.signal`, both signals are linked — abort on either side
+ *     aborts the internal controller.
+ *   - When the budget expires, abort the internal controller and
+ *     reject with `RuntimeError("RESPONSE_TIMEOUT", …)` matching the
+ *     legacy `withTimeout` code shape.
+ *   - Result success path is unchanged from `runCliPrompt`.
+ */
+export async function runCliPromptWithBudget(opts, budgetMs, stage) {
+    const controller = new AbortController();
+    if (opts.signal?.aborted === true) {
+        controller.abort();
+    }
+    const onParentAbort = () => controller.abort();
+    opts.signal?.addEventListener("abort", onParentAbort, { once: true });
+    let timeoutFired = false;
+    let timer;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            timeoutFired = true;
+            controller.abort();
+            reject(new RuntimeError("RESPONSE_TIMEOUT", `${stage} timed out after ${budgetMs}ms.`, stage, {
+                details: {
+                    budget_ms: budgetMs,
+                    command_label: opts.commandLabel ?? null,
+                },
+            }));
+        }, budgetMs);
+        timer.unref();
+    });
+    try {
+        const runPromise = runCliPrompt({ ...opts, signal: controller.signal });
+        const result = await Promise.race([runPromise, timeoutPromise]);
+        if (timeoutFired) {
+            // Defensive — Promise.race might have observed the result first
+            // even though the timer fired in the same microtask tick. The
+            // controller was already aborted, so the subprocess is on its
+            // way down; surface the timeout to the caller.
+            throw new RuntimeError("RESPONSE_TIMEOUT", `${stage} timed out after ${budgetMs}ms (race detected post-result).`, stage);
+        }
+        return result;
+    }
+    finally {
+        if (timer !== undefined)
+            clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", onParentAbort);
+    }
+}
 function buildArgs(opts) {
     const args = [...(opts.prefixArgs ?? [])];
     args.push("--output-format", "stream-json");

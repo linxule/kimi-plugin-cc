@@ -11,7 +11,7 @@ import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 
 // Background --wait returns the artifact text as-is (includes writeArtifact trailing newline)
 const ASK_SUCCESS_BACKGROUND_OUTPUT = "Ask answer from mock Kimi.\n";
