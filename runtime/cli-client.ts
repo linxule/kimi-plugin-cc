@@ -28,6 +28,7 @@ import {
   type StreamJsonOutcome,
   type StreamJsonRecord,
 } from "./stream-json.js";
+import { collectDescendants } from "./process-tree.js";
 
 /** Bytes of stderr retained for diagnostics on completion. Rolling buffer. */
 const STDERR_TAIL_BYTES = 8192;
@@ -72,6 +73,12 @@ export interface CliClientOptions {
   logPath?: string;
   /** Optional cancellation. */
   signal?: AbortSignal;
+  /**
+   * Internal test seam for hosts that block process-listing commands.
+   * Production callers should leave this unset so cancellation uses the
+   * platform process-tree collector.
+   */
+  descendantCollector?: (pid: number) => Promise<number[]>;
   /**
    * Optional callback fired as each stream-json record is parsed. Useful for
    * callers that need to update SQLite phase / status mid-run without waiting
@@ -246,28 +253,60 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     // queued at close time could observe `settled === false` and fire
     // a redundant SIGKILL during the drain window.
     let processClosed = false;
-    const signalChildTree = (signal: NodeJS.Signals) => {
-      if (process.platform !== "win32" && child.pid !== undefined) {
+    // Descendants captured at SIGTERM time, reused for SIGKILL. Critical:
+    // by the time SIGKILL fires (1500ms later), kimi may have died from
+    // SIGTERM while bash grandchildren ignored it. Bash reparents to
+    // launchd (PPID=1), so a fresh PPID-walk from kimi's pid returns
+    // empty and the SIGKILL escalation would miss the surviving
+    // grandchildren entirely. Snapshot once, signal twice.
+    let descendantSnapshot: number[] | undefined;
+    const signalChildTree = async (signal: NodeJS.Signals) => {
+      if (child.pid === undefined) return;
+
+      if (process.platform === "win32") {
+        // Descendant reaping is not implemented on win32; cancel may leave grandchildren alive.
         try {
-          process.kill(-child.pid, signal);
-          return;
+          child.kill(signal);
+        } catch {
+          // Best-effort.
+        }
+        return;
+      }
+
+      // First call (SIGTERM) populates the snapshot before kimi dies.
+      // Second call (SIGKILL) reuses it so a reparented bash subprocess
+      // still gets the kill signal.
+      if (descendantSnapshot === undefined) {
+        descendantSnapshot = await (opts.descendantCollector ?? collectDescendants)(child.pid);
+      }
+      const pids = [child.pid, ...descendantSnapshot];
+      for (const pid of pids) {
+        try {
+          process.kill(pid, signal);
         } catch (err) {
-          // ESRCH means the process group is already gone; EPERM means this
-          // environment rejected group signaling. Other errors also fall
-          // through because cancellation is best-effort.
           const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
           void ignored;
         }
       }
-      try {
-        child.kill(signal);
-      } catch {
-        // Best-effort.
+
+      // Group-kill each pid as defense-in-depth. Each kimi-code Bash tool
+      // subprocess spawns with `detached: true` (per kimi-code 0.1.1
+      // LocalKaos), so every descendant is itself a session leader with
+      // its own pgrp. A pgrp kill on each catches *its* unenumerated
+      // children (e.g. a bash command's own pipeline kids that spawned
+      // after our enumeration). ESRCH/EPERM are silently skipped.
+      for (const pid of pids) {
+        try {
+          process.kill(-pid, signal);
+        } catch (err) {
+          const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
+          void ignored;
+        }
       }
     };
     const onAbort = () => {
       aborted = true;
-      signalChildTree("SIGTERM");
+      void signalChildTree("SIGTERM");
       // Escalate to SIGKILL if the process doesn't exit promptly.
       // v0.4 had this on the wire-client side; v1 inherits the same
       // 1500ms default so a stuck-kimi rescue/ask/review feels
@@ -276,7 +315,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       if (Number.isFinite(escalationMs)) {
         escalationTimer = setTimeout(() => {
           if (processClosed || settled) return;
-          signalChildTree("SIGKILL");
+          void signalChildTree("SIGKILL");
         }, escalationMs);
         escalationTimer.unref();
       }

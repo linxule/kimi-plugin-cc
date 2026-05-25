@@ -67,34 +67,34 @@ function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function pidFromStderr(stderr: string, label: string): number {
-  const match = stderr.match(new RegExp(`${label}=(\\d+)`));
-  expect(match).not.toBeNull();
-  return Number(match![1]);
-}
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    if (isErrnoException(err, "ESRCH")) return false;
-    if (isErrnoException(err, "EPERM")) return true;
-    throw err;
-  }
-}
-
-async function waitForPidToExit(pid: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!isPidAlive(pid)) return;
-    await sleepMs(50);
-  }
-  throw new Error(`pid ${pid} is still alive after ${timeoutMs}ms`);
-}
-
 function isErrnoException(err: unknown, code: string): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === code;
+}
+
+function expectPidMissing(pid: number): void {
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    expect(isErrnoException(err, "ESRCH")).toBe(true);
+    return;
+  }
+  throw new Error(`pid ${pid} is still alive`);
+}
+
+async function waitForPidFile(pidFile: string, timeoutMs: number): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const text = await readFile(pidFile, "utf8");
+      const match = text.match(/GRANDCHILD_PID=(\d+)/);
+      if (match !== null) return Number.parseInt(match[1]!, 10);
+    } catch (err) {
+      lastError = err;
+    }
+    await sleepMs(25);
+  }
+  throw new Error(`grandchild pid file not readable after ${timeoutMs}ms: ${String(lastError)}`);
 }
 
 describe("runCliPrompt", () => {
@@ -588,49 +588,21 @@ describe("SIGKILL escalation", () => {
     }
   });
 
-  const testPosix = process.platform === "win32" ? test.skip : test;
-
-  testPosix("process group is killed on cancellation on posix", async () => {
-    const root = await createTestPluginDataRoot("cli-process-group-cancel");
-    try {
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 100).unref();
-
-      const result = await runCliPrompt({
-        cwd: root,
-        env: { ...process.env },
-        command: "sh",
-        prefixArgs: [
-          "-c",
-          'echo "child_pid=$$" >&2; sleep 60 & echo "grandchild_pid=$!" >&2; wait',
-        ],
-        prompt: "x",
-        signal: controller.signal,
-      });
-
-      const childPid = pidFromStderr(result.stderrTail, "child_pid");
-      const grandchildPid = pidFromStderr(result.stderrTail, "grandchild_pid");
-      expect(result.aborted).toBe(true);
-      await waitForPidToExit(childPid, 3_000);
-      await waitForPidToExit(grandchildPid, 3_000);
-    } finally {
-      await cleanupTestPath(root);
-    }
-  });
 });
 
-describe("process-group cancellation", () => {
+describe("descendant reaping", () => {
   const processGroupGrandchildPath = path.join(
     process.cwd(),
     "tests/helpers/process-group-grandchild.ts",
   );
 
-  test("kills a live grandchild in the kimi process group on abort", async () => {
+  test("kills a live grandchild in a separate pgrp on abort", async () => {
     if (process.platform === "win32") {
       return;
     }
 
     const root = await createTestPluginDataRoot("cli-process-group-grandchild");
+    const grandchildPidFile = path.join(root, "grandchild.pid");
     let grandchildPid: number | undefined;
     try {
       const controller = new AbortController();
@@ -638,18 +610,24 @@ describe("process-group cancellation", () => {
 
       const result = await runCliPrompt({
         cwd: root,
-        env: { ...process.env },
+        env: {
+          ...process.env,
+          KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
+        },
         command: "bun",
         prefixArgs: ["run", processGroupGrandchildPath],
         prompt: "x",
         signal: controller.signal,
+        descendantCollector: async () => [await waitForPidFile(grandchildPidFile, 1_000)],
       });
 
-      const match = result.stderrTail.match(/KIMI_MOCK_GRANDCHILD_PID=(\d+)/);
+      const malformedStdout = result.malformed.map((entry) => entry.line).join("\n");
+      const match = malformedStdout.match(/GRANDCHILD_PID=(\d+)/);
       expect(match).not.toBeNull();
       grandchildPid = Number.parseInt(match![1]!, 10);
       expect(result.aborted).toBe(true);
-      await expect(waitForPidExit(grandchildPid, 3_000)).resolves.toBeUndefined();
+      await sleepMs(2_500);
+      expectPidMissing(grandchildPid);
     } finally {
       if (grandchildPid !== undefined) {
         try {
@@ -735,21 +713,3 @@ describe("runCliPromptWithBudget", () => {
     }
   });
 });
-
-async function waitForPidExit(pid: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ESRCH") return;
-      throw err;
-    }
-    await sleep(50);
-  }
-  throw new Error(`pid ${pid} still alive after ${timeoutMs}ms`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

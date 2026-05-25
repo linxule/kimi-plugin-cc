@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0-alpha.3 — 2026-05-25
+
+### Fixed
+
+- **Cancellation: grandchild orphan (CRITICAL, production-observed).** kimi-code 0.1.1's internal `LocalKaos` spawns every Bash tool subprocess with `detached: true` deliberately — so kimi-code can group-kill its own tools during cancellation. This gives bash subprocesses their own PGID (sibling to kimi-code's PGID, not nested). The alpha.2 process-group fix (`process.kill(-kimi_pid, ...)`) therefore only killed kimi-code itself; the bash grandchildren survived as orphans. Reproduced in production smoke testing — `/kimi:cancel` left `bun test` running indefinitely after the cancel completed.
+
+  **Fix:** On POSIX, enumerate the descendant tree once at abort time (BFS over `/proc/*/status` on Linux, `ps -axo pid=,ppid=` snapshot on macOS, `pgrep -P` recursive as fallback; depth bounded at 8, pid count bounded at 512). The snapshot is reused for both SIGTERM and the SIGKILL escalation 1500ms later — re-enumerating at SIGKILL would miss any grandchildren whose parent (kimi) died from SIGTERM and reparented them to launchd, since the PPID-walk roots at kimi-code's now-dead pid. After per-pid kill, each descendant ALSO gets a negative-pid (process-group) kill as defense-in-depth, because each bash subprocess is itself a session leader and may have its own children that our enumeration missed (e.g. just-spawned pipeline kids). Win32 is unchanged — descendant reaping on Windows is a known limitation, documented in `runtime/cli-client.ts`.
+
+  **Regression coverage:** New `tests/helpers/process-group-grandchild.ts` spawns its sleep grandchild with `{ detached: true }` to mirror kimi-code's actual production shape. New test in `tests/runtime/cli-client.test.ts` parses the grandchild PID via stdout, aborts the parent, waits for the SIGKILL escalation window, then asserts ESRCH on the grandchild. Confirmed to fail on the alpha.2 process-group-only path. Replaced an older sh-based test that could pass via shell SIGHUP cleanup semantics rather than actual descendant signaling.
+
+  **Why this is a real safety regression rather than UX polish:** under `/kimi:rescue` an approved long-running tool (e.g. `bun test`, `cargo check`) kept consuming model tokens, file descriptors, and CPU after the user thought the job was cancelled. For build/test commands the workspace impact is bounded by the rescue allowlist's read-only-shape constraints, but the denial-of-cancellation is unacceptable for a write-capable surface. Surfaced by `/kimi:challenge` Finding 4 during smoke testing (challenge mode literally predicted this exact gap) and confirmed empirically.
+
+### Investigation notes
+
+- kimi-code 0.1.1's `detached: true` is a deliberate design choice in its `LocalKaos.exec` abstraction, paired with kimi-code-side `process.kill(-pid, ...)` cancellation. The behavior is structural and unlikely to change in the 0.1.x line. There is no env var or flag to disable it (confirmed by binary-strings inspection and source-level grep of the bundled Node binary at `~/.kimi-code/bin/kimi`).
+- Production smoke testing observed a three-level PGID chain: plugin (own PGID from our `detached: true`) → kimi-code (own PGID from kimi-code's spawn shape) → bash (own PGID from kimi-code's `LocalKaos.exec`). All three are siblings, not nested. This is the shape the alpha.3 fix now handles.
+
+
+
 ## 1.0.0-alpha.2 — 2026-05-25
 
 ### Highlights
