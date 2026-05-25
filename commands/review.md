@@ -1,5 +1,6 @@
 ---
 description: Run a read-only Kimi review over the current working tree changes or a base ref diff.
+argument-hint: "[--base <ref>] [-m <model>] [--no-thinking] [extra prose]"
 disable-model-invocation: true
 ---
 

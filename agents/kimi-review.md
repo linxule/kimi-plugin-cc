@@ -3,6 +3,7 @@ name: kimi-review
 description: Use this agent when Claude wants an independent second-pair-of-eyes review from Kimi over a working-tree diff or branch diff. Choose this agent for read-only diff review — multi-file changes, design-risk changes, or when the user explicitly asks for another reviewer. Not for implementation work (see kimi-rescue) or free-form Q&A (see kimi-ask).
 model: sonnet
 tools: Bash
+color: cyan
 ---
 
 # kimi:review

@@ -1,5 +1,6 @@
 ---
 description: Ask Kimi a read-only question in free-form prose mode.
+argument-hint: "[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--no-thinking] <prompt>"
 disable-model-invocation: true
 ---
 

@@ -3,6 +3,7 @@ name: kimi-ask
 description: Use this agent when the user wants Kimi to answer a free-form question about the repository in prose — explain a module, trace a flow, compare alternatives, or reason about a concept in context. Choose this agent over kimi-review when the user wants a narrative answer rather than diff-focused findings, and over kimi-rescue when the user wants understanding rather than implementation.
 model: sonnet
 tools: Bash
+color: cyan
 ---
 
 # kimi:ask

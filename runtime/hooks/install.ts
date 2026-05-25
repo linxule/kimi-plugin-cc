@@ -2,41 +2,35 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { evaluateInstalled, parseManagedBlock } from "./managed-block.js";
+import { evaluateInstalled } from "./managed-block.js";
+import { tryBuildExpectedHookCommand } from "./install-paths.js";
 
 /**
  * Verify that the kimi-plugin-cc PreToolUse hook is installed and
- * structurally valid in `~/.kimi-code/config.toml`.
+ * structurally valid in `~/.kimi-code/config.toml`, AND that its
+ * `command = "..."` exactly matches the canonical shell command this
+ * companion would write for the current env.
  *
- * PR 4 hardening:
+ * PR 4 hardened the grammar (matcher rejection, duplicate detection,
+ * etc.). The pre-tag audit (reports 27 + 28) found two further gaps,
+ * both fixed here:
  *
- *   PR 2 implemented this as a substring check (`includes("kimi-plugin-cc-managed")`
- *   AND `includes("approval-hook.js")`). PR 4 reviewers (Codex + Claude)
- *   independently flagged the gap: stray comments, partial references,
- *   or a malformed block with `matcher = "*"` (which kimi-code rejects
- *   and silently disables) all passed the substring check while the
- *   hook was effectively absent. Rescue's "refuse if hook missing"
- *   gate was therefore bypassable.
+ *   1. Optional `expectedHookPath` parameter → callers (rescue, ask,
+ *      review, review-gate) all omitted it, so a managed block
+ *      referencing a stale or missing hook script silently passed. The
+ *      verifier now ALWAYS reconstructs the expected command from the
+ *      current env (via `tryBuildExpectedHookCommand`) and equality-
+ *      checks. There is no opt-out short of `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1`.
  *
- *   The verifier now shares its grammar with `setup.ts` via
- *   `runtime/hooks/managed-block.ts::parseManagedBlock`. Both gates
- *   reject the same shapes:
- *
- *     - duplicate managed blocks (two installs raced)
- *     - orphan markers (manual edit)
- *     - missing [[hooks]] table
- *     - missing event = "PreToolUse"
- *     - missing or empty command
- *     - presence of any `matcher = ...` line
- *
- *   The hook-script-path check is optional: callers (ask/review/etc.)
- *   that just want to know "is something installed and minimally
- *   valid" can pass undefined; setup --check passes the expected dist
- *   path so we also catch stale-path drift.
+ *   2. The path check was substring (`commandPath.includes(hookPath)`),
+ *      which a crafted command like `true # /path/to/approval-hook.js`
+ *      passed: `/bin/sh -c "true # ..."` runs only `true` (exit 0),
+ *      which kimi-code's hook runner treats as ALLOW. Equality on the
+ *      full canonical shell command closes this.
  *
  * Tests / setup probes can opt out via
- * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` so the warning doesn't pollute
- * mock-driven CI output.
+ * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` — that bypass also disables
+ * rescue's refusal gate (documented in `docs/safety.md`).
  */
 export interface HookInstallStatus {
   installed: boolean;
@@ -48,12 +42,26 @@ export interface HookInstallStatus {
 
 export async function verifyHookInstalled(
   env: NodeJS.ProcessEnv,
-  options: { expectedHookPath?: string } = {},
 ): Promise<HookInstallStatus> {
   const configPath = resolveKimiCodeConfigPath(env);
   if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
     return { installed: true, configPath };
   }
+
+  // Canonical expected shell command for the current env. If this
+  // can't be resolved (KIMI_PLUGIN_CC_NODE_BIN not absolute,
+  // install-paths module can't infer plugin root, etc.) treat the hook
+  // as un-verifiable — installed=false with a structured reason. The
+  // caller's stderr warning surfaces the underlying error code.
+  const expected = tryBuildExpectedHookCommand(env);
+  if ("error" in expected) {
+    return {
+      installed: false,
+      reason: `unable to resolve canonical hook command for this companion: ${expected.error.message}`,
+      configPath,
+    };
+  }
+
   let raw: string;
   try {
     raw = await readFile(configPath, "utf8");
@@ -73,46 +81,12 @@ export async function verifyHookInstalled(
     };
   }
 
-  if (options.expectedHookPath !== undefined) {
-    const check = evaluateInstalled(raw, options.expectedHookPath);
-    return {
-      installed: check.installed,
-      reason: check.reason,
-      configPath,
-    };
-  }
-
-  // No expected path supplied — caller just wants "is a structurally
-  // valid managed block present?". This is the common path for
-  // ask/review/etc., which only need to know whether to emit the
-  // missing-hook warning. Stale-path drift is caught at
-  // `/kimi:setup --check` time, not here.
-  const { state } = parseManagedBlock(raw);
-  switch (state.kind) {
-    case "absent":
-      return { installed: false, reason: "no kimi-plugin-cc PreToolUse hook found in kimi-code config", configPath };
-    case "orphan":
-      return {
-        installed: false,
-        reason: `${state.detail} marker. Run /kimi:setup --uninstall to clear, then /kimi:setup.`,
-        configPath,
-      };
-    case "duplicate":
-      return {
-        installed: false,
-        reason: `duplicate managed blocks. Run /kimi:setup --uninstall, then /kimi:setup.`,
-        configPath,
-      };
-    case "found":
-      if (!state.valid) {
-        return {
-          installed: false,
-          reason: state.invalidReason ?? "managed block failed validation",
-          configPath,
-        };
-      }
-      return { installed: true, configPath };
-  }
+  const check = evaluateInstalled(raw, expected.command);
+  return {
+    installed: check.installed,
+    reason: check.reason,
+    configPath,
+  };
 }
 
 function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {

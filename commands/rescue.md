@@ -1,5 +1,6 @@
 ---
 description: Run a write-capable Kimi rescue against the current repository with optional background execution and resume behavior.
+argument-hint: "[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] <prompt>"
 disable-model-invocation: true
 ---
 

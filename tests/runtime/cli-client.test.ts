@@ -247,6 +247,42 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("aborts the child if abort fires during the pre-spawn mkdir window (Codex H1 race)", async () => {
+    // Audit finding (report 28 Codex H1): `await mkdir` is a yield
+    // point between the pre-spawn aborted check and the
+    // addEventListener call. If abort fires during the mkdir await,
+    // the signal is already in an aborted state by the time
+    // addEventListener runs — but addEventListener doesn't re-fire
+    // for already-aborted signals. Without the post-attach
+    // `if (signal.aborted) onAbort()` recovery, the child is orphaned.
+    //
+    // We reproduce the race by passing a logPath that forces mkdir
+    // and aborting on the next microtask after spawn launches.
+    const root = await createTestPluginDataRoot("cli-client-mkdir-abort-race");
+    try {
+      const controller = new AbortController();
+      // Abort on the immediately-next microtask. By the time the cli-client
+      // adds its abort listener (after mkdir resolves), the signal will
+      // already be in aborted state.
+      Promise.resolve().then(() => {
+        controller.abort();
+      });
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "should be killed" }],
+          delayMs: 5_000,
+          signal: controller.signal,
+          logPath: path.join(root, "nested", "deeper", "log.jsonl"),
+        }),
+      );
+      // The recovery path called onAbort() → SIGTERM was sent → result.aborted=true.
+      expect(result.aborted).toBe(true);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("rejects with CLI_ABORTED when the signal is already aborted at entry", async () => {
     const root = await createTestPluginDataRoot("cli-client-pre-aborted");
     try {

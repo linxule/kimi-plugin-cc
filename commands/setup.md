@@ -1,5 +1,6 @@
 ---
 description: Verify local Kimi companion readiness and manage review-gate state.
+argument-hint: "[--check | --uninstall | --enable-review-gate | --disable-review-gate]"
 disable-model-invocation: true
 ---
 

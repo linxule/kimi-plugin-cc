@@ -155,7 +155,7 @@ export function parseManagedBlock(contents) {
         lines,
     };
 }
-export function evaluateInstalled(contents, expectedHookPath) {
+export function evaluateInstalled(contents, expectedCommand) {
     const { state } = parseManagedBlock(contents);
     if (state.kind === "absent") {
         return { installed: false, reason: "managed block is not present", state };
@@ -183,10 +183,10 @@ export function evaluateInstalled(contents, expectedHookPath) {
             state,
         };
     }
-    if (!state.commandPath.includes(expectedHookPath)) {
+    if (state.commandPath !== expectedCommand) {
         return {
             installed: false,
-            reason: `installed block references a different hook script. expected ${expectedHookPath}; got ${state.commandPath}.`,
+            reason: `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
             state,
         };
     }

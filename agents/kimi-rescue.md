@@ -3,6 +3,7 @@ name: kimi-rescue
 description: Use this agent proactively when the user wants to delegate a substantial investigation or implementation task to Kimi, especially multi-step bug hunts, cross-file refactors, or work the main Claude thread would rather offload than context-switch through. Choose this agent when the work is too large for an inline response but the user clearly wants it handed off, not just reviewed.
 model: sonnet
 tools: Bash
+color: magenta
 ---
 
 # kimi:rescue

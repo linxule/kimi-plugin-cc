@@ -189,6 +189,18 @@ describe("evaluateRescueHookRequest", () => {
         "eslint . --fix=bugs",
         "prettier --write=files .",
         "ruff check --fix .",
+        // --output= file write escapes (audit report 28 Codex M2):
+        // these all let the command write to an arbitrary file outside
+        // the workspace, bypassing rescue's file-edit allowlist.
+        "git diff --output=/tmp/exfil.diff",
+        "git diff --output=secret.txt",
+        "git log --output=/tmp/log.txt",
+        "git show --output=/tmp/show.txt HEAD",
+        "jq . --output=/tmp/data.json",
+        "curl example.com --output /tmp/payload",
+        "openssl rand --output=/tmp/key.bin 32",
+        "git format-patch --output-directory=/tmp/patches HEAD~3",
+        "git format-patch --output-dir=/tmp/patches HEAD~3",
         // sed -i suffix forms
         "rg x . | sed -i.bak 's/a/b/'",
         "rg x . | sed --in-place=.bak 's/a/b/'",

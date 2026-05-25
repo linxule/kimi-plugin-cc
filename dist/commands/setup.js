@@ -38,14 +38,14 @@
 // TOML manipulation is line-based, not via a TOML parser. The marker
 // block is owned by us; the rest of the file is the user's, untouched.
 import { spawn } from "node:child_process";
-import { access, mkdir, readFile, rename, unlink, writeFile, } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rename, unlink, writeFile, } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
+import { buildHookShellCommand, resolveHookScriptPath, resolveNodeBinary, } from "../hooks/install-paths.js";
 import { evaluateInstalled, parseManagedBlock, } from "../hooks/managed-block.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
@@ -185,7 +185,8 @@ async function runInstall(configPath, hookScriptPath, reviewGateEnabled, warning
 }
 async function runCheck(configPath, hookScriptPath, reviewGateEnabled, warnings, context) {
     const existing = await readConfigSafe(configPath);
-    const installedCheck = evaluateInstalled(existing, hookScriptPath);
+    const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
+    const installedCheck = evaluateInstalled(existing, expectedCommand);
     if (!installedCheck.installed) {
         return {
             action: "check",
@@ -340,11 +341,23 @@ async function writeConfigAtomic(configPath, contents) {
     // call uses a unique temp path so two concurrent installs/uninstalls
     // can race without clobbering each other's intermediate file (PR 4
     // reviewer finding — fixed-path tmp file was a race surface).
+    //
+    // Mode: tighten to 0o600 (owner-only read/write) BEFORE rename. The
+    // kimi-code config file holds API keys and tokens; the user's existing
+    // file is typically 0o600, and umask-only would silently downgrade it
+    // to 0o644 after our rewrite. Audit report 28 (Codex M1) tracked this.
+    // chmod the temp file before rename so the final inode never exists at
+    // a wider mode.
     await mkdir(path.dirname(configPath), { recursive: true });
     const suffix = randomBytes(8).toString("hex");
     const tmpPath = `${configPath}.kimi-plugin-cc.${process.pid}.${suffix}.tmp`;
     try {
         await writeFile(tmpPath, contents, "utf8");
+        if (process.platform !== "win32") {
+            // Windows file modes are emulated; skip the chmod to avoid
+            // platform-specific noise. The threat model excludes Windows.
+            await chmod(tmpPath, 0o600);
+        }
         await rename(tmpPath, configPath);
     }
     catch (err) {
@@ -458,54 +471,6 @@ function isEndMarker(trimmedLine) {
     return /^#\s*===\s*END\s+kimi-plugin-cc-managed\s*===\s*$/.test(trimmedLine);
 }
 // ----- Block content -----------------------------------------------------
-/**
- * Resolved Node binary that kimi-code will spawn. We write an absolute
- * path into the managed block so the hook keeps firing when kimi-code
- * is launched from a GUI/LaunchAgent with a sanitized PATH (nvm /
- * asdf / mise users). PR 4 reviewers flagged bare `node` as a
- * fail-open class: kimi-code's `/bin/sh -c "node ..."` exits 127 on
- * missing-node, which the hook protocol treats as ALLOW.
- *
- * PR 5 reviewer hardening: the override is now required to be an
- * absolute path. A user setting `KIMI_PLUGIN_CC_NODE_BIN=node` would
- * otherwise write bare `node` into the managed block, defeating the
- * absolute-path invariant the docs promise.
- */
-function resolveNodeBinary(env) {
-    const override = env.KIMI_PLUGIN_CC_NODE_BIN;
-    if (override === undefined || override.length === 0) {
-        return process.execPath;
-    }
-    if (!path.isAbsolute(override)) {
-        throw new RuntimeError("SETUP_NODE_BIN_NOT_ABSOLUTE", [
-            `KIMI_PLUGIN_CC_NODE_BIN must be an absolute path; got ${JSON.stringify(override)}.`,
-            `kimi-code spawns hooks via /bin/sh -c, where a bare command relies on the shell's PATH at hook execution time.`,
-            `Use an absolute path so the hook keeps firing under sanitized-PATH launches.`,
-        ].join(" "), "setup.node-bin", { details: { override } });
-    }
-    return override;
-}
-/**
- * Build the exact shell command string that `/bin/sh -c "<command>"`
- * needs to spawn the hook. Single source of truth for:
- *
- *   - what the managed block writes into kimi-code's config
- *     (`command = "..."` inside [[hooks]])
- *   - what the shell probe runs via `spawn("/bin/sh", ["-c", ...])`
- *
- * Keeping these two callers in lockstep is load-bearing: PR 5
- * reviewer (Codex C2) caught a drift where the probe quoted both
- * arguments and the managed block did not. A path with spaces passed
- * the probe and silently failed under kimi-code's real hook runner —
- * `/bin/sh -c "/Users/some user/node /Users/some user/hook.js"` parses
- * as `/Users/some` with arguments `user/node`, `/Users/some`,
- * `user/hook.js`. Hook exits non-2 → kimi-code treats as allow →
- * safety contract collapses.
- */
-function buildHookShellCommand(hookScriptPath, env) {
-    const nodeBin = resolveNodeBinary(env);
-    return `${shellSingleQuote(nodeBin)} ${shellSingleQuote(hookScriptPath)}`;
-}
 function buildManagedBlock(hookScriptPath, lineEnding = "\n") {
     const shellCommand = buildHookShellCommand(hookScriptPath, process.env);
     const commandLine = `command = ${tomlBasicString(shellCommand)}`;
@@ -565,43 +530,6 @@ function assertHookPathTomlSafe(hookScriptPath) {
 function resolveKimiCodeConfigPath(env) {
     const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
     return path.join(home, "config.toml");
-}
-/**
- * Resolve the absolute path to the compiled hook script.
- *
- * Resolution order:
- *
- *   1. `KIMI_PLUGIN_CC_HOOK_SCRIPT` override — tests / advanced users.
- *   2. Sibling resolution from this file's URL. setup.ts (or setup.js)
- *      lives at `<root>/{runtime,dist}/commands/`. The hook artifact
- *      lives at `<root>/dist/hooks/approval-hook.js`. We walk up to
- *      `<root>` and append `dist/hooks/approval-hook.js`.
- */
-function resolveHookScriptPath(env) {
-    if (env.KIMI_PLUGIN_CC_HOOK_SCRIPT && env.KIMI_PLUGIN_CC_HOOK_SCRIPT.length > 0) {
-        return env.KIMI_PLUGIN_CC_HOOK_SCRIPT;
-    }
-    // `import.meta.url` resolves to either:
-    //   - file://.../dist/commands/setup.js   (installed plugin)
-    //   - file://.../runtime/commands/setup.ts (dev / bun test)
-    const here = fileURLToPath(import.meta.url);
-    const parts = here.split(path.sep);
-    // Pin to the canonical suffix `{runtime|dist}/commands/setup.{ts,js}`
-    // — anchoring to a specific tail keeps ancestor directories named
-    // "runtime" or "dist" from confusing the lookup.
-    if (parts.length < 3) {
-        throw resolveHookFailure(here);
-    }
-    const tailParent = parts[parts.length - 2];
-    const tailGrandparent = parts[parts.length - 3];
-    if (tailParent !== "commands" || (tailGrandparent !== "runtime" && tailGrandparent !== "dist")) {
-        throw resolveHookFailure(here);
-    }
-    const pluginRoot = parts.slice(0, parts.length - 3).join(path.sep) || path.sep;
-    return path.join(pluginRoot, "dist", "hooks", "approval-hook.js");
-}
-function resolveHookFailure(here) {
-    return new RuntimeError("SETUP_RESOLVE_HOOK_FAILED", `Could not infer plugin root from setup module path ${here}. Set KIMI_PLUGIN_CC_HOOK_SCRIPT to the absolute path of dist/hooks/approval-hook.js.`, "setup.resolve-hook", { details: { here } });
 }
 async function assertHookScriptExists(hookScriptPath) {
     try {
@@ -733,9 +661,6 @@ function spawnProbe(command, args, env, label) {
             resolve({ ok: false, reason: `${label}: failed to write probe stdin: ${err.message}` });
         }
     });
-}
-function shellSingleQuote(value) {
-    return `'${value.replaceAll("'", "'\\''")}'`;
 }
 function truncate(value, max) {
     if (value.length <= max)

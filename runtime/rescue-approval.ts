@@ -22,8 +22,39 @@ import type { HookDecision } from "./hooks/approval-policy.js";
 //   shell-quote pipeline parsing) doesn't have to be re-derived. The
 //   thin dispatcher at the top translates between the two surfaces.
 
-const MUTATING_FLAGS_EXACT = new Set(["--fix", "--write", "-w", "--apply", "--in-place", "-i"]);
-const MUTATING_FLAG_PREFIXES = ["--fix=", "--write=", "--apply=", "--in-place="];
+// Flags that direct a command to write its output to a file. Audit
+// report 28 (Codex M2) found that `git diff --output=secret.txt` slipped
+// through the allowlist: the path argument bypasses rescue's
+// workspace-bound file-edit check because the write happens via the
+// tool's own --output semantics, not via shell redirection. Treating
+// these as mutating closes that class (git diff, jq, dot, curl, openssl,
+// many compilers — anything that advertises `--output=PATH`).
+//
+// `-o` short form is intentionally NOT blanket-banned: too many
+// read-only commands use it for non-file purposes (rg -o, awk -o,
+// grep --only-matching aliases). The space-separated `--output PATH`
+// two-arg form is implicitly rejected because the scanner doesn't pair
+// args — `--output` exact match below catches the flag itself.
+const MUTATING_FLAGS_EXACT = new Set([
+  "--fix",
+  "--write",
+  "-w",
+  "--apply",
+  "--in-place",
+  "-i",
+  "--output",
+  "--output-directory",
+  "--output-dir",
+]);
+const MUTATING_FLAG_PREFIXES = [
+  "--fix=",
+  "--write=",
+  "--apply=",
+  "--in-place=",
+  "--output=",
+  "--output-directory=",
+  "--output-dir=",
+];
 const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);
 const GIT_READONLY_SUBCOMMANDS = new Set(["status", "diff", "show", "log", "grep", "blame"]);
 const CARGO_SUBCOMMANDS = new Set(["check", "clippy", "test"]);

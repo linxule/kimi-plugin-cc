@@ -177,6 +177,17 @@ export async function runCliPrompt(opts) {
             }
         };
         opts.signal?.addEventListener("abort", onAbort, { once: true });
+        // Re-check `aborted` AFTER attaching the listener. `await mkdir` above
+        // is the first synchronous yield point after the pre-spawn aborted
+        // check — if abort fired during that await, the signal is already in
+        // an aborted state by the time we reach addEventListener, which does
+        // NOT re-fire for already-aborted signals (per the AbortSignal spec).
+        // Without this re-check the spawned child is orphaned: SIGTERM/SIGKILL
+        // is never sent and the process keeps holding the SQLite row + model
+        // tokens. Audit report 28 (Codex H1) tracked this fix.
+        if (opts.signal?.aborted === true) {
+            onAbort();
+        }
         // Swap the pre-attached early listener for the real handler. These two
         // statements are synchronous and execute as one unit; no event can
         // interleave between marking earlyErrorHandled and attaching the new

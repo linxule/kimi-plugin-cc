@@ -3,6 +3,7 @@ name: kimi-challenge
 description: Use this agent when Claude wants Kimi to run an adversarial review that challenges the implementation approach, design choices, tradeoffs, and assumptions rather than just flagging defects. Choose this agent when the user wants pushback on whether the chosen approach is the right one, not a tighter pass over implementation defects (see kimi-review for that).
 model: sonnet
 tools: Bash
+color: cyan
 ---
 
 # kimi:challenge

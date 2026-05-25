@@ -1,11 +1,25 @@
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { evaluateInstalled, parseManagedBlock } from "./managed-block.js";
-export async function verifyHookInstalled(env, options = {}) {
+import { evaluateInstalled } from "./managed-block.js";
+import { tryBuildExpectedHookCommand } from "./install-paths.js";
+export async function verifyHookInstalled(env) {
     const configPath = resolveKimiCodeConfigPath(env);
     if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
         return { installed: true, configPath };
+    }
+    // Canonical expected shell command for the current env. If this
+    // can't be resolved (KIMI_PLUGIN_CC_NODE_BIN not absolute,
+    // install-paths module can't infer plugin root, etc.) treat the hook
+    // as un-verifiable — installed=false with a structured reason. The
+    // caller's stderr warning surfaces the underlying error code.
+    const expected = tryBuildExpectedHookCommand(env);
+    if ("error" in expected) {
+        return {
+            installed: false,
+            reason: `unable to resolve canonical hook command for this companion: ${expected.error.message}`,
+            configPath,
+        };
     }
     let raw;
     try {
@@ -26,45 +40,12 @@ export async function verifyHookInstalled(env, options = {}) {
             configPath,
         };
     }
-    if (options.expectedHookPath !== undefined) {
-        const check = evaluateInstalled(raw, options.expectedHookPath);
-        return {
-            installed: check.installed,
-            reason: check.reason,
-            configPath,
-        };
-    }
-    // No expected path supplied — caller just wants "is a structurally
-    // valid managed block present?". This is the common path for
-    // ask/review/etc., which only need to know whether to emit the
-    // missing-hook warning. Stale-path drift is caught at
-    // `/kimi:setup --check` time, not here.
-    const { state } = parseManagedBlock(raw);
-    switch (state.kind) {
-        case "absent":
-            return { installed: false, reason: "no kimi-plugin-cc PreToolUse hook found in kimi-code config", configPath };
-        case "orphan":
-            return {
-                installed: false,
-                reason: `${state.detail} marker. Run /kimi:setup --uninstall to clear, then /kimi:setup.`,
-                configPath,
-            };
-        case "duplicate":
-            return {
-                installed: false,
-                reason: `duplicate managed blocks. Run /kimi:setup --uninstall, then /kimi:setup.`,
-                configPath,
-            };
-        case "found":
-            if (!state.valid) {
-                return {
-                    installed: false,
-                    reason: state.invalidReason ?? "managed block failed validation",
-                    configPath,
-                };
-            }
-            return { installed: true, configPath };
-    }
+    const check = evaluateInstalled(raw, expected.command);
+    return {
+        installed: check.installed,
+        reason: check.reason,
+        configPath,
+    };
 }
 function resolveKimiCodeConfigPath(env) {
     // KIMI_CODE_HOME mirrors kimi-code's own override (apps/kimi-code reads

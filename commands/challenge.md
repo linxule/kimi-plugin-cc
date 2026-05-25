@@ -1,5 +1,6 @@
 ---
 description: Run a read-only Kimi challenge review that challenges assumptions and surfaces safer alternatives.
+argument-hint: "[--base <ref>] [-m <model>] [--no-thinking] [extra prose]"
 disable-model-invocation: true
 ---
 

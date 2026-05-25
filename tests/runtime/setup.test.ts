@@ -214,9 +214,11 @@ describe("setup managed-block installer", () => {
 
     const result = await runSetup(["--check"], makeContext(env));
     expect(result.probe).toBe("failed");
-    // setup --check rejects a block that doesn't point at the current
-    // dist path so users notice path drift after a reinstall.
-    expect(result.probeError ?? "").toContain("different hook script");
+    // setup --check rejects a block whose `command = "..."` doesn't
+    // equal the canonical shell command this companion would write,
+    // so users notice path drift after a reinstall. Audit reports 27/28
+    // tightened this from substring to equality.
+    expect(result.probeError ?? "").toContain("does not match the canonical command");
     expect(result.nextStep).toContain("repair");
   });
 
@@ -406,6 +408,17 @@ describe("setup managed-block installer", () => {
     expect(after).toContain("another = 42\r\n");
     // The managed block we appended is also CRLF.
     expect(after).toMatch(/=== BEGIN kimi-plugin-cc-managed[^\n]*\r\n/);
+  });
+
+  test("install writes the config with mode 0o600 (audit M1 — preserves API-key secrecy)", async () => {
+    if (process.platform === "win32") return;
+    const { env, configPath } = await makeCase("install-mode-600");
+    await runSetup([], makeContext(env));
+    const { stat } = await import("node:fs/promises");
+    const stats = await stat(configPath);
+    // Lower 9 bits are the permission triplet; mask off the file-type bits.
+    // Expect 0o600 — owner read/write only, no group or other access.
+    expect(stats.mode & 0o777).toBe(0o600);
   });
 
   test("KIMI_PLUGIN_CC_HOOK_SCRIPT override is honored end-to-end", async () => {

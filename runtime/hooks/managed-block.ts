@@ -195,7 +195,15 @@ export function parseManagedBlock(contents: string): ParsedManagedBlock {
 
 /**
  * Convenience helper: is the supplied config in a "managed block is
- * installed and valid" state, with the expected hook script path?
+ * installed and valid" state, with the EXACT expected hook command?
+ *
+ * `expectedCommand` is the canonical byte string the installer would
+ * write into `command = "..."` for the current env — produced by
+ * `buildHookShellCommand(resolveHookScriptPath(env), env)`. Equality is
+ * exact, not substring: the substring form let a crafted command like
+ * `true # /path/to/approval-hook.js` pass while `/bin/sh -c` ran only
+ * `true` (no-op allow). Audit reports 27/28 (Codex C1 + Claude HIGH-2)
+ * tracked this fix.
  *
  * Returns a structured result so callers can produce informative
  * messages (vs a bare boolean).
@@ -208,7 +216,7 @@ export interface InstalledCheck {
 
 export function evaluateInstalled(
   contents: string,
-  expectedHookPath: string,
+  expectedCommand: string,
 ): InstalledCheck {
   const { state } = parseManagedBlock(contents);
   if (state.kind === "absent") {
@@ -237,10 +245,10 @@ export function evaluateInstalled(
       state,
     };
   }
-  if (!state.commandPath.includes(expectedHookPath)) {
+  if (state.commandPath !== expectedCommand) {
     return {
       installed: false,
-      reason: `installed block references a different hook script. expected ${expectedHookPath}; got ${state.commandPath}.`,
+      reason: `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
       state,
     };
   }
