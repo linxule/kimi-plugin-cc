@@ -4,14 +4,14 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 1.0.0-alpha.1 (kimi-code, subprocess transport). v0.4.x is preserved at the `v0.4.0` tag (with a `v0.4-maintenance` branch cut from that tag, once published) for users still on kimi-cli.
+- **Version**: 1.0.0-alpha.2 (kimi-code, subprocess transport). v0.4.x is preserved at the `v0.4.0` tag (with a `v0.4-maintenance` branch cut from that tag, once published) for users still on kimi-cli.
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 
 ## Directory layout
 
 ```
-.claude-plugin/     Plugin manifest (plugin.json, marketplace.json) — v1.x uses kimi-marketplace-v1 + kimi-v1
+.claude-plugin/     Plugin manifest (plugin.json, marketplace.json) — id stays as kimi/kimi-marketplace (no rename for v1); v0.4 users opt-in to v1 by updating the same install
 commands/           Slash command markdown — thin wrappers over companion.sh
 agents/             Claude Code subagent definitions (kimi-rescue, kimi-review, kimi-challenge, kimi-ask)
 hooks/              Stop hook for the review gate (kimi-code-side PreToolUse hook lives at runtime/hooks/)

@@ -1,15 +1,15 @@
 {
-  "name": "kimi-marketplace-v1",
+  "name": "kimi-marketplace",
   "owner": {
     "name": "linxule"
   },
   "metadata": {
-    "description": "Single-plugin marketplace for kimi-plugin-cc (v1.x). v0.x users stay on the kimi-marketplace name, pinned to the v0.4.0 tag (or the v0.4-maintenance branch cut from that tag, once published).",
-    "version": "1.0.0-alpha.1"
+    "description": "Single-plugin marketplace for kimi-plugin-cc. v1.x targets kimi-code; v0.4.x users who need the Python Kimi CLI Wire transport should pin to the v0.4.0 tag (or the v0.4-maintenance branch cut from that tag, once published).",
+    "version": "1.0.0-alpha.2"
   },
   "plugins": [
     {
-      "name": "kimi-v1",
+      "name": "kimi",
       "source": "./"
     }
   ]

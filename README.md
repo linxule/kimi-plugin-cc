@@ -8,14 +8,14 @@ This is a [Claude Code](https://claude.ai/code) plugin that drives the [kimi-cod
 - **No orchestration layer required.** No ACP, no cloud broker, no shared API keys. The plugin talks directly to a locally-installed `kimi` binary using `kimi -p --output-format stream-json`.
 - **Full agent capabilities, safely bounded.** Kimi can read files, write code, run shell commands, and resume where it left off — all bounded by a [workspace allowlist](./runtime/rescue-approval.ts) invoked via the PreToolUse hook. Read-only commands enforce read-only at the hook layer, not the prompt.
 
-> **Migrating from v0.4?** v0.4.x targeted the Python [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and stays available at the [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag (`v0.4-maintenance` branch is cut from that tag for ongoing fixes — see the linked tag if the branch is not yet pushed). v1.0 is a hard cut to kimi-code with a renamed marketplace so existing installs don't auto-upgrade. See [docs/migration.md](./docs/migration.md) for the step-by-step upgrade.
+> **Migrating from v0.4?** v0.4.x targeted the Python [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and stays available at the [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag (`v0.4-maintenance` branch is cut from that tag for ongoing fixes — see the linked tag if the branch is not yet pushed). v1.0 is a hard cut to kimi-code — install kimi-code first, then `/plugin update kimi` will upgrade you in place. See [docs/migration.md](./docs/migration.md) for the step-by-step upgrade.
 
 ## Try it in 60 seconds
 
 ```
 # Prerequisite: install kimi-code from https://kimi.com/code/docs
 /plugin marketplace add linxule/kimi-plugin-cc
-/plugin install kimi-v1@kimi-marketplace-v1
+/plugin install kimi@kimi-marketplace
 /kimi:setup
 /kimi:review "review my current diff"
 ```
@@ -93,7 +93,7 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 ```
 /plugin marketplace add linxule/kimi-plugin-cc
-/plugin install kimi-v1@kimi-marketplace-v1
+/plugin install kimi@kimi-marketplace
 /kimi:setup
 ```
 
@@ -114,7 +114,7 @@ Then run `/kimi:setup` to install the safety hook.
 /kimi:setup --uninstall
 ```
 
-Removes the managed block from `~/.kimi-code/config.toml`. The plugin itself can be uninstalled via `/plugin uninstall kimi-v1`.
+Removes the managed block from `~/.kimi-code/config.toml`. The plugin itself can be uninstalled via `/plugin uninstall kimi`.
 
 ## Prerequisites
 

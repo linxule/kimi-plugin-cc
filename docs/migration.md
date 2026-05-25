@@ -17,10 +17,10 @@ If you're already running v0.4.x with the Python Kimi CLI, you have a choice:
 | Session id | Client-assigned UUID, passed via `--session` | Server-minted, captured from kimi's stderr announce |
 | Web UI integration | `kimi web` + PATCH `/api/sessions/{id}` for human-readable titles | kimi-code vis-server (read-only — no PATCH support) |
 | Replay log format | Wire JSON-RPC events (`{direction, message}`) | cli-client NDJSON (`{event, record}`) |
-| Marketplace name | `kimi-marketplace` (plugin: `kimi`) | `kimi-marketplace-v1` (plugin: `kimi-v1`) |
+| Marketplace name | `kimi-marketplace` (plugin: `kimi`) — unchanged | same `kimi-marketplace` / `kimi` (v1 upgrades in place) |
 | Rescue allowlist | In-band approval policy on the Wire client | Out-of-band via the PreToolUse hook (same allowlist code) |
 
-The marketplace + plugin rename means existing v0.4 installs **cannot auto-upgrade** to v1.0. This is intentional. The kimi-code dependency, the new safety story, and the changed session-id semantics all require an explicit opt-in.
+The marketplace + plugin IDs are unchanged from v0.4, so an existing install can update in place — but only after kimi-code is installed locally. Without kimi-code the new transport has nothing to spawn, so the order matters: install kimi-code first, then update the plugin.
 
 ## Upgrade procedure
 
@@ -47,21 +47,25 @@ If you set any of these env vars for v0.4, review them before continuing — v1.
 | `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` | Bypasses both the "is the hook installed" warning AND rescue's refusal gate. Only set for tests / setup probes. |
 | `CLAUDE_PLUGIN_DATA` | Plugin data root. Unchanged from v0.4. |
 
-### 3. Uninstall the v0.4 plugin
+### 3. Update the plugin in place
+
+From an existing v0.4 install:
 
 ```
-/plugin uninstall kimi
-/plugin marketplace remove kimi-marketplace
+/plugin marketplace update linxule
+# then in the /plugin UI: select kimi → "Update now"
 ```
 
-### 4. Install the v1.0 plugin
+Or fresh install on a machine that doesn't have v0.4:
 
 ```
 /plugin marketplace add linxule/kimi-plugin-cc
-/plugin install kimi-v1@kimi-marketplace-v1
+/plugin install kimi@kimi-marketplace
 ```
 
-### 5. Run setup
+(v0.4 ALPHA NOTE: v1.0.0-alpha.1 was briefly tagged with renamed IDs `kimi-v1` / `kimi-marketplace-v1`. The rename was rolled back in v1.0.0-alpha.2. If you happened to install alpha.1 by those names, uninstall first: `/plugin uninstall kimi-v1`, `/plugin marketplace remove kimi-marketplace-v1`, then follow the procedure above.)
+
+### 4. Run setup
 
 ```
 /kimi:setup
@@ -76,7 +80,7 @@ This writes the PreToolUse hook to `~/.kimi-code/config.toml` and runs a two-lay
 - **Probe timed out** (5s budget). Usually means kimi-code or the Node binary is wedged on cold start. Re-run; if persistent, file an issue with `/kimi:setup --check` output.
 - **Hook script not found** — `dist/hooks/approval-hook.js` is missing. Reinstall the plugin or run `bun run build` if you're on a local clone. Code: `SETUP_HOOK_SCRIPT_MISSING`.
 
-### 6. Verify
+### 5. Verify
 
 ```
 /kimi:setup --check
@@ -91,7 +95,7 @@ If you're running the plugin via `claude --plugin-dir ~/kimi-plugin-cc` rather t
 ```bash
 cd ~/kimi-plugin-cc
 git fetch --tags origin
-git checkout v1.0.0-alpha.1
+git checkout v1.0.0-alpha.2
 # Verify dist/ is in sync; if you previously deleted it locally, rebuild:
 ls dist/hooks/approval-hook.js >/dev/null || bun run build
 # Restart Claude Code so the new agents/ and dist/ register
@@ -111,8 +115,8 @@ If something is wrong, the v0.4 install is one step away:
 
 ```
 /kimi:setup --uninstall            # removes the v1.0 PreToolUse hook
-/plugin uninstall kimi-v1
-/plugin marketplace remove kimi-marketplace-v1
+/plugin uninstall kimi
+/plugin marketplace remove kimi-marketplace
 # If the v0.4-maintenance branch is published:
 /plugin marketplace add linxule/kimi-plugin-cc@v0.4-maintenance
 # Otherwise, pin to the v0.4.0 tag:

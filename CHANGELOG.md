@@ -1,10 +1,33 @@
 # Changelog
 
+## 1.0.0-alpha.2 — 2026-05-25
+
+### Highlights
+
+Same alpha.1 functionality; the rollback of the marketplace/plugin rename is the only meaningful change. v0.4 installs can now update in place to v1 (`/plugin update kimi`), so long as kimi-code is installed locally first.
+
+### Reverted
+
+- **Marketplace and plugin rename.** alpha.1 shipped with the IDs renamed to `kimi-marketplace-v1` / `kimi-v1` as a defensive measure against v0.4 users auto-upgrading into a kimi-code dependency they didn't have. For a plugin at this scale the friction of forcing a fresh marketplace registration + reinstall is more cost than the auto-upgrade risk is worth, so alpha.2 restores the original `kimi-marketplace` / `kimi` ids. The kimi-code prerequisite is now communicated through README + migration docs rather than the install path itself.
+
+### Migration from alpha.1
+
+If you installed `kimi-v1@kimi-marketplace-v1` during the brief alpha.1 window:
+
+```
+/plugin uninstall kimi-v1
+/plugin marketplace remove kimi-marketplace-v1
+/plugin marketplace update linxule          # or: marketplace add linxule/kimi-plugin-cc
+/plugin install kimi@kimi-marketplace
+```
+
+Then reload Claude Code and re-run `/kimi:setup` (the managed block is keyed by version marker — alpha.1 markers will be detected as stale and refreshed).
+
 ## 1.0.0-alpha.1 — 2026-05-25
 
 ### Highlights
 
-Hard cut from the Python Kimi CLI Wire transport to the kimi-code Node.js subprocess transport. v0.4.x stays available at the [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag (with a `v0.4-maintenance` branch cut from that tag for ongoing fixes — see the tag if the branch is not yet pushed). v1.0 is an explicit opt-in upgrade — the marketplace and plugin id changed (`kimi-marketplace-v1` / `kimi-v1`) so existing installs do not auto-pull v1.
+Hard cut from the Python Kimi CLI Wire transport to the kimi-code Node.js subprocess transport. v0.4.x stays available at the [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag (with a `v0.4-maintenance` branch cut from that tag for ongoing fixes — see the tag if the branch is not yet pushed). alpha.1 briefly renamed the marketplace and plugin ids to `kimi-marketplace-v1` / `kimi-v1`; alpha.2 reverted that. Read the alpha.2 entry above for the upgrade path.
 
 The alpha shipped after **two multi-agent audit rounds**: a comprehensive cross-PR pass over the five-commit cutover and a focused re-review of the audit-fix diff. Convergent findings from Claude code-reviewer + Codex closed before tag — exact-command hook verification, abort-race recovery, 0o600 config-mode preservation, an `--output=*` rescue-allowlist gap, and a TOML-decode false-fail for apostrophe-in-path installs. See [docs/safety.md](./docs/safety.md) for the hardened safety story.
 
@@ -28,12 +51,9 @@ See [docs/migration.md](./docs/migration.md) for the step-by-step upgrade.
 
 `/kimi:ask` is read-only in v1.0. v0.4 ran ask under Kimi CLI agent profiles that allowed write tools; the hook tightens this to match the documented "narrative answer, not implementation" contract.
 
-### Renamed marketplace + plugin id
+### Marketplace + plugin id (reverted in alpha.2)
 
-- `kimi-marketplace` → `kimi-marketplace-v1`
-- `kimi` → `kimi-v1`
-
-Existing v0.4 installs continue working unchanged. Upgrade is explicit; see [docs/migration.md](./docs/migration.md) for the full step-by-step procedure (uninstall the v0.4 plugin + marketplace, install the v1 plugin from the renamed marketplace, run `/kimi:setup` to install the PreToolUse hook — `/kimi:setup` is load-bearing for safety, not optional).
+alpha.1 renamed the marketplace and plugin ids (`kimi-marketplace` → `kimi-marketplace-v1`, `kimi` → `kimi-v1`) so existing v0.4 installs couldn't auto-pull v1. **alpha.2 reverted that rename**; see the alpha.2 entry above. For posterity the original intent was: kimi-code is a hard dependency in v1, and the rename was a defensive forcing function for users to acknowledge the new prerequisite before upgrading. The revert traded that defense for a much smoother upgrade UX, with the kimi-code prerequisite communicated through README + migration docs instead.
 
 ### Removed
 
