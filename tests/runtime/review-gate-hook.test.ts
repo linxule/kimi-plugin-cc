@@ -109,6 +109,11 @@ describe("review gate stop hook", () => {
       expect(invocation.argv).toContain("stream-json");
       expect(invocation.argv).toContain("-m");
       expect(invocation.argv).toContain("kimi-for-coding");
+      // v1.0 alpha.4: review-gate sets `thinking: false` in the options
+      // bag for future kimi-code support, but the runtime MUST NOT emit
+      // `--no-thinking` in argv — kimi-code 0.1.1 has no such flag and
+      // crashes on unknown options. (Round 2 Codex finding.)
+      expect(invocation.argv).not.toContain("--no-thinking");
 
       const repoIdentity = await resolveRepoIdentity(process.cwd());
       const store = new JobStore(paths);

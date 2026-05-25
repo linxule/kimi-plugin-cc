@@ -1,6 +1,6 @@
 ---
 description: Run a read-only Kimi challenge review that challenges assumptions and surfaces safer alternatives.
-argument-hint: "[--base <ref>] [-m <model>] [--no-thinking] [extra prose]"
+argument-hint: "[--base <ref>] [-m <model>] [extra prose]"
 disable-model-invocation: true
 ---
 
@@ -12,10 +12,8 @@ Supported flags:
 
 - `--base <ref>` — challenge against a branch/commit diff instead of the working tree
 - `-m`, `--model <name>`
-- `--thinking` — enable Kimi's extended reasoning (on by default; kept for explicit intent)
-- `--no-thinking` — disable Kimi's extended reasoning
 - trailing text — adversarial focus or framing to steer the challenge
 
-Challenge runs foreground-synchronously; it does not support `--background` or `--wait`.
+Kimi's extended reasoning is always on for `challenge`. Budget is 30 min so adversarial review has time to dig. Challenge runs foreground-synchronously; it does not support `--background` or `--wait`.
 
 Return the companion stdout verbatim.

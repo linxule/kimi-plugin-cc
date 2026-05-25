@@ -145,7 +145,7 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
     return {
       kind: "max_steps_reached",
       summary: "Kimi exhausted its step budget before finalizing the turn.",
-      nextStep: "Retry with a more focused prompt or a higher step budget, or rerun with --no-thinking.",
+      nextStep: "Retry with a more focused prompt or a higher step budget.",
       runtimeProbe: "ok",
       authProbe: "ok",
     };
@@ -181,7 +181,7 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       return {
         kind: "response_timeout",
         summary: "Kimi started and accepted the prompt but never returned a final response.",
-        nextStep: "Retry with `--no-thinking`; if the response still hangs, check local Kimi version and report upstream.",
+        nextStep: "Reduce the prompt scope (or for /kimi:ask and /kimi:rescue, retry with --background to detach). If the response still hangs after a fresh run, check local Kimi version and report upstream.",
         runtimeProbe: "ok",
         authProbe: "ok",
       };

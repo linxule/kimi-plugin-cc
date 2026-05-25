@@ -191,13 +191,25 @@ async function executeReviewGate(
           prompt,
           commandLabel: "review_gate",
           model,
+          // Intent: thinking-off so the 8s Stop-hook budget is achievable.
+          // Mechanism: currently advisory — kimi-code 0.1.1 has no CLI
+          // flag for this; control is config-based (default_thinking /
+          // [thinking].mode). The field carries intent through the
+          // contract; when upstream adds a per-spawn flag, buildArgs will
+          // translate it. (Round 2 Codex finding.)
+          thinking: false,
           logPath,
         },
         KIMI_REVIEW_GATE_TIMEOUT_MS,
         "review_gate.runtime",
       );
       assertCliResultSuccess(result, "review_gate.runtime");
-      if (result.sessionId !== undefined) {
+      if (result.sessionId !== undefined && result.sessionId.length > 0) {
+        // length>0 guard matches the other commands (Kimi alpha.4
+        // challenge finding #3 — defense-in-depth, since
+        // extractSessionIdFromStderr returns undefined on no-match and
+        // can't synthesize empty strings today, but the guard locks the
+        // SQLite contract independent of upstream behavior).
         activeStore.updateRunningJob(job.job_id, {
           kimi_session_id: result.sessionId,
         });

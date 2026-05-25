@@ -9,14 +9,14 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
-import { KIMI_ASK_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
+import { KIMI_RESCUE_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 export { describeMissingResult } from "../background-spawn.js";
 // v1.0 cutover note (PR 3):
 //
@@ -38,11 +38,6 @@ export { describeMissingResult } from "../background-spawn.js";
 const AUTO_RESUME_PATTERN = /\b(continue|resume|keep going|keep working|apply the top fix|dig deeper)\b/i;
 const RESCUE_SUMMARY_MAX = 120;
 const RESCUE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
-// Rescue inherits the ask budget — longer than review since it may
-// perform multi-step apply/test/verify loops. Match v0.4's
-// KIMI_ASK_PROMPT_TIMEOUT_MS to avoid silent regression for users
-// with long-running rescue sessions.
-const RESCUE_PROMPT_TIMEOUT_MS = KIMI_ASK_PROMPT_TIMEOUT_MS;
 export async function runRescue(argv, context) {
     const parsed = parseRescueArgs(argv);
     const paths = resolvePluginPaths(context.env);
@@ -174,13 +169,20 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             signal: handlers.signal,
             // SIGKILL escalation defaults to 1500ms inside cli-client —
             // matches v0.4's cancellation.ts behavior for the wire client.
-        }, RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
+        }, KIMI_RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "rescue.runtime");
         }
         assertCliResultSuccess(result, "rescue.runtime");
-        if (result.sessionId !== undefined && result.sessionId !== job.kimi_session_id) {
+        if (result.sessionId !== undefined &&
+            result.sessionId.length > 0 &&
+            result.sessionId !== job.kimi_session_id) {
+            // length>0 guard: empty-string capture would poison the row. (Kimi
+            // alpha.4 challenge finding #3.)
             store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+        }
+        if (job.kimi_session_id === null) {
+            warnIfSessionIdMissing(result, "rescue", job.job_id, context.stderr);
         }
         const finalText = reassembleProseFromRecords(result.records);
         const rendered = renderManagedJobOutput(job, finalText);

@@ -63,7 +63,7 @@ describe("command output mode enforcement", () => {
     const repoRoot = await createGitRepoFixture("companion-review-repo");
 
     try {
-      const result = await runCompanion(["review", "--no-thinking"], {
+      const result = await runCompanion(["review"], {
         ...process.env,
         CLAUDE_PLUGIN_DATA: pluginDataRoot,
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",
@@ -85,7 +85,7 @@ describe("command output mode enforcement", () => {
     const repoRoot = await createGitRepoFixture("companion-challenge-repo");
 
     try {
-      const result = await runCompanion(["task", "challenge", "--no-thinking"], {
+      const result = await runCompanion(["task", "challenge"], {
         ...process.env,
         CLAUDE_PLUGIN_DATA: pluginDataRoot,
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",

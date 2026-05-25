@@ -422,6 +422,11 @@ function buildArgs(opts) {
             args.push("--skills-dir", dir);
         }
     }
+    // NOTE: `opts.thinking === false` is intentionally NOT translated into a
+    // `--no-thinking` argv flag. kimi-code 0.1.1 rejects unknown options and
+    // has no per-spawn thinking control — the Round 2 multi-agent review
+    // caught this. The option stays in CliClientOptions for future wiring
+    // when upstream adds the flag (see field doc).
     // -p accepts the prompt as the option value. We pass it as a separate argv
     // entry so prompts with leading dashes or whitespace are not interpreted as
     // additional flags.

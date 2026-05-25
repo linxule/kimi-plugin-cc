@@ -21,13 +21,19 @@ function looksLikeFlag(token) {
     // Short flag: a single dash followed by exactly one letter (`-r`, `-m`).
     return /^-[a-zA-Z]$/.test(token);
 }
-const ASK_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>, --thinking, --no-thinking";
-const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>, --thinking, --no-thinking";
+const ASK_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+// Thinking-on is always-on for user-facing commands in v1.0. review-gate
+// pins thinking=false via the cli-client options bag instead of an argv
+// flag (see runtime/cli-client.ts::CliClientOptions). The parser rejects
+// --thinking and --no-thinking with a hard error so a documented-removed
+// flag doesn't get silently accepted as a no-op.
+const THINKING_FLAG_REMOVED_MESSAGE = "--thinking / --no-thinking were removed in v1.0. Thinking is always on for user-facing commands.";
 export function parseAskArgs(argv) {
     let model;
-    // Thinking is on by default across ask/review/challenge/rescue. Users opt out
-    // with --no-thinking. The review-gate path sets thinking: false explicitly in
-    // its runtime caller, so this default does not affect the gate.
+    // Thinking is on by default across ask/review/challenge/rescue. The
+    // parser rejects --thinking / --no-thinking; review-gate's runtime
+    // caller pins thinking=false via CliClientOptions instead.
     let thinking = true;
     let background = false;
     let wait = false;
@@ -84,11 +90,8 @@ export function parseAskArgs(argv) {
                 break;
             }
             case "--thinking":
-                thinking = true;
-                break;
             case "--no-thinking":
-                thinking = false;
-                break;
+                throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
             default:
                 if (looksLikeFlag(token)) {
                     throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ask. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
@@ -116,7 +119,7 @@ export function parseAskArgs(argv) {
     };
 }
 export function parseReviewArgs(argv, commandName = "review") {
-    const parsed = parseKnownFlags(argv, new Set(["--base", "--background", "--wait", "-m", "--model", "--thinking", "--no-thinking"]), commandName);
+    const parsed = parseKnownFlags(argv, new Set(["--base", "--background", "--wait", "-m", "--model"]), commandName);
     return {
         base: parsed.base,
         background: parsed.background,
@@ -184,11 +187,8 @@ export function parseRescueArgs(argv) {
                 break;
             }
             case "--thinking":
-                thinking = true;
-                break;
             case "--no-thinking":
-                thinking = false;
-                break;
+                throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
             default:
                 if (looksLikeFlag(token)) {
                     throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for rescue. Supported flags: ${RESCUE_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
@@ -269,13 +269,16 @@ function parseKnownFlags(argv, knownFlags, commandName) {
             break;
         }
         if (!knownFlags.has(token)) {
+            if (token === "--thinking" || token === "--no-thinking") {
+                throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
+            }
             if (looksLikeFlag(token)) {
                 // Wrapper agents routinely hallucinate flags like `--file` /
                 // `--context` because that shape is common in other CLIs. Silently
                 // slurping them into focus text produced a bloated prompt that
                 // looked like a hang. Hard-fail with the supported list inline so
                 // the error message itself is the correction.
-                throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${commandName}. Supported flags: --base <ref>, -m/--model <name>, --thinking, --no-thinking. Use \`--\` before flag-shaped focus text to pass it through.`, "args.parse");
+                throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${commandName}. Supported flags: --base <ref>, -m/--model <name>. Use \`--\` before flag-shaped focus text to pass it through.`, "args.parse");
             }
             trailingTokens = argv.slice(index);
             break;
@@ -312,15 +315,12 @@ function parseKnownFlags(argv, knownFlags, commandName) {
             case "--wait":
                 wait = true;
                 break;
-            case "--thinking":
-                thinking = true;
-                break;
-            case "--no-thinking":
-                thinking = false;
-                break;
             // The early `if (!knownFlags.has(token))` gate above means we only
             // reach this switch with tokens that ARE in knownFlags, and every
             // member is handled above. A `default` arm would be unreachable.
+            // --thinking and --no-thinking are NOT in knownFlags any more (v1.0
+            // removed them); the early gate above hard-fails on them with
+            // THINKING_FLAG_REMOVED_MESSAGE.
         }
     }
     return {

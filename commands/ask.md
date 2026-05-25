@@ -1,6 +1,6 @@
 ---
 description: Ask Kimi a read-only question in free-form prose mode.
-argument-hint: "[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--no-thinking] <prompt>"
+argument-hint: "[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] <prompt>"
 disable-model-invocation: true
 ---
 
@@ -16,7 +16,7 @@ Supported flags:
 - `--resume <job-id-or-session-id>` — resume a specific prior ask session without a new prompt payload
 - `--fresh` — force a new ask session id instead of reusing a prior session
 - `-m`, `--model <name>`
-- `--thinking` — enable Kimi's extended reasoning (on by default; this flag is a no-op now, kept for explicit intent)
-- `--no-thinking` — disable Kimi's extended reasoning (opt out of the new default)
+
+Kimi's extended reasoning is always on for `ask`. Budgets are sized for the thinking-on path (15 min) so a real session has headroom.
 
 Return the companion stdout verbatim.

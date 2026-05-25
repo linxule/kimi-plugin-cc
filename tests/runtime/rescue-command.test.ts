@@ -145,6 +145,11 @@ describe("rescue command lifecycle", () => {
       expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("rescue");
       expect(invocation.argv).toContain("--output-format");
       expect(invocation.argv).toContain("stream-json");
+      // v1.0 alpha.4: rescue runs thinking-on always. Locks the contract
+      // against future regressions that re-introduce --no-thinking via
+      // some new caller path. (Round 2 code-reviewer finding.)
+      expect(invocation.argv).not.toContain("--no-thinking");
+      expect(invocation.argv).not.toContain("--thinking");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);

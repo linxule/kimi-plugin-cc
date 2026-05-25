@@ -39,6 +39,31 @@ export function reassembleProseFromRecords(records) {
     return out;
 }
 /**
+ * Loud-fail warning when kimi finished a job but never announced a
+ * session id on stderr. We persist `kimi_session_id` as NULL in that
+ * case (the row is unresumable), and the user is silently surprised
+ * later when `-r` or `/kimi:replay` returns nothing.
+ *
+ * The right surface is human-readable stderr per the LLM-caller
+ * discipline invariant — load-bearing context still goes via the SQLite
+ * row (`kimi_session_id IS NULL`), but the user sees this warning
+ * inline immediately after the prompt completes so they know resume is
+ * unavailable for this job.
+ *
+ * Called at the end of every command that captures sessionId (review,
+ * challenge, ask, rescue). Review-gate intentionally skips: it's a Stop
+ * hook with no resume semantics and we don't want a runtime warning to
+ * leak into Claude Code's transcript on every assistant turn.
+ */
+export function warnIfSessionIdMissing(result, commandLabel, jobId, stderr) {
+    if (result.sessionId !== undefined && result.sessionId.length > 0) {
+        return;
+    }
+    stderr.write(`[${commandLabel}] kimi did not announce a session id for job ${jobId}. ` +
+        `Resume and replay will not work for this job. ` +
+        `If this happens repeatedly, check kimi-code's stderr format (the " To resume this session" line) and report upstream.\n`);
+}
+/**
  * Translate a cli-client `CliClientResult` into the kind of error
  * surface ask/review/rescue commands have always thrown when the
  * underlying transport reported a failure.

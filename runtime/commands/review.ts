@@ -19,7 +19,7 @@ import type { CommandContext } from "../types.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 
 // v1.0 cutover note (PR 2):
 //
@@ -146,8 +146,19 @@ export async function runReview(
     // Persist whichever session id kimi announced. Review never resumes,
     // but the id is the only handle for post-hoc replay against
     // ~/.kimi-code/sessions/.
-    if (result.sessionId !== undefined) {
+    if (result.sessionId !== undefined && result.sessionId.length > 0) {
+      // Tighten on length>0 so a degenerate empty-string capture doesn't
+      // poison the row — consumers reading SQLite distinguish "missing"
+      // (NULL) from "captured" (non-empty UUID) only via NULL-ness.
+      // (Kimi alpha.4 challenge finding #3.)
       store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+    }
+    // Match ask/rescue: gate on the JOB row's pre-call session id so that
+    // a future --resume code path won't warn on a resumed review whose
+    // prior session id remains valid even if this turn didn't re-announce.
+    // Today review never resumes, so the gate is always true at call time.
+    if (job.kimi_session_id === null) {
+      warnIfSessionIdMissing(result, commandType, job.job_id, context.stderr);
     }
 
     const finalText = reassembleProseFromRecords(result.records);

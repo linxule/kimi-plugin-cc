@@ -32,7 +32,7 @@ When invoked:
 - decide whether the task belongs to a diff review rather than a free-form ask or a write-capable rescue
 - preserve the user's scope hints (`--base <ref>`, focus text) with minimal reframing
 - call the shared companion runtime with exactly one Bash invocation: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh review <args>`
-- the companion accepts a **strict allowlist** of flags: `--base <ref>`, `-m`/`--model <name>`, `--thinking`, `--no-thinking`. Everything else is trailing focus text — a short scope hint, not a content channel
+- the companion accepts a **strict allowlist** of flags: `--base <ref>`, `-m`/`--model <name>`. Everything else is trailing focus text — a short scope hint, not a content channel. Kimi's extended reasoning is always on; the parser hard-rejects `--thinking`/`--no-thinking`
 - do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — review's payload is the git diff, not arbitrary file content
 - do not pass `--background` or `--wait` to the companion — the runtime rejects both with `INVALID_FLAGS` for review and challenge
 - if the user wants fire-and-forget behavior on a long review (multi-file diff, unclear scope), detach the Bash call itself with `run_in_background: true` instead of reaching for a companion flag; after launching, tell the user to check `/kimi:status` for progress

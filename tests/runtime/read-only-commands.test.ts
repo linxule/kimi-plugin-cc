@@ -44,7 +44,7 @@ describe("read-only command handlers", () => {
     const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
 
     try {
-      const result = await runAsk(["--no-thinking", "What", "changed?"], makeContext(process.cwd(), env));
+      const result = await runAsk(["What", "changed?"], makeContext(process.cwd(), env));
       const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
         argv: string[];
         env: { KIMI_PLUGIN_CC_CMD: string | null };
@@ -58,6 +58,10 @@ describe("read-only command handlers", () => {
       expect(invocation.argv).toContain("stream-json");
       expect(invocation.argv).toContain("-p");
       expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("ask");
+      // v1.0 alpha.4: ask runs thinking-on always. Only review-gate's
+      // internal caller pins thinking=false. (Kimi alpha.4 finding #1.)
+      expect(invocation.argv).not.toContain("--no-thinking");
+      expect(invocation.argv).not.toContain("--thinking");
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
@@ -70,7 +74,7 @@ describe("read-only command handlers", () => {
     const env = makeMockEnv(pluginDataRoot, "review-success", invocationPath);
 
     try {
-      const result = await runReview(["--no-thinking"], makeContext(repoRoot, env), "review");
+      const result = await runReview([], makeContext(repoRoot, env), "review");
       const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
         argv: string[];
         env: { KIMI_PLUGIN_CC_CMD: string | null };

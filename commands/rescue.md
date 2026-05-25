@@ -16,7 +16,7 @@ Supported flags:
 - `--resume <job-id-or-session-id>` — resume a specific prior rescue session without a new prompt payload
 - `--fresh` — force a new rescue session id instead of reusing a prior session
 - `-m`, `--model <name>`
-- `--thinking` — enable Kimi's extended reasoning (on by default; kept for explicit intent)
-- `--no-thinking` — disable Kimi's extended reasoning
+
+Kimi's extended reasoning is always on for `rescue`. Budget is 30 min for multi-step apply/test/verify loops; use `--background` for sessions that need to run longer.
 
 Return the companion stdout verbatim.

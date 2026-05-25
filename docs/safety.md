@@ -139,6 +139,12 @@ If you want to silence the warning (e.g., you're running tests, or you've delibe
 - **Custom kimi-code skill libraries that bypass the hook.** Hooks fire on tool calls, not on skill activations. A skill that calls `Bash` will be hooked; a skill that performs file ops via a Node binding that doesn't surface as a tool call won't be. The default kimi-code skill catalog uses the standard tool surface.
 - **The host (Claude Code) itself.** kimi-plugin-cc constrains kimi-code, not Claude. Claude's own tool permissions live in `~/.claude/settings.json`.
 
+## Known limitation: Node version manager switches
+
+The verifier does exact equality on the installed `command = "..."` against the canonical command for the **current** `process.execPath`. If you use `nvm`, `asdf`, `mise`, or `fnm` and switch the active Node version after `/kimi:setup`, the canonical command's Node binary path changes and the verifier rejects the previously-installed block. Every read-only command will emit a hook-missing warning; `/kimi:rescue` will refuse to run.
+
+The workaround is to re-run `/kimi:setup` after any Node version switch. The strict behavior is deliberate — a hash-based verification scheme that would survive Node moves is in the v1.1 roadmap (see [ROADMAP-TO-GA.md](../ROADMAP-TO-GA.md), item G2/H4); shipping it pre-GA would add surface area without addressing a security gap.
+
 ## Reporting safety issues
 
 If you find a way to coax /kimi:review, /kimi:challenge, /kimi:review_gate, or /kimi:ask into running a non-read tool — or to make /kimi:rescue mutate `.git/` or escape the workspace — please open a GitHub security advisory rather than a public issue.

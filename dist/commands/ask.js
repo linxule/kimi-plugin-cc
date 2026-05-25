@@ -16,7 +16,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 // v1.0 cutover note (PR 2):
 //
 //   The v0.4 wire client/initialize/prompt sequence is replaced with a
@@ -147,8 +147,19 @@ export async function executeAskJob(jobId, prompt, context, options) {
         // sessions this is the only chance to record it. For resumed
         // sessions it should match the input, but capture anyway in case
         // kimi-code mints a new id on each turn.
-        if (result.sessionId !== undefined && result.sessionId !== job.kimi_session_id) {
+        if (result.sessionId !== undefined &&
+            result.sessionId.length > 0 &&
+            result.sessionId !== job.kimi_session_id) {
+            // length>0 guard: empty-string capture would poison the row. The
+            // warning helper's null-ish check would also fire but only after
+            // the bad write. (Kimi alpha.4 challenge finding #3.)
             store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+        }
+        // For ask, missing session id breaks both -r (latest-resume) and
+        // explicit --resume <id>. Warn loudly so the user notices before
+        // they try to continue the conversation.
+        if (job.kimi_session_id === null) {
+            warnIfSessionIdMissing(result, "ask", job.job_id, context.stderr);
         }
         const finalText = reassembleProseFromRecords(result.records);
         const rendered = renderManagedJobOutput(job, finalText);

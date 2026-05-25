@@ -69,6 +69,23 @@ export interface CliClientOptions {
   skillsDirs?: string[];
   /** Resume an existing session via `kimi -r <session_id>`. */
   resumeSessionId?: string;
+  /**
+   * Reserved for future thinking-mode control. **Currently a no-op.**
+   *
+   * kimi-code 0.1.1 does NOT expose a `--no-thinking` CLI flag; thinking
+   * is controlled by config (`default_thinking` + `[thinking].mode`) and
+   * `allowUnknownOption(false)` means a `--no-thinking` argv would
+   * crash the spawn. The Round 2 Codex review caught the broken alpha.4
+   * emission of this flag.
+   *
+   * The field stays in the options bag so review-gate (the only caller
+   * that needs thinking-off semantics) carries intent through the
+   * runtime contract. If/when upstream kimi-code adds a per-spawn
+   * thinking override, wire it through here. Until then, review-gate's
+   * 8s budget assumes the user has `default_thinking = false` or a
+   * non-thinking model selected — see docs/safety.md.
+   */
+  thinking?: boolean;
   /** Optional absolute path for an append-only JSONL diagnostics log. */
   logPath?: string;
   /** Optional cancellation. */
@@ -571,6 +588,12 @@ function buildArgs(opts: CliClientOptions): string[] {
       args.push("--skills-dir", dir);
     }
   }
+  // NOTE: `opts.thinking === false` is intentionally NOT translated into a
+  // `--no-thinking` argv flag. kimi-code 0.1.1 rejects unknown options and
+  // has no per-spawn thinking control — the Round 2 multi-agent review
+  // caught this. The option stays in CliClientOptions for future wiring
+  // when upstream adds the flag (see field doc).
+
   // -p accepts the prompt as the option value. We pass it as a separate argv
   // entry so prompts with leading dashes or whitespace are not interpreted as
   // additional flags.

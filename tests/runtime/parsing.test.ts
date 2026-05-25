@@ -5,12 +5,23 @@ import { parseAskArgs, parseJobLookupArgs, parseRescueArgs, parseReviewArgs } fr
 
 describe("argument parsing", () => {
   test("parseAskArgs preserves text after the -- sentinel", () => {
-    const parsed = parseAskArgs(["--no-thinking", "--", "--literal", "question"]);
+    // v1.0 alpha.4: thinking is always-on; --thinking/--no-thinking are
+    // rejected with a hard error. Use --fresh as the leading flag here.
+    const parsed = parseAskArgs(["--fresh", "--", "--literal", "question"]);
 
-    expect(parsed.thinking).toBeFalse();
+    expect(parsed.thinking).toBeTrue();
+    expect(parsed.fresh).toBeTrue();
     expect(parsed.prompt).toBe("--literal question");
     expect(parsed.resume).toBeFalse();
-    expect(parsed.fresh).toBeFalse();
+  });
+
+  test("parseAskArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
+    expect(() => parseAskArgs(["--no-thinking", "hello"])).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseAskArgs(["--thinking", "hello"])).toThrow(
+      /thinking is always on/i,
+    );
   });
 
   test("parseAskArgs rejects unknown flag-shaped tokens in flag-position", () => {
@@ -99,11 +110,29 @@ describe("argument parsing", () => {
   });
 
   test("parseReviewArgs preserves adversarial focus text after known flags", () => {
-    const parsed = parseReviewArgs(["--base", "main", "--thinking", "focus", "on", "rollback"]);
+    const parsed = parseReviewArgs(["--base", "main", "focus", "on", "rollback"]);
 
     expect(parsed.base).toBe("main");
     expect(parsed.thinking).toBeTrue();
     expect(parsed.focus).toBe("focus on rollback");
+  });
+
+  test("parseReviewArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
+    expect(() => parseReviewArgs(["--no-thinking", "focus"])).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseReviewArgs(["--thinking", "focus"])).toThrow(
+      /thinking is always on/i,
+    );
+  });
+
+  test("parseRescueArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
+    expect(() => parseRescueArgs(["--no-thinking", "fix the bug"])).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseRescueArgs(["--thinking", "fix the bug"])).toThrow(
+      /thinking is always on/i,
+    );
   });
 
   test("parseReviewArgs rejects --model followed by another flag", () => {
