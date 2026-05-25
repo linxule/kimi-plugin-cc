@@ -4,7 +4,7 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 1.0.0-alpha.1 (kimi-code, subprocess transport). v0.4.x lives on the `v0.4-maintenance` branch for users still on kimi-cli.
+- **Version**: 1.0.0-alpha.1 (kimi-code, subprocess transport). v0.4.x is preserved at the `v0.4.0` tag (with a `v0.4-maintenance` branch cut from that tag, once published) for users still on kimi-cli.
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 

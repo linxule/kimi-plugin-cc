@@ -2,7 +2,7 @@
   "name": "kimi-plugin-cc",
   "version": "1.0.0-alpha.1",
   "private": true,
-  "description": "Claude Code plugin that delegates review, challenge, ask, and rescue work to the local Kimi CLI.",
+  "description": "Claude Code plugin that delegates review, challenge, ask, and rescue work to the local kimi-code CLI.",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"

@@ -4,7 +4,7 @@
     "name": "linxule"
   },
   "metadata": {
-    "description": "Single-plugin marketplace for kimi-plugin-cc (v1.x). v0.x users stay on the kimi-marketplace name shipped from the v0.4-maintenance branch.",
+    "description": "Single-plugin marketplace for kimi-plugin-cc (v1.x). v0.x users stay on the kimi-marketplace name, pinned to the v0.4.0 tag (or the v0.4-maintenance branch cut from that tag, once published).",
     "version": "1.0.0-alpha.1"
   },
   "plugins": [

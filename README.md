@@ -2,17 +2,20 @@
 
 Use [Kimi](https://kimi.ai) as Claude Code's second reviewer, independent thinker, and delegated worker — without building your own multi-agent stack.
 
-This is a [Claude Code](https://claude.ai/code) plugin that connects to [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)'s **Wire mode** — an experimental streaming protocol that gives full programmatic access to a Kimi agent session. Claude can ask Kimi for a structured code review, delegate a bug hunt, or have Kimi double-check its own work before stopping — all through slash commands, with persistent job state and session resume.
+This is a [Claude Code](https://claude.ai/code) plugin that drives the [kimi-code](https://kimi.com/code/docs) CLI (the Node.js successor to Kimi CLI) as a subprocess. Claude can ask Kimi for a structured code review, delegate a bug hunt, or have Kimi double-check its own work before stopping — all through slash commands, with persistent job state, session resume, and per-command safety enforced by a [PreToolUse hook](./docs/safety.md) installed in `~/.kimi-code/config.toml`.
 
 - **Independent model, independent perspective.** Kimi reasons differently from Claude. A second opinion from a different model catches things self-review misses.
-- **No orchestration layer required.** No ACP, no cloud broker, no shared API keys. The plugin talks directly to a locally-installed `kimi` CLI over stdio.
-- **Full agent capabilities.** Kimi can read files, write code, run shell commands, and resume where it left off — all bounded by a [companion-side approval allowlist](./runtime/rescue-approval.ts) that the plugin enforces.
+- **No orchestration layer required.** No ACP, no cloud broker, no shared API keys. The plugin talks directly to a locally-installed `kimi` binary using `kimi -p --output-format stream-json`.
+- **Full agent capabilities, safely bounded.** Kimi can read files, write code, run shell commands, and resume where it left off — all bounded by a [workspace allowlist](./runtime/rescue-approval.ts) invoked via the PreToolUse hook. Read-only commands enforce read-only at the hook layer, not the prompt.
+
+> **Migrating from v0.4?** v0.4.x targeted the Python [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) and stays available at the [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag (`v0.4-maintenance` branch is cut from that tag for ongoing fixes — see the linked tag if the branch is not yet pushed). v1.0 is a hard cut to kimi-code with a renamed marketplace so existing installs don't auto-upgrade. See [docs/migration.md](./docs/migration.md) for the step-by-step upgrade.
 
 ## Try it in 60 seconds
 
 ```
+# Prerequisite: install kimi-code from https://kimi.com/code/docs
 /plugin marketplace add linxule/kimi-plugin-cc
-/plugin install kimi@kimi-marketplace
+/plugin install kimi-v1@kimi-marketplace-v1
 /kimi:setup
 /kimi:review "review my current diff"
 ```
@@ -62,37 +65,27 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
        │
        └─ companion.sh → node dist/companion.js
                │
-               ├─ spawns: kimi --wire --session <uuid> --agent-file review.yaml
-               ├─ streams JSON-RPC events over stdio (Wire protocol)
-               ├─ turn capture: buffers ContentParts after last ToolResult
-               ├─ approval dispatcher: auto-approves reads, allowlists writes
-               ├─ persists job + event log to SQLite (node:sqlite, zero native deps)
+               ├─ spawns: kimi --output-format stream-json -p "<prompt>"
+               │            with KIMI_PLUGIN_CC_CMD=review in the env block
+               ├─ parses OpenAI-shaped NDJSON records (assistant content + tool_calls)
+               ├─ PreToolUse hook (installed by /kimi:setup) enforces the
+               │   per-command policy: review/challenge/review_gate/ask are
+               │   read-only; rescue uses the workspace allowlist
+               ├─ persists job + stream log to SQLite (node:sqlite, zero native deps)
                └─ returns structured result to Claude
 ```
 
-**Wire-first transport.** The plugin implements a full [Wire client](./runtime/wire/) in TypeScript — JSON-RPC over stdio with `start`, `initialize`, `prompt`, approval dispatch, turn capture, and `close`-based exit semantics. Each command mode runs a custom Kimi [agent profile](./runtime/agents/) (`--agent-file`) that controls which tools Kimi has access to. This is one of the first third-party consumers of Kimi CLI's Wire protocol.
+**Subprocess-first transport.** v1.0 drives `kimi -p --output-format stream-json` as a one-process-per-job subprocess. kimi-code mints the session id and announces it on stderr; the runtime captures it for `--resume`. The v0.4 Wire JSON-RPC client is gone (kimi-code dropped it); the v0.4-maintenance branch keeps the Wire path alive for Kimi CLI users.
 
-**Job lifecycle.** Every job gets a client-assigned UUID, a SQLite record (created before the Wire connection opens), and a full event log. Jobs go through `running` → `completed`/`failed`/`cancelled`. Use `/kimi:status`, `/kimi:result`, `/kimi:cancel`, `/kimi:replay` to manage them.
+**Safety via PreToolUse hook.** kimi-code's `kimi -p` mode hard-codes `permission: auto` and auto-approves every tool call. The plugin's safety contract therefore lives in a [PreToolUse hook](./docs/safety.md) that `/kimi:setup` installs as a managed block in `~/.kimi-code/config.toml`. The hook reads `KIMI_PLUGIN_CC_CMD` from the env block we set per spawn and applies the right policy — read-only for review/challenge/review_gate/ask, workspace allowlist for rescue. Without the hook, rescue refuses to run.
 
-**Rescue approval policy.** When Kimi has write access (rescue mode), every file edit and shell command goes through the [approval allowlist](./runtime/rescue-approval.ts): symlink-aware path containment, `.git/` exclusion, a curated set of read-only check tools, and explicit rejection of `package-manager run <script>` (opaque scripts are a supply-chain risk). The allowlist is the security boundary — not the system prompt.
+**Workspace allowlist.** Rescue's allowlist ([`runtime/rescue-approval.ts`](./runtime/rescue-approval.ts)) is the security boundary — not the prompt. Symlink-aware path containment, `.git/` exclusion, a curated set of read-only check tools, mutating-flag detection on `git`/`find`/`sed`, and explicit rejection of `package-manager run <script>` (opaque scripts are a supply-chain risk). The hook calls `evaluateRescueHookRequest` for every rescue tool call.
+
+**Job lifecycle.** Every job gets a SQLite record, a stream-json diagnostic log, and a `kimi_session_id` captured from kimi's stderr announce. Jobs go through `running` → `completed`/`failed`/`cancelled`. Use `/kimi:status`, `/kimi:result`, `/kimi:cancel`, `/kimi:replay` to manage them.
 
 **Zero native dependencies.** The runtime uses Node 22.5's built-in `node:sqlite` — no `better-sqlite3`, no `node-gyp`, no compilation step. `dist/` is precompiled and committed, so installed plugins work immediately with just `node` on PATH.
 
-**132 tests, drift gate.** The test suite covers the Wire client, approval allowlist, command handlers, job lifecycle, session-title integration, and more. `bun run check` rebuilds `dist/` and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship.
-
-## kimi web integration
-
-Every plugin session appears in [kimi web](https://github.com/MoonshotAI/kimi-cli) with a human-readable title. The plugin calls `PATCH /api/sessions/{id}` on the local kimi web server after session creation, setting titles like `Kimi Task: review my current diff` (read-only) or `Kimi Task: fix the auth bug [write]` (rescue).
-
-This means you get a unified view of all Kimi work — terminal sessions and plugin-delegated sessions side by side, searchable by the `Kimi Task` prefix.
-
-<p align="center">
-  <img src="./assets/kimi-web-sessions.png" alt="Plugin sessions in kimi web" width="780" />
-  <br />
-  <em>Plugin-created sessions in kimi web — each titled with the task prompt, browsable alongside regular terminal sessions.</em>
-</p>
-
-> **Note for Kimi CLI maintainers:** The plugin would benefit from a native `--session-title TEXT` flag on `kimi --wire` so titles can be set in-band during session creation, eliminating the PATCH workaround. See the [session-title runtime](./runtime/session-title.ts) and [kimi-web client](./runtime/kimi-web-client.ts) for the current integration.
+**342 tests, drift gate.** The test suite covers the stream-json parser, cli-client lifecycle, approval policy, approval hook entry script, rescue allowlist, command handlers, job lifecycle, setup managed-block installer, and more. `bun run check` rebuilds `dist/`, typechecks, runs the suite, and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship.
 
 ## Install
 
@@ -100,9 +93,11 @@ This means you get a unified view of all Kimi work — terminal sessions and plu
 
 ```
 /plugin marketplace add linxule/kimi-plugin-cc
-/plugin install kimi@kimi-marketplace
+/plugin install kimi-v1@kimi-marketplace-v1
 /kimi:setup
 ```
+
+`/kimi:setup` writes the PreToolUse hook to `~/.kimi-code/config.toml` and probes it both directly and through `/bin/sh -c` so launch-from-GUI/LaunchAgent setups (where `node` may not be on the shell's PATH) get caught up front rather than silently auto-approving every tool call.
 
 ### From a local clone
 
@@ -111,26 +106,36 @@ git clone https://github.com/linxule/kimi-plugin-cc ~/kimi-plugin-cc
 claude --plugin-dir ~/kimi-plugin-cc
 ```
 
-Then run `/kimi:setup` to verify the local `kimi` CLI is reachable and authenticated.
+Then run `/kimi:setup` to install the safety hook.
+
+### Removing the integration
+
+```
+/kimi:setup --uninstall
+```
+
+Removes the managed block from `~/.kimi-code/config.toml`. The plugin itself can be uninstalled via `/plugin uninstall kimi-v1`.
 
 ## Prerequisites
 
-- **Kimi CLI** on `PATH` — requires `--wire`, `--session`, and `--agent-file` support (recent versions). Set `KIMI_PLUGIN_CC_KIMI_BIN` to override.
+- **[kimi-code](https://kimi.com/code/docs)** installed and authenticated. The plugin spawns `kimi -p`; set `KIMI_PLUGIN_CC_KIMI_BIN` to override the binary location.
 - **Node >= 22.5** — for built-in `node:sqlite`. Set `KIMI_PLUGIN_CC_NODE_BIN` to override.
 - **bun** — only for contributor tooling. Not required at runtime.
+
+Still on Python Kimi CLI? Stay on the [v0.4.0 tag](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) (or its `v0.4-maintenance` branch, once published) — see [docs/migration.md](./docs/migration.md).
 
 ## Development
 
 ```bash
-bun run check    # rebuild dist/, typecheck, run 132 tests, drift gate
+bun run check    # rebuild dist/, typecheck, run the full test suite, drift gate
 bun test <path>  # run a single test file
 ```
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor workflow.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full contributor workflow and [AGENTS.md](./AGENTS.md) for the architecture invariants coding agents should preserve.
 
 ## How this was built
 
-This plugin was built through the same multi-model collaboration it enables — Claude, Kimi, and Codex working together at every stage from design through pre-public audit.
+This plugin was built through the same multi-model collaboration it enables — Claude, Kimi, and Codex working together at every stage from design through pre-public audit. The v1.0 cutover (PRs 1-5) used the same pattern: each PR landed with paired Claude code-reviewer + Codex codex-rescue adversarial reviews, contradictions resolved against the kimi-code source, and convergent findings applied before commit.
 
 ## Acknowledgments
 

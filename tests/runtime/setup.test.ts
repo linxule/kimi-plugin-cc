@@ -304,13 +304,16 @@ describe("setup managed-block installer", () => {
     expect(result.warnings.join("\n")).toContain("orphan marker");
   });
 
-  test("install accepts paths containing a single quote (TOML basic-string handles it)", async () => {
-    // PR 4 reviewers flagged that the old shell-single-quote approach
-    // produced unparseable TOML when paths contained `'`. The fix
-    // switched to TOML basic-string escaping for the entire command
-    // field — single quotes are legitimate inside a basic string.
-    // Verify that a path with an apostrophe is accepted AND that the
-    // resulting TOML is parseable (basic-string round-trip).
+  test("install accepts paths containing a single quote (shell-quote + TOML-escape round-trip)", async () => {
+    // PR 5 reviewer fix (Codex C2): the managed block now shell-quotes
+    // both arguments so kimi-code's `/bin/sh -c "<command>"` parses the
+    // path back correctly. For a path containing `'`, shellSingleQuote
+    // splits the literal at the apostrophe (`'o'\''reilly'` is four
+    // shell tokens that concatenate into `o'reilly`), and TOML escapes
+    // the embedded backslash. The file does NOT contain the literal
+    // substring "o'reilly" — but the round-trip works, which is what
+    // the probe asserts (probe.ok === true means /bin/sh successfully
+    // parsed and ran the command).
     const { env, configPath } = await makeCase("install-apostrophe-path");
     const apostrophePath = path.join(scratch, "install-apostrophe-path", "o'reilly", "hook.js");
     await mkdir(path.dirname(apostrophePath), { recursive: true });
@@ -319,9 +322,29 @@ describe("setup managed-block installer", () => {
       [],
       makeContext({ ...env, KIMI_PLUGIN_CC_HOOK_SCRIPT: apostrophePath }),
     );
+    // The probe runs `/bin/sh -c "<command>"` with the exact string
+    // written into the managed block. probe.ok === true means /bin/sh
+    // successfully parsed the shell-quoted-then-TOML-escaped command
+    // back to a runnable invocation that reached the apostrophe path.
     expect(result.probe).toBe("ok");
+    // Sanity: the path tail (without the apostrophe) survives in the
+    // file. The full path doesn't appear as a contiguous substring
+    // because shellSingleQuote splits at the apostrophe; the test for
+    // round-trip correctness is the probe assertion above.
     const contents = await readFile(configPath, "utf8");
-    expect(contents).toContain("o'reilly");
+    expect(contents).toContain("reilly/hook.js");
+  });
+
+  test("install rejects KIMI_PLUGIN_CC_NODE_BIN that is not absolute", async () => {
+    // PR 5 reviewer fix (Codex H1): the env override is honored
+    // verbatim, so a `KIMI_PLUGIN_CC_NODE_BIN=node` invocation would
+    // write bare `node` into the managed block and silently break the
+    // absolute-path invariant kimi-code's /bin/sh -c spawn relies on.
+    // Setup must reject the override up front.
+    const { env } = await makeCase("install-bad-node-bin");
+    await expect(
+      runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_NODE_BIN: "node" })),
+    ).rejects.toMatchObject({ code: "SETUP_NODE_BIN_NOT_ABSOLUTE" });
   });
 
   test("install refuses a hook script path containing characters that break TOML basic strings", async () => {

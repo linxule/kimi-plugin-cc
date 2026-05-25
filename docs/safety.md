@@ -1,0 +1,143 @@
+# Safety
+
+How kimi-plugin-cc v1.0 enforces the difference between "Kimi can answer my question" and "Kimi can rewrite my source tree."
+
+## Why the safety story is hook-based
+
+kimi-code's `kimi -p` mode hard-codes `permission: 'auto'` and registers an auto-approve handler for every tool call. There is no argv flag to disable this — `-p` is a non-interactive batch mode and assumes the caller wants tools to run unattended. That's a sensible default for a coding agent invoked directly from a terminal. It's the wrong default when a plugin is forwarding a read-only review request and the user expects no shell or file mutations to happen.
+
+The plugin therefore enforces per-command safety **outside** kimi-code's permission system, using the PreToolUse hook mechanism that kimi-code itself supports. A single hook entry in `~/.kimi-code/config.toml` runs before every tool call. The hook reads an env var the plugin sets per spawn (`KIMI_PLUGIN_CC_CMD=ask|review|challenge|review_gate|rescue`) and answers `allow` or `deny` according to a per-command policy.
+
+```
+┌──────────────────────┐    KIMI_PLUGIN_CC_CMD=review     ┌──────────────────────┐
+│ /kimi:review         │ ───────────────────────────────► │ kimi -p              │
+│   (companion.sh)     │                                  │   (permission:auto)  │
+└──────────────────────┘                                  └─────────┬────────────┘
+                                                                    │
+                                                                    │ PreToolUse:
+                                                                    │   Bash
+                                                                    ▼
+                                                          ┌──────────────────────┐
+                                                          │ approval-hook.js     │
+                                                          │   reads env var,     │
+                                                          │   applies policy,    │
+                                                          │   exits 2 + stderr   │
+                                                          │   (deny)             │
+                                                          └──────────────────────┘
+```
+
+If the hook is missing or invalid, **`/kimi:rescue` refuses to run** (with `RESCUE_HOOK_NOT_INSTALLED`). The other commands — `/kimi:ask`, `/kimi:review`, `/kimi:challenge`, and the review-gate — emit a stderr warning on every invocation and then fall back to kimi-code's `permission: auto` posture, which auto-approves every tool call including Bash/Write/Edit. The asymmetry is intentional: silently broadening a documented read-only contract is a bad failure mode, but rescue's failure mode (the model running destructive shell because the user never ran `/kimi:setup`) is unrecoverable. `/kimi:setup` also runs a two-layer probe before reporting success so missing-Node-on-PATH and broken-quoting failures surface up front instead of at first tool call.
+
+## The managed block
+
+`/kimi:setup` writes a marker-delimited block to `~/.kimi-code/config.toml`:
+
+```toml
+# === BEGIN kimi-plugin-cc-managed (v1.0.0-alpha.1) ===
+# DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.
+# Purpose:
+#   kimi-code's `kimi -p` mode hard-codes permission='auto' and
+#   auto-approves every tool call. This hook enforces /kimi:review,
+#   /kimi:challenge, /kimi:review_gate, and /kimi:ask as read-only,
+#   and applies the workspace-bound rescue allowlist for /kimi:rescue.
+#   Without this block the plugin's safety contract collapses.
+# Matcher field is intentionally OMITTED — kimi-code compiles the
+#   matcher with `new RegExp(...)`. An empty/missing matcher means
+#   "fire for every tool". The string "*" would throw and silently
+#   disable the hook. Do not "fix" this.
+# The Node binary path is absolute so kimi-code's `/bin/sh -c`
+#   hook spawn doesn't need `node` on its PATH (GUI launches,
+#   LaunchAgents, etc.).
+[[hooks]]
+event = "PreToolUse"
+command = "/abs/path/to/node /abs/path/to/dist/hooks/approval-hook.js"
+timeout = 15
+# === END kimi-plugin-cc-managed ===
+```
+
+Key constraints (verified by [`runtime/hooks/managed-block.ts`](../runtime/hooks/managed-block.ts) on both install and verify):
+
+1. **No `matcher` line.** kimi-code compiles the matcher field via `new RegExp(matcher)`. An empty matcher means "fire for every tool." `new RegExp("*")` throws, which kimi-code catches and treats as "no matcher" → silently disables the hook. The installer omits the field intentionally; the verifier rejects any block that contains a `matcher = ...` line.
+2. **Absolute Node path.** kimi-code spawns hook commands via `/bin/sh -c "<command>"`. If we wrote bare `node`, the shell would resolve it against kimi-code's PATH at execution time. On a system where kimi-code launches from a GUI/LaunchAgent with a sanitized PATH (nvm/asdf/mise users), bare `node` would exit 127 → hook protocol treats non-{0,2} as **allow** → safety contract collapses with no user-visible signal.
+3. **TOML basic-string escaping.** The command field is a TOML basic string. Quotes, backslashes, newlines, and control characters in the resolved hook path are escaped during install; paths containing characters that cannot be safely escaped (literal `"`, raw control chars) are rejected up front with `SETUP_HOOK_PATH_UNSAFE`.
+4. **Exact marker grammar.** The verifier rejects stray comments containing the marker tag, partial references, duplicate blocks (from a setup race), and orphan markers (from a manual edit). The same parser is used by both the installer and the per-call verifier so the two cannot disagree.
+
+## The hook's per-command policy
+
+[`runtime/hooks/approval-policy.ts`](../runtime/hooks/approval-policy.ts) is the single source of truth:
+
+| `KIMI_PLUGIN_CC_CMD` | Allowed tools | Denied tools |
+|---|---|---|
+| unset / empty | everything | nothing (kimi was invoked outside the plugin) |
+| `ask` | `Read`, `Grep`, `Glob`, `ReadMediaFile`, `TaskList`, `TaskOutput` | everything else, including `Bash`, `Write`, `Edit` |
+| `review`, `challenge`, `review_gate` | same as `ask` | same as `ask` |
+| `rescue` | governed by [`evaluateRescueHookRequest`](../runtime/rescue-approval.ts) — workspace-bound shell allowlist, symlink-aware path containment, mutating-flag detection on `git`/`find`/`sed`, etc. | every shell command, file edit, or write that the allowlist rejects |
+| unknown label | `Read`, `Grep`, `Glob` only | everything else (conservative-deny for stale/misconfigured callers) |
+
+Denied tool calls exit the hook with code 2 and write a reason to stderr. kimi-code surfaces the reason to the model, which can adapt and try a different approach (e.g., use `Read` instead of `Bash cat`).
+
+## The rescue allowlist
+
+For `/kimi:rescue`, the hook delegates to [`evaluateRescueHookRequest`](../runtime/rescue-approval.ts). This is the same workspace-bound allowlist code that v0.4 carried — kept verbatim from PR 3's port. Highlights:
+
+- **File edits** (`Write`, `Edit`): the file path must resolve inside the workspace (`realpath`-based check), must not be inside `.git/`, and must not be a symlink that escapes the workspace.
+- **Shell commands** (`Bash`): the command is parsed with `shell-quote`. Pipelines are split and each stage validated independently. Mutating flags on `git` (`commit`, `push`, `reset --hard`, ...), `find` (`-delete`, `-exec`), and `sed` (`-i`) are rejected.
+- **Package-manager scripts**: `npm/pnpm/yarn/bun/uv run <script>` is rejected because `package.json` scripts can run anything. The `<pm> test` shorthand IS allowed (npm/pnpm/yarn test, bun test, uv test) — under the assumption that test runs are intentional and the developer trusts their own workspace's test config. If you don't, use direct test invocations (`pytest`, `tsc --noEmit`, `eslint`, …) instead and have your tooling refuse the `<pm> test` form.
+- **Read-safe commands** (`ls`, `cat`, `head`, `tail`, `rg`, `pwd`, `wc`, `git status`, `git diff`, ...): allowed.
+- **`.git/`**: every file-edit path check excludes anything inside `.git/`. Shell commands cannot include `git commit`, `git push`, `git reset --hard`, etc. Branch and commit ownership stays with the main Claude thread.
+
+The full table lives in `runtime/rescue-approval.ts`. Test coverage is in `tests/runtime/rescue-approval.test.ts` — every accept-shape and every reject-shape has at least one regression test.
+
+## The setup probe
+
+`/kimi:setup` runs a two-layer probe before reporting success:
+
+1. **Direct probe.** Spawns the hook with the same Node binary (`process.execPath`) the companion is running under. Sends synthetic PreToolUse stdin with `KIMI_PLUGIN_CC_CMD=review` + a Bash tool request. Asserts exit 2 + non-empty stderr.
+2. **Shell probe.** Re-runs the same payload via `/bin/sh -c "<command>"` — the exact spawn shape kimi-code's hook runner uses. Same assertion.
+
+Both must pass. The shell probe catches the case where `process.execPath` works but `/bin/sh` can't resolve the path through quoting (a `KIMI_PLUGIN_CC_NODE_BIN` override pointing at a binary in a shell-unsafe path, for example). If either probe fails, setup reports failure with the captured stderr and the user can act on a clear signal rather than discover the gap by accident.
+
+## How to verify the install yourself
+
+```
+/kimi:setup --check
+```
+
+Reports the current state without writing. The output line you want to see is `Probe: ok`. If the probe is failing, the `Details:` section shows which layer failed and what stderr was captured.
+
+`/kimi:setup --check` is strict: it rejects any managed block that doesn't pass the [`parseManagedBlock`](../runtime/hooks/managed-block.ts) grammar (missing `[[hooks]]` table, wrong event, present `matcher = ...` line, duplicate blocks, orphan markers, or a stale hook-script path). `/kimi:setup` (without `--check`) is lenient: it repairs a malformed managed block in place by overwriting it with a fresh, grammar-clean copy. So if you find a bad block, the fix is `/kimi:setup` itself — `--check` is the inspection tool, not the repair tool.
+
+You can also inspect the managed block manually:
+
+```bash
+awk '/^# === BEGIN kimi-plugin-cc-managed/,/^# === END kimi-plugin-cc-managed/' \
+  ~/.kimi-code/config.toml
+```
+
+The block should match the template at the top of this document. If the `[[hooks]]` line is missing, if `event` is something other than `"PreToolUse"`, or if there's a `matcher = ...` line — the installer should have rejected the block. Run `/kimi:setup --uninstall` + `/kimi:setup` to repair.
+
+## How to opt out
+
+```
+/kimi:setup --uninstall
+```
+
+Removes the managed block from `~/.kimi-code/config.toml`. Subsequent kimi-plugin-cc command invocations:
+
+- `/kimi:rescue` will refuse to run (`RESCUE_HOOK_NOT_INSTALLED`).
+- `/kimi:ask`, `/kimi:review`, `/kimi:challenge`, review gate will emit a one-time stderr warning per Claude Code session and then run anyway — but with kimi-code's default `permission: auto` posture, which auto-approves every tool. This is intentionally loud rather than silent.
+
+If you want to silence the warning (e.g., you're running tests, or you've deliberately accepted the risk), set `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` in the env block for your kimi-plugin-cc invocations.
+
+> **Note:** `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` does more than silence the warning — it also disables `/kimi:rescue`'s refusal-when-hook-missing safeguard. The bypass exists for the setup probe and the test suite, both of which need to spawn kimi without the hook in place. Set it only when you've intentionally accepted both consequences.
+
+## What this safety story does NOT cover
+
+- **Malicious kimi-code binaries.** The threat model assumes the user trusts the kimi-code binary they installed. A hostile binary can ignore the hook entry in its own config.
+- **TOCTOU between path check and edit.** The rescue allowlist resolves and checks paths at allowlist time. Between that check and the actual file write, an attacker with workspace write access could swap a symlink. The mitigation is workspace-write-trust — if untrusted code can edit your workspace, you have bigger problems than this plugin.
+- **Custom kimi-code skill libraries that bypass the hook.** Hooks fire on tool calls, not on skill activations. A skill that calls `Bash` will be hooked; a skill that performs file ops via a Node binding that doesn't surface as a tool call won't be. The default kimi-code skill catalog uses the standard tool surface.
+- **The host (Claude Code) itself.** kimi-plugin-cc constrains kimi-code, not Claude. Claude's own tool permissions live in `~/.claude/settings.json`.
+
+## Reporting safety issues
+
+If you find a way to coax /kimi:review, /kimi:challenge, /kimi:review_gate, or /kimi:ask into running a non-read tool — or to make /kimi:rescue mutate `.git/` or escape the workspace — please open a GitHub security advisory rather than a public issue.

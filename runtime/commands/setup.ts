@@ -613,18 +613,57 @@ function isEndMarker(trimmedLine: string): boolean {
  * asdf / mise users). PR 4 reviewers flagged bare `node` as a
  * fail-open class: kimi-code's `/bin/sh -c "node ..."` exits 127 on
  * missing-node, which the hook protocol treats as ALLOW.
+ *
+ * PR 5 reviewer hardening: the override is now required to be an
+ * absolute path. A user setting `KIMI_PLUGIN_CC_NODE_BIN=node` would
+ * otherwise write bare `node` into the managed block, defeating the
+ * absolute-path invariant the docs promise.
  */
 function resolveNodeBinary(env: NodeJS.ProcessEnv): string {
   const override = env.KIMI_PLUGIN_CC_NODE_BIN;
-  if (override !== undefined && override.length > 0) {
-    return override;
+  if (override === undefined || override.length === 0) {
+    return process.execPath;
   }
-  return process.execPath;
+  if (!path.isAbsolute(override)) {
+    throw new RuntimeError(
+      "SETUP_NODE_BIN_NOT_ABSOLUTE",
+      [
+        `KIMI_PLUGIN_CC_NODE_BIN must be an absolute path; got ${JSON.stringify(override)}.`,
+        `kimi-code spawns hooks via /bin/sh -c, where a bare command relies on the shell's PATH at hook execution time.`,
+        `Use an absolute path so the hook keeps firing under sanitized-PATH launches.`,
+      ].join(" "),
+      "setup.node-bin",
+      { details: { override } },
+    );
+  }
+  return override;
+}
+
+/**
+ * Build the exact shell command string that `/bin/sh -c "<command>"`
+ * needs to spawn the hook. Single source of truth for:
+ *
+ *   - what the managed block writes into kimi-code's config
+ *     (`command = "..."` inside [[hooks]])
+ *   - what the shell probe runs via `spawn("/bin/sh", ["-c", ...])`
+ *
+ * Keeping these two callers in lockstep is load-bearing: PR 5
+ * reviewer (Codex C2) caught a drift where the probe quoted both
+ * arguments and the managed block did not. A path with spaces passed
+ * the probe and silently failed under kimi-code's real hook runner —
+ * `/bin/sh -c "/Users/some user/node /Users/some user/hook.js"` parses
+ * as `/Users/some` with arguments `user/node`, `/Users/some`,
+ * `user/hook.js`. Hook exits non-2 → kimi-code treats as allow →
+ * safety contract collapses.
+ */
+function buildHookShellCommand(hookScriptPath: string, env: NodeJS.ProcessEnv): string {
+  const nodeBin = resolveNodeBinary(env);
+  return `${shellSingleQuote(nodeBin)} ${shellSingleQuote(hookScriptPath)}`;
 }
 
 function buildManagedBlock(hookScriptPath: string, lineEnding: "\n" | "\r\n" = "\n"): string {
-  const nodeBin = resolveNodeBinary(process.env);
-  const commandLine = `command = ${tomlBasicString(`${nodeBin} ${hookScriptPath}`)}`;
+  const shellCommand = buildHookShellCommand(hookScriptPath, process.env);
+  const commandLine = `command = ${tomlBasicString(shellCommand)}`;
   return [
     `${BEGIN_MARKER_PREFIX} (v${KIMI_PLUGIN_CC_VERSION}) ===`,
     `# DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.`,
@@ -814,11 +853,9 @@ async function probeHookViaShell(
     // shell probe so we don't false-fail on a platform we don't run on.
     return { ok: true, reason: "shell probe skipped (Windows)" };
   }
-  const nodeBin = resolveNodeBinary(env);
-  // Quote both arguments the same way the managed block would — the
-  // managed block writes `"<nodeBin> <hookScript>"` into a TOML basic
-  // string. We reproduce that via `/bin/sh -c`.
-  const shellCommand = `${shellSingleQuote(nodeBin)} ${shellSingleQuote(hookScriptPath)}`;
+  // Reuse the exact command string the managed block wrote into
+  // kimi-code's config so probe and runtime cannot drift.
+  const shellCommand = buildHookShellCommand(hookScriptPath, env);
   return await spawnProbe(
     "/bin/sh",
     ["-c", shellCommand],
