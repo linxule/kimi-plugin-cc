@@ -60,6 +60,10 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 - Cancellation uses AbortController + SIGTERM → SIGKILL (1500ms escalation) to ensure the kimi child **and its grandchildren** actually die when the user cancels or a budget expires. POSIX spawns with `detached: true` so kimi-code owns a process group, enumerates the descendant tree at abort time, signals `[child.pid, ...descendants]` individually, then also signals the negative pid (`process.kill(-child.pid, ...)`) as defense-in-depth. ESRCH/EPERM are best-effort skips per pid. Without descendant enumeration, kimi-code's Bash tool subprocesses that enter their own process groups survive cancel as orphans (denial-of-cancellation; for `/kimi:rescue` an approved long-running tool would keep consuming workspace state). win32 keeps the direct-kill path — descendant reaping on Windows is a known gap. Matches v0.4's wire-cancellation timing. Pre-listener abort race (signal aborted between the pre-spawn check and `addEventListener`) is recovered by re-checking `signal.aborted` after attach and invoking `onAbort()` synchronously — `{ once: true }` keeps it idempotent.
 - Config writes preserve mode 0o600. `writeConfigAtomic` chmods the temp file before rename so the final inode never exists at a wider mode, matching the user's existing kimi-code config permissions (the file holds API keys + tokens).
 
+## Pending work
+
+See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md) for the triaged deferred items from the three audit rounds + alpha.3 production smoke test. The GA gate is **G1 + G2 + G3 + L2** (≈1 working day). H1-H3 ship in v1.1.
+
 ## When editing
 
 - Read the code before changing it — the runtime has specific invariants that aren't obvious from file names

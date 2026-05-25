@@ -2,6 +2,8 @@
 
 ## 1.0.0-alpha.3 — 2026-05-25
 
+> **Roadmap to GA:** see [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md). The deferred items from the three audit rounds + production smoke testing are triaged into GA blockers (4), high-priority post-GA (3), and polish backlog (3). GA gate ≈ 1 working day of focused work.
+
 ### Fixed
 
 - **Cancellation: grandchild orphan (CRITICAL, production-observed).** kimi-code 0.1.1's internal `LocalKaos` spawns every Bash tool subprocess with `detached: true` deliberately — so kimi-code can group-kill its own tools during cancellation. This gives bash subprocesses their own PGID (sibling to kimi-code's PGID, not nested). The alpha.2 process-group fix (`process.kill(-kimi_pid, ...)`) therefore only killed kimi-code itself; the bash grandchildren survived as orphans. Reproduced in production smoke testing — `/kimi:cancel` left `bun test` running indefinitely after the cancel completed.
