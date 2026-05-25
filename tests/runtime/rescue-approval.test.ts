@@ -141,6 +141,13 @@ describe("evaluateRescueHookRequest", () => {
         "ruff format --diff .",
         "biome check .",
         "eslint runtime",
+        // eslint --quiet / --no-eslintrc / --max-warnings are read-only;
+        // verify the eslint-specific check doesn't over-reject. (audit
+        // re-review report 34 introduced an explicit validator that
+        // rejects only -o; this exercises the still-allowed surface.)
+        "eslint . --quiet",
+        "eslint . --max-warnings 0",
+        "rg -o needle src",
         "cargo check",
         "cargo clippy",
         "cargo test",
@@ -201,6 +208,14 @@ describe("evaluateRescueHookRequest", () => {
         "openssl rand --output=/tmp/key.bin 32",
         "git format-patch --output-directory=/tmp/patches HEAD~3",
         "git format-patch --output-dir=/tmp/patches HEAD~3",
+        // Audit re-review (report 34 Codex HIGH): eslint --output-file
+        // and eslint -o were the surviving classes after the first
+        // --output fix. ESLint was wholesale-approved; --output-file
+        // now lives in MUTATING_FLAGS and -o is rejected by the
+        // eslint-specific validator.
+        "eslint . --output-file=/tmp/exfil.json",
+        "eslint . --output-file /tmp/exfil.json",
+        "eslint . -o /tmp/exfil.json",
         // sed -i suffix forms
         "rg x . | sed -i.bak 's/a/b/'",
         "rg x . | sed --in-place=.bak 's/a/b/'",

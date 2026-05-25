@@ -162,7 +162,16 @@ export function parseManagedBlock(contents: string): ParsedManagedBlock {
     const basic = COMMAND_LINE_RE.exec(line);
     const literal = COMMAND_LITERAL_LINE_RE.exec(line);
     if (basic !== null || literal !== null) {
-      commandPath = basic ? basic[1]! : literal![1]!;
+      // TOML basic strings escape `\`, `"`, and the control chars.
+      // Setup writes the escaped form via `tomlBasicString`; the
+      // verifier compares against the JS-string canonical command, so
+      // we must decode the escapes here before equality. Without this,
+      // a hook script path containing `'` round-trips through
+      // `shellSingleQuote` -> backslash -> TOML basic-string escape ->
+      // captured raw -> mismatch on verify. Audit re-review (reports
+      // 33/34) flagged this as a UX false-fail. Literal strings ('...')
+      // have no escapes — pass through as-is.
+      commandPath = basic !== null ? decodeTomlBasicString(basic[1]!) : literal![1]!;
       continue;
     }
     // Other TOML lines (timeout = N, etc.) are accepted as opaque
@@ -260,3 +269,61 @@ export const MARKERS = {
   BEGIN_LINE_RE,
   END_LINE_RE,
 } as const;
+
+/**
+ * Decode a TOML 1.0 basic-string body (the bytes BETWEEN the quotes —
+ * the surrounding `"..."` is stripped by the capture group). Handles
+ * the six standard escapes plus `\\` and `\"`. Unknown escapes fall
+ * through as-is, mirroring permissive parsers; the canonical command
+ * we compare against never contains them, so a mismatch surfaces as
+ * "installed: false" rather than a parse error.
+ *
+ * The inverse of `tomlBasicString` in `runtime/hooks/install-paths.ts`'s
+ * sibling helper in setup.ts. Audit re-review (reports 33/34) flagged
+ * the missing decode as a verifier false-fail for apostrophe paths.
+ */
+function decodeTomlBasicString(raw: string): string {
+  let out = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]!;
+    if (ch !== "\\") {
+      out += ch;
+      continue;
+    }
+    const next = raw[i + 1];
+    if (next === undefined) {
+      out += ch;
+      continue;
+    }
+    i += 1;
+    switch (next) {
+      case "\\":
+        out += "\\";
+        break;
+      case "\"":
+        out += "\"";
+        break;
+      case "b":
+        out += "\b";
+        break;
+      case "t":
+        out += "\t";
+        break;
+      case "n":
+        out += "\n";
+        break;
+      case "f":
+        out += "\f";
+        break;
+      case "r":
+        out += "\r";
+        break;
+      default:
+        // Pass unknown escapes through verbatim. The canonical command
+        // never produces them, so an inequality surfaces as a benign
+        // "installed: false" rather than a parse exception.
+        out += `\\${next}`;
+    }
+  }
+  return out;
+}

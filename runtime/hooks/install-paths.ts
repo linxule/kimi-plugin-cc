@@ -105,8 +105,29 @@ export function shellSingleQuote(value: string): string {
  *      to `<root>` and append the canonical hook artifact path.
  */
 export function resolveHookScriptPath(env: NodeJS.ProcessEnv): string {
-  if (env.KIMI_PLUGIN_CC_HOOK_SCRIPT && env.KIMI_PLUGIN_CC_HOOK_SCRIPT.length > 0) {
-    return env.KIMI_PLUGIN_CC_HOOK_SCRIPT;
+  const override = env.KIMI_PLUGIN_CC_HOOK_SCRIPT;
+  if (override !== undefined && override.length > 0) {
+    if (!path.isAbsolute(override)) {
+      // kimi-code spawns hooks via `/bin/sh -c "<command>"` with a
+      // cwd that may not match the companion's. A relative path here
+      // would resolve against the kimi-code shell's working dir at
+      // hook execution time — different from the path resolved at
+      // install time. The mismatch would let the verifier bless a
+      // path that doesn't actually run. Match the NODE_BIN_NOT_ABSOLUTE
+      // contract by requiring an absolute override. Audit re-review
+      // (report 34 Codex MEDIUM) flagged this.
+      throw new RuntimeError(
+        "SETUP_HOOK_SCRIPT_NOT_ABSOLUTE",
+        [
+          `KIMI_PLUGIN_CC_HOOK_SCRIPT must be an absolute path; got ${JSON.stringify(override)}.`,
+          `kimi-code spawns hooks via /bin/sh -c with a cwd that may differ from the companion's.`,
+          `Use an absolute path so the verifier and the runtime spawn refer to the same file.`,
+        ].join(" "),
+        "setup.hook-script-path",
+        { details: { override } },
+      );
+    }
+    return override;
   }
   const here = fileURLToPath(import.meta.url);
   const parts = here.split(path.sep);

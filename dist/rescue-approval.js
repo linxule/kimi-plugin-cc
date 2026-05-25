@@ -39,6 +39,7 @@ const MUTATING_FLAGS_EXACT = new Set([
     "--in-place",
     "-i",
     "--output",
+    "--output-file",
     "--output-directory",
     "--output-dir",
 ]);
@@ -48,6 +49,7 @@ const MUTATING_FLAG_PREFIXES = [
     "--apply=",
     "--in-place=",
     "--output=",
+    "--output-file=",
     "--output-directory=",
     "--output-dir=",
 ];
@@ -349,7 +351,24 @@ export function validateShellStage(tokens, pipelineMode) {
     if (command === "npm" || command === "pnpm" || command === "yarn" || command === "bun" || command === "uv") {
         return validatePackageManagerCommand(command, args);
     }
-    if (["rg", "grep", "ls", "cat", "pwd", "pyright", "mypy", "eslint", "pytest"].includes(command)) {
+    if (command === "eslint") {
+        // ESLint's `-o` short form is `--output-file` — writes the lint
+        // report to an arbitrary path. The long form `--output-file=` is
+        // already caught by MUTATING_FLAG_PREFIXES; the short form needs an
+        // eslint-specific check because `-o` is a legitimate read flag in
+        // other tools (e.g. `rg -o` = --only-matching). Audit re-review
+        // (report 34 Codex HIGH) found this gap. `--fix` is also already
+        // in MUTATING_FLAGS_EXACT, so the eslint command surface is now
+        // read-only by construction.
+        if (args.includes("-o")) {
+            return {
+                ok: false,
+                reason: `Rescue rejects eslint -o (writes report to a file): ${tokens.join(" ")}. Drop the flag or use a path-checked Write tool call.`,
+            };
+        }
+        return { ok: true };
+    }
+    if (["rg", "grep", "ls", "cat", "pwd", "pyright", "mypy", "pytest"].includes(command)) {
         return { ok: true };
     }
     if (pipelineMode && PIPELINE_PLUMBING.has(command)) {

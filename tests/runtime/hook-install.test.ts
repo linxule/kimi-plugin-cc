@@ -235,6 +235,56 @@ describe("verifyHookInstalled", () => {
       await cleanupTestPath(home);
     }
   });
+
+  test("rejects KIMI_PLUGIN_CC_HOOK_SCRIPT that is not an absolute path (audit re-review M)", async () => {
+    const home = await createTestPluginDataRoot("hook-install-bad-script-path");
+    try {
+      const status = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: "./relative/hook.js",
+      });
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain("KIMI_PLUGIN_CC_HOOK_SCRIPT must be an absolute path");
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
+  test("verifier accepts an apostrophe in the hook script path (TOML round-trip)", async () => {
+    // Audit re-review (reports 33/34 convergent MEDIUM): the canonical
+    // expected command has a `\` from shell-quoting the apostrophe; the
+    // installer TOML-escapes that `\` to `\\` on write; the parser must
+    // TOML-decode it back to `\` before equality, or every install on
+    // an apostrophe path false-fails the verifier.
+    const home = await createTestPluginDataRoot("hook-install-apostrophe-path");
+    try {
+      const hookPath = "/home/o'reilly/dist/hooks/approval-hook.js";
+      const canonical = canonicalCommandFor(hookPath);
+      // tomlBasicString equivalent: escape \ to \\ and " to \"
+      const tomlEscaped = canonical.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          `command = "${tomlEscaped}"`,
+          "timeout = 15",
+          "# === END kimi-plugin-cc-managed ===",
+        ].join("\n"),
+        "utf8",
+      );
+      const status = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      });
+      expect(status.installed).toBe(true);
+      expect(status.reason).toBeUndefined();
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
 });
 
 describe("maybeWarnHookMissing", () => {
