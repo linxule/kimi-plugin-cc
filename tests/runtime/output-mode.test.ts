@@ -47,7 +47,7 @@ function makeJob(commandType: ManagedCommandType): JobRecord {
     kimi_pid: null,
     status: "running",
     kimi_session_id: "session",
-    agent_profile: `runtime/agents/${commandType}.yaml`,
+    agent_profile: "<cli-client>",
     prompt_digest: "digest",
     summary: "running",
     phase: null,

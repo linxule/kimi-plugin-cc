@@ -62,14 +62,14 @@ export function summarizeKimiAvailabilityWarning(
   }
 
   if (classification.kind === "startup_failed") {
-    return `Kimi ${formatCommandLabel(commandType).toLowerCase()} could not start a usable Wire session; allowing stop.`;
+    return `Kimi ${formatCommandLabel(commandType).toLowerCase()} could not start a usable Kimi subprocess; allowing stop.`;
   }
 
   switch (classification.kind) {
     case "startup_timeout":
       return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not respond during startup; allowing stop.`;
     case "initialize_timeout":
-      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not complete Wire initialization; allowing stop.`;
+      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not complete session initialization; allowing stop.`;
     case "response_timeout":
       return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not return a final response; allowing stop.`;
     case "max_steps_reached":
@@ -96,10 +96,7 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
     };
   }
 
-  if (
-    error instanceof RuntimeError &&
-    (error.code === "WIRE_SPAWN_FAILED" || error.code === "CLI_SPAWN_FAILED")
-  ) {
+  if (error instanceof RuntimeError && error.code === "CLI_SPAWN_FAILED") {
     return {
       kind: "binary_unavailable",
       summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
@@ -111,8 +108,7 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
 
   // v1.0 cli-client surfaces async ENOENT (Bun) as CLI_PROCESS_ERROR with
   // "spawn ... ENOENT" in the message. Map that to binary_unavailable so
-  // the failure message points users at /kimi:setup the same way the v0.4
-  // WIRE_SPAWN_FAILED path did.
+  // the failure message points users at /kimi:setup.
   if (
     error instanceof RuntimeError &&
     error.code === "CLI_PROCESS_ERROR" &&
@@ -122,29 +118,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       kind: "binary_unavailable",
       summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
       nextStep: "Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.",
-      runtimeProbe: "failed",
-      authProbe: "failed",
-    };
-  }
-
-  if (message.includes("Failed to start kimi")) {
-    return {
-      kind: "startup_failed",
-      summary: "the Kimi CLI reported a startup failure before the Wire session was ready.",
-      nextStep: "Run `/kimi:setup` to inspect the local Kimi installation and retry.",
-      runtimeProbe: "failed",
-      authProbe: "failed",
-    };
-  }
-
-  if (
-    error instanceof RuntimeError &&
-    error.code === "WIRE_PROCESS_EXITED"
-  ) {
-    return {
-      kind: "startup_failed",
-      summary: "the Kimi Wire process exited before the session initialized.",
-      nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
       runtimeProbe: "failed",
       authProbe: "failed",
     };
@@ -179,10 +152,15 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
   }
 
   if (error instanceof RuntimeError) {
+    // STARTUP_TIMEOUT and INITIALIZE_TIMEOUT predate the v1.0 subprocess
+    // transport (the v0.4 Wire client had a three-phase startup). The
+    // v1.0 cli-client only emits RESPONSE_TIMEOUT, so these branches are
+    // defensive — callers that synthesize the old codes (or load v0.4
+    // job rows from SQLite) still get a useful classification.
     if (error.code === "STARTUP_TIMEOUT") {
       return {
         kind: "startup_timeout",
-        summary: "the Kimi CLI did not respond to the wire handshake within the startup budget.",
+        summary: "the Kimi CLI did not respond during startup.",
         nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
         runtimeProbe: "failed",
         authProbe: "failed",
@@ -192,8 +170,8 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
     if (error.code === "INITIALIZE_TIMEOUT") {
       return {
         kind: "initialize_timeout",
-        summary: "the Kimi wire session started but did not complete `initialize` in time.",
-        nextStep: "Run `/kimi:setup` to verify local Kimi auth and protocol-version compatibility, then retry.",
+        summary: "the Kimi session started but did not finish initializing in time.",
+        nextStep: "Run `/kimi:setup` to verify local Kimi configuration and retry.",
         runtimeProbe: "failed",
         authProbe: "failed",
       };

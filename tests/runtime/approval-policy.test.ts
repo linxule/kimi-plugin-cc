@@ -20,20 +20,7 @@ describe("decideHookOutcome", () => {
     });
   });
 
-  describe("ask label", () => {
-    test("allows every tool — including write/exec", async () => {
-      const tools = ["Bash", "Write", "Edit", "Read", "Grep", "Glob"];
-      for (const tool of tools) {
-        const decision = await decideHookOutcome(
-          { tool_name: tool, tool_input: {} },
-          { commandLabel: "ask" },
-        );
-        expect(decision.decision).toBe("allow");
-      }
-    });
-  });
-
-  describe.each(["review", "challenge", "review_gate"] as const)("%s label", (label) => {
+  describe.each(["ask", "review", "challenge", "review_gate"] as const)("%s label", (label) => {
     test("allows read-only tools", async () => {
       for (const tool of ["Read", "Grep", "Glob"]) {
         const decision = await decideHookOutcome(

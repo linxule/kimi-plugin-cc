@@ -1,11 +1,11 @@
 {
-  "name": "kimi",
-  "description": "Delegate read-only review, challenge, free-form ask, and write-capable rescue work to the local Kimi CLI. Includes an opt-in stop-time review gate.",
-  "version": "0.4.0",
+  "name": "kimi-v1",
+  "description": "Claude Code plugin that delegates read-only review, challenge, free-form ask, and write-capable rescue work to the local kimi-code CLI. Includes an opt-in stop-time review gate and a PreToolUse hook that enforces per-command safety.",
+  "version": "1.0.0-alpha.1",
   "homepage": "https://github.com/linxule/kimi-plugin-cc",
   "repository": "https://github.com/linxule/kimi-plugin-cc",
   "license": "Apache-2.0",
-  "keywords": ["kimi", "review", "code-review", "delegation", "multi-model"],
+  "keywords": ["kimi", "kimi-code", "review", "code-review", "delegation", "multi-model"],
   "author": {
     "name": "linxule"
   }

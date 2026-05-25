@@ -8,12 +8,33 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { renderManagedJobOutput } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { sweepStaleJobs } from "../jobs.js";
-import type { IncomingWireMessage, PromptResult } from "../wire/types.js";
-import {
-  createTurnCapture,
-  finalizeTurnCapture,
-  observeTurnEvent,
-} from "../wire/turn-capture.js";
+
+/**
+ * Replay a completed job from its persisted stream-json diagnostics log.
+ *
+ * v1.0 log format (`runtime/cli-client.ts`):
+ *
+ *   Each line is a JSON object with a `ts` timestamp and an `event`
+ *   discriminator. The events we care about:
+ *
+ *     {"ts":"...","event":"spawn", ...}
+ *     {"ts":"...","event":"record","record":{"role":"assistant","content":"..."}}
+ *     {"ts":"...","event":"record","record":{"role":"assistant","tool_calls":[...]}}
+ *     {"ts":"...","event":"record","record":{"role":"tool","tool_call_id":"...","content":"..."}}
+ *     {"ts":"...","event":"malformed","line":"...","reason":"..."}
+ *     {"ts":"...","event":"process_error", ...}
+ *     {"ts":"...","event":"exit","exit_code":0,"session_id":"...", ...}
+ *
+ *   This file format is OURS — written by cli-client when `logPath` is
+ *   set. Replay only needs the assistant `content` chunks; tool_calls
+ *   and tool responses are diagnostic and don't change the rendered
+ *   artifact.
+ *
+ * v0.4 wire-format logs are NOT supported. The wire transport went
+ * away in v1.0 along with the kimi-cli binary, and the new replay
+ * source is this stream-json log. Jobs created under v0.4 produce a
+ * REPLAY_LOG_UNREADABLE error explaining the cutover.
+ */
 
 export interface ReplayResult {
   rendered: string;
@@ -23,9 +44,15 @@ export interface ReplayResult {
 
 const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
 
-interface WireLogEntry {
-  direction: "meta" | "in" | "out" | "stderr";
-  message: unknown;
+interface StreamLogEntry {
+  ts?: unknown;
+  event?: unknown;
+  record?: unknown;
+  exit_code?: unknown;
+  session_id?: unknown;
+  signal?: unknown;
+  aborted?: unknown;
+  message?: unknown;
 }
 
 export async function runReplay(argv: string[], context: CommandContext): Promise<string> {
@@ -83,8 +110,8 @@ export async function replayJob(job: JobRecord): Promise<ReplayResult> {
     );
   }
 
-  const completedTurn = await replayCompletedTurn(job.stream_log_path);
-  const rendered = renderManagedJobOutput(job, completedTurn.finalText);
+  const finalText = await replayFinalText(job.stream_log_path);
+  const rendered = renderManagedJobOutput(job, finalText);
 
   return {
     rendered: rendered.rendered,
@@ -93,122 +120,108 @@ export async function replayJob(job: JobRecord): Promise<ReplayResult> {
   };
 }
 
-async function replayCompletedTurn(logPath: string) {
+async function replayFinalText(logPath: string): Promise<string> {
   const contents = await readFile(logPath, "utf8");
   const rawLines = contents.split("\n");
-  const turn = createTurnCapture();
-  let promptRequestId: string | null = null;
-  let promptResult: PromptResult | null = null;
+  let sawSpawn = false;
+  let sawExit = false;
+  let sawV1Event = false;
+  let sawV04Direction = false;
+  let assistantContent = "";
 
   for (let lineNumber = 0; lineNumber < rawLines.length; lineNumber += 1) {
     const line = rawLines[lineNumber]!.trim();
-    if (!line) {
-      continue;
-    }
+    if (!line) continue;
 
-    let entry: WireLogEntry;
+    let entry: StreamLogEntry;
     try {
-      entry = JSON.parse(line) as WireLogEntry;
+      entry = JSON.parse(line) as StreamLogEntry;
     } catch (error) {
-      // A truncated final line is the expected shape when a worker was SIGKILL'd mid-write.
-      // Silently drop it so replay still works on the preceding, consistent prefix.
-      if (lineNumber === rawLines.length - 1) {
-        continue;
-      }
+      // A truncated trailing line is the expected shape when a worker
+      // was SIGKILL'd mid-write. Drop it silently so replay still works
+      // on the consistent prefix.
+      if (lineNumber === rawLines.length - 1) continue;
       throw new RuntimeError(
         "REPLAY_LOG_INVALID",
-        `Wire log ${logPath}:${lineNumber + 1} is malformed JSON: ${(error as Error).message}`,
+        `Stream log ${logPath}:${lineNumber + 1} is malformed JSON: ${(error as Error).message}`,
         "replay.log",
         { cause: error as Error },
       );
     }
 
-    if (entry.direction === "out") {
-      const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
-      if (message.method === "prompt" && typeof message.id === "string") {
-        promptRequestId = message.id;
+    if (typeof entry.event === "string") sawV1Event = true;
+    if (Object.prototype.hasOwnProperty.call(entry, "direction")) sawV04Direction = true;
+
+    const event = typeof entry.event === "string" ? entry.event : "";
+    switch (event) {
+      case "spawn":
+        sawSpawn = true;
+        break;
+      case "record": {
+        const record = entry.record;
+        if (typeof record !== "object" || record === null || Array.isArray(record)) {
+          throw new RuntimeError(
+            "REPLAY_LOG_INVALID",
+            `Stream log ${logPath}:${lineNumber + 1} record entry is not an object.`,
+            "replay.log",
+          );
+        }
+        const role = (record as { role?: unknown }).role;
+        const content = (record as { content?: unknown }).content;
+        if (role === "assistant" && typeof content === "string") {
+          assistantContent += content;
+        }
+        // Non-string content (null/undefined/object) silently skipped —
+        // these are diagnostic-only records we don't render.
+        break;
       }
-      continue;
-    }
-
-    if (entry.direction !== "in") {
-      continue;
-    }
-
-    const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
-
-    if ("method" in message) {
-      if (message.method === "event" && isEventPayload(message.params)) {
-        observeTurnEvent(turn, message.params.type, message.params.payload);
+      case "exit":
+        sawExit = true;
+        break;
+      case "process_error": {
+        const detail = typeof entry.message === "string" ? entry.message : "<unknown>";
+        throw new RuntimeError(
+          "REPLAY_LOG_PROCESS_ERROR",
+          `Stream log ${logPath} captured a subprocess error and cannot be replayed: ${detail}`,
+          "replay.log",
+          { details: { logPath, line: lineNumber + 1 } },
+        );
       }
-      continue;
-    }
-
-    if (
-      promptRequestId &&
-      message.id === promptRequestId &&
-      isPromptResult(message.result)
-    ) {
-      promptResult = message.result;
+      default:
+        // Unknown / malformed-line / future events are diagnostics — skip.
+        break;
     }
   }
 
-  if (!promptRequestId || !promptResult) {
+  if (!sawSpawn) {
+    // Differentiate "this is a v0.4 wire log" from "this is a v1.0 log
+    // that died before reaching the spawn event". v0.4 logs had a
+    // `direction` field on every entry (out/in/meta/stderr); v1.0 logs
+    // use `event` instead.
+    if (sawV04Direction && !sawV1Event) {
+      throw new RuntimeError(
+        "REPLAY_LOG_UNREADABLE",
+        `Stream log ${logPath} is a v0.4 wire log (no \`event\` key). v0.4 wire logs are not supported by the v1.0 replay command.`,
+        "replay.log",
+        { details: { logPath } },
+      );
+    }
     throw new RuntimeError(
-      "REPLAY_LOG_INVALID",
-      `Wire log ${logPath} does not contain a replayable prompt result.`,
+      "REPLAY_LOG_NO_SPAWN",
+      `Stream log ${logPath} contains no spawn event — the worker likely failed before launching kimi (e.g., synchronous spawn failure, early cancellation). No assistant content to replay.`,
       "replay.log",
+      { details: { logPath } },
     );
   }
 
-  return finalizeTurnCapture(turn, promptResult);
-}
-
-function coerceWireObject(
-  value: unknown,
-  logPath: string,
-  lineNumber: number,
-): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = typeof value === "string" ? JSON.parse(value) : value;
-  } catch (error) {
+  if (!sawExit && assistantContent.length === 0) {
     throw new RuntimeError(
       "REPLAY_LOG_INVALID",
-      `Wire log ${logPath}:${lineNumber} message field is malformed JSON: ${(error as Error).message}`,
+      `Stream log ${logPath} did not capture any assistant content before truncation.`,
       "replay.log",
-      { cause: error as Error },
+      { details: { logPath } },
     );
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new RuntimeError(
-      "REPLAY_LOG_INVALID",
-      `Wire log ${logPath}:${lineNumber} entry is not a JSON object.`,
-      "replay.log",
-    );
-  }
-
-  return parsed as Record<string, unknown>;
-}
-
-function isEventPayload(value: unknown): value is Extract<IncomingWireMessage, { method: "event" }>["params"] {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    typeof (value as { type?: unknown }).type === "string" &&
-    typeof (value as { payload?: unknown }).payload === "object" &&
-    (value as { payload?: unknown }).payload !== null &&
-    !Array.isArray((value as { payload?: unknown }).payload)
-  );
-}
-
-function isPromptResult(value: unknown): value is PromptResult {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    typeof (value as { status?: unknown }).status === "string"
-  );
+  return assistantContent;
 }

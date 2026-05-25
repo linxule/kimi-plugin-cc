@@ -44,25 +44,33 @@ describe("verifyHookInstalled", () => {
     }
   });
 
-  test("reports missing when only marker is present (no script reference)", async () => {
-    const home = await createTestPluginDataRoot("hook-install-marker-only");
+  test("reports missing when a stray comment mentions the marker but no real block exists", async () => {
+    // PR 4 hardening: the old substring-based verifier returned installed
+    // here because the raw text included both `kimi-plugin-cc-managed`
+    // and `approval-hook.js`. The shared grammar parser now requires a
+    // proper BEGIN/END block with a `[[hooks]]` table inside.
+    const home = await createTestPluginDataRoot("hook-install-stray-comment");
     try {
       await mkdir(home, { recursive: true });
       await writeFile(
         path.join(home, "config.toml"),
-        `# kimi-plugin-cc-managed marker but no actual hook entry\n`,
+        "# notes: don't reinstall kimi-plugin-cc-managed approval-hook.js by hand\n",
         "utf8",
       );
       const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
       expect(status.installed).toBe(false);
-      expect(status.reason).toContain("approval-hook.js reference missing");
+      expect(status.reason).toContain("no kimi-plugin-cc PreToolUse hook");
     } finally {
       await cleanupTestPath(home);
     }
   });
 
-  test("reports missing when only script reference is present (no marker)", async () => {
-    const home = await createTestPluginDataRoot("hook-install-script-only");
+  test("reports missing when an unmanaged [[hooks]] block points at the script", async () => {
+    // Same situation as above but with a real hooks block. The verifier
+    // still rejects because there is no BEGIN/END managed marker — the
+    // user installed something manually and we can't safely confirm it
+    // matches the contract we depend on.
+    const home = await createTestPluginDataRoot("hook-install-unmanaged-block");
     try {
       await mkdir(home, { recursive: true });
       await writeFile(
@@ -72,13 +80,13 @@ describe("verifyHookInstalled", () => {
       );
       const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
       expect(status.installed).toBe(false);
-      expect(status.reason).toContain("managed-block marker is missing");
+      expect(status.reason).toContain("no kimi-plugin-cc PreToolUse hook");
     } finally {
       await cleanupTestPath(home);
     }
   });
 
-  test("reports installed when both marker and script reference are present", async () => {
+  test("reports installed when a complete valid managed block is present", async () => {
     const home = await createTestPluginDataRoot("hook-install-ok");
     try {
       await mkdir(home, { recursive: true });
@@ -97,6 +105,58 @@ describe("verifyHookInstalled", () => {
       const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
       expect(status.installed).toBe(true);
       expect(status.reason).toBeUndefined();
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
+  test("reports missing when the managed block contains a matcher line (kimi-code would silently disable)", async () => {
+    const home = await createTestPluginDataRoot("hook-install-matcher");
+    try {
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===",
+          "[[hooks]]",
+          'matcher = "*"',
+          'event = "PreToolUse"',
+          'command = "node /abs/path/dist/hooks/approval-hook.js"',
+          "timeout = 15",
+          "# === END kimi-plugin-cc-managed ===",
+        ].join("\n"),
+        "utf8",
+      );
+      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain("matcher");
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
+  test("reports missing when expectedHookPath is supplied and the block points elsewhere", async () => {
+    const home = await createTestPluginDataRoot("hook-install-stale-path");
+    try {
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          'command = "node /old/dist/hooks/approval-hook.js"',
+          "timeout = 15",
+          "# === END kimi-plugin-cc-managed ===",
+        ].join("\n"),
+        "utf8",
+      );
+      const status = await verifyHookInstalled(
+        { KIMI_CODE_HOME: home },
+        { expectedHookPath: "/new/dist/hooks/approval-hook.js" },
+      );
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain("different hook script");
     } finally {
       await cleanupTestPath(home);
     }

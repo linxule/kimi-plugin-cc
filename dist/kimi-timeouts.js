@@ -1,37 +1,25 @@
-import { RuntimeError } from "./errors.js";
-export const KIMI_START_TIMEOUT_MS = 10_000;
-export const KIMI_INITIALIZE_TIMEOUT_MS = 15_000;
+// Per-command response-budget constants for the v1.0 cli-client path.
+//
+// v0.4 also exposed startup / initialize timeouts plus a generic
+// `withTimeout` helper. Those existed because the Wire transport had a
+// three-phase lifecycle (spawn → initialize → prompt). The v1.0
+// subprocess transport collapses spawn + prompt into a single
+// `runCliPromptWithBudget` call (see `runtime/cli-client.ts`), and
+// startup failures surface as CLI_SPAWN_FAILED / CLI_PROCESS_ERROR —
+// not as separate timeouts. So only the per-command response budgets
+// remain.
+/** Ask budget. Conversational; allow a long answer + tool detours. */
 export const KIMI_ASK_PROMPT_TIMEOUT_MS = 300_000;
+/** Review/challenge budget. Single-turn analysis over the workspace. */
 export const KIMI_REVIEW_PROMPT_TIMEOUT_MS = 600_000;
+/**
+ * Review-gate budget. Fires inside Claude Code's Stop hook so any value
+ * above the user's perceptible wait makes the gate feel broken.
+ */
 export const KIMI_REVIEW_GATE_TIMEOUT_MS = 8_000;
-export const KIMI_SETUP_INITIALIZE_TIMEOUT_MS = 5_000;
-export const KIMI_SETUP_PROMPT_TIMEOUT_MS = 10_000;
-const TIMEOUT_KIND_CODES = {
-    startup: "STARTUP_TIMEOUT",
-    initialize: "INITIALIZE_TIMEOUT",
-    response: "RESPONSE_TIMEOUT",
-};
 export function isTimeoutCode(code) {
     return (code === "TIMEOUT" ||
         code === "STARTUP_TIMEOUT" ||
         code === "INITIALIZE_TIMEOUT" ||
         code === "RESPONSE_TIMEOUT");
-}
-export async function withTimeout(promise, timeoutMs, stage, kind) {
-    const code = kind ? TIMEOUT_KIND_CODES[kind] : "TIMEOUT";
-    let timer;
-    const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => {
-            reject(new RuntimeError(code, `${stage} timed out after ${timeoutMs}ms.`, stage));
-        }, timeoutMs);
-        timer.unref();
-    });
-    try {
-        return await Promise.race([promise, timeout]);
-    }
-    finally {
-        if (timer) {
-            clearTimeout(timer);
-        }
-    }
 }

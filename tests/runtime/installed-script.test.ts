@@ -14,7 +14,6 @@ const companionScript = path.join(repoRoot, "scripts", "companion.sh");
 const reviewGateScript = path.join(repoRoot, "scripts", "review-gate-hook.sh");
 const SANITIZED_PATH = "/usr/bin:/bin";
 const nodeExecPath = resolveNodeExecPath();
-const bunExecPath = process.execPath;
 
 let cleanCopyRoot: string;
 let fakeNode20Path: string;
@@ -122,17 +121,17 @@ describe("installed-plugin script wrappers", () => {
   });
 
   test("clean installed copy runs setup without repo-root node_modules", () => {
+    // v1.0 setup writes a managed block to ~/.kimi-code/config.toml and
+    // probes the installed hook script directly. We isolate the test from
+    // the developer's real kimi-code config via KIMI_CODE_HOME → a temp
+    // dir under the clean copy. The probe never spawns kimi-code itself,
+    // so the kimi mock is no longer needed here.
+    const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home");
     const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
       env: {
         PATH: SANITIZED_PATH,
         KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
-        KIMI_PLUGIN_CC_KIMI_BIN: bunExecPath,
-        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([
-          "run",
-          path.join(cleanCopyRoot, "tests", "helpers", "mock-kimi-cli.ts"),
-        ]),
-        KIMI_PLUGIN_CC_MOCK_SCENARIO: "ask-success",
-        KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: path.join(cleanCopyRoot, ".tmp", "installed-setup.jsonl"),
+        KIMI_CODE_HOME: kimiCodeHome,
         CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
         CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
       },
@@ -141,7 +140,8 @@ describe("installed-plugin script wrappers", () => {
 
     const combined = `${result.stdout}\n${result.stderr}`;
     expect(result.status).toBe(0);
-    expect(combined).toContain("Kimi runtime is ready.");
+    expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
+    expect(combined).toContain("Probe:          ok");
     expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
   });
 

@@ -64,12 +64,17 @@ export async function decideHookOutcome(input, ctx) {
     const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
     switch (label) {
         case "ask":
-            // Conversational; user is watching the prompt. Trust kimi-code's
-            // built-in permission posture.
-            return { decision: "allow" };
         case "review":
         case "challenge":
         case "review_gate":
+            // /kimi:ask is documented and dispatched as a read-only narrative
+            // surface (see agents/kimi-ask.md: "do not implement anything Kimi
+            // describes"). PR 2 initially trusted kimi-code's `permission:auto`
+            // for ask on the assumption the user was watching every tool call,
+            // but `/kimi:ask` runs as a non-interactive subprocess via
+            // companion.sh — the user never sees individual tool prompts. PR 4
+            // reviewers flagged this contradiction; ask now shares the
+            // read-only allowlist with review/challenge/review_gate.
             if (READ_ONLY_TOOLS.has(toolName)) {
                 return { decision: "allow" };
             }

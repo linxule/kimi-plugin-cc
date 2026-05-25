@@ -2,33 +2,37 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { evaluateInstalled, parseManagedBlock } from "./managed-block.js";
+
 /**
- * Verify that the kimi-plugin-cc PreToolUse hook is installed in
- * `~/.kimi-code/config.toml`.
+ * Verify that the kimi-plugin-cc PreToolUse hook is installed and
+ * structurally valid in `~/.kimi-code/config.toml`.
  *
- * Why this lives in PR 2:
+ * PR 4 hardening:
  *
- *   The hook script (approval-hook.ts → dist/hooks/approval-hook.js) is
- *   the only enforcement of the read-only contract for review /
- *   challenge / review_gate (kimi-code's `-p` mode auto-approves every
- *   tool otherwise). PR 4 owns the managed-block installer (rewrite of
- *   `setup.ts`); until PR 4 lands, the hook is compiled but inert.
+ *   PR 2 implemented this as a substring check (`includes("kimi-plugin-cc-managed")`
+ *   AND `includes("approval-hook.js")`). PR 4 reviewers (Codex + Claude)
+ *   independently flagged the gap: stray comments, partial references,
+ *   or a malformed block with `matcher = "*"` (which kimi-code rejects
+ *   and silently disables) all passed the substring check while the
+ *   hook was effectively absent. Rescue's "refuse if hook missing"
+ *   gate was therefore bypassable.
  *
- *   The reviewers (reports 17 + 18) flagged this as a critical safety
- *   gap. Rather than pull the installer forward, PR 2 adds this
- *   verifier so commands can emit a loud warning when the hook is
- *   missing. The warning surfaces the gap on every call — better than
- *   silent fail-open.
+ *   The verifier now shares its grammar with `setup.ts` via
+ *   `runtime/hooks/managed-block.ts::parseManagedBlock`. Both gates
+ *   reject the same shapes:
  *
- * Behavior:
+ *     - duplicate managed blocks (two installs raced)
+ *     - orphan markers (manual edit)
+ *     - missing [[hooks]] table
+ *     - missing event = "PreToolUse"
+ *     - missing or empty command
+ *     - presence of any `matcher = ...` line
  *
- *   - Reads `~/.kimi-code/config.toml` (best effort; missing file is
- *     "not installed").
- *   - Looks for the managed-block marker `kimi-plugin-cc-managed` AND
- *     a `[[hooks]]` block referencing `approval-hook.js`. Either
- *     marker alone is treated as not-yet-installed (PR 4's installer
- *     writes both).
- *   - Returns a structured result; does not throw on missing config.
+ *   The hook-script-path check is optional: callers (ask/review/etc.)
+ *   that just want to know "is something installed and minimally
+ *   valid" can pass undefined; setup --check passes the expected dist
+ *   path so we also catch stale-path drift.
  *
  * Tests / setup probes can opt out via
  * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` so the warning doesn't pollute
@@ -42,17 +46,12 @@ export interface HookInstallStatus {
   configPath: string;
 }
 
-const MANAGED_MARKER = "kimi-plugin-cc-managed";
-const HOOK_SCRIPT_HINT = "approval-hook.js";
-
 export async function verifyHookInstalled(
   env: NodeJS.ProcessEnv,
+  options: { expectedHookPath?: string } = {},
 ): Promise<HookInstallStatus> {
   const configPath = resolveKimiCodeConfigPath(env);
   if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
-    // Setup probes, CI test runs, and intentional silencing share this
-    // bypass. We still surface a configPath in the result so a caller
-    // that asks "where would we have looked?" doesn't need to recompute.
     return { installed: true, configPath };
   }
   let raw: string;
@@ -74,21 +73,46 @@ export async function verifyHookInstalled(
     };
   }
 
-  const hasManagedBlock = raw.includes(MANAGED_MARKER);
-  const hasHookReference = raw.includes(HOOK_SCRIPT_HINT);
-  if (hasManagedBlock && hasHookReference) {
-    return { installed: true, configPath };
+  if (options.expectedHookPath !== undefined) {
+    const check = evaluateInstalled(raw, options.expectedHookPath);
+    return {
+      installed: check.installed,
+      reason: check.reason,
+      configPath,
+    };
   }
 
-  return {
-    installed: false,
-    reason: hasHookReference
-      ? "managed-block marker is missing (config may have been edited manually)"
-      : hasManagedBlock
-        ? "managed-block marker present but approval-hook.js reference missing"
-        : "no kimi-plugin-cc PreToolUse hook found in kimi-code config",
-    configPath,
-  };
+  // No expected path supplied — caller just wants "is a structurally
+  // valid managed block present?". This is the common path for
+  // ask/review/etc., which only need to know whether to emit the
+  // missing-hook warning. Stale-path drift is caught at
+  // `/kimi:setup --check` time, not here.
+  const { state } = parseManagedBlock(raw);
+  switch (state.kind) {
+    case "absent":
+      return { installed: false, reason: "no kimi-plugin-cc PreToolUse hook found in kimi-code config", configPath };
+    case "orphan":
+      return {
+        installed: false,
+        reason: `${state.detail} marker. Run /kimi:setup --uninstall to clear, then /kimi:setup.`,
+        configPath,
+      };
+    case "duplicate":
+      return {
+        installed: false,
+        reason: `duplicate managed blocks. Run /kimi:setup --uninstall, then /kimi:setup.`,
+        configPath,
+      };
+    case "found":
+      if (!state.valid) {
+        return {
+          installed: false,
+          reason: state.invalidReason ?? "managed block failed validation",
+          configPath,
+        };
+      }
+      return { installed: true, configPath };
+  }
 }
 
 function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {
@@ -109,16 +133,16 @@ export function formatHookMissingWarning(
 ): string {
   return [
     "",
-    "WARNING: kimi-plugin-cc safety hook is NOT installed.",
+    "WARNING: kimi-plugin-cc safety hook is NOT installed (or is invalid).",
     `  Command: ${commandLabel}`,
     `  Config:  ${status.configPath}`,
     `  Reason:  ${status.reason ?? "unknown"}`,
     "",
-    "  Without the PreToolUse hook, kimi-code's `-p` mode auto-approves every",
-    "  tool call — including Bash, Write, Edit — even from commands documented",
-    "  as read-only. Run `/kimi:setup` (PR 4) to install the managed block",
-    "  in ~/.kimi-code/config.toml. Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 to",
-    "  silence this warning intentionally.",
+    "  Without a valid PreToolUse hook, kimi-code's `-p` mode auto-approves",
+    "  every tool call — including Bash, Write, Edit — even from commands",
+    "  documented as read-only. Run `/kimi:setup` to install or repair the",
+    "  managed block in ~/.kimi-code/config.toml. Set",
+    "  KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 to silence this warning intentionally.",
     "",
   ].join("\n");
 }

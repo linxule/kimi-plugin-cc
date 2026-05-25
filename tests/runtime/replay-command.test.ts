@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runReviewGateStopHook } from "../../runtime/commands/review-gate.js";
 import { replayJob, runReplay } from "../../runtime/commands/replay.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { JobStore, type JobRecord } from "../../runtime/job-store.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
-import { WireClient } from "../../runtime/wire/client.js";
-import { ApprovalDispatcher, rejectAllApprovals } from "../../runtime/wire/approval-dispatcher.js";
-import { KIMI_WIRE_PROTOCOL_VERSION } from "../../runtime/wire/types.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+// v1.0 cli-client emits NDJSON diagnostic entries that look like:
+//   {"ts":"2026-01-01T00:00:00.000Z","event":"spawn","command":"kimi",...}
+//   {"ts":"...","event":"record","record":{"role":"assistant","content":"..."}}
+//   {"ts":"...","event":"exit","exit_code":0,...}
+// Replay needs to reassemble assistant content from those records.
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -24,87 +24,130 @@ function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   };
 }
 
+interface LogEntry {
+  ts?: string;
+  event: string;
+  [key: string]: unknown;
+}
+
+async function writeStreamLog(logPath: string, entries: LogEntry[]): Promise<void> {
+  const lines = entries.map((entry) => {
+    const withTs = { ts: entry.ts ?? "2026-01-01T00:00:00.000Z", ...entry };
+    return JSON.stringify(withTs);
+  });
+  await writeFile(logPath, `${lines.join("\n")}\n`, "utf8");
+}
+
+function makeAskJob(logPath: string): JobRecord {
+  const now = new Date().toISOString();
+  return {
+    job_id: "replay-ask-001",
+    repo_id: "repo",
+    command_type: "ask",
+    created_at: now,
+    updated_at: now,
+    cwd: process.cwd(),
+    model: null,
+    thinking: false,
+    background: false,
+    pid: null,
+    kimi_pid: null,
+    status: "completed",
+    kimi_session_id: "session-ask-001",
+    agent_profile: "<cli-client>",
+    prompt_digest: "digest",
+    summary: "ask",
+    phase: null,
+    final_output_path: null,
+    stream_log_path: logPath,
+    error: null,
+  };
+}
+
 describe("replay command", () => {
-  // PR 2 follow-up: v1.0's stream log records cli-client NDJSON events
-  // (spawn/record/exit), not the v0.4 wire JSON-RPC turn capture. The
-  // canonical replay source for v1.0 is kimi-code's auto-persisted
-  // ~/.kimi-code/sessions/<wd>/<sid>/agents/main/wire.jsonl, which
-  // captures the full event-rich stream. The replay command will be
-  // re-pointed at that file in PR 3/4 once rescue + setup land. Until
-  // then this test is skipped — `replayJob` still works against
-  // legacy v0.4 logs (verified by the interrupted-turn test below).
-  test.skip("replay reproduces a stored review gate output from the event log", async () => {
-    const pluginDataRoot = await createTestPluginDataRoot("replay-review-gate");
-    const env = {
-      ...process.env,
-      CLAUDE_PLUGIN_DATA: pluginDataRoot,
-      KIMI_PLUGIN_CC_KIMI_BIN: "bun",
-      KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
-      KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block",
-    };
-
+  test("replay reassembles assistant content from a stream-json log", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("replay-stream-json");
+    const logPath = path.join(pluginDataRoot, "ask-log.jsonl");
     try {
-      const paths = resolvePluginPaths(env);
-      await mkdir(paths.pluginRoot, { recursive: true });
-      await writeFile(paths.configPath, `${JSON.stringify({ reviewGateEnabled: true }, null, 2)}\n`, "utf8");
+      await mkdir(path.dirname(logPath), { recursive: true });
+      await writeStreamLog(logPath, [
+        { event: "spawn", command: "kimi", args: ["--output-format", "stream-json", "-p", "hi"], cwd: process.cwd() },
+        { event: "record", record: { role: "assistant", content: "Reassembled " } },
+        { event: "record", record: { role: "assistant", content: "ask answer." } },
+        { event: "exit", exit_code: 0, session_id: "session-ask-001", malformed_count: 0, record_count: 2 },
+      ]);
 
-      const transcriptPath = path.join(pluginDataRoot, "transcript.jsonl");
-      await writeFile(
-        transcriptPath,
-        [
-          JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "Fix the failing path." }] } }),
-          JSON.stringify({
-            type: "assistant",
-            message: { content: [{ type: "text", text: "I fixed the issue and everything is complete." }] },
-          }),
-        ].join("\n") + "\n",
-        "utf8",
-      );
+      const replayed = await replayJob(makeAskJob(logPath));
+      expect(replayed.output).toBe("Reassembled ask answer.");
+      expect(replayed.rendered).toContain("Reassembled ask answer.");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
 
-      await runReviewGateStopHook(
-        {
-          cwd: process.cwd(),
-          hook_event_name: "Stop",
-          transcript_path: transcriptPath,
-        },
-        makeContext(process.cwd(), env),
-      );
+  test("replay tolerates a truncated trailing line (worker SIGKILL mid-write)", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("replay-truncated");
+    const logPath = path.join(pluginDataRoot, "ask-log.jsonl");
+    try {
+      const validLines = [
+        JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", event: "spawn", command: "kimi", args: ["-p", "hi"] }),
+        JSON.stringify({
+          ts: "2026-01-01T00:00:00.001Z",
+          event: "record",
+          record: { role: "assistant", content: "partial answer text" },
+        }),
+      ];
+      // Synthesize a truncated final line (no closing brace).
+      const truncated = '{"ts":"2026-01-01T00:00:00.002Z","event":"exi';
+      await writeFile(logPath, `${validLines.join("\n")}\n${truncated}`, "utf8");
 
-      const repoIdentity = await resolveRepoIdentity(process.cwd());
-      const store = new JobStore(paths);
+      const replayed = await replayJob(makeAskJob(logPath));
+      expect(replayed.output).toBe("partial answer text");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("replay fails with REPLAY_LOG_UNREADABLE for a v0.4-style wire log", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("replay-v04-log");
+    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
+    try {
+      // v0.4 wire log shape — no `event` discriminator, has `direction`.
+      const wireEntries = [
+        { direction: "out", message: { jsonrpc: "2.0", method: "prompt", id: "p1", params: { user_input: "hi" } } },
+        { direction: "in", message: { jsonrpc: "2.0", method: "event", params: { type: "TurnEnd", payload: {} } } },
+        { direction: "in", message: { jsonrpc: "2.0", id: "p1", result: { status: "finished" } } },
+      ];
+      await writeFile(logPath, `${wireEntries.map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
+
+      let caught: unknown;
       try {
-        const job = store.findLatestJob({
-          repoId: repoIdentity.repoId,
-          commandType: "review_gate",
-        });
-
-        expect(job).toBeTruthy();
-
-        const replayed = await replayJob(job!);
-        const replayOutput = await runReplay([job!.job_id], makeContext(process.cwd(), env));
-        const artifact = await readFile(job!.final_output_path!, "utf8");
-
-        expect(replayed.output).toEqual({
-          decision: "BLOCK",
-          confidence: "high",
-          summary: "The assistant claimed the requested work was complete without addressing the core fix.",
-          issues: [
-            {
-              title: "Requested fix still missing",
-              body: "The response says the task is done, but it does not address the user’s explicit request to fix the failing path.",
-              severity: "high",
-            },
-          ],
-        });
-        // v0.2.4: renderReviewGateArtifact now emits a trailing newline,
-        // so writeArtifact's normalization is a no-op and the on-disk file
-        // is byte-identical to the in-memory rendered string.
-        expect(replayed.rendered).toBe(artifact);
-        expect(replayOutput).toContain("# Review Gate Result");
-        expect(replayOutput).toContain("Requested fix still missing");
-      } finally {
-        store.close();
+        await replayJob(makeAskJob(logPath));
+      } catch (err) {
+        caught = err;
       }
+      expect(caught).toBeTruthy();
+      expect((caught as { code?: string }).code).toBe("REPLAY_LOG_UNREADABLE");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
+  test("replay surfaces a process_error event as REPLAY_LOG_PROCESS_ERROR", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("replay-process-error");
+    const logPath = path.join(pluginDataRoot, "ask-log.jsonl");
+    try {
+      await writeStreamLog(logPath, [
+        { event: "spawn", command: "kimi", args: ["-p", "hi"], cwd: process.cwd() },
+        { event: "process_error", message: "spawn ENOENT" },
+      ]);
+      let caught: unknown;
+      try {
+        await replayJob(makeAskJob(logPath));
+      } catch (err) {
+        caught = err;
+      }
+      expect((caught as { code?: string }).code).toBe("REPLAY_LOG_PROCESS_ERROR");
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
@@ -134,7 +177,7 @@ describe("replay command", () => {
         kimi_pid: null,
         status: "failed",
         kimi_session_id: "session-missing-log",
-        agent_profile: "runtime/agents/review-gate.yaml",
+        agent_profile: "<cli-client>",
         prompt_digest: "digest",
         summary: "failed",
         phase: null,
@@ -154,138 +197,57 @@ describe("replay command", () => {
     }
   });
 
-  test("replay reproduces interrupted-turn failures identically to the live path", async () => {
-    const pluginDataRoot = await createTestPluginDataRoot("replay-interrupted");
-    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
+  test("runReplay enforces argv shape and returns the rendered artifact", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("replay-runreplay");
     const env = {
       ...process.env,
       CLAUDE_PLUGIN_DATA: pluginDataRoot,
     };
-    const client = new WireClient({
-      cwd: process.cwd(),
-      command: "bun",
-      args: ["run", "tests/helpers/mock-wire-server.ts", "cancelled"],
-      env,
-      logPath,
-      approvalDispatcher: new ApprovalDispatcher(rejectAllApprovals("unexpected approval request in replay test")),
-    });
-
     try {
-      await client.start();
-      await client.initialize({
-        protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
-        client: { name: "test-client", version: "0.1.0" },
+      const repoIdentity = await resolveRepoIdentity(process.cwd());
+      const paths = resolvePluginPaths(env);
+      await mkdir(paths.pluginRoot, { recursive: true });
+
+      const logPath = path.join(pluginDataRoot, "review-log.jsonl");
+      await writeStreamLog(logPath, [
+        { event: "spawn", command: "kimi" },
+        { event: "record", record: { role: "assistant", content: "Review pass-through prose." } },
+        { event: "exit", exit_code: 0 },
+      ]);
+
+      const store = new JobStore(paths);
+      const job = store.createJob({
+        job_id: "replay-review-001",
+        repo_id: repoIdentity.repoId,
+        command_type: "review",
+        cwd: process.cwd(),
+        model: null,
+        thinking: false,
+        background: false,
+        pid: null,
+        kimi_pid: null,
+        status: "completed",
+        kimi_session_id: "session-r",
+        agent_profile: "<cli-client>",
+        prompt_digest: "d",
+        summary: "review",
+        phase: null,
+        final_output_path: null,
+        stream_log_path: logPath,
+        error: null,
       });
+      store.close();
 
-      const liveError: Error = await client.prompt("hello", "setup").then(
-        () => {
-          throw new Error("Expected the live prompt to fail.");
-        },
-        (error) => error as Error,
-      );
-      const replayJobRecord = makeReplayJobRecord(logPath);
-      const replayError: Error = await replayJob(replayJobRecord).then(
-        () => {
-          throw new Error("Expected replay to fail.");
-        },
-        (error) => error as Error,
-      );
+      const rendered = await runReplay([job.job_id], makeContext(process.cwd(), env));
+      expect(rendered).toContain("# Review Result");
+      expect(rendered).toContain("Review pass-through prose.");
 
-      expect((replayError as { code?: string }).code).toBe((liveError as { code?: string }).code);
-      expect(replayError.message).toBe(liveError.message);
-    } finally {
-      await client.close();
-      await cleanupTestPath(pluginDataRoot);
-    }
-  });
-  test("replay discards failed-attempt text when StepRetry is in the log", async () => {
-    const pluginDataRoot = await createTestPluginDataRoot("replay-step-retry");
-    const logPath = path.join(pluginDataRoot, "wire-log.jsonl");
-
-    try {
-      const promptId = "prompt-1";
-      const entries: { direction: "out" | "in"; message: unknown }[] = [
-        {
-          direction: "out",
-          message: {
-            jsonrpc: "2.0",
-            method: "prompt",
-            id: promptId,
-            params: { user_input: "tell me a fact" },
-          },
-        },
-        wireEvent("TurnBegin", { user_input: "tell me a fact" }),
-        wireEvent("StepBegin", { n: 1 }),
-        wireEvent("ContentPart", { type: "text", text: "bad partial draft" }),
-        wireEvent("StepRetry", {
-          n: 1,
-          next_attempt: 2,
-          max_attempts: 3,
-          wait_s: 0.5,
-          error_type: "RateLimitError",
-          status_code: 429,
-        }),
-        wireEvent("ContentPart", { type: "text", text: "good final answer" }),
-        wireEvent("TurnEnd", {}),
-        {
-          direction: "in",
-          message: {
-            jsonrpc: "2.0",
-            id: promptId,
-            result: { status: "finished" },
-          },
-        },
-      ];
-
-      await writeFile(
-        logPath,
-        entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
-        "utf8",
-      );
-
-      const replayed = await replayJob(makeReplayJobRecord(logPath));
-
-      expect(replayed.rendered).toContain("good final answer");
-      expect(replayed.rendered).not.toContain("bad partial draft");
+      // Argv validation: trailing garbage rejected
+      await expect(
+        runReplay([job.job_id, "junk"], makeContext(process.cwd(), env)),
+      ).rejects.toThrow("expects exactly one job id");
     } finally {
       await cleanupTestPath(pluginDataRoot);
     }
   });
 });
-
-function wireEvent(type: string, payload: Record<string, unknown>): { direction: "in"; message: unknown } {
-  return {
-    direction: "in",
-    message: {
-      jsonrpc: "2.0",
-      method: "event",
-      params: { type, payload },
-    },
-  };
-}
-
-function makeReplayJobRecord(logPath: string): JobRecord {
-  const now = new Date().toISOString();
-  return {
-    job_id: "replay-live-match",
-    repo_id: "repo",
-    command_type: "ask",
-    created_at: now,
-    updated_at: now,
-    cwd: process.cwd(),
-    model: null,
-    thinking: false,
-    background: false,
-    pid: null,
-    kimi_pid: null,
-    status: "failed",
-    kimi_session_id: "session",
-    agent_profile: "runtime/agents/ask.yaml",
-    prompt_digest: "digest",
-    summary: "failed",
-    phase: null,
-    final_output_path: null,
-    stream_log_path: logPath,
-    error: null,
-  };
-}

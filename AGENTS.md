@@ -4,28 +4,29 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 0.4.0 (tagged `v0.4.0`)
+- **Version**: 1.0.0-alpha.1 (kimi-code, subprocess transport). v0.4.x lives on the `v0.4-maintenance` branch for users still on kimi-cli.
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 
 ## Directory layout
 
 ```
-.claude-plugin/     Plugin manifest (plugin.json, marketplace.json)
+.claude-plugin/     Plugin manifest (plugin.json, marketplace.json) — v1.x uses kimi-marketplace-v1 + kimi-v1
 commands/           Slash command markdown — thin wrappers over companion.sh
 agents/             Claude Code subagent definitions (kimi-rescue, kimi-review, kimi-challenge, kimi-ask)
-hooks/              Stop hook for the review gate
+hooks/              Stop hook for the review gate (kimi-code-side PreToolUse hook lives at runtime/hooks/)
 scripts/            Shell entry points (companion.sh, review-gate-hook.sh)
 runtime/            TypeScript source — the real runtime
   ├── background-spawn.ts  Shared detached-worker spawn helper (rescue + ask)
-  ├── wire/         Wire client (JSON-RPC over stdio) + turn capture
-  ├── commands/     One file per companion subcommand
-  ├── agents/       Kimi agent profiles (YAML)
-  ├── prompts/      System prompts per command type
-  ├── schemas/      Structured output contract for review_gate (review/challenge dropped theirs in v0.2.3)
-  └── hooks/        Stop hook entry point
+  ├── cli-client.ts        Subprocess wrapper around `kimi -p --output-format stream-json`
+  ├── stream-json.ts       Pure parser for kimi-code's NDJSON output
+  ├── cli-cancellation.ts  AbortController-based cancellation for long-running commands
+  ├── rescue-approval.ts   Workspace-bound allowlist (called by the PreToolUse hook)
+  ├── commands/            One file per companion subcommand
+  ├── hooks/               PreToolUse approval hook (entry script + policy + install verifier)
+  └── schemas/             Structured output contract for review_gate (review/challenge dropped theirs in v0.2.3)
 dist/               Compiled JS — committed for zero-build install
-tests/              bun test suite (265 tests / 29 files)
+tests/              bun test suite
 ```
 
 ## Commands
@@ -34,27 +35,28 @@ tests/              bun test suite (265 tests / 29 files)
 - `bun test <path>` — run a single test file
 - `bun run build` — compile `runtime/**/*.ts` → `dist/**/*.js`
 
-The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node` and runs `dist/companion.js`. Subcommands: `setup`, `review`, `task`, `status`, `result`, `cancel`, `replay`.
+The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node` and runs `dist/companion.js`. Subcommands: `setup`, `review`, `task`, `ask`, `status`, `result`, `cancel`, `replay`.
 
 ## Architecture
 
 **Thin plugin, rich runtime** — mirrors [codex-plugin-cc](https://github.com/openai/codex-plugin-cc):
 
 - Plugin layer (commands/, agents/, hooks/) handles routing only
-- Runtime layer (runtime/, scripts/) owns Wire sessions, SQLite job store, approval policy, and rendering
-- Flow: `slash command → companion.sh → companion.js → kimi --wire → job store → artifact`
+- Runtime layer (runtime/, scripts/) owns subprocess lifecycle, SQLite job store, hook-side approval policy, and rendering
+- Flow: `slash command → companion.sh → companion.js → kimi -p --output-format stream-json → job store → artifact`
 
 **Key invariants:**
 
-- Wire-first. One `kimi --wire` process per job. Client-assigned session UUIDs.
-- Read-only commands (review, challenge, ask, review_gate) enforced by agent-file `exclude_tools`, not prompts.
-- Rescue is the only write-capable profile. Shell access bounded by allowlist in `runtime/rescue-approval.ts`.
+- Subprocess-first. One `kimi -p` process per job. kimi-code mints the session id and announces it on stderr; we capture via regex.
+- Read-only commands (review, challenge, ask, review_gate) are enforced by the PreToolUse hook in `~/.kimi-code/config.toml` — `kimi -p`'s built-in auto-approve cannot be overridden via argv. `/kimi:setup` installs the managed block. Without it, rescue refuses to run.
+- Rescue is the only write-capable command. Workspace allowlist (shell-quote parser, mutating-flag detector, symlink reject, path-realpath check) lives in `runtime/rescue-approval.ts` and is called by the hook via `evaluateRescueHookRequest`.
 - Rescue cannot mutate git state. The main Claude thread owns branch/commit.
 - Jobs in SQLite are the source of truth. Terminal states are permanent.
 - Review/challenge/ask/rescue are all prose pass-through (review/challenge dropped their JSON schemas in v0.2.3). Review gate is the only command that still parses Kimi output (JSON allow/block).
 - Review gate is a Stop hook, disabled by default, fail-open on malformed output. When the gate skips (missing assistant message, unreadable transcript), `systemMessage` surfaces the reason.
 - LLM-caller discipline (v0.3.6+): stderr is for humans only; anything load-bearing for an agent caller goes in stdout, exit codes, or persisted SQLite state. Parsers hard-fail on unknown flag-shaped tokens (INVALID_ARGS) instead of warn-and-swallowing — wrappers never see stderr warnings. `RuntimeError` carries an optional `details: Record<string, unknown>` for structured failure context.
 - Default command stdout: review/challenge/ask/rescue emit raw prose; status emits raw job-row JSON; result emits raw artifact markdown. `result <jobId> --json` opts into a structured envelope (`{job_id, kind, status, summary, error, artifact_path, body, created_at, completed_at}`) for downstream automation.
+- Cancellation uses AbortController + SIGTERM → SIGKILL (1500ms escalation) to ensure the kimi child actually dies when the user cancels or a budget expires. Matches v0.4's wire-cancellation timing.
 
 ## When editing
 
@@ -68,7 +70,7 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 
 Version bump touches 5 files — update all before tagging:
 
-- `runtime/version.ts` (`KIMI_PLUGIN_CC_VERSION` — sent on the Wire handshake)
+- `runtime/version.ts` (`KIMI_PLUGIN_CC_VERSION` — written into the managed-block marker comment by /kimi:setup)
 - `package.json`
 - `.claude-plugin/plugin.json`
 - `.claude-plugin/marketplace.json`

@@ -36,22 +36,27 @@ describe("classifyManagedCommandFailure", () => {
     expect((result as RuntimeError).stage).toBe("rescue.initialize");
   });
 
-  test("preserveStage preserves wire.start when WIRE_SPAWN_FAILED is the inner cause", () => {
+  test("preserveStage preserves cli-client.spawn when CLI_SPAWN_FAILED is the inner cause", () => {
     const inner = new RuntimeError(
-      "WIRE_SPAWN_FAILED",
+      "CLI_SPAWN_FAILED",
       "Failed to spawn kimi.",
-      "wire.start",
+      "cli-client.spawn",
     );
     const result = classifyManagedCommandFailure(inner, "rescue", "job-xyz", {
       preserveStage: true,
     });
     expect(result).toBeInstanceOf(RuntimeError);
     expect((result as RuntimeError).code).toBe("RESCUE_KIMI_BINARY_UNAVAILABLE");
-    expect((result as RuntimeError).stage).toBe("wire.start");
+    expect((result as RuntimeError).stage).toBe("cli-client.spawn");
   });
 
   test("preserveStage only kicks in when the inner error is a RuntimeError", () => {
-    const inner = new Error("Failed to start kimi: ENOENT");
+    // Plain Errors no longer carry the kimi-startup classifier signal in
+    // v1.0 (the "Failed to start kimi" message-substring branch was a
+    // wire-transport artifact). Use a RuntimeError-shaped LLM-auth
+    // failure so the classifier still recognizes it but is forced into
+    // the default stage when the inner type isn't a RuntimeError.
+    const inner = new Error("LLM is not set");
     const result = classifyManagedCommandFailure(inner, "rescue", "job-xyz", {
       preserveStage: true,
     });
@@ -162,20 +167,20 @@ describe("summarizeKimiAvailabilityWarning", () => {
       expected: "Kimi review gate is not configured for model access; allowing stop.",
     },
     {
-      error: new RuntimeError("WIRE_SPAWN_FAILED", "Failed to spawn kimi.", "wire.start"),
+      error: new RuntimeError("CLI_SPAWN_FAILED", "Failed to spawn kimi.", "cli-client.spawn"),
       expected: "Kimi review gate could not find the Kimi CLI; allowing stop.",
     },
     {
-      error: new RuntimeError("WIRE_PROCESS_EXITED", "exited", "wire.process"),
-      expected: "Kimi review gate could not start a usable Wire session; allowing stop.",
+      error: new RuntimeError("CLI_NONZERO_EXIT", "exited", "cli-client.process"),
+      expected: "Kimi review gate could not start a usable Kimi subprocess; allowing stop.",
     },
     {
-      error: new RuntimeError("STARTUP_TIMEOUT", "startup timed out", "wire.start"),
+      error: new RuntimeError("STARTUP_TIMEOUT", "startup timed out", "cli-client.spawn"),
       expected: "Kimi review gate did not respond during startup; allowing stop.",
     },
     {
-      error: new RuntimeError("INITIALIZE_TIMEOUT", "initialize timed out", "wire.initialize"),
-      expected: "Kimi review gate did not complete Wire initialization; allowing stop.",
+      error: new RuntimeError("INITIALIZE_TIMEOUT", "initialize timed out", "cli-client.initialize"),
+      expected: "Kimi review gate did not complete session initialization; allowing stop.",
     },
     {
       error: new RuntimeError("RESPONSE_TIMEOUT", "prompt timed out", "wire.prompt"),

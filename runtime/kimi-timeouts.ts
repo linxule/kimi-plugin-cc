@@ -1,25 +1,31 @@
-import { RuntimeError } from "./errors.js";
+// Per-command response-budget constants for the v1.0 cli-client path.
+//
+// v0.4 also exposed startup / initialize timeouts plus a generic
+// `withTimeout` helper. Those existed because the Wire transport had a
+// three-phase lifecycle (spawn → initialize → prompt). The v1.0
+// subprocess transport collapses spawn + prompt into a single
+// `runCliPromptWithBudget` call (see `runtime/cli-client.ts`), and
+// startup failures surface as CLI_SPAWN_FAILED / CLI_PROCESS_ERROR —
+// not as separate timeouts. So only the per-command response budgets
+// remain.
 
-export const KIMI_START_TIMEOUT_MS = 10_000;
-export const KIMI_INITIALIZE_TIMEOUT_MS = 15_000;
+/** Ask budget. Conversational; allow a long answer + tool detours. */
 export const KIMI_ASK_PROMPT_TIMEOUT_MS = 300_000;
+/** Review/challenge budget. Single-turn analysis over the workspace. */
 export const KIMI_REVIEW_PROMPT_TIMEOUT_MS = 600_000;
+/**
+ * Review-gate budget. Fires inside Claude Code's Stop hook so any value
+ * above the user's perceptible wait makes the gate feel broken.
+ */
 export const KIMI_REVIEW_GATE_TIMEOUT_MS = 8_000;
-export const KIMI_SETUP_INITIALIZE_TIMEOUT_MS = 5_000;
-export const KIMI_SETUP_PROMPT_TIMEOUT_MS = 10_000;
 
 /**
- * Discriminates which lifecycle phase a timeout fired during. Lets callers
- * (and downstream classifiers) distinguish "Kimi never started" from "Kimi
- * started but never responded" — historically both surfaced as `TIMEOUT`.
+ * Discriminates which lifecycle phase a timeout fired during. The
+ * `startup` / `initialize` cases survive for backward-compat with the
+ * v0.4 error classifier in `kimi-errors.ts`; the v1.0 cli-client only
+ * ever emits `response`.
  */
 export type TimeoutKind = "startup" | "initialize" | "response";
-
-const TIMEOUT_KIND_CODES: Record<TimeoutKind, string> = {
-  startup: "STARTUP_TIMEOUT",
-  initialize: "INITIALIZE_TIMEOUT",
-  response: "RESPONSE_TIMEOUT",
-};
 
 export function isTimeoutCode(code: string): boolean {
   return (
@@ -28,28 +34,4 @@ export function isTimeoutCode(code: string): boolean {
     code === "INITIALIZE_TIMEOUT" ||
     code === "RESPONSE_TIMEOUT"
   );
-}
-
-export async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  stage: string,
-  kind?: TimeoutKind,
-): Promise<T> {
-  const code = kind ? TIMEOUT_KIND_CODES[kind] : "TIMEOUT";
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new RuntimeError(code, `${stage} timed out after ${timeoutMs}ms.`, stage));
-    }, timeoutMs);
-    timer.unref();
-  });
-
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
 }

@@ -6,7 +6,6 @@ import { withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { renderManagedJobOutput } from "../render.js";
 import { sweepStaleJobs } from "../jobs.js";
-import { createTurnCapture, finalizeTurnCapture, observeTurnEvent, } from "../wire/turn-capture.js";
 const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
 export async function runReplay(argv, context) {
     const [jobId, ...rest] = argv;
@@ -40,90 +39,85 @@ export async function replayJob(job) {
     if (stats.size > MAX_REPLAY_LOG_BYTES) {
         throw new RuntimeError("REPLAY_LOG_TOO_LARGE", `Job ${job.job_id} stream log is ${stats.size} bytes, which exceeds the ${MAX_REPLAY_LOG_BYTES}-byte replay ceiling.`, "replay.lookup");
     }
-    const completedTurn = await replayCompletedTurn(job.stream_log_path);
-    const rendered = renderManagedJobOutput(job, completedTurn.finalText);
+    const finalText = await replayFinalText(job.stream_log_path);
+    const rendered = renderManagedJobOutput(job, finalText);
     return {
         rendered: rendered.rendered,
         output: rendered.output,
         summary: rendered.summary,
     };
 }
-async function replayCompletedTurn(logPath) {
+async function replayFinalText(logPath) {
     const contents = await readFile(logPath, "utf8");
     const rawLines = contents.split("\n");
-    const turn = createTurnCapture();
-    let promptRequestId = null;
-    let promptResult = null;
+    let sawSpawn = false;
+    let sawExit = false;
+    let sawV1Event = false;
+    let sawV04Direction = false;
+    let assistantContent = "";
     for (let lineNumber = 0; lineNumber < rawLines.length; lineNumber += 1) {
         const line = rawLines[lineNumber].trim();
-        if (!line) {
+        if (!line)
             continue;
-        }
         let entry;
         try {
             entry = JSON.parse(line);
         }
         catch (error) {
-            // A truncated final line is the expected shape when a worker was SIGKILL'd mid-write.
-            // Silently drop it so replay still works on the preceding, consistent prefix.
-            if (lineNumber === rawLines.length - 1) {
+            // A truncated trailing line is the expected shape when a worker
+            // was SIGKILL'd mid-write. Drop it silently so replay still works
+            // on the consistent prefix.
+            if (lineNumber === rawLines.length - 1)
                 continue;
+            throw new RuntimeError("REPLAY_LOG_INVALID", `Stream log ${logPath}:${lineNumber + 1} is malformed JSON: ${error.message}`, "replay.log", { cause: error });
+        }
+        if (typeof entry.event === "string")
+            sawV1Event = true;
+        if (Object.prototype.hasOwnProperty.call(entry, "direction"))
+            sawV04Direction = true;
+        const event = typeof entry.event === "string" ? entry.event : "";
+        switch (event) {
+            case "spawn":
+                sawSpawn = true;
+                break;
+            case "record": {
+                const record = entry.record;
+                if (typeof record !== "object" || record === null || Array.isArray(record)) {
+                    throw new RuntimeError("REPLAY_LOG_INVALID", `Stream log ${logPath}:${lineNumber + 1} record entry is not an object.`, "replay.log");
+                }
+                const role = record.role;
+                const content = record.content;
+                if (role === "assistant" && typeof content === "string") {
+                    assistantContent += content;
+                }
+                // Non-string content (null/undefined/object) silently skipped —
+                // these are diagnostic-only records we don't render.
+                break;
             }
-            throw new RuntimeError("REPLAY_LOG_INVALID", `Wire log ${logPath}:${lineNumber + 1} is malformed JSON: ${error.message}`, "replay.log", { cause: error });
-        }
-        if (entry.direction === "out") {
-            const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
-            if (message.method === "prompt" && typeof message.id === "string") {
-                promptRequestId = message.id;
+            case "exit":
+                sawExit = true;
+                break;
+            case "process_error": {
+                const detail = typeof entry.message === "string" ? entry.message : "<unknown>";
+                throw new RuntimeError("REPLAY_LOG_PROCESS_ERROR", `Stream log ${logPath} captured a subprocess error and cannot be replayed: ${detail}`, "replay.log", { details: { logPath, line: lineNumber + 1 } });
             }
-            continue;
-        }
-        if (entry.direction !== "in") {
-            continue;
-        }
-        const message = coerceWireObject(entry.message, logPath, lineNumber + 1);
-        if ("method" in message) {
-            if (message.method === "event" && isEventPayload(message.params)) {
-                observeTurnEvent(turn, message.params.type, message.params.payload);
-            }
-            continue;
-        }
-        if (promptRequestId &&
-            message.id === promptRequestId &&
-            isPromptResult(message.result)) {
-            promptResult = message.result;
+            default:
+                // Unknown / malformed-line / future events are diagnostics — skip.
+                break;
         }
     }
-    if (!promptRequestId || !promptResult) {
-        throw new RuntimeError("REPLAY_LOG_INVALID", `Wire log ${logPath} does not contain a replayable prompt result.`, "replay.log");
+    if (!sawSpawn) {
+        // Differentiate "this is a v0.4 wire log" from "this is a v1.0 log
+        // that died before reaching the spawn event". v0.4 logs had a
+        // `direction` field on every entry (out/in/meta/stderr); v1.0 logs
+        // use `event` instead.
+        if (sawV04Direction && !sawV1Event) {
+            throw new RuntimeError("REPLAY_LOG_UNREADABLE", `Stream log ${logPath} is a v0.4 wire log (no \`event\` key). v0.4 wire logs are not supported by the v1.0 replay command.`, "replay.log", { details: { logPath } });
+        }
+        throw new RuntimeError("REPLAY_LOG_NO_SPAWN", `Stream log ${logPath} contains no spawn event — the worker likely failed before launching kimi (e.g., synchronous spawn failure, early cancellation). No assistant content to replay.`, "replay.log", { details: { logPath } });
     }
-    return finalizeTurnCapture(turn, promptResult);
-}
-function coerceWireObject(value, logPath, lineNumber) {
-    let parsed;
-    try {
-        parsed = typeof value === "string" ? JSON.parse(value) : value;
+    if (!sawExit && assistantContent.length === 0) {
+        throw new RuntimeError("REPLAY_LOG_INVALID", `Stream log ${logPath} did not capture any assistant content before truncation.`, "replay.log", { details: { logPath } });
     }
-    catch (error) {
-        throw new RuntimeError("REPLAY_LOG_INVALID", `Wire log ${logPath}:${lineNumber} message field is malformed JSON: ${error.message}`, "replay.log", { cause: error });
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw new RuntimeError("REPLAY_LOG_INVALID", `Wire log ${logPath}:${lineNumber} entry is not a JSON object.`, "replay.log");
-    }
-    return parsed;
-}
-function isEventPayload(value) {
-    return (typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        typeof value.type === "string" &&
-        typeof value.payload === "object" &&
-        value.payload !== null &&
-        !Array.isArray(value.payload));
-}
-function isPromptResult(value) {
-    return (typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        typeof value.status === "string");
+    return assistantContent;
 }

@@ -1,15 +1,15 @@
 {
-  "name": "kimi-marketplace",
+  "name": "kimi-marketplace-v1",
   "owner": {
     "name": "linxule"
   },
   "metadata": {
-    "description": "Single-plugin marketplace for kimi-plugin-cc.",
-    "version": "0.4.0"
+    "description": "Single-plugin marketplace for kimi-plugin-cc (v1.x). v0.x users stay on the kimi-marketplace name shipped from the v0.4-maintenance branch.",
+    "version": "1.0.0-alpha.1"
   },
   "plugins": [
     {
-      "name": "kimi",
+      "name": "kimi-v1",
       "source": "./"
     }
   ]
