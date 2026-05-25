@@ -34,6 +34,7 @@
 //   The TOML command is parsed by `/bin/sh -c "..."` so the resolved
 //   `node /abs/path/...` works regardless of where it's invoked from.
 import { decideHookOutcome } from "./approval-policy.js";
+import { evaluateRescueHookRequest } from "../rescue-approval.js";
 const STDIN_TIMEOUT_MS = 5_000;
 async function main() {
     const stdinText = await readStdinWithTimeout(STDIN_TIMEOUT_MS);
@@ -49,8 +50,9 @@ async function main() {
         failClosed(`stdin was not a JSON object: ${formatErr(err)}`);
         return;
     }
-    const decision = decideHookOutcome(input, {
+    const decision = await decideHookOutcome(input, {
         commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
+        rescueEvaluator: evaluateRescueHookRequest,
     });
     if (decision.decision === "deny") {
         // stderr.trim() in runner.ts:118 becomes the model-visible reason.

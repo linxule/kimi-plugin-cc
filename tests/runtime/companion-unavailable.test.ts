@@ -22,6 +22,12 @@ describe("companion Kimi-unavailable handling", () => {
       CLAUDE_PLUGIN_DATA: pluginDataRoot,
       KIMI_PLUGIN_CC_KIMI_BIN: "/nonexistent/path",
       KIMI_PLUGIN_CC_WORKSPACE_CWD: repoRoot,
+      // This test exercises the kimi-binary-unavailable code path
+      // across all four commands. Rescue would otherwise short-circuit
+      // on the v1.0 hook-installation refusal before reaching the
+      // spawn; bypass that check so the binary-unavailable assertion
+      // still runs for rescue. (Hook-refusal is covered separately.)
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
     };
 
     try {

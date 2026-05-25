@@ -203,6 +203,45 @@ function recordsForScenario(name: string): AssistantContentRecord[] {
       // Emit truncated JSON that fails JSON.parse — mirrors v0.4 mock.
       return [{ role: "assistant", content: "{\"decision\":\"BLOCK\"" }];
 
+    case "rescue-success":
+      return [
+        {
+          role: "assistant",
+          content: [
+            "Applied the requested change.",
+            "",
+            "- Updated note.txt with the requested fix.",
+            "- Ran pwd to verify the workspace context.",
+            "- Mock verification passed.",
+            "",
+          ].join("\n"),
+        },
+      ];
+
+    case "rescue-empty":
+      // Emit a single whitespace-only assistant record — render.ts trims
+      // to empty and throws RESCUE_EMPTY_OUTPUT. Mirrors the v0.4 mock's
+      // empty-final-text scenario.
+      return [{ role: "assistant", content: "   \n" }];
+
+    case "rescue-cancel":
+      // Long-form rescue prose used by cancel tests. The delay env var
+      // (KIMI_PLUGIN_CC_MOCK_DELAY_MS) decides whether the mock finishes
+      // before SIGTERM lands. Without a delay the call completes
+      // normally, which doubles as a positive smoke test.
+      return [
+        {
+          role: "assistant",
+          content: [
+            "Working on the requested rescue task.",
+            "",
+            "Step 1: inspect repository structure.",
+            "Step 2: apply the suggested fix.",
+            "",
+          ].join("\n"),
+        },
+      ];
+
     default:
       // Bail loudly so the test surfaces the missing scenario rather
       // than silently exiting with empty records. CLI_NONZERO_EXIT

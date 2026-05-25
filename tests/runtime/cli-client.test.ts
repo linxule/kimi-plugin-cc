@@ -399,6 +399,81 @@ describe("runCliPrompt", () => {
   });
 });
 
+describe("SIGKILL escalation", () => {
+  // Helper that spawns a stub which traps SIGTERM (writes a record
+  // then ignores SIGTERM forever). cli-client must escalate to
+  // SIGKILL when the abort signal fires; without the escalation we'd
+  // hang or leak the process.
+  const stubKimiPath = path.join(process.cwd(), "tests/helpers/sigterm-trap.ts");
+
+  test("escalates to SIGKILL when the child traps SIGTERM", async () => {
+    const root = await createTestPluginDataRoot("cli-sigkill-escalate");
+    try {
+      const controller = new AbortController();
+      const start = Date.now();
+      // Fire abort 200ms into the run; child traps SIGTERM, so cli-client
+      // must escalate to SIGKILL after the escalationMs window (250ms).
+      setTimeout(() => controller.abort(), 200).unref();
+
+      const result = await runCliPrompt({
+        cwd: root,
+        env: {
+          ...process.env,
+          KIMI_MOCK_RECORDS: JSON.stringify([{ role: "assistant", content: "x" }]),
+          KIMI_MOCK_SESSION_ID: "10000000-0000-0000-0000-000000000000",
+        },
+        command: "bun",
+        prefixArgs: ["run", stubKimiPath],
+        prompt: "x",
+        signal: controller.signal,
+        escalationMs: 250,
+      });
+
+      const elapsed = Date.now() - start;
+      expect(result.aborted).toBe(true);
+      expect(result.signal).toBe("SIGKILL");
+      // Must escalate within abort + escalationMs + slack; hard-fail
+      // long enough above that to catch a regression where the timer
+      // never fires.
+      expect(elapsed).toBeLessThan(2_000);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("escalationMs: Infinity opts out of SIGKILL", async () => {
+    const root = await createTestPluginDataRoot("cli-sigkill-optout");
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100).unref();
+
+      // Stub eventually exits cleanly on its own (after ~500ms). With
+      // escalation disabled, cli-client only sends SIGTERM, which the
+      // stub ignores; the stub's own self-exit ends the call.
+      const result = await runCliPrompt({
+        cwd: root,
+        env: {
+          ...process.env,
+          KIMI_MOCK_RECORDS: JSON.stringify([{ role: "assistant", content: "x" }]),
+          KIMI_MOCK_SESSION_ID: "20000000-0000-0000-0000-000000000000",
+          SIGTERM_TRAP_SELF_EXIT_MS: "500",
+        },
+        command: "bun",
+        prefixArgs: ["run", stubKimiPath],
+        prompt: "x",
+        signal: controller.signal,
+        escalationMs: Number.POSITIVE_INFINITY,
+      });
+
+      expect(result.aborted).toBe(true);
+      // SIGKILL must NOT have been delivered — the stub self-exited.
+      expect(result.signal).not.toBe("SIGKILL");
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+});
+
 describe("runCliPromptWithBudget", () => {
   test("returns the result when kimi finishes inside the budget", async () => {
     const root = await createTestPluginDataRoot("cli-budget-ok");

@@ -2,9 +2,25 @@ import { access, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { parse } from "./vendor/shell-quote/index.js";
+import type { HookDecision } from "./hooks/approval-policy.js";
 
-import type { ApprovalPolicy } from "./wire/approval-dispatcher.js";
-import type { ApprovalRequestPayload } from "./wire/types.js";
+// v1.0 cutover note (PR 3):
+//
+//   The v0.4 entrypoint, `createRescueApprovalPolicy`, took
+//   ApprovalRequestPayload values from the wire JSON-RPC channel and
+//   returned approval policies for ApprovalDispatcher. Both of those
+//   types lived in `runtime/wire/` which PR 4 deletes.
+//
+//   The v1.0 entrypoint, `evaluateRescueHookRequest`, takes the
+//   PreToolUse hook shape (toolName + raw toolInput from kimi-code's
+//   hook stdin) and returns a `HookDecision`. All the security helpers
+//   below are unchanged from v0.4 — `checkApprovedPath`,
+//   `validateShellCommand`, `validateShellStage`, `hasUnsafeShellSyntax`,
+//   `hasMutatingFlag`, `validatePackageManagerCommand`, plus the
+//   constant tables — kept verbatim so the bug-history reasoning that
+//   went into them (e.g. git pre-subcommand flags, sed `-i.bak`,
+//   shell-quote pipeline parsing) doesn't have to be re-derived. The
+//   thin dispatcher at the top translates between the two surfaces.
 
 const MUTATING_FLAGS_EXACT = new Set(["--fix", "--write", "-w", "--apply", "--in-place", "-i"]);
 const MUTATING_FLAG_PREFIXES = ["--fix=", "--write=", "--apply=", "--in-place="];
@@ -12,7 +28,6 @@ const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);
 const GIT_READONLY_SUBCOMMANDS = new Set(["status", "diff", "show", "log", "grep", "blame"]);
 const CARGO_SUBCOMMANDS = new Set(["check", "clippy", "test"]);
 const GO_SUBCOMMANDS = new Set(["build", "vet", "test"]);
-const SHELL_ACTIONS = new Set(["run command", "run shell command"]);
 const BANNED_FIND_ACTIONS = new Set([
   "-exec",
   "-execdir",
@@ -25,64 +40,147 @@ const BANNED_FIND_ACTIONS = new Set([
   "-fls",
 ]);
 
-export async function createRescueApprovalPolicy(workspaceRoot: string): Promise<ApprovalPolicy> {
-  const root = await realpath(workspaceRoot);
+/**
+ * Read-only tools that bypass the rescue allowlist entirely. Mirrors
+ * the broader `READ_ONLY_TOOLS` in approval-policy.ts plus rescue's
+ * historical "no harm done" defaults.
+ */
+const RESCUE_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "ReadMediaFile",
+  "TaskList",
+  "TaskOutput",
+]);
 
-  return async (request) => {
-    if (isFileEditRequest(request)) {
-      const decision = await evaluateFileEdit(root, request);
-      return decision ?? reject("Only workspace-local file edits are allowed in rescue.");
+/**
+ * Evaluate a PreToolUse hook request under the rescue policy.
+ *
+ * Replaces the v0.4 `createRescueApprovalPolicy` factory. The new entry
+ * is a single async function so the hook script can call it directly
+ * without juggling a factory + a closure.
+ *
+ * Inputs come from kimi-code's hook stdin:
+ *   - `workspaceRoot`: the `cwd` field of the hook payload
+ *   - `toolName`: e.g. `Bash`, `Write`, `Edit`, `MultiEdit`, etc.
+ *   - `toolInput`: the raw arguments kimi will pass to the tool
+ */
+export async function evaluateRescueHookRequest(
+  workspaceRoot: string,
+  toolName: string,
+  toolInput: unknown,
+): Promise<HookDecision> {
+  if (RESCUE_READ_ONLY_TOOLS.has(toolName)) {
+    return { decision: "allow" };
+  }
+
+  let root: string;
+  try {
+    root = await realpath(workspaceRoot);
+  } catch (err) {
+    return {
+      decision: "deny",
+      reason: `rescue cannot resolve workspace root: ${(err as Error).message}`,
+    };
+  }
+
+  if (toolName === "Bash") {
+    const command = extractBashCommand(toolInput);
+    if (command === null) {
+      return {
+        decision: "deny",
+        reason: "rescue cannot evaluate Bash input with no command field",
+      };
     }
+    const result = validateShellCommand(command);
+    return result.response === "approve"
+      ? { decision: "allow" }
+      : { decision: "deny", reason: result.feedback ?? "rescue rejected the shell command" };
+  }
 
-    if (isShellRequest(request)) {
-      const command = extractShellCommand(request);
-      if (!command) {
-        return reject("Rescue could not determine the shell command to approve.");
-      }
-
-      return validateShellCommand(command);
+  if (toolName === "Write" || toolName === "Edit") {
+    const filePath = extractFilePath(toolInput);
+    if (filePath === null) {
+      return {
+        decision: "deny",
+        reason: `rescue cannot evaluate ${toolName} input with no file_path field`,
+      };
     }
+    return pathDecision(await checkApprovedPath(root, filePath), filePath);
+  }
 
-    return reject(`Rescue does not allow ${request.sender} approvals in v1.`);
+  if (toolName === "MultiEdit") {
+    const filePath = extractFilePath(toolInput);
+    if (filePath === null) {
+      return {
+        decision: "deny",
+        reason: "rescue cannot evaluate MultiEdit input with no file_path field",
+      };
+    }
+    return pathDecision(await checkApprovedPath(root, filePath), filePath);
+  }
+
+  return {
+    decision: "deny",
+    reason: `rescue does not allow tool "${toolName}" — only Bash, Write, Edit, MultiEdit (with allowlist checks) and read-only tools are permitted.`,
   };
 }
 
-function isFileEditRequest(request: ApprovalRequestPayload): boolean {
-  return request.sender === "WriteFile" || request.sender === "StrReplaceFile" || request.action === "edit file";
-}
-
-function isShellRequest(request: ApprovalRequestPayload): boolean {
-  return request.sender === "Shell" || SHELL_ACTIONS.has(request.action);
-}
-
-async function evaluateFileEdit(
-  workspaceRoot: string,
-  request: ApprovalRequestPayload,
-): Promise<{ response: "approve" } | { response: "reject"; feedback: string } | null> {
-  const targets = request.display
-    .filter(isDiffDisplay)
-    .map((entry) => entry.path)
-    .filter((value): value is string => typeof value === "string");
-
-  if (targets.length === 0) {
-    return null;
+function pathDecision(
+  outcome: "allow" | "symlink" | "reject",
+  filePath: string,
+): HookDecision {
+  if (outcome === "allow") return { decision: "allow" };
+  if (outcome === "symlink") {
+    return {
+      decision: "deny",
+      reason: `rescue does not overwrite symlinks: ${filePath}`,
+    };
   }
-
-  for (const target of targets) {
-    const allowed = await checkApprovedPath(workspaceRoot, target);
-    if (allowed !== "allow") {
-      if (allowed === "symlink") {
-        return reject("Rescue does not overwrite symlinks.");
-      }
-
-      return reject(`Rescue rejects file edits outside the workspace or inside .git: ${target}`);
-    }
-  }
-
-  return { response: "approve" };
+  return {
+    decision: "deny",
+    reason: `rescue rejects file edits outside the workspace or inside .git: ${filePath}`,
+  };
 }
 
-async function checkApprovedPath(
+function extractBashCommand(toolInput: unknown): string | null {
+  if (!isObject(toolInput)) return null;
+  const command = toolInput.command;
+  return typeof command === "string" && command.length > 0 ? command : null;
+}
+
+function extractFilePath(toolInput: unknown): string | null {
+  if (!isObject(toolInput)) return null;
+  const filePath = toolInput.file_path;
+  return typeof filePath === "string" && filePath.length > 0 ? filePath : null;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ---------------------------------------------------------------------
+// Internal helpers — verbatim from v0.4 rescue-approval.ts. The bug
+// history that motivates each subtle check (e.g. git pre-subcommand
+// flags, sed -i.bak suffix, shell-quote pipeline collapse, .git
+// containment check) is documented inline and must NOT be removed.
+// ---------------------------------------------------------------------
+
+/**
+ * TOCTOU note: this check runs at hook time, BEFORE kimi-code actually
+ * writes the file. Between our allow decision and the write, an
+ * attacker with workspace write access could swap the path with a
+ * symlink that escapes the workspace. v0.4 had the same window (the
+ * wire approval policy fired at the same point in time). Closing the
+ * window would require either an open-by-fd dance under kimi-code's
+ * Write tool (not available) or a recheck immediately before the
+ * write (also unavailable to plugin code). The practical mitigation
+ * is to trust the workspace's existing write controls — anything
+ * able to swap a symlink can already mutate workspace files directly,
+ * and rescue is intentionally write-capable.
+ */
+export async function checkApprovedPath(
   workspaceRoot: string,
   rawTargetPath: string,
 ): Promise<"allow" | "symlink" | "reject"> {
@@ -140,27 +238,19 @@ async function findNearestExistingAncestor(targetDirectory: string): Promise<str
   }
 }
 
-function extractShellCommand(request: ApprovalRequestPayload): string | null {
-  const shellEntry = request.display.find(isShellDisplay);
-  if (shellEntry) {
-    return shellEntry.command;
-  }
-
-  const match = request.description.match(/`([^`]+)`/);
-  return match?.[1] ?? null;
-}
-
-function validateShellCommand(command: string): { response: "approve" | "reject"; feedback?: string } {
+export function validateShellCommand(
+  command: string,
+): { response: "approve" } | { response: "reject"; feedback: string } {
   // shell-quote collapses raw newline/carriage-return separators into adjacent tokens, which
   // hides a second command from per-stage validation (`git status\nrm -rf /` parses as
   // ['git','status','rm','-rf','/']). Reject any line-break characters up front so every
   // approved command maps to a single shell invocation.
   if (/[\r\n]/.test(command)) {
-    return reject(`Rescue rejects multi-line shell commands: ${JSON.stringify(command)}`);
+    return rejectShell(`Rescue rejects multi-line shell commands: ${JSON.stringify(command)}`);
   }
 
   if (hasUnsafeShellSyntax(command)) {
-    return reject(`Rescue rejects command substitution, process substitution, or backticks: ${command}`);
+    return rejectShell(`Rescue rejects command substitution, process substitution, or backticks: ${command}`);
   }
 
   const parsed = parse(command);
@@ -177,25 +267,28 @@ function validateShellCommand(command: string): { response: "approve" | "reject"
       continue;
     }
 
-    return reject(`Rescue rejects shell syntax outside simple pipelines: ${command}`);
+    return rejectShell(`Rescue rejects shell syntax outside simple pipelines: ${command}`);
   }
 
   if (stages.some((stage) => stage.length === 0)) {
-    return reject(`Rescue rejects malformed shell pipelines: ${command}`);
+    return rejectShell(`Rescue rejects malformed shell pipelines: ${command}`);
   }
 
   for (let index = 0; index < stages.length; index += 1) {
     const stage = stages[index]!;
     const allowed = validateShellStage(stage, index > 0 || stages.length > 1);
     if (!allowed.ok) {
-      return reject(allowed.reason);
+      return rejectShell(allowed.reason);
     }
   }
 
   return { response: "approve" };
 }
 
-function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true } | { ok: false; reason: string } {
+export function validateShellStage(
+  tokens: string[],
+  pipelineMode: boolean,
+): { ok: true } | { ok: false; reason: string } {
   const [command, ...args] = tokens;
 
   if (!command || path.isAbsolute(command) || command.includes(path.sep)) {
@@ -297,11 +390,11 @@ function validateShellStage(tokens: string[], pipelineMode: boolean): { ok: true
   return { ok: false, reason: `Rescue rejects shell command: ${tokens.join(" ")}` };
 }
 
-function hasUnsafeShellSyntax(command: string): boolean {
+export function hasUnsafeShellSyntax(command: string): boolean {
   return /[`]/.test(command) || /\$\(/.test(command) || /<\(/.test(command) || />\(/.test(command);
 }
 
-function hasMutatingFlag(args: string[]): boolean {
+export function hasMutatingFlag(args: string[]): boolean {
   for (const arg of args) {
     if (MUTATING_FLAGS_EXACT.has(arg)) {
       return true;
@@ -319,7 +412,7 @@ function hasMutatingFlag(args: string[]): boolean {
   return false;
 }
 
-function validatePackageManagerCommand(
+export function validatePackageManagerCommand(
   command: string,
   args: string[],
 ): { ok: true } | { ok: false; reason: string } {
@@ -340,31 +433,6 @@ function isWithin(root: string, target: string): boolean {
   return target === root || target.startsWith(`${root}${path.sep}`);
 }
 
-function reject(feedback: string): { response: "reject"; feedback: string } {
-  return {
-    response: "reject",
-    feedback,
-  };
-}
-
-function isDiffDisplay(value: unknown): value is { type: "diff"; path: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    (value as { type?: string }).type === "diff" &&
-    "path" in value &&
-    typeof (value as { path?: unknown }).path === "string"
-  );
-}
-
-function isShellDisplay(value: unknown): value is { type: "shell"; command: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    (value as { type?: string }).type === "shell" &&
-    "command" in value &&
-    typeof (value as { command?: unknown }).command === "string"
-  );
+function rejectShell(feedback: string): { response: "reject"; feedback: string } {
+  return { response: "reject", feedback };
 }

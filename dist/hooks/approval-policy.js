@@ -54,7 +54,7 @@ const KNOWN_LABELS = new Set([
     "review_gate",
     "rescue",
 ]);
-export function decideHookOutcome(input, ctx) {
+export async function decideHookOutcome(input, ctx) {
     const label = typeof ctx.commandLabel === "string" ? ctx.commandLabel : undefined;
     // Out-of-plugin context: any kimi process spawned without our env var
     // is direct user usage. The hook MUST NOT restrict it.
@@ -79,18 +79,22 @@ export function decideHookOutcome(input, ctx) {
             };
         case "rescue":
             if (ctx.rescueEvaluator !== undefined) {
-                return ctx.rescueEvaluator(toolName, input.tool_input);
+                const workspaceRoot = typeof input.cwd === "string" && input.cwd.length > 0
+                    ? input.cwd
+                    : process.cwd();
+                return await ctx.rescueEvaluator(workspaceRoot, toolName, input.tool_input);
             }
-            // PR 2 stub. PR 3 wires the full allowlist (shell argv parsing,
-            // mutating-flag detector, approved-path check). Until then, deny
-            // any non-read tool so a rescue spawn under PR 2's hook can't
-            // smuggle Bash/Edit/Write through.
+            // Stub for callers that didn't inject the evaluator (e.g.,
+            // tests that exercise only the policy function). Allow
+            // Read/Grep/Glob and friends; deny everything else. The
+            // production entry script wires the real evaluator from
+            // runtime/rescue-approval.ts.
             if (READ_ONLY_TOOLS.has(toolName)) {
                 return { decision: "allow" };
             }
             return {
                 decision: "deny",
-                reason: `rescue write/exec tools are gated until the v1.0 allowlist lands in PR 3; tool "${toolName}" denied.`,
+                reason: `kimi-plugin-cc safety hook: rescue evaluator not configured; tool "${toolName}" denied as a safety default.`,
             };
         default:
             if (KNOWN_LABELS.has(label)) {

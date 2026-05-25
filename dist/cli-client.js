@@ -25,6 +25,13 @@ import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js"
 const STDERR_TAIL_BYTES = 8192;
 /** Hard cap on awaiting diagnostics log drain before resolving the result. */
 const LOG_DRAIN_TIMEOUT_MS = 250;
+/**
+ * Default delay between SIGTERM and SIGKILL when an abort fires.
+ * Matches v0.4's `cancellation.ts` escalation timing for wire clients,
+ * so rescue/ask/review continue to feel identical to a stuck-kimi user
+ * after the v1.0 cutover.
+ */
+const DEFAULT_ESCALATION_MS = 1_500;
 export async function runCliPrompt(opts) {
     // Pre-aborted signal: refuse to spawn at all.
     if (opts.signal?.aborted === true) {
@@ -134,6 +141,14 @@ export async function runCliPrompt(opts) {
             else
                 reject(payload);
         };
+        const escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
+        let escalationTimer;
+        // Separate flag from `settled` because the close handler clears the
+        // timer BEFORE awaiting the log drain and only calls settle()
+        // afterward. Without `processClosed`, a timer callback already
+        // queued at close time could observe `settled === false` and fire
+        // a redundant SIGKILL during the drain window.
+        let processClosed = false;
         const onAbort = () => {
             aborted = true;
             try {
@@ -141,6 +156,24 @@ export async function runCliPrompt(opts) {
             }
             catch {
                 // Best-effort.
+            }
+            // Escalate to SIGKILL if the process doesn't exit promptly.
+            // v0.4 had this on the wire-client side; v1 inherits the same
+            // 1500ms default so a stuck-kimi rescue/ask/review feels
+            // identical post-cutover. Skipped when escalationMs is
+            // non-finite (Infinity) so tests can opt out.
+            if (Number.isFinite(escalationMs)) {
+                escalationTimer = setTimeout(() => {
+                    if (processClosed || settled)
+                        return;
+                    try {
+                        child.kill("SIGKILL");
+                    }
+                    catch {
+                        // Best-effort.
+                    }
+                }, escalationMs);
+                escalationTimer.unref();
             }
         };
         opts.signal?.addEventListener("abort", onAbort, { once: true });
@@ -168,6 +201,16 @@ export async function runCliPrompt(opts) {
             });
         }
         child.on("close", async (exitCode, signal) => {
+            // Mark closed BEFORE clearing the timer so a callback already
+            // queued in the same tick observes `processClosed === true`
+            // and short-circuits. Without this, the log-drain await below
+            // opens a window where the timer can fire a redundant SIGKILL
+            // on an already-dead pid (which may have been recycled by the OS).
+            processClosed = true;
+            if (escalationTimer !== undefined) {
+                clearTimeout(escalationTimer);
+                escalationTimer = undefined;
+            }
             consumeOutcomes(parser.flush());
             const sessionId = extractSessionIdFromStderr(stderrTail);
             appendLogLine({

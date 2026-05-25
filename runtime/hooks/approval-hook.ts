@@ -35,6 +35,7 @@
 //   `node /abs/path/...` works regardless of where it's invoked from.
 
 import { decideHookOutcome, type HookInput } from "./approval-policy.js";
+import { evaluateRescueHookRequest } from "../rescue-approval.js";
 
 const STDIN_TIMEOUT_MS = 5_000;
 
@@ -53,8 +54,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const decision = decideHookOutcome(input, {
+  const decision = await decideHookOutcome(input, {
     commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
+    rescueEvaluator: evaluateRescueHookRequest,
   });
 
   if (decision.decision === "deny") {

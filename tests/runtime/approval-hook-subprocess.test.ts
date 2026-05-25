@@ -138,13 +138,61 @@ describe("approval-hook entry script", () => {
     expect(result.stderr).toContain("misconfigured");
   });
 
-  test("rescue label without evaluator denies Write (PR 2 stub)", async () => {
+  test("rescue + Write inside workspace → exit 0 (PR 3 evaluator wired)", async () => {
+    // file_path "x" resolves against cwd (process.cwd()), which is the
+    // plugin repo — inside the workspace, so the rescue evaluator
+    // allows it.
     const result = await invokeHook(
-      { hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: "x" } },
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: "x" },
+        cwd: process.cwd(),
+      },
+      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("rescue + Write outside workspace → exit 2 (PR 3 evaluator wired)", async () => {
+    const result = await invokeHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: "/etc/should-not-write" },
+        cwd: process.cwd(),
+      },
       { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
     );
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("PR 3");
+    expect(result.stderr).toContain("outside the workspace");
+  });
+
+  test("rescue + Bash with disallowed command → exit 2", async () => {
+    const result = await invokeHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "rm -rf /" },
+        cwd: process.cwd(),
+      },
+      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+    );
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.length).toBeGreaterThan(0);
+  });
+
+  test("rescue + Bash with allowlisted git status → exit 0", async () => {
+    const result = await invokeHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "git status" },
+        cwd: process.cwd(),
+      },
+      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+    );
+    expect(result.exitCode).toBe(0);
   });
 
   test("rescue label + Read → exit 0", async () => {

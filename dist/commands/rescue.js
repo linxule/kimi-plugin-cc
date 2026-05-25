@@ -1,34 +1,53 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { createCancellationHandlers } from "../cancellation.js";
+import { createCliCancellationHandlers } from "../cli-cancellation.js";
+import { runCliPromptWithBudget } from "../cli-client.js";
+import { resolveKimiCliCommand } from "../kimi-command.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
 import { JobStore } from "../job-store.js";
-import { announceSessionTitle } from "../kimi-web-client.js";
-import { buildAndStartWireClient, resolveAgentFile } from "../kimi-launch.js";
-import { KIMI_WIRE_PROTOCOL_VERSION } from "../wire/types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
-import { KIMI_INITIALIZE_TIMEOUT_MS, KIMI_START_TIMEOUT_MS, withTimeout } from "../kimi-timeouts.js";
-import { buildSessionTitle } from "../session-title.js";
+import { KIMI_ASK_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
-import { createRescueApprovalPolicy } from "../rescue-approval.js";
-import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { startBackgroundJob } from "../background-spawn.js";
+import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
+import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
 export { describeMissingResult } from "../background-spawn.js";
+// v1.0 cutover note (PR 3):
+//
+//   Rescue is the only write-capable command. v0.4 enforced safety
+//   in-band via `WireClient.approvalPolicy = createRescueApprovalPolicy(cwd)`,
+//   which called back into our runtime on every kimi-side approval
+//   request. v1.0 moves that enforcement into the PreToolUse hook
+//   (`runtime/hooks/approval-hook.ts`), which spawns under kimi-code
+//   and calls `evaluateRescueHookRequest` for `KIMI_PLUGIN_CC_CMD=rescue`
+//   tool calls. The runtime side now just sets the env var and lets
+//   the hook gate everything.
+//
+//   The security helpers in `runtime/rescue-approval.ts` are unchanged.
+// "Continue working on the bug" verbs that auto-attach to the latest
+// rescue session. Documented UX trap: a prompt matching this pattern
+// will resume the most recent rescue session regardless of whether
+// that session was about the same bug. Users should pass an explicit
+// `--resume <job-id>` or `--fresh` when the topic switches.
 const AUTO_RESUME_PATTERN = /\b(continue|resume|keep going|keep working|apply the top fix|dig deeper)\b/i;
 const RESCUE_SUMMARY_MAX = 120;
+const RESCUE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
+// Rescue inherits the ask budget — longer than review since it may
+// perform multi-step apply/test/verify loops. Match v0.4's
+// KIMI_ASK_PROMPT_TIMEOUT_MS to avoid silent regression for users
+// with long-running rescue sessions.
+const RESCUE_PROMPT_TIMEOUT_MS = KIMI_ASK_PROMPT_TIMEOUT_MS;
 export async function runRescue(argv, context) {
     const parsed = parseRescueArgs(argv);
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
-    // Registry-driven cancellation and failure messages — see
-    // runtime/commands/registry.ts.
     const rescueConfig = getManagedCommandConfig("rescue");
     const store = new JobStore(paths);
     try {
@@ -37,7 +56,6 @@ export async function runRescue(argv, context) {
         const prompt = buildRescuePrompt(parsed.prompt, sessionResolution.reusedSession);
         const jobId = randomUUID();
         const logPath = path.join(paths.logsDir, `rescue-${jobId}.jsonl`);
-        const agentProfile = resolveAgentFile("runtime/agents/rescue.yaml");
         const job = store.createJob({
             job_id: jobId,
             repo_id: repoIdentity.repoId,
@@ -49,8 +67,8 @@ export async function runRescue(argv, context) {
             pid: parsed.background ? null : process.pid,
             kimi_pid: null,
             status: "running",
-            kimi_session_id: sessionResolution.sessionId,
-            agent_profile: agentProfile,
+            kimi_session_id: sessionResolution.kimiSessionId,
+            agent_profile: RESCUE_AGENT_PROFILE_PLACEHOLDER,
             prompt_digest: digestPrompt(prompt),
             summary: shorten(prompt, RESCUE_SUMMARY_MAX),
             phase: parsed.background ? "queued" : "starting",
@@ -61,7 +79,7 @@ export async function runRescue(argv, context) {
         try {
             await writeInvocationLogHeader(logPath, {
                 commandType: "rescue",
-                kimiSessionId: sessionResolution.sessionId,
+                kimiSessionId: sessionResolution.kimiSessionId ?? "(pending)",
                 cwd: context.cwd,
             });
         }
@@ -86,9 +104,7 @@ export async function runRescue(argv, context) {
                 spawnStage: "rescue.worker.spawn",
             });
         }
-        const completed = await executeRescueJob(job.job_id, prompt, context, {
-            reusedSession: sessionResolution.reusedSession,
-        });
+        const completed = await executeRescueJob(job.job_id, prompt, context);
         if (!completed.final_output_path) {
             throw new RuntimeError("RESCUE_RESULT_MISSING", "Rescue finished without a rendered result.", "rescue.result");
         }
@@ -107,75 +123,67 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         store.close();
         throw new RuntimeError("JOB_NOT_FOUND", `Rescue job ${jobId} was not found.`, "rescue.worker");
     }
-    // Shared cancellation handler — registers SIGTERM/SIGINT immediately
-    // so a signal during wire-client startup still latches
-    // cancelling=true. See runtime/cancellation.ts. Cancellation constants
-    // (codes, messages, escalation timing) come from the command registry
-    // so error-code drift across commands is impossible.
     const rescueConfig = getManagedCommandConfig("rescue");
     const cancel = rescueConfig.cancellation;
-    const handlers = createCancellationHandlers({ escalationMs: cancel.escalationMs });
-    let client;
+    // Rescue is the only write-capable command. Without the PreToolUse
+    // hook, kimi-code's `-p` mode auto-approves every Bash/Write/Edit —
+    // including destructive ones. ask/review/challenge are loud-warn
+    // because their failure mode is silent broadening of a documented
+    // read-only contract. Rescue's failure mode is the model executing
+    // an `rm -rf` because the user happens not to have run
+    // `/kimi:setup` yet. Refuse rather than warn.
+    //
+    // The hook check happens BEFORE `createCliCancellationHandlers()` so
+    // an early return doesn't leak SIGTERM/SIGINT listeners. Tests /
+    // setup probes / intentional bypass: KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1.
+    if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
+        const installStatus = await verifyHookInstalled(context.env);
+        if (!installStatus.installed) {
+            maybeWarnHookMissing(installStatus, "rescue", context.stderr);
+            const classified = new RuntimeError("RESCUE_HOOK_NOT_INSTALLED", [
+                "rescue refuses to run without the kimi-plugin-cc PreToolUse hook.",
+                `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
+                "Run /kimi:setup (PR 4 owns the installer) or set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1",
+                "if you've intentionally configured an alternative safety mechanism.",
+            ].join(" "), "rescue.hook-check", { details: { config_path: installStatus.configPath } });
+            try {
+                return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
+            }
+            finally {
+                store.close();
+            }
+        }
+    }
+    const handlers = createCliCancellationHandlers();
+    const kimi = resolveKimiCliCommand(context.env);
     try {
-        let approvalPolicy;
-        try {
-            approvalPolicy = await createRescueApprovalPolicy(job.cwd);
-        }
-        catch (error) {
-            const classified = new RuntimeError("RESCUE_SETUP_FAILED", `Rescue setup failed: ${error.message ?? String(error)}`, "rescue.setup", error instanceof Error ? { cause: error } : undefined);
-            return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
-        }
-        client = await buildAndStartWireClient({
-            cwd: job.cwd,
-            env: context.env,
-            sessionId: job.kimi_session_id ?? randomUUID(),
-            agentFile: job.agent_profile,
-            model: job.model ?? undefined,
-            thinking: job.thinking ?? undefined,
-            logPath: job.stream_log_path,
-            approvalPolicy,
-        }, KIMI_START_TIMEOUT_MS, "rescue.start", { shouldRetry: () => !handlers.cancelling });
-        handlers.attachClient(client);
-        if (handlers.cancelling) {
-            // Signal fired during startup; the first attempt succeeded before the
-            // retry gate could short-circuit. Synthesize a throw so the normal
-            // cancellation teardown path runs.
-            throw new RuntimeError(cancel.errorCodes.cancelledDuringStart, cancel.cancelMessages.duringStart, "rescue.start");
-        }
         if (options?.workerPid) {
             store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
         }
-        store.updateRunningJob(job.job_id, {
-            kimi_pid: client.getChildPid(),
-            phase: "turn-running",
-        });
-        await withTimeout(client.initialize({
-            protocol_version: KIMI_WIRE_PROTOCOL_VERSION,
-            client: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
-            capabilities: {
-                supports_question: false,
-                supports_plan_mode: false,
-            },
-        }), KIMI_INITIALIZE_TIMEOUT_MS, "rescue.initialize", "initialize");
-        // Skip the rename on resumed sessions: the title was set by the original
-        // rescue call and the current prompt here is either the generic
-        // "Continue the previous rescue task..." string or a user-supplied
-        // refinement — neither should clobber the original identifying excerpt
-        // in `kimi web`. A future enhancement could update the title when the
-        // user explicitly supplies a new prompt on resume, but the no-op on
-        // reuse is the conservative choice.
-        if (job.kimi_session_id && !options?.reusedSession) {
-            await announceSessionTitle(job.kimi_session_id, buildSessionTitle("rescue", prompt), {
-                env: context.env,
-            });
-        }
-        const completedTurn = await client.prompt(prompt, "rescue");
-        // Cancel-after-prompt-success check: SIGTERM could have fired between
-        // prompt completion and our terminal-state writes. Honour it.
+        store.updateRunningJob(job.job_id, { phase: "turn-running" });
+        const result = await runCliPromptWithBudget({
+            cwd: job.cwd,
+            env: context.env,
+            command: kimi.command,
+            prefixArgs: kimi.prefixArgs,
+            prompt,
+            commandLabel: "rescue",
+            model: job.model ?? undefined,
+            resumeSessionId: job.kimi_session_id ?? undefined,
+            logPath: job.stream_log_path,
+            signal: handlers.signal,
+            // SIGKILL escalation defaults to 1500ms inside cli-client —
+            // matches v0.4's cancellation.ts behavior for the wire client.
+        }, RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "rescue.runtime");
         }
-        const rendered = renderManagedJobOutput(job, completedTurn.finalText);
+        assertCliResultSuccess(result, "rescue.runtime");
+        if (result.sessionId !== undefined && result.sessionId !== job.kimi_session_id) {
+            store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+        }
+        const finalText = reassembleProseFromRecords(result.records);
+        const rendered = renderManagedJobOutput(job, finalText);
         let artifactPath;
         try {
             if (context.env.KIMI_PLUGIN_CC_TEST_FAIL_WRITE_ARTIFACT === "1") {
@@ -184,15 +192,18 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             artifactPath = await writeArtifact(paths, job, rendered.rendered);
         }
         catch (writeError) {
-            process.stderr.write(`[kimi-plugin-cc] rescue artifact write failed for job ${job.job_id}; raw output follows:\n${completedTurn.finalText}\n`);
+            // LLM-caller discipline: writing the raw model output to stderr
+            // for a wrapper LLM-caller would corrupt its prose stream. Keep
+            // the raw text in the RuntimeError details — surfaces via
+            // /kimi:status / /kimi:result --json — and emit only a short
+            // human-facing line on stderr.
+            context.stderr.write(`[kimi-plugin-cc] rescue artifact write failed for job ${job.job_id}; raw output preserved in error details.\n`);
             const classified = new RuntimeError("RESCUE_ARTIFACT_WRITE_FAILED", `Failed to write rescue artifact: ${writeError.message ?? String(writeError)}`, "rescue.artifact", {
                 ...(writeError instanceof Error ? { cause: writeError } : {}),
-                details: { rawOutput: completedTurn.finalText },
+                details: { rawOutput: finalText },
             });
             return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
         }
-        // Re-check after the artifact write (disk I/O window) — cancel could
-        // have landed there too.
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterArtifact, "rescue.runtime");
         }
@@ -205,11 +216,6 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     }
     catch (error) {
         if (handlers.cancelling) {
-            // Clear escalation timer NOW, before awaiting markJobCancelled
-            // (disk I/O can exceed 1.5s under load and trigger a redundant SIGTERM).
-            handlers.clearEscalation();
-            // Always wrap into a canonical *_CANCELLED RuntimeError so callers
-            // can distinguish user-cancel from infra failure via error.code.
             const cancelledError = new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.default, "rescue.runtime", error instanceof Error ? { cause: error } : undefined);
             return await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError, { phase: "cancelled" });
         }
@@ -220,9 +226,6 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     }
     finally {
         handlers.dispose();
-        // WireClient.close() has an internal `closed` latch so a second call
-        // is a no-op — drop the separate clientClosed flag (dead code).
-        await client?.close().catch(() => { });
         store.close();
     }
 }
@@ -237,34 +240,39 @@ function buildRescuePrompt(prompt, reusedSession) {
 }
 function resolveRescueSession(store, repoId, prompt, fresh, resume, resumeTarget) {
     if (fresh) {
-        return { sessionId: randomUUID(), reusedSession: false };
+        return { kimiSessionId: null, reusedSession: false };
     }
     if (resumeTarget) {
         const byJob = store.getJob(resumeTarget);
         const scoped = byJob?.repo_id === repoId && byJob.command_type === "rescue" ? byJob : null;
         const exact = scoped ?? store.findRescueJobBySession(repoId, resumeTarget);
-        if (!exact?.kimi_session_id) {
+        if (!exact) {
             throw new RuntimeError("RESCUE_RESUME_NOT_FOUND", `No rescue job or session matched ${resumeTarget}.`, "rescue.resume");
         }
         ensureSessionIsNotRunning(exact);
-        return { sessionId: exact.kimi_session_id, reusedSession: true };
+        if (!exact.kimi_session_id) {
+            throw new RuntimeError("RESCUE_RESUME_NOT_FOUND", `No rescue job or session matched ${resumeTarget}.`, "rescue.resume");
+        }
+        return { kimiSessionId: exact.kimi_session_id, reusedSession: true };
     }
     if (resume) {
         const latest = store.findLatestJob({ repoId, commandType: "rescue" });
-        if (!latest?.kimi_session_id) {
+        if (!latest) {
             throw new RuntimeError("RESCUE_RESUME_NOT_FOUND", "No prior rescue session exists for this repository.", "rescue.resume");
         }
         ensureSessionIsNotRunning(latest);
-        return { sessionId: latest.kimi_session_id, reusedSession: true };
+        if (!latest.kimi_session_id) {
+            throw new RuntimeError("RESCUE_RESUME_NOT_FOUND", "No prior rescue session exists for this repository.", "rescue.resume");
+        }
+        return { kimiSessionId: latest.kimi_session_id, reusedSession: true };
     }
     if (prompt && AUTO_RESUME_PATTERN.test(prompt)) {
         const latest = store.findLatestJob({ repoId, commandType: "rescue" });
-        if (latest?.kimi_session_id) {
-            ensureSessionIsNotRunning(latest);
-            return { sessionId: latest.kimi_session_id, reusedSession: true };
+        if (latest?.kimi_session_id && latest.status !== "running") {
+            return { kimiSessionId: latest.kimi_session_id, reusedSession: true };
         }
     }
-    return { sessionId: randomUUID(), reusedSession: false };
+    return { kimiSessionId: null, reusedSession: false };
 }
 function ensureSessionIsNotRunning(job) {
     if (job.status === "running") {
