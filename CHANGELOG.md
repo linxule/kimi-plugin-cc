@@ -6,6 +6,8 @@
 
 Hard cut from the Python Kimi CLI Wire transport to the kimi-code Node.js subprocess transport. v0.4.x stays available at the [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag (with a `v0.4-maintenance` branch cut from that tag for ongoing fixes — see the tag if the branch is not yet pushed). v1.0 is an explicit opt-in upgrade — the marketplace and plugin id changed (`kimi-marketplace-v1` / `kimi-v1`) so existing installs do not auto-pull v1.
 
+The alpha shipped after **two multi-agent audit rounds**: a comprehensive cross-PR pass over the five-commit cutover and a focused re-review of the audit-fix diff. Convergent findings from Claude code-reviewer + Codex closed before tag — exact-command hook verification, abort-race recovery, 0o600 config-mode preservation, an `--output=*` rescue-allowlist gap, and a TOML-decode false-fail for apostrophe-in-path installs. See [docs/safety.md](./docs/safety.md) for the hardened safety story.
+
 See [docs/migration.md](./docs/migration.md) for the step-by-step upgrade.
 
 ### Architecture changes
@@ -75,9 +77,21 @@ The five-PR cutover landed with paired Claude code-reviewer + Codex codex-rescue
 - **PR 4 / locateMarkerBlock only inspected the first BEGIN/END pair** — duplicate-block detection with `SETUP_DUPLICATE_BLOCKS`.
 - **PR 4 / CRLF line endings mixed on write** — line-ending detection threaded through install/uninstall/splice.
 
+### Pre-tag audit hardening
+
+Two further multi-agent rounds (Claude code-reviewer + Codex codex-rescue, plus plugin-validator and claude-code-guide for spec compliance) found these classes during the pre-tag audit. All closed before tag:
+
+- **rescue.ts skipped the hook-path drift gate** — the optional `expectedHookPath` parameter let a stale managed block silently re-enable kimi-code's auto-approve. Verifier is now strict-by-default and always reconstructs the canonical command via the shared `runtime/hooks/install-paths.ts` module.
+- **Verifier substring match → exact equality** — `commandPath.includes(expectedHookPath)` accepted `command = "true # /path/to/approval-hook.js"` (`/bin/sh -c` parsed `#` as a comment, hook exited 0 = ALLOW). Equality on the full canonical shell command closes the bypass.
+- **`await mkdir` race in cli-client** — if abort fired during the mkdir yield, the listener attached after meant SIGTERM/SIGKILL was never sent. Re-checks `signal.aborted` after attach. Mirrors kimi-code's own runner pattern.
+- **`writeConfigAtomic` umask** — temp file inherited umask before rename. Now chmods 0o600 before rename so the user's existing API-key/token file mode is preserved.
+- **`--output=*` workspace escape via Bash** — `git diff --output=/etc/passwd`, `curl --output /tmp/x`, `eslint --output-file=/tmp/x` all wrote outside the workspace through their own report-output mechanism. `--output`/`--output-file`/`--output-directory`/`--output-dir` (exact + `=` prefix) now live in `MUTATING_FLAGS`. `-o` is rejected per-tool where its semantics are write-shape (eslint).
+- **TOML basic-string capture without decode** — `parseManagedBlock` captured raw, so apostrophe-in-path installs round-tripped through `\\` (TOML escape) → captured `\\` ≠ canonical `\` → false-fail. `decodeTomlBasicString` handles the six standard escapes.
+- **Relative `KIMI_PLUGIN_CC_HOOK_SCRIPT` override** — kimi-code spawns hooks via `/bin/sh -c` with a cwd that may differ from the companion's. Override is now required to be absolute, matching the `KIMI_PLUGIN_CC_NODE_BIN` contract.
+
 ### Test surface
 
-342 tests across 28 files. Drift gate (`git diff --exit-code -- dist`) runs as part of `bun run check` to catch forgotten rebuilds before commit.
+349 tests across 28 files. Drift gate (`git diff --exit-code -- dist`) runs as part of `bun run check` to catch forgotten rebuilds before commit.
 
 ### Versions
 
