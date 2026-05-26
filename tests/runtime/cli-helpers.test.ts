@@ -1,9 +1,26 @@
 import { describe, expect, test } from "bun:test";
 
-import { assertCliResultSuccess, reassembleProseFromRecords } from "../../runtime/commands/cli-helpers.js";
+import {
+  assertCliResultSuccess,
+  reassembleProseFromRecords,
+  warnIfSessionIdMissing,
+} from "../../runtime/commands/cli-helpers.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import type { CliClientResult } from "../../runtime/cli-client.js";
 import type { StreamJsonRecord } from "../../runtime/stream-json.js";
+
+// Minimal stderr stub that captures writes — avoids spinning up real
+// process.stderr in tests and lets us assert on the message bytes.
+function createStderrStub(): { written: string[]; stream: NodeJS.WriteStream } {
+  const written: string[] = [];
+  const stream = {
+    write: (chunk: string | Uint8Array) => {
+      written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    },
+  } as unknown as NodeJS.WriteStream;
+  return { written, stream };
+}
 
 describe("reassembleProseFromRecords", () => {
   test("concatenates assistant content in order", () => {
@@ -148,6 +165,61 @@ describe("assertCliResultSuccess", () => {
       throw new Error("should have thrown");
     } catch (err) {
       expect((err as RuntimeError).code).toBe("CLI_ABORTED");
+    }
+  });
+});
+
+describe("warnIfSessionIdMissing", () => {
+  function makeResult(overrides: Partial<CliClientResult>): CliClientResult {
+    return {
+      sessionId: undefined,
+      records: [],
+      malformed: [],
+      stderrTail: "",
+      exitCode: 0,
+      signal: null,
+      aborted: false,
+      ...overrides,
+    };
+  }
+
+  test("emits no stderr when sessionId is a non-empty UUID", () => {
+    const stub = createStderrStub();
+    warnIfSessionIdMissing(
+      makeResult({ sessionId: "session_38462d24-786a-474c-a813-5ad8d89e305e" }),
+      "review",
+      "job-uuid-123",
+      stub.stream,
+    );
+    expect(stub.written).toEqual([]);
+  });
+
+  test("writes a loud warning when sessionId is undefined", () => {
+    const stub = createStderrStub();
+    warnIfSessionIdMissing(makeResult({ sessionId: undefined }), "ask", "job-uuid-456", stub.stream);
+    expect(stub.written.length).toBe(1);
+    const msg = stub.written[0]!;
+    expect(msg).toContain("[ask]");
+    expect(msg).toContain("job-uuid-456");
+    expect(msg).toContain("Resume and replay will not work");
+  });
+
+  test("writes a loud warning when sessionId is the empty string (alpha.4 finding #3 lock)", () => {
+    // Empty-string capture is the case Kimi Round 1 #3 flagged — the
+    // helper's length check must catch it independent of the outer
+    // SQLite-update gate in the call sites.
+    const stub = createStderrStub();
+    warnIfSessionIdMissing(makeResult({ sessionId: "" }), "rescue", "job-uuid-789", stub.stream);
+    expect(stub.written.length).toBe(1);
+    expect(stub.written[0]).toContain("[rescue]");
+    expect(stub.written[0]).toContain("job-uuid-789");
+  });
+
+  test("commandLabel propagates verbatim — review / challenge / ask / rescue all carry through", () => {
+    for (const label of ["review", "challenge", "ask", "rescue"] as const) {
+      const stub = createStderrStub();
+      warnIfSessionIdMissing(makeResult({ sessionId: undefined }), label, "job-id", stub.stream);
+      expect(stub.written[0]).toContain(`[${label}]`);
     }
   });
 });

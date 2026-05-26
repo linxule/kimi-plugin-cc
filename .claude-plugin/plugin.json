@@ -1,7 +1,7 @@
 {
   "name": "kimi",
   "description": "Claude Code plugin that delegates read-only review, challenge, free-form ask, and write-capable rescue work to the local kimi-code CLI. Includes an opt-in stop-time review gate and a PreToolUse hook that enforces per-command safety.",
-  "version": "1.0.0-alpha.3",
+  "version": "1.0.0-alpha.4",
   "homepage": "https://github.com/linxule/kimi-plugin-cc",
   "repository": "https://github.com/linxule/kimi-plugin-cc",
   "license": "Apache-2.0",

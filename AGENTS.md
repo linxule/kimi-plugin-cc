@@ -4,7 +4,7 @@ Project context for coding agents working in this repository.
 
 ## Quick reference
 
-- **Version**: 1.0.0-alpha.3 (kimi-code, subprocess transport). v0.4.x is preserved at the `v0.4.0` tag (with a `v0.4-maintenance` branch cut from that tag, once published) for users still on kimi-cli.
+- **Version**: 1.0.0-alpha.4 (kimi-code, subprocess transport). v0.4.x is preserved at the `v0.4.0` tag (with a `v0.4-maintenance` branch cut from that tag, once published) for users still on kimi-cli.
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 
@@ -62,7 +62,7 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 
 ## Pending work
 
-See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md) for the triaged deferred items from the three audit rounds + alpha.3 production smoke test. The GA gate is **G1 + G2 + G3 + L2** (≈1 working day). H1-H3 ship in v1.1.
+See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md) for the triaged deferred items from three audit rounds + alpha.3 production smoke test + Round 1-3 multi-agent review on the alpha.4 candidate. **alpha.4 closes G1 + G3 + L2 and defers G2 → H4 (Node version manager soft-recovery, v1.1).** G4 (TOCTOU) ships GA with a known-limitation note. H1, H2, H3, H4, H5 ship in v1.1.
 
 ## When editing
 

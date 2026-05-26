@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.0-alpha.4 — 2026-05-26
+
+> **Roadmap update**: alpha.4 closes G1 + G3 + L2. G2 deferred to v1.1 as H4 (Node version manager soft-recovery). New H5 added (per-spawn thinking control via kimi-code CLI, pending upstream). See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md).
+
+### User directive
+
+Thinking is enabled for all user-facing commands (ask, review, challenge, rescue). Previous diagnosis — that review hung at the 10-minute default budget — was a budget-sizing problem, not a flag problem.
+
+### Changed
+
+- **Budget constants raised for the thinking-on workflow.** `KIMI_ASK_PROMPT_TIMEOUT_MS` 300s → 900s; `KIMI_REVIEW_PROMPT_TIMEOUT_MS` 600s → 1800s; new `KIMI_RESCUE_PROMPT_TIMEOUT_MS = 1800s` (rescue no longer shares the ask budget — it runs multi-step apply/test/verify loops under thinking-on and needs the full headroom). `KIMI_REVIEW_GATE_TIMEOUT_MS` unchanged at 8s; comment now honest about what it assumes (user has `default_thinking = false` or a non-thinking-capable model selected, since kimi-code 0.1.1 has no per-spawn CLI thinking control).
+- **`--thinking` / `--no-thinking` removed from every user-facing surface.** Stripped from `commands/{ask,challenge,review,rescue}.md` (argument-hint + flag bullets), from `agents/{kimi-review,kimi-challenge}.md` strict allowlists, from `runtime/parsing.ts` `SUPPORTED_FLAGS` strings and error templates, and from `runtime/kimi-errors.ts` nextStep hints. The parser now **hard-rejects** both flags with `INVALID_ARGS` (`THINKING_FLAG_REMOVED_MESSAGE`) — no escape hatch. Multi-agent Round 1-3 review surfaced and closed five contradicting references across docs, agents, and source.
+- **`RESPONSE_TIMEOUT` nextStep hint qualified for review/challenge.** Previous hint suggested `--background` as a universal retry; review and challenge explicitly reject `--background`. Hint now qualifies it as ask/rescue-only.
+- **Hook-missing warning surfaces the nvm/asdf remediation explicitly.** Users who switch Node versions hit a strict-equality verifier rejection by design. The warning now points at re-running `/kimi:setup` after every Node version switch and links to `docs/safety.md`.
+
+### Added
+
+- **`warnIfSessionIdMissing` helper in `runtime/commands/cli-helpers.ts`.** When kimi finishes a job but never announces a session id, a loud stderr warning fires so the user learns resume/replay won't work for that job. Wired into review/challenge/ask/rescue end-of-job paths. Full unit coverage in `tests/runtime/cli-helpers.test.ts`.
+- **`CliClientOptions.thinking` (reserved field, currently no-op).** Round 2 Codex review caught that emitting `--no-thinking` in argv crashes kimi-code 0.1.1 (`allowUnknownOption(false)`). The field stays as an intent contract — review-gate sets `thinking: false` to declare its requirement — and `buildArgs` will translate when upstream lands a per-spawn CLI flag (see ROADMAP H5).
+- **Negative test assertions to lock the v1.0 thinking-on contract.** ask, rescue, and review-gate argv assertions now verify `--no-thinking` is NOT emitted; parseRescueArgs has a dedicated rejection test alongside parseAskArgs and parseReviewArgs.
+
+### Fixed
+
+- **Empty-string sessionId no longer poisons the SQLite row.** All four sessionId-capturing commands (review/challenge, ask, rescue, review-gate) tightened from `result.sessionId !== undefined` to `result.sessionId.length > 0`. Kimi Round 1 finding #3.
+- **Orphan JSDoc above `warnIfSessionIdMissing` moved back above `assertCliResultSuccess` where it belongs.** Both kimi-review and code-reviewer flagged this in Round 1.
+- **Redundant `RESCUE_PROMPT_TIMEOUT_MS` local alias dropped.** rescue.ts now imports `KIMI_RESCUE_PROMPT_TIMEOUT_MS` directly.
+
+### Process
+
+- Multi-agent review across 3 rounds: kimi-review + code-reviewer (Claude opus) + kimi-challenge + codex-rescue. Round 2 surfaced 1 Critical (kimi-code rejects `--no-thinking`) and 2 High (agent files still advertised removed flags). Round 3 found 4 release-blockers (version bump, AGENTS gate text, missing warnIfSessionIdMissing tests, missing alpha.4 CHANGELOG entry) — all addressed in this tag.
+
+### Documentation
+
+- `ROADMAP-TO-GA.md` reflects alpha.4 reality: G1+G3+L2 closed, G2→H4, new H5 (kimi-code upstream thinking-flag negotiation). Ship-gate updated.
+- `docs/safety.md` "Known limitation: Node version manager switches" section added.
+- `AGENTS.md` GA gate sentence updated.
+
+---
+
 ## 1.0.0-alpha.3 — 2026-05-25
 
 > **Roadmap to GA:** see [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md). The deferred items from the three audit rounds + production smoke testing are triaged into GA blockers (4), high-priority post-GA (3), and polish backlog (3). GA gate ≈ 1 working day of focused work.
