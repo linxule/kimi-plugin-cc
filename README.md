@@ -85,7 +85,7 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 **Zero native dependencies.** The runtime uses Node 22.5's built-in `node:sqlite` — no `better-sqlite3`, no `node-gyp`, no compilation step. `dist/` is precompiled and committed, so installed plugins work immediately with just `node` on PATH.
 
-**342 tests, drift gate.** The test suite covers the stream-json parser, cli-client lifecycle, approval policy, approval hook entry script, rescue allowlist, command handlers, job lifecycle, setup managed-block installer, and more. `bun run check` rebuilds `dist/`, typechecks, runs the suite, and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship.
+**391 tests, drift gate.** The test suite covers the stream-json parser (including the kimi-code 0.2.0 session-meta record), cli-client lifecycle, approval policy, approval hook entry script, rescue allowlist, command handlers, job lifecycle, setup managed-block installer, kimi version probe, and more. `bun run check` rebuilds `dist/`, typechecks, runs the suite, and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship.
 
 ## Install
 
