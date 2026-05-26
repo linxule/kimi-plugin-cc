@@ -75,13 +75,13 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
                └─ returns structured result to Claude
 ```
 
-**Subprocess-first transport.** v1.0 drives `kimi -p --output-format stream-json` as a one-process-per-job subprocess. kimi-code mints the session id and announces it on stderr; the runtime captures it for `--resume`. The v0.4 Wire JSON-RPC client is gone (kimi-code dropped it); the v0.4-maintenance branch keeps the Wire path alive for Kimi CLI users.
+**Subprocess-first transport.** v1.0 drives `kimi -p --output-format stream-json` as a one-process-per-job subprocess. kimi-code mints the session id and announces it via a `role:"meta", type:"session.resume_hint"` record on stdout (kimi-code 0.2.0+) — earlier 0.1.x announced on stderr instead. The runtime consumes both channels (first-announce-wins) and round-trips the captured token verbatim via `--resume`. The v0.4 Wire JSON-RPC client is gone (kimi-code dropped it); the v0.4-maintenance branch keeps the Wire path alive for Kimi CLI users.
 
 **Safety via PreToolUse hook.** kimi-code's `kimi -p` mode hard-codes `permission: auto` and auto-approves every tool call. The plugin's safety contract therefore lives in a [PreToolUse hook](./docs/safety.md) that `/kimi:setup` installs as a managed block in `~/.kimi-code/config.toml`. The hook reads `KIMI_PLUGIN_CC_CMD` from the env block we set per spawn and applies the right policy — read-only for review/challenge/review_gate/ask, workspace allowlist for rescue. Without the hook, rescue refuses to run.
 
 **Workspace allowlist.** Rescue's allowlist ([`runtime/rescue-approval.ts`](./runtime/rescue-approval.ts)) is the security boundary — not the prompt. Symlink-aware path containment, `.git/` exclusion, a curated set of read-only check tools, mutating-flag detection on `git`/`find`/`sed`, and explicit rejection of `package-manager run <script>` (opaque scripts are a supply-chain risk). The hook calls `evaluateRescueHookRequest` for every rescue tool call.
 
-**Job lifecycle.** Every job gets a SQLite record, a stream-json diagnostic log, and a `kimi_session_id` captured from kimi's stderr announce. Jobs go through `running` → `completed`/`failed`/`cancelled`. Use `/kimi:status`, `/kimi:result`, `/kimi:cancel`, `/kimi:replay` to manage them.
+**Job lifecycle.** Every job gets a SQLite record, a stream-json diagnostic log, and a `kimi_session_id` captured from kimi's stream-json meta record (0.2.0+) or stderr announce (0.1.x fallback). Jobs go through `running` → `completed`/`failed`/`cancelled`. Use `/kimi:status`, `/kimi:result`, `/kimi:cancel`, `/kimi:replay` to manage them.
 
 **Zero native dependencies.** The runtime uses Node 22.5's built-in `node:sqlite` — no `better-sqlite3`, no `node-gyp`, no compilation step. `dist/` is precompiled and committed, so installed plugins work immediately with just `node` on PATH.
 

@@ -24,6 +24,19 @@ describe("argument parsing", () => {
     );
   });
 
+  test("parseAskArgs hard-rejects --thinking=value / --no-thinking=value with the v1.0 removal message", () => {
+    // Codex Round 4 (pre-GA): assignment form fell through to the generic
+    // "Unknown flag" path. A wrapper agent reading that error would think
+    // the fix is to drop the `=value`, not the flag itself. Force the
+    // canonical message for the assignment form too.
+    expect(() => parseAskArgs(["--no-thinking=true", "hello"])).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseAskArgs(["--thinking=false", "hello"])).toThrow(
+      /thinking is always on/i,
+    );
+  });
+
   test("parseAskArgs rejects unknown flag-shaped tokens in flag-position", () => {
     expect(() => parseAskArgs(["-m", "kimi-k2", "--mystery", "tail"])).toThrow(
       /Unknown flag --mystery for ask.*Supported flags:.*Use `--` before flag-shaped prompt text/s,
@@ -126,11 +139,50 @@ describe("argument parsing", () => {
     );
   });
 
+  test("parseReviewArgs hard-rejects --thinking=value / --no-thinking=value with the v1.0 removal message", () => {
+    expect(() => parseReviewArgs(["--no-thinking=true", "focus"])).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseReviewArgs(["--thinking=false", "focus"])).toThrow(
+      /thinking is always on/i,
+    );
+  });
+
+  test("parseReviewArgs hard-rejects thinking flag forms when invoked as 'challenge'", () => {
+    // parseReviewArgs handles both /kimi:review and /kimi:challenge via
+    // its `commandName` parameter; both share `parseKnownFlags`. A future
+    // refactor of that helper could regress the challenge path silently
+    // (kimi review-smoke #2 on the alpha.5 candidate caught this gap).
+    // Pin all four forms — bare and =value, for thinking and no-thinking
+    // — explicitly under the challenge command label.
+    expect(() => parseReviewArgs(["--no-thinking", "focus"], "challenge")).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseReviewArgs(["--thinking", "focus"], "challenge")).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseReviewArgs(["--no-thinking=true", "focus"], "challenge")).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseReviewArgs(["--thinking=false", "focus"], "challenge")).toThrow(
+      /thinking is always on/i,
+    );
+  });
+
   test("parseRescueArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
     expect(() => parseRescueArgs(["--no-thinking", "fix the bug"])).toThrow(
       /thinking is always on/i,
     );
     expect(() => parseRescueArgs(["--thinking", "fix the bug"])).toThrow(
+      /thinking is always on/i,
+    );
+  });
+
+  test("parseRescueArgs hard-rejects --thinking=value / --no-thinking=value with the v1.0 removal message", () => {
+    expect(() => parseRescueArgs(["--no-thinking=true", "fix"])).toThrow(
+      /thinking is always on/i,
+    );
+    expect(() => parseRescueArgs(["--thinking=false", "fix"])).toThrow(
       /thinking is always on/i,
     );
   });

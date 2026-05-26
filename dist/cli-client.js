@@ -114,6 +114,26 @@ export async function runCliPrompt(opts) {
     const consumeOutcomes = (outcomes) => {
         for (const outcome of outcomes) {
             if (outcome.record !== undefined) {
+                // session.resume_hint is out-of-band metadata for our wrapper, not
+                // a consumer-facing record. Capture the session id (first-announce
+                // wins, mirroring the stderr capture below for kimi 0.1.x), then
+                // skip it: companion commands iterate records[] expecting only
+                // assistant/tool roles, and invokeOnRecord callbacks were never
+                // designed to receive meta. kimi 0.2.0 (PR #47) moved this from
+                // stderr to stdout stream-json, so this is the primary source of
+                // truth for session capture under 0.2.0+.
+                if (outcome.record.role === "meta") {
+                    if (outcome.record.type === "session.resume_hint" &&
+                        announcedSessionId === undefined) {
+                        announcedSessionId = outcome.record.sessionId;
+                        appendLogLine({
+                            event: "session_announce",
+                            source: "stream-json.meta",
+                            session_id: outcome.record.sessionId,
+                        });
+                    }
+                    continue;
+                }
                 records.push(outcome.record);
                 appendLogLine({ event: "record", record: outcome.record });
                 invokeOnRecord(outcome.record);

@@ -90,6 +90,45 @@ describe("StreamJsonParser", () => {
     expect(outcome!.malformedLine).toBe('{"role":"system","content":"x"}');
   });
 
+  test("parses the kimi 0.2.0 session.resume_hint meta record", () => {
+    // PR #47 (07ed2cf) moved the resume hint from stderr to a stream-json
+    // meta record on stdout. The session_id token uses kimi 0.2.0's
+    // `session_<uuid>` shape — round-trip it verbatim.
+    const parser = new StreamJsonParser();
+    const line = JSON.stringify({
+      role: "meta",
+      type: "session.resume_hint",
+      session_id: "session_233450b2-f558-499b-b133-bd4d5650d583",
+      command: "kimi -r session_233450b2-f558-499b-b133-bd4d5650d583",
+      content: "To resume this session: kimi -r session_233450b2-f558-499b-b133-bd4d5650d583",
+    });
+    const [outcome] = parser.push(`${line}\n`);
+    expect(outcome!.record).toEqual({
+      role: "meta",
+      type: "session.resume_hint",
+      sessionId: "session_233450b2-f558-499b-b133-bd4d5650d583",
+    });
+  });
+
+  test("reports meta.session.resume_hint with missing session_id as malformed", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push(
+      '{"role":"meta","type":"session.resume_hint","command":"kimi -r x","content":"y"}\n',
+    );
+    expect(outcome!.malformedReason).toContain("session_id not non-empty string");
+  });
+
+  test("reports unknown meta.type as malformed without crashing", () => {
+    // Forward-compat: kimi-code may add new meta types in 0.3.x; the
+    // parser should surface them through the malformed channel for
+    // diagnostics, not throw.
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push(
+      '{"role":"meta","type":"some.future.thing","payload":1}\n',
+    );
+    expect(outcome!.malformedReason).toContain("unknown meta.type");
+  });
+
   test("reports assistant with neither content nor tool_calls as malformed", () => {
     const parser = new StreamJsonParser();
     const [outcome] = parser.push('{"role":"assistant"}\n');
@@ -223,6 +262,37 @@ describe("extractSessionIdFromStderr", () => {
         "To resume this session: kimi -r abcdef01-2345-6789-abcd-ef0123456789\n",
       ),
     ).toBe("abcdef01-2345-6789-abcd-ef0123456789");
+  });
+
+  test("captures the 0.2.0+ session_<uuid> token shape from stderr fallback", () => {
+    // kimi-code 0.2.0 emits the resume hint as a stream-json meta record
+    // on stdout when --output-format is stream-json, so the stderr path
+    // is a 0.1.x fallback. But if a user runs in text-output mode (or a
+    // future version re-introduces stderr emission with the new token
+    // shape), the regex should still capture.
+    expect(
+      extractSessionIdFromStderr(
+        "To resume this session: kimi -r session_233450b2-f558-499b-b133-bd4d5650d583\n",
+      ),
+    ).toBe("session_233450b2-f558-499b-b133-bd4d5650d583");
+  });
+
+  test("rejects malformed session_-prefixed tokens that aren't full UUIDs", () => {
+    // Review-smoke (kimi 0.2.0 review against alpha.5 candidate) caught
+    // the previous loose pattern `session_[0-9a-f-]{8,}` which would
+    // accept `session_--------` (8 dashes), `session_aaaaaaaa` (too
+    // short to be a UUID), or arbitrarily long noise. The tightened
+    // pattern anchors session_<uuid> to a full UUID shape exactly like
+    // the bare-UUID branch.
+    for (const malformed of [
+      "To resume this session: kimi -r session_--------\n",
+      "To resume this session: kimi -r session_aaaaaaaa\n",
+      "To resume this session: kimi -r session_deadbeef-cafe-1234-5678-90abcdef000\n", // last group too short
+      "To resume this session: kimi -r session_deadbeefcafe12345678-90abcdef0000\n", // missing dashes
+      "To resume this session: kimi -r session_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx\n", // non-hex
+    ]) {
+      expect(extractSessionIdFromStderr(malformed)).toBeUndefined();
+    }
   });
 
   test("rejects commentary appearing after the session id", () => {

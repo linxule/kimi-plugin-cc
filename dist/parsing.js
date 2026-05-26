@@ -27,8 +27,18 @@ const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh
 // pins thinking=false via the cli-client options bag instead of an argv
 // flag (see runtime/cli-client.ts::CliClientOptions). The parser rejects
 // --thinking and --no-thinking with a hard error so a documented-removed
-// flag doesn't get silently accepted as a no-op.
+// flag doesn't get silently accepted as a no-op. Both bare (`--thinking`)
+// and assignment (`--thinking=true`) forms are rejected — otherwise the
+// assignment form would fall through to the generic "Unknown flag" path
+// and a wrapper agent reading the error would think the cure is to drop
+// the `=value` rather than the flag itself.
 const THINKING_FLAG_REMOVED_MESSAGE = "--thinking / --no-thinking were removed in v1.0. Thinking is always on for user-facing commands.";
+function isRemovedThinkingFlag(token) {
+    return (token === "--thinking" ||
+        token === "--no-thinking" ||
+        token.startsWith("--thinking=") ||
+        token.startsWith("--no-thinking="));
+}
 export function parseAskArgs(argv) {
     let model;
     // Thinking is on by default across ask/review/challenge/rescue. The
@@ -89,10 +99,10 @@ export function parseAskArgs(argv) {
                 index += 1;
                 break;
             }
-            case "--thinking":
-            case "--no-thinking":
-                throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
             default:
+                if (isRemovedThinkingFlag(token)) {
+                    throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
+                }
                 if (looksLikeFlag(token)) {
                     throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ask. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
                 }
@@ -186,10 +196,10 @@ export function parseRescueArgs(argv) {
                 index += 1;
                 break;
             }
-            case "--thinking":
-            case "--no-thinking":
-                throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
             default:
+                if (isRemovedThinkingFlag(token)) {
+                    throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
+                }
                 if (looksLikeFlag(token)) {
                     throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for rescue. Supported flags: ${RESCUE_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
                 }
@@ -269,7 +279,7 @@ function parseKnownFlags(argv, knownFlags, commandName) {
             break;
         }
         if (!knownFlags.has(token)) {
-            if (token === "--thinking" || token === "--no-thinking") {
+            if (isRemovedThinkingFlag(token)) {
                 throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
             }
             if (looksLikeFlag(token)) {

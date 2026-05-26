@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.0.0 — 2026-05-26 (GA)
+
+> **GA release.** Closes the kimi-code 0.2.0 stream-json session-meta compat gap discovered in alpha.4 production smoke, plus the alpha.4 Round-4 closeout polish items (parser `=value` rejection, safety.md template), plus H6 (kimi-code version probe) per the post-hotfix Codex audit, plus two review-smoke catches (stderr regex tightening, missing challenge test). Two parallel deep audits (Claude opus + Codex via codex-rescue) over the kimi-code 0.1.1→0.2.0 source diff converge: session-id capture is the only break that affects our plugin invariants; hook contract, exit-code semantics, cancellation behavior, config schema, and output framing are all byte-identical between kimi-code 0.1.1 and 0.2.0. Live review-smoke against kimi 0.2.0 (8m 37s) returns clean. **391 tests pass, drift gate clean.**
+
+### Critical fix — kimi-code 0.2.0 compatibility
+
+- **Session id capture now reads `role:"meta", type:"session.resume_hint"` from stdout stream-json** (the new transport kimi-code 0.2.0 introduced in [PR #47](https://github.com/MoonshotAI/kimi-code/pull/47)). In kimi 0.2.0 the resume hint moved off stderr — kimi-plugin-cc alpha.4 captured nothing under the new version, so `kimi_session_id` was `null` on every job. Resume/replay broken across the board. The loud `warnIfSessionIdMissing` stderr surface added in alpha.4 G3 caught this in production smoke before the GA tag — exactly the failure mode it was designed to catch.
+- **Session id format widened.** kimi-code 0.2.0 emits `session_<uuid>` instead of bare `<uuid>`. The cli-client stores the token verbatim and round-trips it via `kimi -r <token>` — we treat it as opaque. The stderr-fallback regex accepts both formats so 0.1.x users on text-output mode keep working alongside 0.2.0+ users on stream-json.
+- **Stream-json parser learned `role:"meta"`.** Previously meta records were rejected as "unknown role" malformed. Now `meta.session.resume_hint` produces a structured `SessionResumeHintRecord`; unknown meta types still surface to the malformed channel (forward-compat for 0.3.x — we won't crash on new meta types, just log them for diagnostics).
+- **Meta record filtered from consumer-facing `records[]`.** Commands iterating `result.records` only see assistant/tool roles. The `onRecord` streaming callback also skips meta — wrappers wiring up live UI updates never see plumbing records.
+
+### Review-smoke catches (kimi 0.2.0 review against the GA candidate)
+
+- **Stderr fallback regex tightened to anchored full-UUID.** Initial widening to accept `session_<uuid>` used the loose pattern `session_[0-9a-f-]{8,}`, which would have accepted `session_--------` (8 dashes) or any 8+ char hex-dash token. The "anchored full-UUID regex" safety invariant documented in `AGENTS.md` is preserved by requiring both alternations to match a full UUID payload — `session_<uuid>` and bare `<uuid>` are now symmetric. Tests cover five malformed forms (too short, wrong length, missing dashes, non-hex chars) explicitly.
+- **`parseChallengeArgs` `=value` rejection test added.** The `parseKnownFlags` shared helper makes the code correct transitively, but the test gap meant a future refactor could regress the challenge path undetected. All four forms (bare/assignment × thinking/no-thinking) now have explicit assertions under the `"challenge"` command label.
+
+### H6 — kimi-code version probe (Codex post-hotfix audit Area 8, addressed pre-GA)
+
+- **New `runtime/kimi-version-probe.ts`.** Spawns `kimi --version`, parses output, compares against a `KIMI_TESTED_MINORS` allow-list of `{major, minor}` pairs (currently `0.1.x`, `0.2.x`). Soft-fails — if the probe itself fails (kimi missing, spawn error, unparseable output), we record nothing because the hook probe will surface a clearer error. Only loud-warns when the version is **demonstrably** out of range.
+- **Wired into `/kimi:setup` (install + check paths).** The warning shows up in setup's warnings array and surfaces on stdout for users. `KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1` opts out (useful for CI environments without kimi).
+- **Why this matters.** kimi-code 0.2.0 is wire protocol `1.1`; a future 0.3.0 could replay older sessions with an invisible warning and produce flattened output we never capture (per Codex audit reading of `cf2227e` / `2004aed`). The version probe gives users early signal before a silent breakage bites them. Belt-and-suspenders with the alpha.4 `warnIfSessionIdMissing` (which fires *after* a job demonstrates capture failure) — H6 fires *before* any job, on the theory that "you're running an untested kimi" is worth knowing.
+- Tests: parser cases (bare semver, `v` prefix, pre-release, garbage), tested-range membership, formatted warning content, probe behavior under missing-binary / timeout / non-zero-exit paths.
+
+### Parser closeout (Codex Round 4)
+
+- **`--thinking=value` / `--no-thinking=value` now produce the canonical removal message.** Previously the assignment form fell through to the generic "Unknown flag" path because the case statements only matched exact tokens. A wrapper agent reading the generic error would have thought the fix is to drop the `=value` rather than the flag itself. New `isRemovedThinkingFlag(token)` helper unifies the exact + assignment forms across all three parsers (ask, rescue, review/challenge).
+
+### Docs
+
+- **`docs/safety.md` managed-block template** now uses `vX.Y.Z` placeholder (no more drifting alpha.X strings) and shows the shell-quoted command shape that `runtime/hooks/install-paths.ts::buildHookShellCommand` actually writes, plus a footnote explaining the round-trip.
+- **`AGENTS.md` invariant 1** rewritten for dual-source session capture (stdout meta record for 0.2.0+, stderr fallback for 0.1.x). Captured token semantics — verbatim round-trip — now explicit.
+- **`README.md` Architecture** updated to reflect the stdout meta-record transport.
+- **`ROADMAP-TO-GA.md`** adds H6 (wire-protocol version guard) per Codex post-hotfix audit finding Area 8: kimi-code 0.2.0 is wire protocol `1.1`; future minors may silently replay older sessions without surfacing warnings. Launch-time version-floor probe deferred to v1.0.x or v1.1.
+
+### Tests
+
+- `tests/runtime/stream-json.test.ts` — 3 new tests: parse `meta.session.resume_hint`, reject malformed meta with missing session_id, forward-compat reject unknown meta types as malformed (not crash). Stderr regex test extended to cover `session_<uuid>` form.
+- `tests/runtime/cli-client.test.ts` — 3 new integration tests: stdout-only meta capture, both-channels first-announce-wins, onRecord callback skips meta.
+- `tests/runtime/parsing.test.ts` — 3 new tests for `=value` form rejection across all three parsers.
+- `tests/helpers/mock-kimi-stream.ts` — new `KIMI_MOCK_ANNOUNCE_VIA` env var (`stderr` | `stdout-meta` | `both`) so tests can exercise both 0.1.x and 0.2.0+ resume-hint transports without authoring separate fixtures.
+
+**391 tests pass, drift gate clean.**
+
+### Roadmap closures incidental to GA
+
+- **H2 (session-id stderr format coupling) — closed by upstream + alpha.5 hotfix.** H2 prescribed a machine-readable session record in stream-json. kimi-code 0.2.0 shipped exactly this (`role:"meta", type:"session.resume_hint"`); the alpha.5 hotfix consumes it. The stderr regex remains as a 0.1.x fallback.
+- **H3 (stream-json parser coupling to kimi-code internals) — partially closed.** The forward-compat behavior for unknown meta types (surface to malformed channel, never crash) is now in place. The hard-coded `apps/kimi-code/src/cli/run-prompt.ts:NNN` line references in the parser's doc comments have been replaced with file-only references — drift across kimi-code versions no longer points at stale line numbers. The remaining H3 work (treating unknown top-level roles as forward-compat instead of malformed) deferred to v1.1 — the current "malformed" treatment is conservative-safe and changing it requires a deeper review of consumer assumptions.
+- **H6 (wire-protocol version guard) — closed.** See above section.
+
+### Verified against real kimi 0.2.0
+
+Production smoke (working-tree companion against the user's installed kimi 0.2.0):
+
+- `/kimi:ask` happy-path → returns prose AND captures `kimi_session_id: "session_<uuid>"` from the stdout meta record.
+- `/kimi:review main "spot any GA blockers"` → completed in **8m 37s** thinking-on (well under the 1800s budget); session id captured; review itself caught two real issues in this candidate (the loose stderr regex and the missing challenge test, both fixed in this commit).
+- `warnIfSessionIdMissing` does NOT fire on successful jobs (no false-positive).
+- `/kimi:cancel` reaps the descendant tree cleanly (alpha.3 invariant preserved).
+- `/kimi:setup --check` strict-equality verifier catches stale hook paths from prior alpha versions (caught in this smoke — alpha.4 install was pointing at alpha.3's hook script). Re-install clean. New version probe surfaces no warning since kimi 0.2.0 is in `KIMI_TESTED_MINORS`.
+- Parser hard-rejection of `--no-thinking foo` and `--no-thinking=true` both surface the canonical removal message.
+
+### Acknowledgments
+
+The kimi-code 0.2.0 compat break was found by the alpha.4 production smoke test loop. Two parallel audit agents (Claude opus + Codex via codex-rescue) ran independent change-surface audits against the kimi-code 0.1.1 → 0.2.0 diff and converged: the session-meta gap is the only break in the plugin's invariants. Codex additionally surfaced the wire-protocol-1.1 forward-compat risk now closed by H6. The kimi-driven review-smoke against the GA candidate caught two final issues (the stderr regex over-widening and the missing challenge-path test). Three layers of independent review (kimi, Claude opus, Codex), each catching things the others missed.
+
 ## 1.0.0-alpha.4 — 2026-05-26
 
 > **Roadmap update**: alpha.4 closes G1 + G3 + L2. G2 deferred to v1.1 as H4 (Node version manager soft-recovery). New H5 added (per-spawn thinking control via kimi-code CLI, pending upstream). See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md).

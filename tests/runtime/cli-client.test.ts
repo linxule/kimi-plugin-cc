@@ -23,6 +23,13 @@ function mockOptions(overrides: {
   records: unknown[];
   sessionId?: string;
   emitAnnounce?: boolean;
+  /**
+   * Which channel the mock uses to announce the session id.
+   *   "stderr"      — 0.1.x style stderr line (default, existing tests)
+   *   "stdout-meta" — kimi 0.2.0+ stream-json meta record on stdout
+   *   "both"        — emit on both channels; exercises first-announce-wins
+   */
+  announceVia?: "stderr" | "stdout-meta" | "both";
   exitCode?: number;
   interleave?: boolean;
   commandLabel?: string;
@@ -40,6 +47,7 @@ function mockOptions(overrides: {
     KIMI_MOCK_SESSION_ID:
       overrides.sessionId ?? "26242650-d95f-4805-80d9-c947d309b2c6",
     KIMI_MOCK_EMIT_ANNOUNCE: overrides.emitAnnounce === false ? "0" : "1",
+    KIMI_MOCK_ANNOUNCE_VIA: overrides.announceVia ?? "stderr",
     KIMI_MOCK_EXIT_CODE: String(overrides.exitCode ?? 0),
     KIMI_MOCK_INTERLEAVE_LF: overrides.interleave ? "1" : "0",
     KIMI_MOCK_DELAY_MS: String(overrides.delayMs ?? 0),
@@ -131,6 +139,84 @@ describe("runCliPrompt", () => {
       expect(first.tool_calls?.[0]?.function.name).toBe("Read");
       const tool = result.records[1] as ToolResultRecord;
       expect(tool.content).toBe("file contents");
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("captures the session id from a kimi 0.2.0 stdout meta record (no stderr announce)", async () => {
+    // kimi 0.2.0 (PR #47) moved the resume hint from stderr to a
+    // stream-json meta record on stdout, with token shape `session_<uuid>`.
+    // The cli-client must consume the meta record and NOT include it in
+    // the consumer-facing records[] surface (the meta record is wrapper
+    // plumbing, not assistant prose).
+    const root = await createTestPluginDataRoot("cli-client-meta-only");
+    try {
+      const sessionId = "session_233450b2-f558-499b-b133-bd4d5650d583";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "Two plus two is four." }],
+          sessionId,
+          announceVia: "stdout-meta",
+        }),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.sessionId).toBe(sessionId);
+      // Meta record filtered from consumer-facing records[]:
+      expect(result.records).toHaveLength(1);
+      expect((result.records[0] as AssistantRecord).content).toBe(
+        "Two plus two is four.",
+      );
+      expect(result.malformed).toEqual([]);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("first-announce-wins when both stdout meta and stderr line are emitted", async () => {
+    // Mixed-version environments or paranoid kimi-code releases might
+    // emit both. The order in our mock is meta-first; the cli-client
+    // should pin to whichever arrives first via the data handler — meta
+    // on stdout typically beats the stderr line.
+    const root = await createTestPluginDataRoot("cli-client-meta-both");
+    try {
+      const sessionId = "session_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "Hi." }],
+          sessionId,
+          announceVia: "both",
+        }),
+      );
+      expect(result.sessionId).toBe(sessionId);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("invokes onRecord for assistant/tool records but NOT for the meta record", async () => {
+    // The meta record is wrapper plumbing — callers wiring up record
+    // streaming (e.g., for live UI updates) should never see it.
+    const root = await createTestPluginDataRoot("cli-client-meta-onrecord");
+    try {
+      const seen: StreamJsonRecord[] = [];
+      await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [
+            { role: "assistant", content: "before" },
+            { role: "assistant", content: "after" },
+          ],
+          announceVia: "stdout-meta",
+          onRecord: (r) => seen.push(r),
+        }),
+      );
+      expect(seen).toHaveLength(2);
+      for (const r of seen) {
+        expect(r.role).toBe("assistant");
+      }
     } finally {
       await cleanupTestPath(root);
     }

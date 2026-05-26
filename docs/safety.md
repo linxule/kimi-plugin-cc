@@ -33,7 +33,7 @@ If the hook is missing or invalid, **`/kimi:rescue` refuses to run** (with `RESC
 `/kimi:setup` writes a marker-delimited block to `~/.kimi-code/config.toml`:
 
 ```toml
-# === BEGIN kimi-plugin-cc-managed (v1.0.0-alpha.1) ===
+# === BEGIN kimi-plugin-cc-managed (vX.Y.Z) ===
 # DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.
 # Purpose:
 #   kimi-code's `kimi -p` mode hard-codes permission='auto' and
@@ -50,10 +50,16 @@ If the hook is missing or invalid, **`/kimi:rescue` refuses to run** (with `RESC
 #   LaunchAgents, etc.).
 [[hooks]]
 event = "PreToolUse"
-command = "/abs/path/to/node /abs/path/to/dist/hooks/approval-hook.js"
+command = "'/abs/path/to/node' '/abs/path/to/dist/hooks/approval-hook.js'"
 timeout = 15
 # === END kimi-plugin-cc-managed ===
 ```
+
+The `vX.Y.Z` marker is replaced with the live plugin version by
+`runtime/commands/setup.ts`. Both the node binary path and the hook
+script path are shell-quoted via `runtime/hooks/install-paths.ts`
+before they reach the config (so a path containing spaces or quotes
+can't bypass the safety contract through argv splitting).
 
 Key constraints (verified by [`runtime/hooks/managed-block.ts`](../runtime/hooks/managed-block.ts) on both install and verify):
 

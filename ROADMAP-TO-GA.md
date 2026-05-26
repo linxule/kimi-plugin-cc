@@ -28,9 +28,12 @@ Smoke-test gap that alpha.4 closes: review hung past the timeout budget under de
 
 ## GA blockers (must close before tagging 1.0.0)
 
-**Empty.** alpha.4 closes the original G1/G3 set. Multi-agent review on the alpha.4 diff is the only step gating the GA tag.
+**Empty as of v1.0.0.** Tagged 2026-05-26. Pre-GA closure sequence:
 
-If multi-agent review surfaces new critical/high findings, treat them as alpha.4→alpha.5 hotfixes and re-spin.
+1. alpha.4 closed the original G1/G3 set (thinking-on budgets + loud session-id warning).
+2. alpha.5 work (rolled into the GA tag directly) closed the kimi-code 0.2.0 stream-json session-meta compat gap (G6 — `runtime/stream-json.ts` + `runtime/cli-client.ts` consume the new `role:"meta", type:"session.resume_hint"` record).
+3. H6 (wire-protocol version probe, formerly v1.0.x deferred) shipped with GA — `runtime/kimi-version-probe.ts` is wired into `/kimi:setup` to loud-warn on out-of-tested-range kimi versions.
+4. Three convergent reviews (Claude opus + Codex via codex-rescue + a kimi 0.2.0 review-smoke under thinking-on) returned consistent verdicts: session-meta is the only 0.1.1→0.2.0 break that affects the plugin; hook contract, exit-code semantics, cancellation behavior, config schema, and output framing are byte-identical between kimi-code 0.1.1 and 0.2.0. Review-smoke additionally caught two issues in the candidate (stderr regex over-widening, missing challenge test), both fixed before the tag.
 
 ## High-priority but not GA-blocking (close before 1.1)
 
@@ -44,21 +47,17 @@ Setup's probe validates the install moment; nothing guards runtime drift.
 
 **Decision (for v1.1):** Runtime-side allowlist post-validation. The cli-client receives `tool_calls` records from kimi-code's stream-json; before the model's text response is finalized, re-validate that every emitted tool call is consistent with the current command's read-only allowlist. If a tool call lands that the hook should have blocked, hard-fail the job and surface a loud error. Belt-and-suspenders: hook stays as the primary gate, runtime catches hook escape.
 
-### H2 — Session-id stderr format coupling (Challenge Finding 3)
-**Severity:** External-dependency fragility
-**Effort:** Negotiation with kimi-code team + small parser change
+### H2 — Session-id stderr format coupling — **CLOSED in v1.0.0**
 
-`extractSessionIdFromStderr` matches a regex against an undocumented human-facing stderr line. A future kimi-code release that adds a timestamp, localizes the message, or changes formatting would break resume silently.
+**Status:** Closed by upstream + GA hotfix. kimi-code 0.2.0 shipped exactly the machine-readable session record this item prescribed: a `role:"meta", type:"session.resume_hint"` stream-json record on stdout (PR #47). The plugin consumes it directly in `runtime/stream-json.ts::validateMeta` + `runtime/cli-client.ts::consumeOutcomes`. The stderr regex remains as a 0.1.x compatibility fallback, anchored to full-UUID payload shape so a malformed line can't pin a garbage id (review-smoke caught the loose form during GA candidate testing).
 
-**Decision (for v1.1):** File an upstream kimi-code issue proposing a machine-readable session record (`{"event":"session","id":"..."}`) in the stream-json output. Until upstream lands, the alpha.4 loud-warning surface (added in G3) gives users immediate signal when capture fails.
+### H3 — Stream-json parser coupled to kimi-code internals — **partially closed in v1.0.0**
 
-### H3 — Stream-json parser coupled to kimi-code internals (Challenge Finding 5)
-**Severity:** Maintainability
-**Effort:** Medium
+**Status (closed pre-GA):**
+- Hard-coded line references removed from the doc-comment header of `runtime/stream-json.ts` (the kimi-code 0.2.0 work touched the relevant source lines and proved the line references stale).
+- Unknown `meta.type` values are forward-compat: the parser surfaces them via the malformed channel for diagnostics but doesn't crash. This is the same posture H3 prescribed for "unknown record types": skip and continue.
 
-`runtime/stream-json.ts` has hard-coded source line references to kimi-code's `apps/kimi-code/src/cli/run-prompt.ts` and treats unknown record types as malformed instead of safely ignoring them.
-
-**Decision (for v1.1):** Refactor to forward-compatible — unknown `type` field values are logged at debug level but treated as "skip and continue", not malformed. Remove the hard-coded line references; they'll go stale across kimi-code versions.
+**Remaining for v1.1:** Treating unknown top-level **roles** (not meta types — full unknown `role` strings) as forward-compat. Currently still flagged as malformed because consumers' assumptions about what `records[]` can contain are baked in. Changing this requires a sweep through the command handlers to confirm none of them break on an unrecognized role landing in their iteration.
 
 ### H5 — Per-spawn thinking control via kimi-code CLI (was alpha.4 internal bug)
 **Severity:** Functional — review-gate's 8s budget assumes thinking-off but cannot enforce it
@@ -80,6 +79,12 @@ Promoted from GA-blocker to v1.1 candidate in alpha.4 triage. Current strict-equ
 1. **Short-term:** Add a soft-recovery path — when the installed block's Node binary path differs from canonical but everything else matches AND the installed binary still exists, emit a stderr warning and auto-refresh the block (call setup install logic from verify path). Preserves strict-by-default but adds an explicit "we noticed your Node moved, refreshing the hook" UX.
 2. **Long-term:** Hash-based verification — store SHA256 of `dist/hooks/approval-hook.js` in the managed block, verify the hash matches regardless of Node path.
 
+### H6 — Wire-protocol version guard for future kimi-code minors — **CLOSED in v1.0.0**
+
+**Status:** Shipped with GA via `runtime/kimi-version-probe.ts` + `/kimi:setup` integration. `KIMI_TESTED_MINORS = [{0,1}, {0,2}]` is the current tested range. The setup probe spawns `kimi --version`, parses output, and pushes a loud warning to setup's warnings array when the version is outside the tested range. Soft-fail policy: probe failures (kimi missing, spawn error, unparseable output) record nothing — the hook probe surfaces those failures more directly. Override: `KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1` skips the probe entirely.
+
+When kimi-code 0.3.x lands, the only release-engineering step is to extend `KIMI_TESTED_MINORS` after end-to-end verification.
+
 ## Low-priority polish (open backlog)
 
 ### L1 — `dist/` drift hazard for developers who skip `bun run check` (Challenge Finding 7)
@@ -98,9 +103,20 @@ Comment block at the start of the cancellation section should explain WHY we hav
 - **Reverting to in-band approval policy (v0.4 wire-style).** The cutover decision is firm — kimi-code dropped Wire transport. Defense-in-depth via H1 covers the same risk surface.
 - **Reintroducing `--thinking` / `--no-thinking` as documented user flags.** User directive in alpha.4: thinking is always on for user-facing commands. The parser **hard-rejects** both flags with `INVALID_ARGS` (`THINKING_FLAG_REMOVED_MESSAGE`); there is no escape hatch. review-gate's runtime caller pins thinking-off via `CliClientOptions.thinking` as a reserved internal seam (currently a no-op since kimi-code 0.1.1 has no per-spawn CLI control — see Codex Round 2 finding).
 
-## Ship-or-fix gate for GA
+## Ship-or-fix gate for GA — **MET**
 
-**GA = alpha.4 + multi-agent-review-clean.**
+**v1.0.0 tagged 2026-05-26.** Pre-tag state:
+- alpha.4 closure scope (G1 + G3 + L2) ✓
+- kimi-code 0.2.0 stream-json session-meta hotfix ✓
+- H6 wire-protocol version probe ✓
+- H2 closed by upstream + plugin consumption ✓
+- H3 partially closed (unknown meta types forward-compat; unknown top-level roles deferred to v1.1) ✓
+- Codex post-hotfix audit clean ✓
+- Claude opus audit clean ✓
+- kimi 0.2.0 review-smoke clean (8m 37s under 1800s thinking-on budget) ✓
+- 391 tests pass, drift gate clean ✓
+
+Remaining v1.1 items: H1 (hook fail-open runtime drift), H3 partial (unknown top-level roles), H4 (Node version manager soft-recovery), H5 (per-spawn thinking control via kimi-code CLI, upstream-blocked).
 
 If multi-agent review surfaces new critical/high findings → tag alpha.4, hotfix to alpha.5, re-review, then GA. If reviews clean → skip alpha.4 tag and go straight to 1.0.0.
 

@@ -47,6 +47,7 @@ import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { buildHookShellCommand, resolveHookScriptPath, resolveNodeBinary, } from "../hooks/install-paths.js";
 import { evaluateInstalled, parseManagedBlock, } from "../hooks/managed-block.js";
+import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
@@ -154,6 +155,7 @@ async function runInstall(configPath, hookScriptPath, reviewGateEnabled, warning
         await writeConfigAtomic(configPath, next);
     }
     collectPermissionRuleWarnings(next, warnings);
+    await collectKimiVersionWarnings(context.env, warnings);
     const probe = await probeHook(hookScriptPath, context.env);
     const summary = probe.ok
         ? blockWritten
@@ -214,6 +216,7 @@ async function runCheck(configPath, hookScriptPath, reviewGateEnabled, warnings,
         };
     }
     collectPermissionRuleWarnings(existing, warnings);
+    await collectKimiVersionWarnings(context.env, warnings);
     // Block is structurally valid AND points at the resolved hook
     // script — now confirm the script itself still loads and behaves.
     try {
@@ -676,6 +679,36 @@ function truncate(value, max) {
  * still misses inline-table and multi-line forms — those are flagged
  * as a known limitation in PR 4 docs.
  */
+/**
+ * Probe kimi-code's version and append a warning to `warnings` if the
+ * installed kimi is outside the range kimi-plugin-cc was tested
+ * against (H6, Codex post-hotfix audit Area 8).
+ *
+ * Soft-fail policy: if the probe itself fails (kimi not on PATH, spawn
+ * error, unparseable output), we record nothing here — the hook probe
+ * will surface a more direct error in that case. We only loud-warn when
+ * the version is **demonstrably** out of range, so users with kimi
+ * installed-and-working but unsupported get an explicit signal before
+ * a silent breakage bites them.
+ *
+ * Override: `KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1` skips the probe
+ * entirely — useful for tests, CI environments without kimi installed,
+ * and for users who consciously want to silence this warning.
+ */
+async function collectKimiVersionWarnings(env, warnings) {
+    if (env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1")
+        return;
+    const probe = await probeKimiVersion({ env });
+    if (probe.kind === "failed") {
+        // Don't warn about probe failure here — if kimi is genuinely
+        // missing/broken, the hook probe path will catch it with a much
+        // clearer message. Avoid double-noise.
+        return;
+    }
+    if (probe.inTestedRange)
+        return;
+    warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION));
+}
 function collectPermissionRuleWarnings(contents, warnings) {
     const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
     let inRule = false;

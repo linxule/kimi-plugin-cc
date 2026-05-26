@@ -32,9 +32,22 @@ const RESCUE_SUPPORTED_FLAGS =
 // pins thinking=false via the cli-client options bag instead of an argv
 // flag (see runtime/cli-client.ts::CliClientOptions). The parser rejects
 // --thinking and --no-thinking with a hard error so a documented-removed
-// flag doesn't get silently accepted as a no-op.
+// flag doesn't get silently accepted as a no-op. Both bare (`--thinking`)
+// and assignment (`--thinking=true`) forms are rejected — otherwise the
+// assignment form would fall through to the generic "Unknown flag" path
+// and a wrapper agent reading the error would think the cure is to drop
+// the `=value` rather than the flag itself.
 const THINKING_FLAG_REMOVED_MESSAGE =
   "--thinking / --no-thinking were removed in v1.0. Thinking is always on for user-facing commands.";
+
+function isRemovedThinkingFlag(token: string): boolean {
+  return (
+    token === "--thinking" ||
+    token === "--no-thinking" ||
+    token.startsWith("--thinking=") ||
+    token.startsWith("--no-thinking=")
+  );
+}
 
 export interface KimiFlagState {
   model?: string;
@@ -153,14 +166,14 @@ export function parseAskArgs(argv: string[]): AskArgs {
         index += 1;
         break;
       }
-      case "--thinking":
-      case "--no-thinking":
-        throw new RuntimeError(
-          "INVALID_ARGS",
-          THINKING_FLAG_REMOVED_MESSAGE,
-          "args.parse",
-        );
       default:
+        if (isRemovedThinkingFlag(token)) {
+          throw new RuntimeError(
+            "INVALID_ARGS",
+            THINKING_FLAG_REMOVED_MESSAGE,
+            "args.parse",
+          );
+        }
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
@@ -288,14 +301,14 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
         index += 1;
         break;
       }
-      case "--thinking":
-      case "--no-thinking":
-        throw new RuntimeError(
-          "INVALID_ARGS",
-          THINKING_FLAG_REMOVED_MESSAGE,
-          "args.parse",
-        );
       default:
+        if (isRemovedThinkingFlag(token)) {
+          throw new RuntimeError(
+            "INVALID_ARGS",
+            THINKING_FLAG_REMOVED_MESSAGE,
+            "args.parse",
+          );
+        }
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
@@ -428,7 +441,7 @@ function parseKnownFlags(
     }
 
     if (!knownFlags.has(token)) {
-      if (token === "--thinking" || token === "--no-thinking") {
+      if (isRemovedThinkingFlag(token)) {
         throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
       }
       if (looksLikeFlag(token)) {

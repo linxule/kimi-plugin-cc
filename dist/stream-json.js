@@ -1,26 +1,32 @@
 // Stream-JSON parser for `kimi -p --output-format stream-json`.
 //
 // Canonical record shapes (verified against kimi-code source at
-// apps/kimi-code/src/cli/run-prompt.ts:456-475 — `PromptJsonWriter` emits one
-// JSON object per line via `JSON.stringify(message) + '\n'`):
+// apps/kimi-code/src/cli/run-prompt.ts — `PromptJsonWriter` emits one JSON
+// object per line via `JSON.stringify(message) + '\n'`):
 //
 //   {"role":"assistant","content":"..."}
 //   {"role":"assistant","content":"...","tool_calls":[{type,id,function:{name,arguments}}]}
 //   {"role":"assistant","tool_calls":[...]}
 //   {"role":"tool","tool_call_id":"...","content":"..."}
+//   {"role":"meta","type":"session.resume_hint","session_id":"session_<uuid>","command":"kimi -r session_<uuid>","content":"To resume this session: kimi -r session_<uuid>"}
 //
 // Notes on what does and does not appear here:
+//   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
+//     (apps/kimi-code/src/cli/run-prompt.ts:477-505). In 0.1.x the resume
+//     hint went to stderr only; 0.2.0 emits a structured stream-json record
+//     on stdout when `--output-format stream-json` is selected (text-output
+//     mode still writes the stderr line). Our cli-client consumes the
+//     meta record's `session_id` for resume/replay routing.
 //   - hook.result events arrive as role:"assistant" with the block rendered as
-//     plain text (see formatHookResultPlain in run-prompt.ts:641). Our
+//     plain text (see formatHookResultPlain in run-prompt.ts). Our
 //     PreToolUse hook's deny reason therefore surfaces in the assistant
 //     stream, not on a separate channel.
 //   - thinking.delta events are silently discarded by the CLI's
-//     PromptJsonWriter (line 495: `writeThinkingDelta(): void {}`).
-//   - tool.progress events are written to stderr only (run-prompt.ts:358-364),
-//     never entering stream-json.
+//     PromptJsonWriter (`writeThinkingDelta(): void {}`).
+//   - tool.progress events are written to stderr only, never entering
+//     stream-json.
 //   - assistant messages are only emitted when content OR tool_calls are
-//     non-empty (run-prompt.ts:537-545); we still defend against the empty
-//     case for resilience.
+//     non-empty; we still defend against the empty case for resilience.
 export const MAX_STREAM_JSON_LINE_BYTES = 1_048_576;
 /**
  * Stateful line-buffer parser. Hold partial-line bytes across chunk boundaries.
@@ -100,9 +106,37 @@ function parseLine(line) {
     if (role === "tool") {
         return validateToolResult(parsed, line);
     }
+    if (role === "meta") {
+        return validateMeta(parsed, line);
+    }
     return {
         malformedLine: line,
         malformedReason: `unknown role: ${JSON.stringify(role)}`,
+    };
+}
+function validateMeta(parsed, line) {
+    const type = parsed["type"];
+    if (type === "session.resume_hint") {
+        const sessionId = parsed["session_id"];
+        if (typeof sessionId !== "string" || sessionId.length === 0) {
+            return {
+                malformedLine: line,
+                malformedReason: "meta.session.resume_hint.session_id not non-empty string",
+            };
+        }
+        const record = {
+            role: "meta",
+            type: "session.resume_hint",
+            sessionId,
+        };
+        return { record };
+    }
+    // Unknown meta types are forward-compatible — surface them via the
+    // malformed channel for diagnostics, but don't crash. kimi-code may add
+    // new meta types in 0.3.x and our wrapper should keep working.
+    return {
+        malformedLine: line,
+        malformedReason: `unknown meta.type: ${JSON.stringify(type)}`,
     };
 }
 function validateAssistant(parsed, line) {
@@ -181,12 +215,29 @@ function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 /**
- * Match kimi-code's stderr session announce line (run-prompt.ts:137):
- *   `To resume this session: kimi -r <uuid>\n`
+ * Match kimi-code's stderr session announce line. In stream-json mode this
+ * is a 0.1.x compatibility fallback only — kimi 0.2.0+ emits the resume
+ * hint as a `role: meta, type: session.resume_hint` record on stdout (see
+ * SessionResumeHintRecord above and apps/kimi-code/src/cli/run-prompt.ts).
+ *
+ * The pattern accepts both 0.1.x bare-UUID format and 0.2.0+ `session_<uuid>`
+ * format so the fallback survives mixed-version environments. The captured
+ * token is whatever appears after `kimi -r ` — we treat it as an opaque
+ * session identifier and round-trip it verbatim via `kimi -r <token>`.
+ *
  * Returns the captured session id, or undefined if no match.
  */
 export function extractSessionIdFromStderr(stderr) {
-    const pattern = /^To resume this session:\s+kimi\s+-r\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/im;
+    // The accepted shapes are tightly anchored — both alternations require
+    // a full UUID payload. The `session_` prefix is the 0.2.0+ form; the
+    // bare UUID is the 0.1.x form. Without the anchoring, a malformed or
+    // hostile stderr line could pin `session_--------` (8 dashes) or any
+    // 8+ char hex-dash token as the captured session id, weakening the
+    // "anchored full-UUID regex" safety invariant documented in AGENTS.md.
+    // Review-smoke (kimi 0.2.0 on the alpha.5 candidate) flagged the loose
+    // form; this is the post-review tightening.
+    const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    const pattern = new RegExp(`^To resume this session:\\s+kimi\\s+-r\\s+(session_${uuid}|${uuid})\\s*$`, "im");
     return stderr.match(pattern)?.[1];
 }
 function makeOversizePreview(line) {

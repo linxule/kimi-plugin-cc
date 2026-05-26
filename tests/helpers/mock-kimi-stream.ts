@@ -15,6 +15,11 @@
 //                             line. Defaults to a fixed UUID.
 //   KIMI_MOCK_EMIT_ANNOUNCE   "0" to skip the announce line (simulate early
 //                             exit). Defaults to "1".
+//   KIMI_MOCK_ANNOUNCE_VIA    Which transport carries the resume hint:
+//                               "stderr"      — 0.1.x style (default; backward compat)
+//                               "stdout-meta" — kimi 0.2.0+ stream-json meta record
+//                               "both"        — emit on BOTH channels; tests first-
+//                                               announce-wins precedence
 //   KIMI_MOCK_EXIT_CODE       Process exit code. Defaults to 0.
 //   KIMI_MOCK_INTERLEAVE_LF   "1" to split each record across two writes
 //                             with a partial trailing newline, exercising
@@ -39,6 +44,7 @@ const stderrPrefix = process.env.KIMI_MOCK_STDERR_PREFIX ?? "";
 const stderrSuffix = process.env.KIMI_MOCK_STDERR_SUFFIX ?? "";
 const sessionId = process.env.KIMI_MOCK_SESSION_ID ?? "00000000-0000-0000-0000-000000000000";
 const emitAnnounce = process.env.KIMI_MOCK_EMIT_ANNOUNCE !== "0";
+const announceVia = process.env.KIMI_MOCK_ANNOUNCE_VIA ?? "stderr";
 const exitCode = Number.parseInt(process.env.KIMI_MOCK_EXIT_CODE ?? "0", 10) || 0;
 const interleave = process.env.KIMI_MOCK_INTERLEAVE_LF === "1";
 const delayMs = Number.parseInt(process.env.KIMI_MOCK_DELAY_MS ?? "0", 10) || 0;
@@ -65,7 +71,21 @@ async function main(): Promise<void> {
   }
 
   if (emitAnnounce) {
-    process.stderr.write(`To resume this session: kimi -r ${sessionId}\n`);
+    if (announceVia === "stdout-meta" || announceVia === "both") {
+      // kimi-code 0.2.0 stream-json shape from
+      // apps/kimi-code/src/cli/run-prompt.ts::writeResumeHint.
+      const meta = {
+        role: "meta",
+        type: "session.resume_hint",
+        session_id: sessionId,
+        command: `kimi -r ${sessionId}`,
+        content: `To resume this session: kimi -r ${sessionId}`,
+      };
+      process.stdout.write(`${JSON.stringify(meta)}\n`);
+    }
+    if (announceVia === "stderr" || announceVia === "both") {
+      process.stderr.write(`To resume this session: kimi -r ${sessionId}\n`);
+    }
   }
   if (stderrSuffix.length > 0) {
     process.stderr.write(stderrSuffix.endsWith("\n") ? stderrSuffix : `${stderrSuffix}\n`);
