@@ -12,11 +12,12 @@
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
-//     (apps/kimi-code/src/cli/run-prompt.ts:477-505). In 0.1.x the resume
-//     hint went to stderr only; 0.2.0 emits a structured stream-json record
-//     on stdout when `--output-format stream-json` is selected (text-output
-//     mode still writes the stderr line). Our cli-client consumes the
-//     meta record's `session_id` for resume/replay routing.
+//     (apps/kimi-code/src/cli/run-prompt.ts:477-505; verified byte-identical
+//     through 0.4.0 in the 2026-05-27 audit). In 0.1.x the resume hint went
+//     to stderr only; 0.2.0+ emits a structured stream-json record on stdout
+//     when `--output-format stream-json` is selected (text-output mode still
+//     writes the stderr line). Our cli-client consumes the meta record's
+//     `session_id` for resume/replay routing.
 //   - hook.result events arrive as role:"assistant" with the block rendered as
 //     plain text (see formatHookResultPlain in run-prompt.ts). Our
 //     PreToolUse hook's deny reason therefore surfaces in the assistant

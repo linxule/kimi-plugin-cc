@@ -85,6 +85,32 @@ Promoted from GA-blocker to v1.1 candidate in alpha.4 triage. Current strict-equ
 
 When kimi-code 0.3.x lands, the only release-engineering step is to extend `KIMI_TESTED_MINORS` after end-to-end verification.
 
+> **2026-05-27 follow-up**: 0.3.0 and 0.4.0 were audited (reports 31-35). `KIMI_TESTED_MINORS` still ships at `[{0,1}, {0,2}]` — extending it is deferred to H7/H9 since the audit recommends a real-binary CI smoke (H7) as the prerequisite for asserting a tested range, and a pinned upper bound + setup-time warning above 0.4.x (H9) as the user-visible surface.
+
+### H7 — Real-binary CI smoke against pinned kimi-code releases (new for v1.1)
+**Severity:** Architectural — closes the structural-fragility concern from the 2026-05-27 audit's adversarial review (report 34 §1)
+**Effort:** Medium (~1 day)
+
+Today `bun test` stubs the kimi process — no test exercises the full policy queue end-to-end against a real `kimi -p` binary. PR #26's policy queue refactor made our hook position (index 0) source-code-position-dependent with no upstream invariant test. A future upstream PR could reorder the queue and silently bypass our safety hook with no test failure on either side.
+
+**Decision (for v1.1):** Add a CI job that installs a pinned kimi-code release (start with 0.4.0), configures the managed block, and spawns `kimi -p --output-format stream-json` against a fixture prompt that requests `Write`. Assert the call is denied with our reason string. Repeat the smoke for review/challenge/ask/review_gate paths. The job catches policy-queue reordering, hook contract drift, and stream-json shape drift in one swoop. Once H7 lands, H6's `KIMI_TESTED_MINORS` can be extended with confidence.
+
+### H8 — `/kimi:setup` surfaces installed kimi-code plugins (new for v1.1)
+**Severity:** UX — closes the turn-waste concern from the 2026-05-27 audit's adversarial review (report 34 §4)
+**Effort:** Small (~half day)
+
+kimi-code 0.4.0 (PR #119) added user-global plugin installation. Plugin-provided MCP tools register on every session creation. Our PreToolUse hook denies any unrecognized tool name for review/challenge/ask/review_gate, so plugins don't escalate privilege — but they DO add tool calls that get denied silently inside the kimi turn, wasting model turns. Users would file confused "kimi did nothing useful" bugs.
+
+**Decision (for v1.1):** During `/kimi:setup`, probe `~/.kimi-code/plugins/installed.json` (kimi-code's home dir is `~/.kimi-code/`, not `~/.kimi/`; confirmed against `packages/agent-core/src/plugin/store.ts` + `docs/en/configuration/data-locations.md` in 0.4.0) and emit a non-blocking notice listing any installed kimi-code plugins, with a one-liner explaining that their MCP tool calls will be denied under review/challenge/ask. Don't block setup. Don't mutate the plugin list. Just set the user's expectations.
+
+### H9 — Pin known-good kimi-code version range at setup (new for v1.1, extends H6)
+**Severity:** Architectural — completes the H6/H7 pair
+**Effort:** Small (~quarter day, once H7 lands)
+
+H6 ships a "warn if version outside tested range" probe. H7 makes "tested" a real assertion (CI-enforced). H9 closes the loop by pinning a known-good upper bound (`>=0.2.0 <0.5.0` once 0.4.0 ships through H7) and emitting a setup-time warning above the upper bound. Adversarial review (report 34 §1) specifically called out that the hook-policy-index-0 contract is undocumented upstream — pinning a tested upper bound is the user-facing signal that we have verified the contract holds for this range.
+
+**Decision (for v1.1):** Once H7 lands, extend `KIMI_TESTED_MINORS` with each newly-verified minor and add an `UPPER_BOUND` constant. Setup-time warning when `kimi --version` reports anything above the upper bound.
+
 ## Low-priority polish (open backlog)
 
 ### L1 — `dist/` drift hazard for developers who skip `bun run check` (Challenge Finding 7)
@@ -116,7 +142,20 @@ Comment block at the start of the cancellation section should explain WHY we hav
 - kimi 0.2.0 review-smoke clean (8m 37s under 1800s thinking-on budget) ✓
 - 391 tests pass, drift gate clean ✓
 
-Remaining v1.1 items: H1 (hook fail-open runtime drift), H3 partial (unknown top-level roles), H4 (Node version manager soft-recovery), H5 (per-spawn thinking control via kimi-code CLI, upstream-blocked).
+Remaining v1.1 items: H1 (hook fail-open runtime drift), H3 partial (unknown top-level roles), H4 (Node version manager soft-recovery), H5 (per-spawn thinking control via kimi-code CLI, upstream-blocked), H7 (real-binary CI smoke), H8 (surface installed kimi-code plugins at setup), H9 (pin known-good kimi-code version range — extends H6).
+
+## Post-GA audit log
+
+- **2026-05-27** — kimi-code 0.3.0 (released 2026-05-26) and 0.4.0 (released 2026-05-27) audited by 4 independent reviewers (hook contract, stream-json, CLI surface, adversarial). Verdict: COMPAT-PRESERVED. No runtime changes required. Findings:
+  - `packages/agent-core/src/agent/hooks/` byte-identical 0.2.0→0.4.0
+  - `apps/kimi-code/src/cli/run-prompt.ts` byte-identical 0.2.0→0.4.0
+  - PR #26's policy queue refactor places `PreToolCallHookPermissionPolicy` at index 0, before `auto-mode-approve` (4) and `yolo-mode-approve` (13) — our hook still fires first
+  - All argv flags we use (`-p`, `-r`, `--output-format stream-json`, `-m`, `--skills-dir`) unchanged
+  - `kimi -p` still hard-codes `permission: 'auto'`; resumed sessions still force-overridden to `'auto'`
+  - Adversarial finding: hook-policy-index-0 is convention-only with no upstream invariant test → tracked as H7 (real-binary CI smoke) and H9 (pin upper bound)
+  - New plugin system (PR #119) introduces silent turn-waste for users with kimi-code plugins installed → tracked as H8
+  - Edits applied: AGENTS.md compat-range framing, `runtime/stream-json.ts` source-of-truth comment widened to "verified through 0.4.0", H7-H9 backlog added here.
+  - Reports: `.claude/kimi-code-research/reports/31-upstream-04-hook-contract.md`, `32-upstream-04-stream-json.md`, `33-upstream-04-cli-surface.md`, `34-upstream-04-adversarial.md`, `35-upstream-04-synthesis.md`.
 
 If multi-agent review surfaces new critical/high findings → tag alpha.4, hotfix to alpha.5, re-review, then GA. If reviews clean → skip alpha.4 tag and go straight to 1.0.0.
 
