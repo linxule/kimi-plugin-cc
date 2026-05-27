@@ -1,0 +1,176 @@
+# Upstream compatibility audit playbook
+
+How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
+
+This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands.
+
+## When to run
+
+- A new `@moonshot-ai/kimi-code` minor (e.g., 0.5.0) or major (1.0.0) ships
+- An adversarial finding in a different audit suggests a contract we depend on may have moved
+- The `/kimi:setup` version probe starts firing "outside tested range" warnings for a version users are actually running
+- Quarterly even if none of the above triggered, just to catch silent drift
+
+**Skip** for patch releases unless the changelog explicitly touches:
+- `apps/kimi-code/src/cli/run-prompt.ts` (stream-json output, session pinning)
+- `packages/agent-core/src/agent/hooks/` (hook engine — input/output contract)
+- `packages/agent-core/src/agent/permission/` (policy queue ordering)
+- `apps/kimi-code/src/cli/commands.ts` / `options.ts` (argv surface)
+
+## What we depend on (the surfaces to audit)
+
+These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our safety guarantees break.
+
+| Surface | Where in kimi-code | What we depend on | Where in kimi-plugin-cc |
+|---|---|---|---|
+| `kimi -p` permission mode | `apps/kimi-code/src/cli/run-prompt.ts` | hard-coded `permission: 'auto'`; `installHeadlessHandlers` auto-approves; resumed sessions force-overridden to `'auto'` | `runtime/cli-client.ts` invokes `-p`; safety relies on the hook firing |
+| PreToolUse hook engine | `packages/agent-core/src/agent/hooks/` | stdin JSON shape (`{tool_name, tool_input, session_id, cwd, ...}`), exit-2-as-deny semantics, empty matcher means all tools, fail-open on internal error | `runtime/hooks/approval-hook.ts`, `runtime/hooks/approval-policy.ts` |
+| Permission policy queue order | `packages/agent-core/src/agent/permission/policies/index.ts` | `PreToolCallHookPermissionPolicy` runs **before** `auto-mode-approve` / `yolo-mode-approve` | implicit — entire safety model assumes hook fires first |
+| Stream-json output | `apps/kimi-code/src/cli/run-prompt.ts` (`PromptJsonWriter`, `writeResumeHint`) | NDJSON record shapes for assistant/tool/tool_result; `role:"meta", type:"session.resume_hint"` carries session id | `runtime/stream-json.ts` parser, `runtime/cli-client.ts` session pinning |
+| CLI argv | `apps/kimi-code/src/cli/commands.ts`, `options.ts` | `-p`, `-r <id>`, `--output-format stream-json`, `-m`, `--skills-dir` all accepted with current semantics | `runtime/cli-client.ts::buildArgs` |
+| Process / exit / lifecycle | `apps/kimi-code/src/cli/run-prompt.ts` and OS-level | stdout = stream-json only; stderr = humans-only; SIGTERM lands; process group enumerable | `runtime/cli-client.ts` cancellation; `runtime/background-spawn.ts` |
+
+## The routine
+
+### Phase 0 — Setup (5 min)
+
+The upstream clone lives at `.claude/kimi-code-research/kimi-code-repo/`. It's gitignored.
+
+```bash
+cd .claude/kimi-code-research/kimi-code-repo
+git fetch --tags origin
+git checkout '@moonshot-ai/kimi-code@<NEW_VERSION>'
+git describe --tags --always  # confirm
+```
+
+Generate scoped diffs against the previous audited version (typically the last tag's referent — check `tags/compat-verified-kimi-code-*` to find it):
+
+```bash
+mkdir -p /tmp/kimi-<NEW>-diff
+PREV='@moonshot-ai/kimi-code@<PREV_VERSION>'
+NEW='@moonshot-ai/kimi-code@<NEW_VERSION>'
+
+git diff "$PREV".."$NEW" -- \
+  apps/kimi-code/src/cli/run-prompt.ts \
+  apps/kimi-code/src/cli/options.ts \
+  apps/kimi-code/src/cli/commands.ts \
+  > /tmp/kimi-<NEW>-diff/01-cli-prompt-mode.diff
+
+git diff "$PREV".."$NEW" -- \
+  packages/agent-core/src/agent/permission/ \
+  > /tmp/kimi-<NEW>-diff/02-permission.diff
+
+git diff "$PREV".."$NEW" -- \
+  packages/agent-core/src/agent/hooks/ \
+  > /tmp/kimi-<NEW>-diff/03-hooks.diff
+
+git diff "$PREV".."$NEW" -- \
+  packages/agent-core/src/agent/records/ \
+  packages/agent-core/src/session/ \
+  > /tmp/kimi-<NEW>-diff/04-wire-records.diff
+```
+
+A 0-byte `03-hooks.diff` is the canonical "hook engine unchanged" signal. The other three need real reading.
+
+### Phase 1 — Multi-agent compat review (4 parallel agents)
+
+Dispatch four reviewers in parallel via the Agent tool with `run_in_background: true`. Each gets one surface and produces one report under `.claude/kimi-code-research/reports/NN-upstream-<scope>.md`.
+
+Reviewer 1 — **PreToolUse hook contract** (`general-purpose` agent)
+- Question: did the JSON-in / exit-code-out contract change? Did matcher semantics change? After any permission-system refactor, does our hook still fire first in `-p` mode?
+- Output: `reports/NN-upstream-<ver>-hook-contract.md`
+
+Reviewer 2 — **Stream-json output** (`general-purpose` agent)
+- Question: did NDJSON record shapes change? Is `session.resume_hint` still emitted with the same field name and position in stream? Any new top-level role or meta-type our parser would warn-on?
+- Output: `reports/NN-upstream-<ver>-stream-json.md`
+
+Reviewer 3 — **CLI surface** (`general-purpose` agent)
+- Question: did our flags survive byte-identical? Any new flags affecting prompt mode? Is auto-approve still hard-coded?
+- Output: `reports/NN-upstream-<ver>-cli-surface.md`
+
+Reviewer 4 — **Adversarial** (`general-purpose` agent — the `kimi:kimi-challenge` subagent is risky for this because its foreground job can disappear)
+- Brief: "Three other reviewers say COMPAT-PRESERVED. Attack the claim. Find the cases where it breaks. If you can't, earn the conclusion adversarially."
+- Output: `reports/NN-upstream-<ver>-adversarial.md`
+
+All four agents must save a structured report to disk and reply with a verdict + short summary. The full report is the deliverable; the chat reply is just a teaser.
+
+Verdicts to use (consistent across reports):
+- `COMPAT-PRESERVED` — no action needed
+- `COMPAT-AT-RISK` — narrow specific concern flagged, may or may not require code
+- `COMPAT-BROKEN` — actual breakage, runtime change required
+
+### Phase 2 — Synthesis (15 min, main thread)
+
+Read all four reports. Write a synthesis to `reports/NN-upstream-<ver>-synthesis.md`. Decide one of three outcomes:
+
+| Findings | Outcome | Commit shape |
+|---|---|---|
+| Nothing load-bearing | Docs-only update + lightweight compat-marker tag | `docs: verify kimi-code <ver> compat — no runtime changes required` |
+| Minor adjustments (e.g., extend `KIMI_TESTED_MINORS`, tighten a comment) | Patch release | Bump 5 version files, tag `vX.Y.Z`, gh release |
+| Real breakage | Real fix + minor release | Bump 5 version files to the next minor, tag, gh release |
+
+"Load-bearing" means runtime code changes. Doc tightening alone is not load-bearing.
+
+### Phase 3 — Edits (variable)
+
+Surgical only. Common doc edits even when no code changes:
+- `AGENTS.md`: extend the "Upstream compat" line with the verified version
+- `AGENTS.md`: update the dual-source session-meta paragraph's verified-through range
+- `runtime/stream-json.ts`: update the source-of-truth comment's verified-through range
+- `ROADMAP-TO-GA.md`: append an audit log entry with date, verdict, and findings
+
+If extending `KIMI_TESTED_MINORS` (`runtime/kimi-version-probe.ts`), that's a runtime change — bump to patch release.
+
+### Phase 4 — Multi-reviewer pass on the audit commit
+
+The audit reports reviewed kimi-code. The reviewers in this phase review **your edits** to confirm they accurately reflect the audit.
+
+Dispatch two reviewers in parallel:
+
+1. **code-reviewer** agent on the working-tree diff — checks for correctness, cross-references the report citations, flags overclaims or wrong file paths
+2. **general-purpose** agent doing "doc fidelity" — verifies every factual claim in the docs is supported by a specific report; checks numerical claims; flags marketing language
+
+Apply must-fix findings before commit. Nits are at your discretion.
+
+> Why not use `code-reviewer` for both: independence. The fidelity audit specifically grades the writing against the source reports, which is a different question than the code-reviewer's "is this commit correct."
+
+### Phase 5 — Commit, tag, push
+
+**Docs-only outcome** (most common — no breakage):
+```bash
+git add AGENTS.md ROADMAP-TO-GA.md runtime/stream-json.ts dist/stream-json.js
+git commit -m "docs: verify kimi-code <ver> compat — no runtime changes required" \
+  -m "<audit summary>"
+git push origin main
+git tag -a "compat-verified-kimi-code-<ver>" -m "<audit verdict + reports>"
+git push origin "compat-verified-kimi-code-<ver>"
+```
+
+**Patch release outcome** (something load-bearing):
+```bash
+# Bump runtime/version.ts, package.json, .claude-plugin/plugin.json,
+#                 .claude-plugin/marketplace.json, AGENTS.md
+bun run check       # must be green
+git add -A
+git commit -m "release: <new-version> — kimi-code <ver> compat"
+git tag -a "v<new-version>" -m "..."
+git push origin main "v<new-version>"
+gh release create "v<new-version>" --notes-file <(echo "<audit body>")
+```
+
+The compat-marker tag (`compat-verified-kimi-code-<ver>`) is independent of the plugin version tag (`v<X.Y.Z>`). Both can coexist.
+
+## Anti-patterns
+
+- **Don't use the `kimi:kimi-challenge` subagent for the adversarial pass**. It invokes `kimi -p` under the hood; its foreground job can disappear (`FOREGROUND_PROCESS_DISAPPEARED`) leaving the wrapper agent unsure whether the work completed. Use `general-purpose` with an adversarial brief instead.
+- **Don't extend `KIMI_TESTED_MINORS` purely on the strength of a manual audit.** The probe is the user's only signal that we tested against their version. Once H7 (real-binary CI smoke) lands, extending the tested range becomes a CI-enforced claim; until then, a manual audit can justify a compat-marker tag and an AGENTS.md line, but the probe should keep firing for unverified versions so users get a real signal.
+- **Don't tag a plugin version (`vX.Y.Z`) for zero-code-change audits.** Reserve patch and minor releases for actual changes. Use the compat-marker tag for verification-only events.
+- **Don't skip the multi-reviewer pass on the audit commit.** The 2026-05-27 run caught a `~/.kimi/plugins/installed.json` path error (correct path: `~/.kimi-code/plugins/installed.json`) propagated from the source audit reports into the roadmap — exactly the kind of detail one reader misses.
+
+## Reference: the 2026-05-27 0.4.0 audit
+
+For a worked example see:
+- Commit: `b67263c` (`git show b67263c`)
+- Tag: `compat-verified-kimi-code-0.4.0` (`git show compat-verified-kimi-code-0.4.0`)
+- Reports (gitignored): `.claude/kimi-code-research/reports/31-upstream-04-hook-contract.md` ... `35-upstream-04-synthesis.md`
+- Roadmap audit log: `ROADMAP-TO-GA.md` § "Post-GA audit log"

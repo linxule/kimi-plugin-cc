@@ -5,7 +5,7 @@ Project context for coding agents working in this repository.
 ## Quick reference
 
 - **Version**: 1.0.0 (kimi-code, subprocess transport). v0.4.x is preserved at the `v0.4.0` tag (with a `v0.4-maintenance` branch cut from that tag, once published) for users still on kimi-cli.
-- **Upstream compat**: verified against `@moonshot-ai/kimi-code` 0.2.0 (GA reference) and 0.4.0 (intermediate 0.3.0 covered transitively by the byte-identical 0.2.0→0.4.0 diff for surfaces we consume). PR #26's policy-queue refactor preserved our PreToolUse hook's runtime position; `run-prompt.ts` and `hooks/` are byte-identical 0.2.0→0.4.0. Audit reports 31-35 in `.claude/kimi-code-research/reports/` (2026-05-27).
+- **Upstream compat**: verified against `@moonshot-ai/kimi-code` 0.2.0 (GA reference) and 0.4.0 (intermediate 0.3.0 covered transitively by the byte-identical 0.2.0→0.4.0 diff for surfaces we consume). PR #26's policy-queue refactor preserved our PreToolUse hook's runtime position; `run-prompt.ts` and `hooks/` are byte-identical 0.2.0→0.4.0. Audit reports 31-35 in `.claude/kimi-code-research/reports/` (2026-05-27); marker tag `compat-verified-kimi-code-0.4.0`. **Playbook for future audits**: [docs/upstream-compat-audit.md](docs/upstream-compat-audit.md) — when a new kimi-code release lands, run this routine before extending `KIMI_TESTED_MINORS` or tagging a new compat marker.
 - **Toolchain**: Node >= 22.5, TypeScript, **bun** (not npm/yarn)
 - **Workflow**: edit `runtime/**/*.ts` → `bun run check` (build + typecheck + test + drift gate)
 
