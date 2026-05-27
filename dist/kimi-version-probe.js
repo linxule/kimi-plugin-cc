@@ -55,6 +55,13 @@ const KIMI_VERSION_PROBE_TIMEOUT_MS = 5_000;
 export const KIMI_TESTED_MINORS = [
     { major: 0, minor: 1 },
     { major: 0, minor: 2 },
+    // 0.3 and 0.4 added in v1.0.1 (2026-05-27) after the 4-reviewer audit
+    // verified compat through @moonshot-ai/kimi-code@0.4.0. See
+    // docs/upstream-compat-audit.md for the playbook and
+    // .claude/kimi-code-research/reports/31-35-* for the audit reports.
+    // Tag: compat-verified-kimi-code-0.4.0 on commit b67263c.
+    { major: 0, minor: 3 },
+    { major: 0, minor: 4 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

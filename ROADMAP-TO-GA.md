@@ -85,7 +85,9 @@ Promoted from GA-blocker to v1.1 candidate in alpha.4 triage. Current strict-equ
 
 When kimi-code 0.3.x lands, the only release-engineering step is to extend `KIMI_TESTED_MINORS` after end-to-end verification.
 
-> **2026-05-27 follow-up**: 0.3.0 and 0.4.0 were audited (reports 31-35). `KIMI_TESTED_MINORS` still ships at `[{0,1}, {0,2}]` — extending it is deferred to H7/H9 since the audit recommends a real-binary CI smoke (H7) as the prerequisite for asserting a tested range, and a pinned upper bound + setup-time warning above 0.4.x (H9) as the user-visible surface.
+> **2026-05-27 follow-up (initial)**: 0.3.0 and 0.4.0 were audited (reports 31-35). `KIMI_TESTED_MINORS` deliberately held at `[{0,1}, {0,2}]` pending H7 (real-binary CI smoke) as the actual claim-enforcer.
+>
+> **2026-05-27 follow-up (v1.0.1 release)**: extended `KIMI_TESTED_MINORS` to `[{0,1}, {0,2}, {0,3}, {0,4}]` and shipped as v1.0.1 (tag `v1.0.1`). The trigger was a user-visible UX gap: `/kimi:setup` was warning users on 0.3.0/0.4.0 — versions we had explicitly audited — which read as a contradiction. Decision was to bump the constant now (manual audit is the claim-enforcer for this release) and let H7 retroactively strengthen the assertion. The "user-visible signal beats H7-first sequencing" call lives in the corresponding memo at `projects/kimi-plugin-cc/memos/2026-05-27-first-post-ga-upstream-compat-audit-playbook.md` (memex vault).
 
 ### H7 — Real-binary CI smoke against pinned kimi-code releases (new for v1.1)
 **Severity:** Architectural — closes the structural-fragility concern from the 2026-05-27 audit's adversarial review (report 34 §1)

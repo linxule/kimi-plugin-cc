@@ -53,10 +53,12 @@ describe("isInTestedRange", () => {
   test("returns true for any patch within a known minor", () => {
     expect(isInTestedRange(0, 1)).toBe(true);
     expect(isInTestedRange(0, 2)).toBe(true);
+    expect(isInTestedRange(0, 3)).toBe(true);
+    expect(isInTestedRange(0, 4)).toBe(true);
   });
 
   test("returns false for an unknown minor", () => {
-    expect(isInTestedRange(0, 3)).toBe(false);
+    expect(isInTestedRange(0, 5)).toBe(false);
     expect(isInTestedRange(0, 99)).toBe(false);
   });
 
