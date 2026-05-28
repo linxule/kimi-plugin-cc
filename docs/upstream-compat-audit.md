@@ -99,6 +99,20 @@ Verdicts to use (consistent across reports):
 - `COMPAT-AT-RISK` — narrow specific concern flagged, may or may not require code
 - `COMPAT-BROKEN` — actual breakage, runtime change required
 
+### Phase 1b — Assertion check: real-binary smoke (10 min)
+
+Source-reading proves the *contract* looks unchanged; the smoke proves it *behaves* unchanged. Run it against the actual new release:
+
+```bash
+# Install / activate the new kimi-code release so `kimi` on PATH is <NEW_VERSION>
+kimi --version                  # confirm it reports <NEW_VERSION>
+bun run smoke:real              # KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts
+```
+
+It spawns the real `kimi -p` in an isolated `KIMI_CODE_HOME` (seeded from your authenticated home — never mutates the real config or session store) and asserts, for review / challenge / ask / review_gate, that a forced write attempt is denied by the hook and no file lands. A green run is direct evidence that the policy-queue-index-0 / hook-deny chain still holds end-to-end on the new release — the single highest-signal check in this whole routine. If it goes red, the source-reading verdict is wrong somewhere; treat as `COMPAT-BROKEN` until reconciled.
+
+Prereqs: a kimi binary + an authenticated `~/.kimi-code` (config + `credentials/` + `oauth/`). Skipped automatically without them, so note in the synthesis whether the smoke actually ran or was skipped — a skipped smoke is not a passed smoke.
+
 ### Phase 2 — Synthesis (15 min, main thread)
 
 Read all four reports. Write a synthesis to `reports/NN-upstream-<ver>-synthesis.md`. Decide one of three outcomes:
@@ -163,7 +177,7 @@ The compat-marker tag (`compat-verified-kimi-code-<ver>`) is independent of the 
 ## Anti-patterns
 
 - **Don't use the `kimi:kimi-challenge` subagent for the adversarial pass**. It invokes `kimi -p` under the hood; its foreground job can disappear (`FOREGROUND_PROCESS_DISAPPEARED`) leaving the wrapper agent unsure whether the work completed. Use `general-purpose` with an adversarial brief instead.
-- **Don't extend `KIMI_TESTED_MINORS` purely on the strength of a manual audit.** The probe is the user's only signal that we tested against their version. Once H7 (real-binary CI smoke) lands, extending the tested range becomes a CI-enforced claim; until then, a manual audit can justify a compat-marker tag and an AGENTS.md line, but the probe should keep firing for unverified versions so users get a real signal.
+- **Don't extend `KIMI_TESTED_MINORS` on source-reading alone — run the Phase 1b smoke against the new release first.** The probe is the user's only signal that we tested against their version. The local real-binary smoke (`bun run smoke:real`) now exists (H7 partial), so "tested" should mean "smoke ran green against this release", not just "four agents read the diff". Until the smoke runs in per-push CI against a pinned release (H7 remaining — blocked on an OAuth-credentials secret), it stays a manual pre-release gate; record in the synthesis whether it ran or was skipped.
 - **Don't tag a plugin version (`vX.Y.Z`) for zero-code-change audits.** Reserve patch and minor releases for actual changes. Use the compat-marker tag for verification-only events.
 - **Don't skip the multi-reviewer pass on the audit commit.** The 2026-05-27 run caught a `~/.kimi/plugins/installed.json` path error (correct path: `~/.kimi-code/plugins/installed.json`) propagated from the source audit reports into the roadmap — exactly the kind of detail one reader misses.
 
