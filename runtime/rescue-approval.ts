@@ -57,6 +57,47 @@ const MUTATING_FLAG_PREFIXES = [
   "--output-directory=",
   "--output-dir=",
 ];
+// Flags whose VALUE is executed as a command or external tool (RCE class).
+// Whole-repo audit 2026-05-28 (report 43) found that allowlisted commands
+// were trusted with arbitrary flags. No allowlisted read-only command uses
+// these legitimately, so they are rejected for EVERY tool:
+//   - `git grep --open-files-in-pager=touch /tmp/x needle` → git runs `touch`
+//     (F1, CRITICAL — same pager-smuggling class as the pre-subcommand
+//     `git -c core.pager=` defense, but via a subcommand flag)
+//   - `go vet -vettool=<bin>`, `go test -exec <bin>` / `-toolexec <bin>` → runs <bin>
+// The git `-O` short form of --open-files-in-pager is handled in the git
+// branch (it collides with `find -O<level>`, so it can't be banned globally).
+const EXEC_DELEGATING_FLAGS_EXACT = new Set([
+  "--open-files-in-pager",
+  "-vettool",
+  "--vettool",
+  "-toolexec",
+  "--toolexec",
+  "-exec",
+  "-execdir",
+]);
+const EXEC_DELEGATING_FLAG_PREFIXES = [
+  "--open-files-in-pager=",
+  "-vettool=",
+  "--vettool=",
+  "-toolexec=",
+  "--toolexec=",
+];
+// Pytest/python -m pytest report flags write to arbitrary paths. Test
+// runners execute repo code by design (documented trust boundary, report 43
+// F4); this only stops them writing OUTSIDE the workspace.
+const PYTEST_REPORT_FLAGS_EXACT = new Set([
+  "--junitxml",
+  "--junit-xml",
+  "--result-log",
+  "--report-log",
+]);
+const PYTEST_REPORT_FLAG_PREFIXES = [
+  "--junitxml=",
+  "--junit-xml=",
+  "--result-log=",
+  "--report-log=",
+];
 const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);
 const GIT_READONLY_SUBCOMMANDS = new Set(["status", "diff", "show", "log", "grep", "blame"]);
 const CARGO_SUBCOMMANDS = new Set(["check", "clippy", "test"]);
@@ -332,6 +373,13 @@ export function validateShellStage(
     return { ok: false, reason: `Rescue rejects mutating shell flags: ${tokens.join(" ")}` };
   }
 
+  if (hasExecDelegatingFlag(args)) {
+    return {
+      ok: false,
+      reason: `Rescue rejects flags that execute an external command/tool (e.g. --open-files-in-pager, -vettool, -exec, -toolexec): ${tokens.join(" ")}`,
+    };
+  }
+
   if (command === "git") {
     const firstArg = args[0] ?? "";
     // Pre-subcommand git flags shift where the subcommand lives in argv. The `-c` form in
@@ -344,6 +392,16 @@ export function validateShellStage(
       return {
         ok: false,
         reason: `Rescue rejects git pre-subcommand flags (e.g. -c/-C/-p/--no-pager/--exec-path): ${tokens.join(" ")}. Put the read-only subcommand immediately after \`git\`.`,
+      };
+    }
+    // `git grep -O[<cmd>]` / `--open-files-in-pager[=<cmd>]` runs <cmd> as the
+    // pager (report 43 F1, CRITICAL RCE). The long form is caught by the
+    // global exec-delegating check above; the `-O` short form collides with
+    // `find -O<level>` so it is rejected here, git-locally.
+    if (args.some((arg) => arg === "-O" || /^-O./.test(arg))) {
+      return {
+        ok: false,
+        reason: `Rescue rejects git -O/--open-files-in-pager (executes the pager value as a command): ${tokens.join(" ")}.`,
       };
     }
     return GIT_READONLY_SUBCOMMANDS.has(firstArg)
@@ -374,6 +432,12 @@ export function validateShellStage(
 
   if (command === "ruff") {
     if (args[0] === "check") {
+      if (hasWriteShortFlag(args)) {
+        return {
+          ok: false,
+          reason: `Rescue rejects ruff -o (writes the report to a file): ${tokens.join(" ")}.`,
+        };
+      }
       return { ok: true };
     }
     if (args[0] === "format") {
@@ -397,15 +461,32 @@ export function validateShellStage(
   }
 
   if (command === "go") {
-    return GO_SUBCOMMANDS.has(args[0] ?? "")
-      ? { ok: true }
-      : { ok: false, reason: `Rescue rejects go subcommand: ${tokens.join(" ")}` };
+    if (!GO_SUBCOMMANDS.has(args[0] ?? "")) {
+      return { ok: false, reason: `Rescue rejects go subcommand: ${tokens.join(" ")}` };
+    }
+    // `go build -o PATH` / `go test -c -o PATH` write a binary to an
+    // arbitrary path (report 43 F3). -vettool / -exec / -toolexec are caught
+    // by the global exec-delegating check above.
+    if (hasWriteShortFlag(args)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects go -o (writes a binary to an arbitrary path): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
   }
 
   if (command === "python" || command === "python3") {
-    return args[0] === "-m" && args[1] === "pytest"
-      ? { ok: true }
-      : { ok: false, reason: `Rescue rejects ${command} shell command: ${tokens.join(" ")}` };
+    if (args[0] !== "-m" || args[1] !== "pytest") {
+      return { ok: false, reason: `Rescue rejects ${command} shell command: ${tokens.join(" ")}` };
+    }
+    if (hasPytestReportFlag(args.slice(2))) {
+      return {
+        ok: false,
+        reason: `Rescue rejects pytest report-writing flags (--junitxml, --result-log, --report-log): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
   }
 
   if (command === "npm" || command === "pnpm" || command === "yarn" || command === "bun" || command === "uv") {
@@ -430,11 +511,63 @@ export function validateShellStage(
     return { ok: true };
   }
 
-  if (["rg", "grep", "ls", "cat", "pwd", "pyright", "mypy", "pytest"].includes(command)) {
+  if (command === "mypy") {
+    // mypy runs no repo code, but its report flags write to arbitrary paths:
+    // `--junit-xml FILE`, `--<fmt>-report DIR` (report 43 F5). Reject those;
+    // everything else is read-only.
+    if (
+      args.some(
+        (arg) =>
+          arg === "--junit-xml" ||
+          arg.startsWith("--junit-xml=") ||
+          /^--[a-z][a-z-]*-report$/.test(arg),
+      )
+    ) {
+      return {
+        ok: false,
+        reason: `Rescue rejects mypy report-writing flags (--junit-xml, --*-report write to arbitrary paths): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
+  }
+
+  if (command === "pytest") {
+    // pytest executes repo code by design (documented trust boundary, report
+    // 43 F4); block only its file-writing report flags so it can't write
+    // outside the workspace.
+    if (hasPytestReportFlag(args)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects pytest report-writing flags (--junitxml, --result-log, --report-log): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
+  }
+
+  if (["rg", "grep", "ls", "cat", "pwd", "pyright"].includes(command)) {
     return { ok: true };
   }
 
   if (pipelineMode && PIPELINE_PLUMBING.has(command)) {
+    // `sort -o FILE` writes anywhere (report 43 F2); `uniq IN OUT` writes its
+    // second positional. Piped plumbing reads stdin → it needs neither.
+    if (hasWriteShortFlag(args) || args.includes("--output")) {
+      return {
+        ok: false,
+        reason: `Rescue rejects ${command} -o/--output (writes to an arbitrary file): ${tokens.join(" ")}.`,
+      };
+    }
+    // `uniq IN OUT` writes OUT; `-` (stdin) counts as an operand, so
+    // `uniq - /tmp/out` is a write. Two+ operands ⇒ an output file is present.
+    if (
+      command === "uniq" &&
+      args.filter((arg) => arg === "-" || !arg.startsWith("-")).length >= 2
+    ) {
+      return {
+        ok: false,
+        reason: `Rescue rejects uniq with an output-file argument (uniq IN OUT writes OUT): ${tokens.join(" ")}.`,
+      };
+    }
     return { ok: true };
   }
 
@@ -461,6 +594,37 @@ export function hasMutatingFlag(args: string[]): boolean {
     }
   }
   return false;
+}
+
+/**
+ * True if any arg is a flag whose value is executed as a command/tool.
+ * Rejected for every command (report 43 F1/F3).
+ */
+export function hasExecDelegatingFlag(args: string[]): boolean {
+  return args.some(
+    (arg) =>
+      EXEC_DELEGATING_FLAGS_EXACT.has(arg) ||
+      EXEC_DELEGATING_FLAG_PREFIXES.some((prefix) => arg.startsWith(prefix)),
+  );
+}
+
+/**
+ * True if any arg is the bare `-o` short form (`-o`, `-ofile`, `-o=file`),
+ * the "write output to file" flag for go / sort / ruff. NOT banned globally:
+ * `rg -o` / `grep -o` (--only-matching) are read-only, so this is applied
+ * per-tool where `-o` writes a file (report 43 F2/F3/F5). The long
+ * `--output*` forms are already covered by MUTATING_FLAG_PREFIXES.
+ */
+export function hasWriteShortFlag(args: string[]): boolean {
+  return args.some((arg) => arg === "-o" || /^-o./.test(arg));
+}
+
+function hasPytestReportFlag(args: string[]): boolean {
+  return args.some(
+    (arg) =>
+      PYTEST_REPORT_FLAGS_EXACT.has(arg) ||
+      PYTEST_REPORT_FLAG_PREFIXES.some((prefix) => arg.startsWith(prefix)),
+  );
 }
 
 export function validatePackageManagerCommand(
