@@ -168,6 +168,14 @@ describe("evaluateRescueHookRequest", () => {
         "rg needle src | wc -l",
         "rg needle src | sort",
         "rg needle src | uniq",
+        // Still-allowed after the 2026-05-28 flag-hardening (report 43):
+        // `-O` is git-scoped (find's -O<level> optimization must survive),
+        // and the base lint/type/test commands keep their read-only surface.
+        "find -O3 . -name '*.ts'",
+        "go test -run TestFoo ./...",
+        "mypy --strict runtime",
+        "ruff check --select E9 .",
+        "rg x . | uniq -c",
       ];
 
       try {
@@ -270,6 +278,35 @@ describe("evaluateRescueHookRequest", () => {
         "git status\nrm -rf /",
         "git status\r\nrm -rf /",
         "git status\rrm -rf /",
+        // ----- Whole-repo audit 2026-05-28 (report 43): allowlisted
+        // commands were trusted with arbitrary flags. -----
+        // F1 (CRITICAL/RCE): git pager-exec via a SUBCOMMAND flag, dodging
+        // the pre-subcommand `git -c core.pager=` defense.
+        "git grep --open-files-in-pager=touch /tmp/pwned needle",
+        "git grep -Otouch needle",
+        "git log --open-files-in-pager=sh",
+        // F3: go writes a binary (-o) / executes an external tool (-vettool,
+        // -exec, -toolexec).
+        "go build -o /tmp/pwned ./...",
+        "go test -c -o /tmp/pwned",
+        "go vet -vettool=/tmp/evil ./...",
+        "go test -exec /tmp/evil ./...",
+        "go test -toolexec /tmp/evil ./...",
+        // F2: bare -o write short form on go/ruff/sort (long --output* was
+        // already covered; the short form only had an eslint special-case).
+        "ruff check -o /tmp/pwned .",
+        "rg x . | sort -o /tmp/pwned",
+        // uniq IN OUT writes OUT (in a pipeline); `-` counts as an operand.
+        "rg x . | uniq - /tmp/pwned",
+        "rg x . | uniq /tmp/in /tmp/out",
+        // F5: report-writing flags on mypy / pytest write outside the
+        // workspace (test runners run repo code by design — see docs/safety.md).
+        "mypy --junit-xml /tmp/pwned.xml .",
+        "mypy --cobertura-xml-report /tmp/dir .",
+        "mypy --html-report /tmp/dir runtime",
+        "pytest --junitxml=/tmp/pwned.xml",
+        "pytest --result-log /tmp/pwned.log",
+        "python -m pytest --junitxml=/tmp/pwned.xml",
       ];
 
       try {
