@@ -159,6 +159,17 @@ Remaining v1.1 items: H1 (hook fail-open runtime drift), H3 partial (unknown top
   - Edits applied: AGENTS.md compat-range framing, `runtime/stream-json.ts` source-of-truth comment widened to "verified through 0.4.0", H7-H9 backlog added here.
   - Reports: `.claude/kimi-code-research/reports/31-upstream-04-hook-contract.md`, `32-upstream-04-stream-json.md`, `33-upstream-04-cli-surface.md`, `34-upstream-04-adversarial.md`, `35-upstream-04-synthesis.md`.
 
+- **2026-05-28** — kimi-code 0.5.0 (released same day) audited by the same 4-reviewer playbook. Verdict: COMPAT-PRESERVED (unanimous). Patch release **v1.0.2** extends `KIMI_TESTED_MINORS` to include `{0, 5}` and tags `compat-verified-kimi-code-0.5.0`. Findings:
+  - Hook engine relocated `packages/agent-core/src/agent/hooks/` → `packages/agent-core/src/session/hooks/` (commit `74e867a`) with byte-identical file contents; PreToolUse contract preserved end-to-end
+  - `apps/kimi-code/src/cli/run-prompt.ts` and `packages/agent-core/src/rpc/events.ts` byte-identical 0.4.0→0.5.0 — stream-json wire format unchanged
+  - `PreToolCallHookPermissionPolicy` still at policy index 0; queue order byte-identical to 0.4.0
+  - Argv unchanged; new `--auto` flag is rejected when combined with `-p` (`options.ts:43–45` throws `OptionConflictError`) so it cannot bypass hook-based read-only enforcement
+  - `--continue` resume + `forcePromptPermission` still override resumed-session permission to `'auto'`
+  - The 1580-line `04-wire-records.diff` is internal persisted-AgentRecord changes (blobref offloading, migration v1.3) that do not surface through `kimi -p --output-format stream-json`
+  - Adversarial finding (latent, does not bite in 0.5.0): `AgentOptions.rpc` downgraded from required to `SDKAgentRPC | undefined`; `PermissionManager.requestToolApproval` now silently auto-approves `'ask'` outcomes when `agent.rpc === undefined`. Every Agent constructor site in 0.5.0 production passes a non-undefined `rpc` proxy, so the branch is dead code, but type safety has weakened. Tracked as a v1.1 tripwire: re-verify rpc-supplied-at-every-callsite in future audits and check whether `installHeadlessHandlers` is still wired into prompt mode
+  - Edits applied: `runtime/kimi-version-probe.ts` (`KIMI_TESTED_MINORS` extended), `runtime/stream-json.ts` (verified-through range extended to 0.5.0, resume-hint emission position clarified as session end), `runtime/hooks/approval-hook.ts` (path breadcrumb updated to `session/hooks/runner.ts`), AGENTS.md (Upstream compat paragraph, dual-source paragraph clarified), 5-file version bump 1.0.1 → 1.0.2
+  - Reports: `.claude/kimi-code-research/reports/36-upstream-05-hook-contract.md`, `37-upstream-05-stream-json.md`, `38-upstream-05-cli-surface.md`, `39-upstream-05-adversarial.md`, `40-upstream-05-synthesis.md`.
+
 If multi-agent review surfaces new critical/high findings → tag alpha.4, hotfix to alpha.5, re-review, then GA. If reviews clean → skip alpha.4 tag and go straight to 1.0.0.
 
 Estimated remaining effort: multi-agent review dispatch + finding triage (~1-2 hours).
