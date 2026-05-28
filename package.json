@@ -11,7 +11,8 @@
     "check": "bun run build && bunx tsc --noEmit && bun test && git diff --exit-code -- dist && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked dist files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
     "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && mkdir -p dist/vendor/shell-quote && cp runtime/vendor/shell-quote/LICENSE dist/vendor/shell-quote/LICENSE",
     "companion": "node --import tsx runtime/companion.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "smoke:real": "KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.12",
