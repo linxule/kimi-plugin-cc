@@ -65,6 +65,14 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // Tag: compat-verified-kimi-code-0.4.0 on commit b67263c.
   { major: 0, minor: 3 },
   { major: 0, minor: 4 },
+  // 0.5 added in v1.0.2 (2026-05-28) after a same-day 4-reviewer audit
+  // verified compat through @moonshot-ai/kimi-code@0.5.0. The hook
+  // engine moved path (agent/hooks/ → session/hooks/) but is
+  // byte-identical; run-prompt.ts and rpc/events.ts are byte-identical;
+  // the new --auto CLI flag is rejected when combined with -p. See
+  // .claude/kimi-code-research/reports/36-40-* for the audit reports.
+  // Tag: compat-verified-kimi-code-0.5.0.
+  { major: 0, minor: 5 },
 ];
 
 export interface KimiVersionProbeOk {

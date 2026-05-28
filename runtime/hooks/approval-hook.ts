@@ -8,7 +8,9 @@
 //   command = "node /abs/path/to/dist/hooks/approval-hook.js"
 //   timeout = 15
 //
-// Hook protocol (kimi-code agent-core/src/agent/hooks/runner.ts):
+// Hook protocol (kimi-code agent-core/src/session/hooks/runner.ts —
+// path was agent/hooks/ in 0.4.0 and earlier; relocated to session/hooks/
+// in 0.5.0 with byte-identical file contents):
 //
 //   stdin:  full hook payload as JSON
 //   stdout: optional structured JSON (only consulted when exit code is 0)
@@ -30,7 +32,8 @@
 //
 // Process boundary:
 //
-//   kimi-code spawns this hook with `shell: true` (see runner.ts:48).
+//   kimi-code spawns this hook with `shell: true` (see runner.ts:46-53,
+//   where `spawn(command, { shell: true, ... })` is invoked).
 //   The TOML command is parsed by `/bin/sh -c "..."` so the resolved
 //   `node /abs/path/...` works regardless of where it's invoked from.
 
