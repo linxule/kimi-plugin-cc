@@ -12,10 +12,16 @@
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
-//     (apps/kimi-code/src/cli/run-prompt.ts:477-505; verified byte-identical
-//     through 0.5.0 — 2026-05-27 audit covered 0.4.0, 2026-05-28 audit
-//     covered 0.5.0; run-prompt.ts has a zero-byte diff across both
-//     intervals). The hint is emitted once per prompt run at session END
+//     (apps/kimi-code/src/cli/run-prompt.ts:477-505; the resume-hint
+//     writer — `writeResumeHint` / `PromptJsonWriter` — is verified
+//     byte-identical through 0.6.0. 2026-05-27 audit covered 0.4.0,
+//     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
+//     both), 2026-05-31 audit covered 0.6.0. NB: at 0.6.0 run-prompt.ts is
+//     no longer a whole-file zero-byte diff — it gained a +17-line
+//     resume-session workDir guard in `resolvePromptSession` — but that
+//     change is OUTSIDE the stream-json writer, which the 0.6.0 audit
+//     confirmed byte-identical by content/blob SHA. See reports 47-51).
+//     The hint is emitted once per prompt run at session END
 //     (after runPromptTurn settles), not at session start. In 0.1.x the
 //     resume hint went to stderr only; 0.2.0+ emits a structured
 //     stream-json record on stdout when `--output-format stream-json` is

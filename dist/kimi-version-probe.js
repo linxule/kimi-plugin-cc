@@ -70,6 +70,22 @@ export const KIMI_TESTED_MINORS = [
     // .claude/kimi-code-research/reports/36-40-* for the audit reports.
     // Tag: compat-verified-kimi-code-0.5.0.
     { major: 0, minor: 5 },
+    // 0.6 added in v1.0.4 (2026-05-31) after a 4-reviewer audit verified
+    // compat through @moonshot-ai/kimi-code@0.6.0, backed by a GREEN
+    // real-binary smoke (`bun run smoke:real`) against the installed 0.6.0
+    // binary — "tested" is earned end-to-end, not source-reading-only. The
+    // hook engine (session/hooks/), policy queue order (policies/index.ts),
+    // and CLI argv (options.ts/commands.ts) are byte-identical; the
+    // stream-json resume-hint writer is byte-identical. The +17-line
+    // run-prompt.ts change is a resume-session workDir guard that runs
+    // before permission forcing and cannot fire for the plugin (we always
+    // resume from the originating cwd). The permission/index.ts
+    // `rpc?.requestApproval` refactor is dead code in -p mode (shadowed by
+    // auto-mode-approve at index 4; the hook policy is index 0;
+    // requestApproval is always present). See
+    // .claude/kimi-code-research/reports/47-51-* for the
+    // audit reports. Tag: compat-verified-kimi-code-0.6.0.
+    { major: 0, minor: 6 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;
