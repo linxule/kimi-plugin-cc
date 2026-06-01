@@ -17,6 +17,18 @@ This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi
 - `packages/agent-core/src/agent/permission/` (policy queue ordering)
 - `apps/kimi-code/src/cli/commands.ts` / `options.ts` (argv surface)
 
+### Forward-scan mode (no release, but `origin/main` moved)
+
+When the routine fires but **nothing new has shipped** — npm `latest`, GitHub `Latest`, and the local binary are all still the version we already verified — do **not** run the full Phase 1 four-agent audit, extend `KIMI_TESTED_MINORS`, or cut a tag. There's no release to certify. Instead run the *forward-scan*: a free look at what the next release will contain.
+
+1. Generate the four scoped diffs exactly as in Phase 0, but with `NEW='origin/main'` (after `git fetch`) and `PREV` = the last verified tag's referent.
+2. Read them yourself in the main thread (no agent dispatch). The same 0-byte signal applies: **0-byte `02-permission.diff` + 0-byte `03-hooks.diff` means the two surfaces the safety model rests on are untouched** — that alone covers most of the risk.
+3. Triage the non-empty diffs against the surface table below. Anything internal-only (record types not emitted to `-p` stdout, provider/model plumbing, internal abort-reason propagation) is benign for us; flag only changes to the stream-json **output shape**, argv, or the deny chain.
+4. Log a one-bullet entry in `ROADMAP-TO-GA.md`'s Post-GA audit log dated and explicitly marked **"forward-scan, not a triggered audit"**, with the scanned `main` SHA, the per-surface result, a provisional verdict, and the specific items to re-confirm with `bun run smoke:real` when the release actually lands.
+5. **No commit beyond the log bullet, no tag, no version bump** — the scanned code is unreleased and will change before shipping. (The 2026-06-01 entry is the worked example.)
+
+The forward-scan is the lightweight discharge of the "quarterly drift" trigger above: it catches a contract moving *before* the release forces a turnaround, without spending the full ceremony on code that isn't final.
+
 ## What we depend on (the surfaces to audit)
 
 These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our safety guarantees break.
