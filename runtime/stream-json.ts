@@ -24,10 +24,13 @@
 //     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the
 //     stream-json writer, which every audit confirmed byte-identical by
 //     content/blob SHA. Goal mode also writes a `{"type":"goal.summary",...}`
-//     line (no `role` field) before the resume hint, but ONLY when the
-//     experimental flag goal-command is on AND the prompt is /goal-prefixed
-//     — unreachable for the plugin, and if it ever appeared it routes to the
-//     malformed channel (fail-safe), not a crash. See reports 47-60).
+//     line (no `role` field) before the resume hint, ONLY when the
+//     experimental flag goal-command is on AND the prompt is /goal-prefixed.
+//     Read-only commands never trigger it; the v1.1 /kimi:pursue command is
+//     the intentional consumer — it is recognized as a first-class record on
+//     the dedicated `StreamJsonOutcome.goalSummary` channel (see
+//     GoalSummaryRecord below), NOT routed to the malformed channel. See
+//     reports 47-60).
 //     The hint is emitted once per prompt run at session END
 //     (after runPromptTurn settles), not at session start. In 0.1.x the
 //     resume hint went to stderr only; 0.2.0+ emits a structured
@@ -88,8 +91,43 @@ export interface SessionResumeHintRecord {
 
 export type StreamJsonRecord = AssistantRecord | ToolResultRecord | SessionResumeHintRecord;
 
+/**
+ * Goal-summary record emitted by kimi-code 0.8.0+ headless goal mode
+ * (`kimi -p "/goal <objective>"`) at the END of a goal run, immediately before
+ * the session.resume_hint. Unlike assistant/tool/meta records it carries NO
+ * `role` field — it is keyed by `type: "goal.summary"`.
+ *
+ * It is OUT-OF-BAND metadata for our wrapper (the /kimi:pursue job store
+ * consumes turns/tokens/wallClock/status), not consumer-facing prose. To keep
+ * the role-keyed `StreamJsonRecord` union — and its `.role` consumers
+ * (reassembleProseFromRecords, onRecord callbacks) — untouched, it is surfaced
+ * on a dedicated `StreamJsonOutcome.goalSummary` channel rather than via the
+ * record union. cli-client captures the first one and filters it, mirroring how
+ * the resume-hint meta record is captured out-of-band.
+ *
+ * Only emitted when the experimental flag `goal-command` is enabled AND the
+ * prompt is `/goal`-prefixed. Before /kimi:pursue this never appeared (it would
+ * have landed in the malformed channel as "unknown role: undefined");
+ * recognizing it is forward-compat hardening that also unlocks structured goal
+ * progress. All fields are nullable upstream (null when no goal snapshot exists).
+ *
+ * Source: apps/kimi-code/src/cli/goal-prompt.ts::goalSummaryJson (GoalSummary),
+ * verified at @moonshot-ai/kimi-code@0.9.0.
+ */
+export interface GoalSummaryRecord {
+  readonly type: "goal.summary";
+  readonly goalId: string | null;
+  readonly status: string | null;
+  readonly reason: string | null;
+  readonly turnsUsed: number | null;
+  readonly tokensUsed: number | null;
+  readonly wallClockMs: number | null;
+}
+
 export interface StreamJsonOutcome {
   readonly record?: StreamJsonRecord;
+  /** Out-of-band goal-mode summary (role-less); see GoalSummaryRecord. */
+  readonly goalSummary?: GoalSummaryRecord;
   readonly malformedLine?: string;
   readonly malformedReason?: string;
 }
@@ -180,10 +218,59 @@ function parseLine(line: string): StreamJsonOutcome {
   if (role === "meta") {
     return validateMeta(parsed, line);
   }
+  // Role-less goal-mode summary (kimi-code 0.8.0+). Keyed by `type`, not
+  // `role`, so it's surfaced on the dedicated goalSummary outcome channel.
+  if (role === undefined && parsed["type"] === "goal.summary") {
+    return validateGoalSummary(parsed, line);
+  }
   return {
     malformedLine: line,
     malformedReason: `unknown role: ${JSON.stringify(role)}`,
   };
+}
+
+function validateGoalSummary(parsed: Record<string, unknown>, line: string): StreamJsonOutcome {
+  // Each field is `T | null` upstream (null when no goal snapshot exists). A
+  // missing field is tolerated as null; a present-but-wrong-typed field is
+  // malformed (so a shape change surfaces in diagnostics rather than silently
+  // coercing). Mirrors the defensive posture of validateMeta.
+  const asStringOrNull = (v: unknown): string | null | undefined =>
+    v === undefined || v === null ? null : typeof v === "string" ? v : undefined;
+  const asNumberOrNull = (v: unknown): number | null | undefined =>
+    v === undefined || v === null
+      ? null
+      : typeof v === "number" && Number.isFinite(v)
+        ? v
+        : undefined;
+
+  const goalId = asStringOrNull(parsed["goalId"]);
+  const status = asStringOrNull(parsed["status"]);
+  const reason = asStringOrNull(parsed["reason"]);
+  const turnsUsed = asNumberOrNull(parsed["turnsUsed"]);
+  const tokensUsed = asNumberOrNull(parsed["tokensUsed"]);
+  const wallClockMs = asNumberOrNull(parsed["wallClockMs"]);
+
+  if (
+    goalId === undefined ||
+    status === undefined ||
+    reason === undefined ||
+    turnsUsed === undefined ||
+    tokensUsed === undefined ||
+    wallClockMs === undefined
+  ) {
+    return { malformedLine: line, malformedReason: "goal.summary field has unexpected type" };
+  }
+
+  const goalSummary: GoalSummaryRecord = {
+    type: "goal.summary",
+    goalId,
+    status,
+    reason,
+    turnsUsed,
+    tokensUsed,
+    wallClockMs,
+  };
+  return { goalSummary };
 }
 
 function validateMeta(parsed: Record<string, unknown>, line: string): StreamJsonOutcome {

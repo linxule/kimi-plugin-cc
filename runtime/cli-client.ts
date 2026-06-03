@@ -25,6 +25,7 @@ import { RuntimeError, formatError } from "./errors.js";
 import {
   StreamJsonParser,
   extractSessionIdFromStderr,
+  type GoalSummaryRecord,
   type StreamJsonOutcome,
   type StreamJsonRecord,
 } from "./stream-json.js";
@@ -121,6 +122,14 @@ export interface CliClientResult {
    */
   sessionId?: string;
   records: StreamJsonRecord[];
+  /**
+   * Out-of-band goal-mode summary from a headless `/goal` run (kimi-code
+   * 0.8.0+): goalId, terminal status, reason, turns/tokens/wallClock. Undefined
+   * for ordinary (non-goal) runs. Captured first-announce-wins and filtered
+   * from records[], mirroring the resume-hint meta record. /kimi:pursue
+   * consumes it; goalId is distinct from the resume-hint sessionId.
+   */
+  goalSummary?: GoalSummaryRecord;
   /** Lines that failed parsing. Diagnostics only — not load-bearing. */
   malformed: ReadonlyArray<{ line: string; reason: string }>;
   stderrTail: string;
@@ -196,6 +205,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   // thinking deltas) doesn't grow our RSS unboundedly.
   let stderrTail = "";
   let announcedSessionId: string | undefined;
+  let announcedGoalSummary: GoalSummaryRecord | undefined;
   let logChain: Promise<void> = Promise.resolve();
 
   const appendLogLine = (payload: Record<string, unknown>) => {
@@ -227,6 +237,23 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
 
   const consumeOutcomes = (outcomes: StreamJsonOutcome[]) => {
     for (const outcome of outcomes) {
+      if (outcome.goalSummary !== undefined) {
+        // Goal-mode summary is out-of-band metadata for our wrapper, not a
+        // consumer-facing record. First-announce wins (a run emits exactly one,
+        // at session end); capture and skip so records[] stays assistant/tool.
+        if (announcedGoalSummary === undefined) {
+          announcedGoalSummary = outcome.goalSummary;
+          appendLogLine({
+            event: "goal_summary",
+            goal_id: outcome.goalSummary.goalId,
+            status: outcome.goalSummary.status,
+            turns_used: outcome.goalSummary.turnsUsed,
+            tokens_used: outcome.goalSummary.tokensUsed,
+            wall_clock_ms: outcome.goalSummary.wallClockMs,
+          });
+        }
+        continue;
+      }
       if (outcome.record !== undefined) {
         // session.resume_hint is out-of-band metadata for our wrapper, not
         // a consumer-facing record. Capture the session id (first-announce
@@ -439,6 +466,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       await raceWithTimeout(logChain, LOG_DRAIN_TIMEOUT_MS);
       settle("resolve", {
         sessionId,
+        goalSummary: announcedGoalSummary,
         records,
         malformed,
         stderrTail,

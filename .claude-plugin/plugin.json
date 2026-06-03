@@ -13,6 +13,7 @@
     "./commands/ask.md",
     "./commands/cancel.md",
     "./commands/challenge.md",
+    "./commands/pursue.md",
     "./commands/replay.md",
     "./commands/rescue.md",
     "./commands/result.md",

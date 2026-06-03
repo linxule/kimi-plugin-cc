@@ -15,7 +15,12 @@ export type RuntimeCommandType =
   | "rescue"
   | "review_gate"
   | "ask"
-  | "task";
+  | "task"
+  // Diagnostic/logging label only. Pursue (autonomous goal mode) reuses the
+  // rescue *job* lineage (command_type "rescue") so it is NOT a
+  // ManagedCommandType; this entry just lets the invocation-log header and
+  // formatCommandLabel name it correctly.
+  | "pursue";
 
 export type ManagedCommandType =
   | "review"

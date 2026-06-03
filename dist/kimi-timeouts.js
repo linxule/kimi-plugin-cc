@@ -23,6 +23,16 @@ export const KIMI_REVIEW_PROMPT_TIMEOUT_MS = 1_800_000;
 /** Rescue budget. Thinking-on multi-step apply/test/verify loops. */
 export const KIMI_RESCUE_PROMPT_TIMEOUT_MS = 1_800_000;
 /**
+ * Pursue (autonomous goal mode) DEFAULT wall-clock ceiling when the user
+ * passes no `--budget`. This is the ONLY hard bound on an autonomous goal —
+ * headless goal create sets no token/turn budget (only the model, via
+ * SetGoalBudget, or this AbortController stops the loop). Larger than the
+ * single-turn rescue budget (a goal spans multiple continuation turns) but
+ * deliberately finite. Overridable per-job via `--budget` (parsed to ms in
+ * parsePursueArgs). See runtime/commands/pursue.ts and docs/safety.md.
+ */
+export const KIMI_PURSUE_DEFAULT_BUDGET_MS = 2_700_000; // 45 minutes
+/**
  * Review-gate budget. Fires inside Claude Code's Stop hook so any value
  * above the user's perceptible wait makes the gate feel broken.
  *

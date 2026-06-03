@@ -24,10 +24,13 @@
 //     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the
 //     stream-json writer, which every audit confirmed byte-identical by
 //     content/blob SHA. Goal mode also writes a `{"type":"goal.summary",...}`
-//     line (no `role` field) before the resume hint, but ONLY when the
-//     experimental flag goal-command is on AND the prompt is /goal-prefixed
-//     — unreachable for the plugin, and if it ever appeared it routes to the
-//     malformed channel (fail-safe), not a crash. See reports 47-60).
+//     line (no `role` field) before the resume hint, ONLY when the
+//     experimental flag goal-command is on AND the prompt is /goal-prefixed.
+//     Read-only commands never trigger it; the v1.1 /kimi:pursue command is
+//     the intentional consumer — it is recognized as a first-class record on
+//     the dedicated `StreamJsonOutcome.goalSummary` channel (see
+//     GoalSummaryRecord below), NOT routed to the malformed channel. See
+//     reports 47-60).
 //     The hint is emitted once per prompt run at session END
 //     (after runPromptTurn settles), not at session start. In 0.1.x the
 //     resume hint went to stderr only; 0.2.0+ emits a structured
@@ -127,10 +130,51 @@ function parseLine(line) {
     if (role === "meta") {
         return validateMeta(parsed, line);
     }
+    // Role-less goal-mode summary (kimi-code 0.8.0+). Keyed by `type`, not
+    // `role`, so it's surfaced on the dedicated goalSummary outcome channel.
+    if (role === undefined && parsed["type"] === "goal.summary") {
+        return validateGoalSummary(parsed, line);
+    }
     return {
         malformedLine: line,
         malformedReason: `unknown role: ${JSON.stringify(role)}`,
     };
+}
+function validateGoalSummary(parsed, line) {
+    // Each field is `T | null` upstream (null when no goal snapshot exists). A
+    // missing field is tolerated as null; a present-but-wrong-typed field is
+    // malformed (so a shape change surfaces in diagnostics rather than silently
+    // coercing). Mirrors the defensive posture of validateMeta.
+    const asStringOrNull = (v) => v === undefined || v === null ? null : typeof v === "string" ? v : undefined;
+    const asNumberOrNull = (v) => v === undefined || v === null
+        ? null
+        : typeof v === "number" && Number.isFinite(v)
+            ? v
+            : undefined;
+    const goalId = asStringOrNull(parsed["goalId"]);
+    const status = asStringOrNull(parsed["status"]);
+    const reason = asStringOrNull(parsed["reason"]);
+    const turnsUsed = asNumberOrNull(parsed["turnsUsed"]);
+    const tokensUsed = asNumberOrNull(parsed["tokensUsed"]);
+    const wallClockMs = asNumberOrNull(parsed["wallClockMs"]);
+    if (goalId === undefined ||
+        status === undefined ||
+        reason === undefined ||
+        turnsUsed === undefined ||
+        tokensUsed === undefined ||
+        wallClockMs === undefined) {
+        return { malformedLine: line, malformedReason: "goal.summary field has unexpected type" };
+    }
+    const goalSummary = {
+        type: "goal.summary",
+        goalId,
+        status,
+        reason,
+        turnsUsed,
+        tokensUsed,
+        wallClockMs,
+    };
+    return { goalSummary };
 }
 function validateMeta(parsed, line) {
     const type = parsed["type"];
