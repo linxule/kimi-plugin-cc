@@ -222,6 +222,55 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("captures a goal.summary out-of-band: sets result.goalSummary, keeps it out of records[] and onRecord, still captures the session id", async () => {
+    // Goal mode (kimi-code 0.8.0+) emits a role-less {type:"goal.summary"} line
+    // before the resume hint. cli-client must surface it on result.goalSummary,
+    // filter it from records[]/onRecord (out-of-band, like the meta record), and
+    // still capture the session id from the following resume hint.
+    const root = await createTestPluginDataRoot("cli-client-goal-summary");
+    try {
+      const seen: StreamJsonRecord[] = [];
+      const sessionId = "session_99999999-8888-7777-6666-555555555555";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [
+            { role: "assistant", content: "working on the goal" },
+            {
+              type: "goal.summary",
+              goalId: "goal_42",
+              status: "complete",
+              reason: null,
+              turnsUsed: 3,
+              tokensUsed: 850,
+              wallClockMs: 41000,
+            },
+          ],
+          sessionId,
+          announceVia: "stdout-meta",
+          onRecord: (r) => seen.push(r),
+        }),
+      );
+      expect(result.goalSummary).toEqual({
+        type: "goal.summary",
+        goalId: "goal_42",
+        status: "complete",
+        reason: null,
+        turnsUsed: 3,
+        tokensUsed: 850,
+        wallClockMs: 41000,
+      });
+      // Filtered from the consumer-facing record surfaces.
+      expect(result.records).toHaveLength(1);
+      expect(result.records[0]!.role).toBe("assistant");
+      expect(seen).toHaveLength(1);
+      // Session id (from the resume hint emitted after the goal.summary) still captured.
+      expect(result.sessionId).toBe(sessionId);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("survives chunk-boundary splits in stream-json output", async () => {
     const root = await createTestPluginDataRoot("cli-client-chunks");
     try {

@@ -104,8 +104,11 @@ export const KIMI_TESTED_MINORS = [
     //   - Headless goal mode (kimi -p "/goal ...", #270) is double-gated:
     //     experimental flag goal-command (default false, env
     //     KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND) AND a /goal-prefixed prompt.
-    //     The plugin sets no KIMI_CODE_EXPERIMENTAL_* env and never sends
-    //     /goal, so the path is structurally unreachable.
+    //     The plugin's read-only and rescue commands set no
+    //     KIMI_CODE_EXPERIMENTAL_* env and never send /goal. (The v1.1
+    //     /kimi:pursue command intentionally opts into goal-command per-job
+    //     and sends /goal, but every tool call still passes the index-0
+    //     PreToolUse hook on every continuation turn — see docs/safety.md.)
     //   - The new deny-all policy is unshift-ed only onto SUBAGENT policy
     //     stacks (a deny, more restrictive) — never the main -p agent.
     //   - New default-approved goal tools (GetGoal/SetGoalBudget/UpdateGoal)

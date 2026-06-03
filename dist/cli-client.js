@@ -85,6 +85,7 @@ export async function runCliPrompt(opts) {
     // thinking deltas) doesn't grow our RSS unboundedly.
     let stderrTail = "";
     let announcedSessionId;
+    let announcedGoalSummary;
     let logChain = Promise.resolve();
     const appendLogLine = (payload) => {
         if (opts.logPath === undefined)
@@ -113,6 +114,23 @@ export async function runCliPrompt(opts) {
     };
     const consumeOutcomes = (outcomes) => {
         for (const outcome of outcomes) {
+            if (outcome.goalSummary !== undefined) {
+                // Goal-mode summary is out-of-band metadata for our wrapper, not a
+                // consumer-facing record. First-announce wins (a run emits exactly one,
+                // at session end); capture and skip so records[] stays assistant/tool.
+                if (announcedGoalSummary === undefined) {
+                    announcedGoalSummary = outcome.goalSummary;
+                    appendLogLine({
+                        event: "goal_summary",
+                        goal_id: outcome.goalSummary.goalId,
+                        status: outcome.goalSummary.status,
+                        turns_used: outcome.goalSummary.turnsUsed,
+                        tokens_used: outcome.goalSummary.tokensUsed,
+                        wall_clock_ms: outcome.goalSummary.wallClockMs,
+                    });
+                }
+                continue;
+            }
             if (outcome.record !== undefined) {
                 // session.resume_hint is out-of-band metadata for our wrapper, not
                 // a consumer-facing record. Capture the session id (first-announce
@@ -305,6 +323,7 @@ export async function runCliPrompt(opts) {
             await raceWithTimeout(logChain, LOG_DRAIN_TIMEOUT_MS);
             settle("resolve", {
                 sessionId,
+                goalSummary: announcedGoalSummary,
                 records,
                 malformed,
                 stderrTail,

@@ -338,3 +338,81 @@ describe("extractSessionIdFromStderr", () => {
     );
   });
 });
+
+describe("goal.summary record (kimi-code 0.8.0+ headless goal mode)", () => {
+  const COMPLETE_LINE =
+    '{"type":"goal.summary","goalId":"goal_abc","status":"complete","reason":null,' +
+    '"turnsUsed":4,"tokensUsed":1200,"wallClockMs":53000}\n';
+
+  test("a complete goal.summary surfaces on the goalSummary channel, not record/malformed", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push(COMPLETE_LINE);
+    expect(outcome).toBeDefined();
+    expect(outcome!.malformedLine).toBeUndefined();
+    expect(outcome!.record).toBeUndefined();
+    expect(outcome!.goalSummary).toEqual({
+      type: "goal.summary",
+      goalId: "goal_abc",
+      status: "complete",
+      reason: null,
+      turnsUsed: 4,
+      tokensUsed: 1200,
+      wallClockMs: 53000,
+    });
+  });
+
+  test("a blocked goal.summary carries terminalReason and is not malformed", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push(
+      '{"type":"goal.summary","goalId":"goal_x","status":"blocked",' +
+        '"reason":"A configured budget was reached","turnsUsed":12,"tokensUsed":99,"wallClockMs":1}\n',
+    );
+    expect(outcome!.goalSummary?.status).toBe("blocked");
+    expect(outcome!.goalSummary?.reason).toBe("A configured budget was reached");
+  });
+
+  test("an all-null goal.summary (no goal snapshot) is accepted", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push(
+      '{"type":"goal.summary","goalId":null,"status":null,"reason":null,' +
+        '"turnsUsed":null,"tokensUsed":null,"wallClockMs":null}\n',
+    );
+    expect(outcome!.malformedLine).toBeUndefined();
+    expect(outcome!.goalSummary).toEqual({
+      type: "goal.summary",
+      goalId: null,
+      status: null,
+      reason: null,
+      turnsUsed: null,
+      tokensUsed: null,
+      wallClockMs: null,
+    });
+  });
+
+  test("a goal.summary with a wrong-typed field is malformed (shape drift surfaces, not silently coerced)", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push(
+      '{"type":"goal.summary","goalId":"g","status":"complete","reason":null,' +
+        '"turnsUsed":"four","tokensUsed":1,"wallClockMs":1}\n',
+    );
+    expect(outcome!.goalSummary).toBeUndefined();
+    expect(outcome!.malformedLine).toBeDefined();
+    expect(outcome!.malformedReason).toContain("goal.summary");
+  });
+
+  test("the goal.summary then session.resume_hint ordering both parse on their own channels", () => {
+    const parser = new StreamJsonParser();
+    const outcomes = parser.push(
+      COMPLETE_LINE +
+        '{"role":"meta","type":"session.resume_hint","session_id":"session_dead",' +
+        '"command":"kimi -r session_dead","content":"To resume this session: kimi -r session_dead"}\n',
+    );
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes[0]!.goalSummary?.goalId).toBe("goal_abc");
+    expect(outcomes[1]!.record).toEqual({
+      role: "meta",
+      type: "session.resume_hint",
+      sessionId: "session_dead",
+    });
+  });
+});

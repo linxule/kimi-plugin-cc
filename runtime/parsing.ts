@@ -85,6 +85,141 @@ export interface RescueArgs extends KimiFlagState {
   prompt?: string;
 }
 
+export interface PursueArgs extends KimiFlagState {
+  /**
+   * Hard wall-clock ceiling in ms (the ONLY guaranteed bound on an
+   * autonomous goal — see runtime/commands/pursue.ts). Undefined here means
+   * "apply the command default" (pursue.ts owns the default so parsing stays
+   * timeout-free).
+   */
+  budgetMs?: number;
+  /**
+   * Soft per-goal turn cap. NOT enforceable headless — injected into the
+   * objective text as a model instruction so kimi calls SetGoalBudget itself.
+   */
+  turns?: number;
+  objective?: string;
+}
+
+const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --turns <N>";
+
+/**
+ * Parse a duration token (`30m`, `1h`, `90s`, or a bare integer = minutes)
+ * into milliseconds. Throws INVALID_ARGS on a malformed or non-positive value.
+ */
+export function parseDurationMs(token: string, flag: string): number {
+  const match = /^(\d+)(s|m|h)?$/.exec(token.trim());
+  if (!match) {
+    throw new RuntimeError(
+      "INVALID_ARGS",
+      `${flag} expects a duration like 30m, 1h, or 90s (bare number = minutes); got "${token}".`,
+      "pursue.parse",
+    );
+  }
+  const value = Number(match[1]);
+  const unit = match[2] ?? "m";
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive duration.`, "pursue.parse");
+  }
+  const unitMs = unit === "s" ? 1_000 : unit === "h" ? 3_600_000 : 60_000;
+  return value * unitMs;
+}
+
+/**
+ * Parser for /kimi:pursue (autonomous goal mode). Foreground-only in the
+ * prototype: no --background/--fresh/--resume (the goalId/sessionId split makes
+ * session resume unreliable — see pursue.ts). Trailing tokens are the objective.
+ */
+export function parsePursueArgs(argv: string[]): PursueArgs {
+  let model: string | undefined;
+  const thinking: boolean | undefined = true;
+  let budgetMs: number | undefined;
+  let turns: number | undefined;
+  let trailingTokens: string[] | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+
+    if (token === "--") {
+      trailingTokens = argv.slice(index + 1);
+      break;
+    }
+
+    if (!token.startsWith("-")) {
+      trailingTokens = argv.slice(index);
+      break;
+    }
+
+    switch (token) {
+      case "-m":
+      case "--model": {
+        const value = argv[index + 1];
+        if (!value) {
+          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "pursue.parse");
+        }
+        if (value.startsWith("-")) {
+          throw new RuntimeError(
+            "INVALID_ARGS",
+            `${token} value cannot start with '-'; pass a model name`,
+            "pursue.parse",
+          );
+        }
+        model = value;
+        index += 1;
+        break;
+      }
+      case "--budget": {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("-")) {
+          throw new RuntimeError(
+            "INVALID_ARGS",
+            "--budget requires a duration (e.g. 30m, 1h, 90s).",
+            "pursue.parse",
+          );
+        }
+        budgetMs = parseDurationMs(value, "--budget");
+        index += 1;
+        break;
+      }
+      case "--turns": {
+        const value = argv[index + 1];
+        if (!value || value.startsWith("-")) {
+          throw new RuntimeError("INVALID_ARGS", "--turns requires a positive integer.", "pursue.parse");
+        }
+        const parsedTurns = Number(value);
+        if (!Number.isInteger(parsedTurns) || parsedTurns <= 0) {
+          throw new RuntimeError("INVALID_ARGS", "--turns must be a positive integer.", "pursue.parse");
+        }
+        turns = parsedTurns;
+        index += 1;
+        break;
+      }
+      default:
+        if (isRemovedThinkingFlag(token)) {
+          throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "pursue.parse");
+        }
+        if (looksLikeFlag(token)) {
+          throw new RuntimeError(
+            "INVALID_ARGS",
+            `Unknown flag ${token} for pursue. Supported flags: ${PURSUE_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped objective text to pass it through.`,
+            "pursue.parse",
+          );
+        }
+        trailingTokens = argv.slice(index);
+        index = argv.length;
+        break;
+    }
+  }
+
+  return {
+    budgetMs,
+    turns,
+    model,
+    thinking,
+    objective: trailingTokens?.join(" "),
+  };
+}
+
 export interface JobLookupArgs {
   jobId?: string;
   type?: Exclude<

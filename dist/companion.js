@@ -5,6 +5,7 @@ import { runReplay } from "./commands/replay.js";
 import { runResult } from "./commands/result.js";
 import { runReview } from "./commands/review.js";
 import { runRescue } from "./commands/rescue.js";
+import { runPursue } from "./commands/pursue.js";
 import { renderSetupResult, runSetup } from "./commands/setup.js";
 import { runStatus } from "./commands/status.js";
 import { runWorker } from "./commands/worker.js";
@@ -38,6 +39,11 @@ async function main(argv) {
             if (taskType === "challenge") {
                 const result = await runReview(taskArgs, context, "challenge");
                 context.stdout.write(`${result}\n`);
+                return;
+            }
+            if (taskType === "pursue") {
+                const result = await runPursue(taskArgs, context);
+                context.stdout.write(result);
                 return;
             }
             notImplementedCompanionCommand(taskType ? `task ${taskType}` : "task");

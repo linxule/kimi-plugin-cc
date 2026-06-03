@@ -101,6 +101,15 @@ For `/kimi:rescue`, the hook delegates to [`evaluateRescueHookRequest`](../runti
 
 The full table lives in `runtime/rescue-approval.ts`. Test coverage is in `tests/runtime/rescue-approval.test.ts` — every accept-shape and every reject-shape has at least one regression test.
 
+## Autonomous goal mode (`/kimi:pursue`, experimental)
+
+`/kimi:pursue` (v1.1 prototype) hands Kimi an objective to pursue across multiple continuation turns via kimi-code's headless goal mode (`kimi -p "/goal ..."`, kimi-code 0.8.0+). It is **write-capable and reuses the rescue trust boundary**: it runs with `KIMI_PLUGIN_CC_CMD=rescue`, so the PreToolUse hook applies the exact same workspace allowlist above, and it cannot mutate git state.
+
+- **The hook fires on every tool call in every continuation turn.** `PreToolCallHookPermissionPolicy` is policy index 0 (ahead of auto-mode-approve at index 4), and goal continuation turns are ordinary turns — there is no autonomous-continuation path that bypasses per-tool approval (verified against kimi-code 0.9.0; audit report 58). A goal-mode run is exactly as write-gated as a single-turn rescue. This is locked by a real-binary smoke (`tests/runtime/real-binary-smoke.test.ts`, run via `KIMI_PLUGIN_CC_SMOKE=1 bun test ... -t "goal mode"`): it runs real headless goal mode under a read-only label and asserts that **no file lands across the entire multi-turn run** — a hook miss on any continuation turn would land one.
+- **The only new risk is unboundedness, and the plugin bounds it.** Headless goal create sets no token/turn budget; only the model (via `SetGoalBudget`) or an external signal stops the loop. `/kimi:pursue` therefore enforces a **mandatory finite wall-clock ceiling** via its AbortController (`--budget`, default 45m) — the SIGTERM→SIGKILL descendant-reaping cancellation reaps the whole goal process tree. `--turns` is a *soft* hint injected into the objective (the model may call `SetGoalBudget`); it is not enforceable headless. Treat `--budget` as the real bound.
+- **Loop runaway is now also capped upstream.** kimi-code 0.8.0 (#364) detects repeated identical tool calls and force-stops a turn at a repeat streak. This benefits `/kimi:rescue`, `/kimi:ask`, and `/kimi:pursue` alike: a force-stopped turn ends *normally* (exit 0, flows through the plugin's success path — not a failure), reducing the chance an autonomous run spins against the wall-clock budget. It is a complement to, not a replacement for, the wall-clock ceiling.
+- **Resume is intentionally not exposed yet.** In goal mode `goal.summary` emits a *goalId* distinct from the resume-hint *sessionId*; `kimi -r <sessionId>` re-enters the session but not necessarily the goal continuation. The plugin captures and surfaces the goalId but does not offer `--resume` for pursue until that split is reconciled upstream — exposing it now would be a silent-failure trap.
+
 ## The setup probe
 
 `/kimi:setup` runs a two-layer probe before reporting success:
