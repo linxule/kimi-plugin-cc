@@ -86,6 +86,40 @@ export const KIMI_TESTED_MINORS = [
     // .claude/kimi-code-research/reports/47-51-* for the
     // audit reports. Tag: compat-verified-kimi-code-0.6.0.
     { major: 0, minor: 6 },
+    // 0.7 / 0.8 / 0.9 added in v1.0.5 (2026-06-03) after a 4-reviewer audit
+    // + an independent cross-model (codex) adversarial pass certified compat
+    // through @moonshot-ai/kimi-code@0.9.0, backed by a GREEN real-binary
+    // smoke (`bun run smoke:real`) against BOTH the installed 0.8.0 binary
+    // and a temp-installed 0.9.0 binary (KIMI_PLUGIN_CC_KIMI_BIN override) —
+    // "tested" is earned end-to-end on 0.9.0, not source-reading-only. This
+    // was a 3-minor catch-up (61 commits). The safety chain is intact:
+    // PreToolCallHookPermissionPolicy is still index 0 (auto-approve index 4);
+    // the hook engine (session/hooks/engine.ts, runner.ts) and the
+    // policy/stream-json writers are byte-identical 0.6.0→0.9.0. The notable
+    // 0.7–0.9 additions are all compat-benign for a `kimi -p` wrapper:
+    //   - Permission approval hooks (PermissionRequest/PermissionResult, #336)
+    //     are fire-and-forget OBSERVABILITY (fireAndForgetTrigger + void) that
+    //     fire only in the rpc.requestApproval/ask branch — dead in -p auto
+    //     mode (shadowed by auto-mode-approve), cannot deny.
+    //   - Headless goal mode (kimi -p "/goal ...", #270) is double-gated:
+    //     experimental flag goal-command (default false, env
+    //     KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND) AND a /goal-prefixed prompt.
+    //     The plugin sets no KIMI_CODE_EXPERIMENTAL_* env and never sends
+    //     /goal, so the path is structurally unreachable.
+    //   - The new deny-all policy is unshift-ed only onto SUBAGENT policy
+    //     stacks (a deny, more restrictive) — never the main -p agent.
+    //   - New default-approved goal tools (GetGoal/SetGoalBudget/UpdateGoal)
+    //     have no fs/git/config side effects; the plugin enforces read-only by
+    //     allow-list (deny-by-default), so new upstream tools cannot slip
+    //     through. CreateGoal is NOT auto-approved.
+    //   - Background auto-upgrade (#334, default on) does not swap the binary
+    //     for the plugin's own -p spawns (source forced 'unsupported'); the
+    //     out-of-band drift it introduces is exactly what this probe catches.
+    // See .claude/kimi-code-research/reports/52-60 for the audit reports.
+    // Tag: compat-verified-kimi-code-0.9.0.
+    { major: 0, minor: 7 },
+    { major: 0, minor: 8 },
+    { major: 0, minor: 9 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

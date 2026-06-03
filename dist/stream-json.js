@@ -12,15 +12,22 @@
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
-//     (apps/kimi-code/src/cli/run-prompt.ts:477-505; the resume-hint
-//     writer — `writeResumeHint` / `PromptJsonWriter` — is verified
-//     byte-identical through 0.6.0. 2026-05-27 audit covered 0.4.0,
+//     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
+//     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
+//     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
+//     verified byte-identical (by blob SHA) through 0.9.0. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
-//     both), 2026-05-31 audit covered 0.6.0. NB: at 0.6.0 run-prompt.ts is
-//     no longer a whole-file zero-byte diff — it gained a +17-line
-//     resume-session workDir guard in `resolvePromptSession` — but that
-//     change is OUTSIDE the stream-json writer, which the 0.6.0 audit
-//     confirmed byte-identical by content/blob SHA. See reports 47-51).
+//     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
+//     0.7.0/0.8.0/0.9.0 in one cumulative pass. NB: from 0.6.0 run-prompt.ts
+//     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
+//     resume-session workDir guard, and at 0.8.0 it gained headless goal
+//     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the
+//     stream-json writer, which every audit confirmed byte-identical by
+//     content/blob SHA. Goal mode also writes a `{"type":"goal.summary",...}`
+//     line (no `role` field) before the resume hint, but ONLY when the
+//     experimental flag goal-command is on AND the prompt is /goal-prefixed
+//     — unreachable for the plugin, and if it ever appeared it routes to the
+//     malformed channel (fail-safe), not a crash. See reports 47-60).
 //     The hint is emitted once per prompt run at session END
 //     (after runPromptTurn settles), not at session start. In 0.1.x the
 //     resume hint went to stderr only; 0.2.0+ emits a structured

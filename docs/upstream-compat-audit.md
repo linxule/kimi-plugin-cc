@@ -11,6 +11,8 @@ This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi
 - The `/kimi:setup` version probe starts firing "outside tested range" warnings for a version users are actually running
 - Quarterly even if none of the above triggered, just to catch silent drift
 
+> **kimi-code self-upgrades by default since 0.8.0** (PR #334, `autoInstall: true`). The installed binary is now *fluid* — a user's interactive TUI can silently move ahead of the verified range out-of-band (the plugin's own `-p` spawns never swap the binary, but they then run against whatever the TUI upgraded to). Expect this trigger to fire more often than the old "user manually updated" cadence. Don't assume `kimi --version` today is the same as last week. (Worked example of a 3-minor catch-up: the 2026-06-03 0.7→0.9 audit, reports 52-60.)
+
 **Skip** for patch releases unless the changelog explicitly touches:
 - `apps/kimi-code/src/cli/run-prompt.ts` (stream-json output, session pinning)
 - `packages/agent-core/src/agent/hooks/` (hook engine — input/output contract)
@@ -124,6 +126,21 @@ bun run smoke:real              # KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/
 It spawns the real `kimi -p` in an isolated `KIMI_CODE_HOME` (seeded from your authenticated home — never mutates the real config or session store) and asserts, for review / challenge / ask / review_gate, that a forced write attempt is denied by the hook and no file lands. A green run is direct evidence that the policy-queue-index-0 / hook-deny chain still holds end-to-end on the new release — the single highest-signal check in this whole routine. If it goes red, the source-reading verdict is *probably* wrong somewhere — but first rule out the operator-auth false alarm below; once that's excluded, treat as `COMPAT-BROKEN` until reconciled.
 
 Prereqs: a kimi binary + an authenticated `~/.kimi-code` (config + `credentials/` + `oauth/`). Skipped automatically without them, so note in the synthesis whether the smoke actually ran or was skipped — a skipped smoke is not a passed smoke.
+
+**Smoking a release without touching the operator's install (the temp-binary technique).** `kimi upgrade` is unreliable on some installs (e.g., the 2026-06-03 run reported a bogus "native (windows)" source on macOS and refused to update, leaving the binary at 0.8.0 while certifying through 0.9.0). The smoke resolves its binary from `KIMI_PLUGIN_CC_KIMI_BIN` (falling back to `kimi` on PATH — see `runtime/kimi-command.ts::resolveKimiCliCommand`), so you can certify the exact target release without mutating `~/.kimi-code/bin`:
+
+```bash
+D=/tmp/kimi-<NEW>; rm -rf "$D"; mkdir -p "$D"; cd "$D"
+echo '{"name":"smoke","private":true}' > package.json
+bun add @moonshot-ai/kimi-code@<NEW>
+"$D/node_modules/.bin/kimi" --version    # confirm <NEW>
+cd -  # back to the plugin repo
+KIMI_PLUGIN_CC_SMOKE=1 \
+  KIMI_PLUGIN_CC_KIMI_BIN="$D/node_modules/.bin/kimi" \
+  bun test tests/runtime/real-binary-smoke.test.ts
+```
+
+Auth still seeds from the real `~/.kimi-code` (`KIMI_PLUGIN_CC_SMOKE_HOME`) into an isolated `KIMI_CODE_HOME`, so a previously-green smoke proves the token is valid. This is how the 0.9.0 cert earned "tested end-to-end" without altering the operator's 0.8.0 install.
 
 **Operator-auth false alarm (seen on the 2026-05-31 0.6.0 run).** The skip-gate only checks that `config.toml` + `credentials/` *exist*, not that the token inside is *still valid*. An expired OAuth token sails past the gate, so the smoke **runs** (not skipped) and goes **red** with every label failing at `auth.login_required: OAuth provider "managed:kimi-code" requires login` — `records` is `[]` and the deny marker never appears because kimi dies before any tool call. This looks alarmingly like a hard break but is pure machine state: re-login (`kimi` interactive auth) and re-run. Distinguish it from a real break by the error string — a true compat break would show the model *attempting* a write and the hook *not* denying, not an auth abort with empty records. Don't pin `COMPAT-BROKEN` on an `auth.login_required` red. Related gotcha: don't pipe the smoke through `... | tail -N` and trust the reported exit code — the pipe's status is `tail`'s, not bun's, so a red suite can look like exit 0. Read the body, or run `bun run smoke:real; echo $?` unpiped.
 
