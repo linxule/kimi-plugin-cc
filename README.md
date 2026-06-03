@@ -88,6 +88,8 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 **400+ tests, drift gate.** The test suite covers the stream-json parser (including the kimi-code 0.2.0 session-meta record and the 0.8.0 `goal.summary` record), cli-client lifecycle, approval policy, approval hook entry script, rescue allowlist, command handlers (incl. `/kimi:pursue` goal-mode parsing/exit-mapping), job lifecycle, setup managed-block installer, kimi version probe, and more. `bun run check` rebuilds `dist/`, typechecks, runs the suite, and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship. Opt-in real-binary smokes (`bun run smoke:real`) spawn the actual `kimi -p` and prove the read-only commands' write denial end-to-end, plus that autonomous goal mode is hook-gated on every continuation turn; they're skipped by default (they need a real kimi binary + authenticated home).
 
+**CI** ([`.github/workflows/`](./.github/workflows/), see [docs/ci.md](./docs/ci.md)). `bun run check` runs on every push to `main` and every PR (`ci.yml`) — free, no secrets, smokes auto-skip. The real-binary smokes (including the `/kimi:pursue` goal-mode safety gate) run on **manual dispatch** (`smoke.yml`), authenticated via an API-key secret so they don't depend on the expiry-prone OAuth subscription; the workflow is inert until that secret is added.
+
 ## Install
 
 ### Via the Claude Code marketplace (recommended)

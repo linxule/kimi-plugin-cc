@@ -1,0 +1,45 @@
+name: CI
+
+# Base CI: build + typecheck + full test suite + dist drift gate. Runs on every
+# push to main and every PR. NO secrets, NO kimi binary, NO model tokens — the
+# real-binary smokes auto-skip without KIMI_PLUGIN_CC_SMOKE=1. This is the
+# per-push safety net the repo previously only had locally via `bun run check`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.12
+
+      # The runtime targets Node >= 22.5 (companion + worker spawns); pin the
+      # engines floor so CI matches the documented support baseline.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # build + `bunx tsc --noEmit` + `bun test` + `git diff --exit-code -- dist`
+      # (+ untracked-dist guard). A forgotten `dist/` rebuild fails the drift
+      # gate here, exactly as it does locally.
+      - name: Check (build, typecheck, test, drift gate)
+        run: bun run check

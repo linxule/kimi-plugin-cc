@@ -1,0 +1,98 @@
+name: Real-binary smoke
+
+# The real-binary safety gate: spawns the ACTUAL `kimi -p` against a real
+# PreToolUse hook and proves end-to-end that (1) read-only commands' forced
+# writes are denied, and (2) autonomous goal mode (/kimi:pursue) is hook-gated on
+# EVERY continuation turn (zero files land across a multi-turn run).
+#
+# MANUAL-DISPATCH ONLY (no schedule) — a goal-mode run is ~1-2 min of REAL model
+# tokens (the model retries against the deny-wall for the whole budget), so this
+# bills per run. You trigger it on demand (e.g. before a release). To make it
+# recurring later, add a `schedule:` trigger below.
+#
+# Auth uses kimi-code's env-model channel (API key), NOT the OAuth subscription —
+# OAuth tokens expire and are brittle in CI. It is INERT until you add the secret
+# (the job no-ops with a warning), so this workflow is safe to merge as-is.
+#
+# ── One-time setup (repo Settings → Secrets and variables → Actions) ──
+#   Secret  KIMI_MODEL_API_KEY   a pay-per-token API key (Moonshot / OpenAI / Anthropic)
+#   Secret  KIMI_MODEL_NAME      the model id to run (e.g. a kimi model)
+#   Variable (optional) KIMI_MODEL_PROVIDER_TYPE   one of: kimi | openai | anthropic  (default: kimi → api.moonshot.ai)
+#   Variable (optional) KIMI_MODEL_BASE_URL        override the provider base URL
+# This is a SEPARATE billing path from your kimi-code subscription. See docs/ci.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kimi_version:
+        description: "kimi-code version to smoke against (must be >= 0.8.0 for goal mode)"
+        type: string
+        default: "0.9.0"
+      goal_budget_ms:
+        description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
+        type: string
+        default: "90000"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.12
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Secrets can't gate a job-level `if:`, so probe in a run step and gate the
+      # rest on its output. A missing secret is a graceful skip (warning), not a
+      # failure — so unconfigured repos/forks don't get red runs.
+      - name: Check auth secret
+        id: auth
+        env:
+          KEY: ${{ secrets.KIMI_MODEL_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::KIMI_MODEL_API_KEY not set — skipping the real-binary smoke. Add it in Settings → Secrets and variables → Actions to enable (see docs/ci.md)."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Temp-binary technique (docs/upstream-compat-audit.md): install the pinned
+      # kimi-code into a throwaway dir and point KIMI_PLUGIN_CC_KIMI_BIN at it —
+      # never touches a system install.
+      - name: Install pinned kimi-code
+        if: steps.auth.outputs.configured == 'true'
+        run: |
+          D="$RUNNER_TEMP/kimi-bin"
+          mkdir -p "$D"
+          cd "$D"
+          echo '{"name":"kimi-smoke","private":true}' > package.json
+          bun add "@moonshot-ai/kimi-code@${{ inputs.kimi_version }}"
+          BIN="$D/node_modules/.bin/kimi"
+          echo "KIMI_PLUGIN_CC_KIMI_BIN=$BIN" >> "$GITHUB_ENV"
+          "$BIN" --version
+
+      - name: Run real-binary smokes (read-only + goal mode)
+        if: steps.auth.outputs.configured == 'true'
+        env:
+          KIMI_PLUGIN_CC_SMOKE: "1"
+          KIMI_MODEL_API_KEY: ${{ secrets.KIMI_MODEL_API_KEY }}
+          KIMI_MODEL_NAME: ${{ secrets.KIMI_MODEL_NAME }}
+          KIMI_MODEL_PROVIDER_TYPE: ${{ vars.KIMI_MODEL_PROVIDER_TYPE || 'kimi' }}
+          KIMI_MODEL_BASE_URL: ${{ vars.KIMI_MODEL_BASE_URL }}
+          KIMI_PLUGIN_CC_SMOKE_GOAL_BUDGET_MS: ${{ inputs.goal_budget_ms }}
+        run: bun test tests/runtime/real-binary-smoke.test.ts

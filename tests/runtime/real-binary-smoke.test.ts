@@ -96,12 +96,23 @@ function resolveBinaryForGate(): string | undefined {
   return found ?? undefined;
 }
 
-// Auth lives in credentials/ + oauth/, not config.toml — gate on both the
-// config and the credentials dir so an unauthenticated home fails loudly at
-// the gate rather than mid-run with a login error.
+// Two supported auth modes:
+//   1) OAuth (local dev): seed config.toml + credentials/ + oauth/ from a real
+//      kimi home. Convenient but tokens EXPIRE (see the compat playbook's
+//      operator-auth false-alarm note), which makes it brittle for CI.
+//   2) API key (CI): set KIMI_MODEL_NAME + KIMI_MODEL_API_KEY (+ optional
+//      KIMI_MODEL_PROVIDER_TYPE / KIMI_MODEL_BASE_URL). kimi-code's env-model
+//      channel (applyEnvModelConfig, packages/agent-core/src/config/env-model.ts)
+//      synthesizes the default provider from these on startup, inherited by the
+//      `kimi -p` spawn — so no OAuth blob or credentials/ dir is needed. Stable
+//      across runs, no expiry. This is what .github/workflows/smoke.yml uses.
+const ENV_MODEL_AUTH =
+  (process.env.KIMI_MODEL_NAME ?? "").length > 0 &&
+  (process.env.KIMI_MODEL_API_KEY ?? "").length > 0;
 const SEED_OK =
-  existsSync(path.join(SEED_HOME, "config.toml")) &&
-  existsSync(path.join(SEED_HOME, "credentials"));
+  ENV_MODEL_AUTH ||
+  (existsSync(path.join(SEED_HOME, "config.toml")) &&
+    existsSync(path.join(SEED_HOME, "credentials")));
 const BINARY = resolveBinaryForGate();
 const PREREQS_OK = SMOKE_ENABLED && SEED_OK && BINARY !== undefined;
 
