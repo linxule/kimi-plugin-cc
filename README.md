@@ -52,6 +52,7 @@ Kimi opens the file, writes the fix, runs the relevant tests, and reports back. 
 | `/kimi:review` | Structured code review of your diff | No | Fresh each time |
 | `/kimi:challenge` | Adversarial review with a custom focus | No | Fresh each time |
 | `/kimi:rescue` | Delegate real work — bug hunts, refactors, fixes | Yes (allowlisted) | Persists + resumable |
+| `/kimi:pursue` | **Experimental** — pursue an objective *autonomously* across turns, bounded by a hard `--budget` | Yes (allowlisted, every turn) | Foreground-only; resume not yet exposed |
 | Review gate | Kimi checks Claude's work before stopping | No | Per-stop-event |
 
 The plugin ships four Claude Code **subagents** that the main thread can dispatch proactively via the Agent tool: `kimi-rescue` (write-capable delegation), plus `kimi-review`, `kimi-challenge`, and `kimi-ask` (read-only forwarders to the matching companion surfaces). Each agent's description is Kimi's own statement of what it's good for — Claude matches the moment and dispatches; no prescriptive skill manual in between.
@@ -85,7 +86,7 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 **Zero native dependencies.** The runtime uses Node 22.5's built-in `node:sqlite` — no `better-sqlite3`, no `node-gyp`, no compilation step. `dist/` is precompiled and committed, so installed plugins work immediately with just `node` on PATH.
 
-**392 tests, drift gate.** The test suite covers the stream-json parser (including the kimi-code 0.2.0 session-meta record), cli-client lifecycle, approval policy, approval hook entry script, rescue allowlist, command handlers, job lifecycle, setup managed-block installer, kimi version probe, and more. `bun run check` rebuilds `dist/`, typechecks, runs the suite, and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship. An opt-in real-binary smoke (`bun run smoke:real`) spawns the actual `kimi -p` and proves the read-only commands' write denial end-to-end; it's skipped by default (it needs a real kimi binary + authenticated home).
+**400+ tests, drift gate.** The test suite covers the stream-json parser (including the kimi-code 0.2.0 session-meta record and the 0.8.0 `goal.summary` record), cli-client lifecycle, approval policy, approval hook entry script, rescue allowlist, command handlers (incl. `/kimi:pursue` goal-mode parsing/exit-mapping), job lifecycle, setup managed-block installer, kimi version probe, and more. `bun run check` rebuilds `dist/`, typechecks, runs the suite, and fails if the rebuild produces uncommitted changes — forgotten rebuilds can't ship. Opt-in real-binary smokes (`bun run smoke:real`) spawn the actual `kimi -p` and prove the read-only commands' write denial end-to-end, plus that autonomous goal mode is hook-gated on every continuation turn; they're skipped by default (they need a real kimi binary + authenticated home).
 
 ## Install
 
