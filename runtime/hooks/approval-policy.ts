@@ -60,6 +60,21 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * kimi-code's parallel fan-out tool (PR #424, 0.12.0). Its exact tool_name
+ * string is `AgentSwarm` (verified against
+ * packages/agent-core/src/tools/builtin/collaboration/agent-swarm.ts:87,
+ * `readonly name = 'AgentSwarm' as const`). The `/kimi:swarm` (read-only)
+ * label allowlists THIS tool so the parent agent can launch the swarm; every
+ * spawned subagent inherits the same KIMI_PLUGIN_CC_CMD label and fires THIS
+ * hook at permission policy index 0 (kimi-code
+ * createPermissionDecisionPolicies puts PreToolCallHookPermissionPolicy at
+ * index 0 for ALL agents — no sub-vs-main branch — so a subagent's write is
+ * denied exactly like a single-turn review's). The singular `Agent` tool is
+ * deliberately NOT allowlisted: swarm is specifically the fan-out surface.
+ */
+const AGENT_SWARM_TOOL = "AgentSwarm";
+
+/**
  * Rescue evaluator signature. PR 3 wires
  * `runtime/rescue-approval.ts::evaluateRescueHookRequest` into the
  * entry script via this hook. Async because the rescue allowlist
@@ -99,6 +114,7 @@ const KNOWN_LABELS = new Set<string>([
   "challenge",
   "review_gate",
   "rescue",
+  "swarm",
 ]);
 
 export async function decideHookOutcome(
@@ -133,6 +149,26 @@ export async function decideHookOutcome(
       return {
         decision: "deny",
         reason: denyReadOnlyMessage(label, toolName),
+      };
+
+    case "swarm":
+      // /kimi:swarm — read-only PARALLEL fan-out. The parent agent must be
+      // allowed to call AgentSwarm (else the swarm never launches and the
+      // hook silently breaks the feature). Every spawned subagent inherits
+      // THIS "swarm" label and fires THIS hook at policy index 0, so a
+      // subagent's Write/Edit/Bash is denied exactly like a single-turn
+      // review's — read-only swarm opens ZERO new write surface. Allow only
+      // the read-only set plus AgentSwarm; deny everything else (including the
+      // singular `Agent` tool — swarm is the fan-out surface, not arbitrary
+      // delegation). Nested AgentSwarm calls from a subagent are allowed and
+      // bounded by the command's wall-clock budget (the only new risk is
+      // cost, not writes).
+      if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
+        return { decision: "allow" };
+      }
+      return {
+        decision: "deny",
+        reason: denySwarmMessage(toolName),
       };
 
     case "rescue":
@@ -183,5 +219,15 @@ function denyReadOnlyMessage(label: string, toolName: string): string {
     `kimi-plugin-cc safety hook: ${label} is read-only.`,
     `Tool "${tool}" is denied — use Read, Grep, or Glob to inspect the workspace instead.`,
     "If you need to mutate state, the user must invoke /kimi:rescue (write-capable) rather than this command.",
+  ].join(" ");
+}
+
+function denySwarmMessage(toolName: string): string {
+  const tool = toolName.length > 0 ? toolName : "<unspecified>";
+  return [
+    "kimi-plugin-cc safety hook: swarm is a read-only parallel review.",
+    `Tool "${tool}" is denied — every subagent may use Read, Grep, or Glob to inspect the workspace,`,
+    "and the coordinator may use AgentSwarm to fan out, but no write, edit, or shell operations are permitted.",
+    "Consolidate the subagents' findings into a markdown report instead.",
   ].join(" ");
 }

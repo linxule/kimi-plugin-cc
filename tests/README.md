@@ -13,13 +13,14 @@ Coverage highlights:
 - `runtime/rescue-approval.test.ts` — file-edit policy and shell allowlist table (accept + reject paths)
 - `runtime/rescue-command.test.ts` — rescue lifecycle: foreground, background, resume, cancellation, hook-not-installed refusal
 - `runtime/pursue.test.ts` — `/kimi:pursue` (autonomous goal mode) pure logic: arg parsing, `--budget` duration parsing, `/goal` prompt construction, terminal exit-code classification (0/3/6 → complete/blocked/paused)
+- `runtime/swarm.test.ts` — `/kimi:swarm` (read-only parallel fan-out) pure logic: arg parsing (`--budget`/`--cap`), AgentSwarm coordination-prompt construction, read-only-with-cap clauses. The `swarm` hook-label allow/deny matrix (read-only + `AgentSwarm` allowed, writes + singular `Agent` denied) lives in `runtime/approval-policy.test.ts`
 - `runtime/read-only-commands.test.ts` — end-to-end ask/review/challenge flows against the v1 mock (review output is prose pass-through as of v0.2.3)
 - `runtime/review-gate-hook.test.ts` — Stop hook end-to-end including disabled/enabled/malformed/timeout paths
 - `runtime/replay-command.test.ts` — replay reproducing stored outputs and handling missing/malformed logs (v1.0 stream-json log format)
 - `runtime/setup.test.ts` — managed-block installer lifecycle: install/check/uninstall, orphan detection, probe behavior
 - `runtime/companion-unavailable.test.ts` — graceful degradation when `kimi` is missing from `PATH`
 - `runtime/job-commands.test.ts` — status/result persistence across command types
-- `runtime/real-binary-smoke.test.ts` — **opt-in** (`KIMI_PLUGIN_CC_SMOKE=1`, needs a real kimi binary + authed home; skipped by default). Spawns the real `kimi -p` and proves end-to-end that (a) read-only commands' forced writes are hook-denied, and (b) autonomous goal mode is hook-gated on *every* continuation turn (zero files land across a full-budget multi-turn run)
+- `runtime/real-binary-smoke.test.ts` — **opt-in** (`KIMI_PLUGIN_CC_SMOKE=1`, needs a real kimi binary + authed home; skipped by default). Spawns the real `kimi -p` and proves end-to-end that (a) read-only commands' forced writes are hook-denied, (b) autonomous goal mode is hook-gated on *every* continuation turn (zero files land across a full-budget multi-turn run), and (c) a spawned **swarm subagent's** forced write is hook-denied under the `swarm` label (needs kimi >= 0.12.0 for the AgentSwarm tool)
 
 Helpers under `helpers/`:
 

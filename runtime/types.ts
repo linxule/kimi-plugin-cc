@@ -20,7 +20,12 @@ export type RuntimeCommandType =
   // rescue *job* lineage (command_type "rescue") so it is NOT a
   // ManagedCommandType; this entry just lets the invocation-log header and
   // formatCommandLabel name it correctly.
-  | "pursue";
+  | "pursue"
+  // Diagnostic/logging label only. Swarm (read-only parallel fan-out) reuses
+  // the review *job* lineage (command_type "review") so it is NOT a
+  // ManagedCommandType; this entry only names it in the invocation-log header.
+  // The PreToolUse hook label is "swarm" (see runtime/hooks/approval-policy.ts).
+  | "swarm";
 
 export type ManagedCommandType =
   | "review"

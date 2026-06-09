@@ -35,6 +35,19 @@ export const KIMI_RESCUE_PROMPT_TIMEOUT_MS = 1_800_000;
  */
 export const KIMI_PURSUE_DEFAULT_BUDGET_MS = 2_700_000; // 45 minutes
 /**
+ * Swarm (read-only parallel fan-out) DEFAULT wall-clock ceiling when the user
+ * passes no `--budget`. Read-only swarm opens no write surface, so the only new
+ * risk is COST/runaway from N parallel model runs (plus possible nested
+ * AgentSwarm). This AbortController is the hard bound on that; the `--cap`
+ * subagent count is a soft prompt-injected hint (not hook-enforceable —
+ * the hook is stateless and can't count subagents). Sized like the single-turn
+ * review budget — a swarm fans review work out in parallel within one process,
+ * so 30m of wall-clock is generous headroom. Overridable per-job via `--budget`
+ * (parsed to ms in parseSwarmArgs). See runtime/commands/swarm.ts and
+ * docs/safety.md.
+ */
+export const KIMI_SWARM_DEFAULT_BUDGET_MS = 1_800_000; // 30 minutes
+/**
  * Review-gate budget. Fires inside Claude Code's Stop hook so any value
  * above the user's perceptible wait makes the gate feel broken.
  *

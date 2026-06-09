@@ -49,6 +49,54 @@ describe("decideHookOutcome", () => {
     });
   });
 
+  describe("swarm label (read-only fan-out)", () => {
+    test("allows read-only tools", async () => {
+      for (const tool of ["Read", "Grep", "Glob"]) {
+        const decision = await decideHookOutcome(
+          { tool_name: tool, tool_input: {} },
+          { commandLabel: "swarm" },
+        );
+        expect(decision.decision).toBe("allow");
+      }
+    });
+
+    test("allows AgentSwarm (the coordinator must be able to fan out)", async () => {
+      const decision = await decideHookOutcome(
+        { tool_name: "AgentSwarm", tool_input: { description: "review", items: ["a", "b"] } },
+        { commandLabel: "swarm" },
+      );
+      expect(decision.decision).toBe("allow");
+    });
+
+    test.each(["Bash", "Write", "Edit", "WebFetch", "Task"])(
+      "denies write/shell tool %s with a swarm reason",
+      async (tool) => {
+        const decision = await decideHookOutcome(
+          { tool_name: tool, tool_input: {} },
+          { commandLabel: "swarm" },
+        );
+        expect(decision.decision).toBe("deny");
+        expect(decision.reason).toContain("swarm");
+        expect(decision.reason).toContain(tool);
+      },
+    );
+
+    test("denies the singular Agent tool (swarm is the fan-out surface, not arbitrary delegation)", async () => {
+      const decision = await decideHookOutcome(
+        { tool_name: "Agent", tool_input: {} },
+        { commandLabel: "swarm" },
+      );
+      expect(decision.decision).toBe("deny");
+      expect(decision.reason).toContain("swarm");
+    });
+
+    test("denies missing tool_name with placeholder", async () => {
+      const decision = await decideHookOutcome({ tool_input: {} }, { commandLabel: "swarm" });
+      expect(decision.decision).toBe("deny");
+      expect(decision.reason).toContain("<unspecified>");
+    });
+  });
+
   describe("rescue label without evaluator (stub)", () => {
     test("allows Read/Grep/Glob", async () => {
       for (const tool of ["Read", "Grep", "Glob"]) {

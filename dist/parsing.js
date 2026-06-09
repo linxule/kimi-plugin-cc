@@ -40,6 +40,83 @@ function isRemovedThinkingFlag(token) {
         token.startsWith("--no-thinking="));
 }
 const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --turns <N>";
+const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>";
+/**
+ * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
+ * no --background/--fresh/--resume. Trailing tokens are the objective.
+ */
+export function parseSwarmArgs(argv) {
+    let model;
+    const thinking = true;
+    let budgetMs;
+    let cap;
+    let trailingTokens;
+    for (let index = 0; index < argv.length; index += 1) {
+        const token = argv[index];
+        if (token === "--") {
+            trailingTokens = argv.slice(index + 1);
+            break;
+        }
+        if (!token.startsWith("-")) {
+            trailingTokens = argv.slice(index);
+            break;
+        }
+        switch (token) {
+            case "-m":
+            case "--model": {
+                const value = argv[index + 1];
+                if (!value) {
+                    throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "swarm.parse");
+                }
+                if (value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", `${token} value cannot start with '-'; pass a model name`, "swarm.parse");
+                }
+                model = value;
+                index += 1;
+                break;
+            }
+            case "--budget": {
+                const value = argv[index + 1];
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "swarm.parse");
+                }
+                budgetMs = parseDurationMs(value, "--budget");
+                index += 1;
+                break;
+            }
+            case "--cap": {
+                const value = argv[index + 1];
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--cap requires a positive integer.", "swarm.parse");
+                }
+                const parsedCap = Number(value);
+                if (!Number.isInteger(parsedCap) || parsedCap <= 0) {
+                    throw new RuntimeError("INVALID_ARGS", "--cap must be a positive integer.", "swarm.parse");
+                }
+                cap = parsedCap;
+                index += 1;
+                break;
+            }
+            default:
+                if (isRemovedThinkingFlag(token)) {
+                    throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "swarm.parse");
+                }
+                if (looksLikeFlag(token)) {
+                    throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for swarm. Supported flags: ${SWARM_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped objective text to pass it through.`, "swarm.parse");
+                }
+                trailingTokens = argv.slice(index);
+                index = argv.length;
+                break;
+        }
+    }
+    return {
+        budgetMs,
+        cap,
+        model,
+        thinking,
+        objective: trailingTokens?.join(" "),
+    };
+}
 /**
  * Parse a duration token (`30m`, `1h`, `90s`, or a bare integer = minutes)
  * into milliseconds. Throws INVALID_ARGS on a malformed or non-positive value.

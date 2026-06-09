@@ -56,7 +56,7 @@ export interface CliClientOptions {
   prompt: string;
   /**
    * Per-command label propagated to the PreToolUse hook via env.
-   * Recognized values: "ask" | "review" | "challenge" | "review_gate" | "rescue".
+   * Recognized values: "ask" | "review" | "challenge" | "review_gate" | "rescue" | "swarm".
    * Unset means the hook treats the call as out-of-plugin context (allows everything).
    */
   commandLabel?: string;
