@@ -15,22 +15,25 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.9.0. 2026-05-27 audit covered 0.4.0,
+//     verified byte-identical (by blob SHA) through 0.12.0. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
-//     0.7.0/0.8.0/0.9.0 in one cumulative pass. NB: from 0.6.0 run-prompt.ts
+//     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
+//     0.10.0/0.11.0/0.12.0 in one cumulative 0.9.0→0.12.0 pass. NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
 //     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the
 //     stream-json writer, which every audit confirmed byte-identical by
 //     content/blob SHA. Goal mode also writes a `{"type":"goal.summary",...}`
-//     line (no `role` field) before the resume hint, ONLY when the
-//     experimental flag goal-command is on AND the prompt is /goal-prefixed.
-//     Read-only commands never trigger it; the v1.1 /kimi:pursue command is
+//     line (no `role` field) before the resume hint when the prompt is
+//     `/goal`-prefixed (on 0.8–0.11 the `goal-command` experimental flag must
+//     also be on; 0.12.0 removed that gate — PR #569 — so the `/goal` prefix
+//     alone triggers it). Read-only commands never trigger it (their trimmed
+//     prompt never starts with `/goal`); the v1.1 /kimi:pursue command is
 //     the intentional consumer — it is recognized as a first-class record on
 //     the dedicated `StreamJsonOutcome.goalSummary` channel (see
 //     GoalSummaryRecord below), NOT routed to the malformed channel. See
-//     reports 47-60).
+//     reports 47-65).
 //     The hint is emitted once per prompt run at session END
 //     (after runPromptTurn settles), not at session start. In 0.1.x the
 //     resume hint went to stderr only; 0.2.0+ emits a structured

@@ -34,8 +34,9 @@ import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMiss
 //     follow-up (would ripple through ManagedCommandType + the registry).
 //
 // SAFETY: the hook fires on every tool call in every continuation turn (policy
-// index 0, verified against kimi-code 0.9.0 — report 58). So a goal-mode run is
-// exactly as write-gated as a single-turn rescue. The only NEW risk is
+// index 0, verified against kimi-code 0.9.0 — report 58 — and re-verified through
+// 0.12.0 by the goal-mode real-binary smoke, reports 61-65). So a goal-mode run
+// is exactly as write-gated as a single-turn rescue. The only NEW risk is
 // unboundedness, bounded here by the AbortController wall-clock ceiling.
 /** kimi-code minor that introduced headless goal mode (#270, 0.8.0). */
 const GOAL_MODE_MIN_MINOR = 8;
@@ -190,6 +191,11 @@ async function executePursueJob(jobId, prompt, objective, budgetMs, context) {
             // Enable headless goal mode for THIS spawn only (per-job env block —
             // never exported to a shell). KIMI_PLUGIN_CC_CMD=rescue is overlaid by
             // cli-client from commandLabel below so the write allowlist applies.
+            // The env flag gates goal mode on kimi-code 0.8–0.11; 0.12.0 removed the
+            // gate (PR #569) so it is now redundant there but harmless — unknown
+            // experimental flag ids resolve to undefined and never error. Kept for
+            // 0.8–0.11 compat. The /goal prompt prefix (buildGoalPrompt) is the
+            // actual trigger on every supported version.
             env: { ...context.env, KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND: "1" },
             command: kimi.command,
             prefixArgs: kimi.prefixArgs,

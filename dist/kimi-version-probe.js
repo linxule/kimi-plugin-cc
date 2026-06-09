@@ -123,6 +123,40 @@ export const KIMI_TESTED_MINORS = [
     { major: 0, minor: 7 },
     { major: 0, minor: 8 },
     { major: 0, minor: 9 },
+    // 0.10 / 0.11 / 0.12 added in v1.1.1 (2026-06-09) after a 4-reviewer audit
+    // (+ adversarial pass) certified compat through @moonshot-ai/kimi-code@0.12.0,
+    // backed by a GREEN real-binary smoke against the installed 0.12.0 binary
+    // (review/challenge/ask/review_gate all hook-denied; the pursue goal-mode
+    // safety smoke wrote zero files across a full budget). The safety chain is
+    // intact: PreToolCallHookPermissionPolicy is still index 0 (auto-approve
+    // index 4); the hook engine (session/hooks/{engine,runner,types}.ts) and the
+    // stream-json writer are byte-identical 0.9.0→0.12.0 (03-hooks.diff is 0 bytes
+    // across all five tags). Notable 0.10–0.12 changes, all compat-benign for a
+    // `kimi -p` wrapper:
+    //   - Goal-mode experimental gate REMOVED in 0.12.0 (#569, commit d7407b0):
+    //     headless goal mode now triggers on the `/^\/goal(\s|$)/` prompt prefix
+    //     ALONE — the KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND env gate is gone (still
+    //     present 0.9.0–0.11.0). This WEAKENS the old "double-gated" claim to a
+    //     single gate, but the plugin never relied on the env gate: read-only
+    //     commands hard-prefix an English instruction line so their trimmed
+    //     prompt never starts with `/goal` (cannot enter goal mode), and the
+    //     index-0 hook denies every write regardless. /kimi:pursue still sets the
+    //     env var per-spawn — now redundant on 0.12 but harmless (unknown
+    //     experimental flag ids resolve to undefined) and still required on
+    //     0.8–0.11.
+    //   - AgentSwarm tool + swarm mode (#424): the new swarm-approve policy sits
+    //     at index ~14 (below hook(0)/auto-approve(4)), is approve-only and
+    //     double-guarded, and swarmMode.enter() runs INSIDE the tool's execute()
+    //     (after the index-0 hook already gated the AgentSwarm call). Swarm
+    //     subagents still inherit DenyAllPermissionPolicy (subagent-host.ts:233).
+    //   - New `doctor` subcommand + a `program.argument('[args...]')` unknown-
+    //     positional error: both unreachable — the plugin passes the prompt as
+    //     the VALUE of `-p, --prompt`, never a bare positional.
+    // See .claude/kimi-code-research/reports/61-65 for the audit reports.
+    // Tag: compat-verified-kimi-code-0.12.0.
+    { major: 0, minor: 10 },
+    { major: 0, minor: 11 },
+    { major: 0, minor: 12 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;
