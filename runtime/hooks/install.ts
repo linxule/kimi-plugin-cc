@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -81,7 +82,13 @@ export async function verifyHookInstalled(
     };
   }
 
-  const check = evaluateInstalled(raw, expected.command);
+  // Pass `nodeExists` so a command MISMATCH is classified into an actionable
+  // H4 diagnosis (Node upgrade / version-manager switch vs. plugin path drift)
+  // instead of a raw expected-vs-got dump. Classification only refines the
+  // reason; it never changes the installed=false decision.
+  const check = evaluateInstalled(raw, expected.command, {
+    nodeExists: (binPath) => existsSync(binPath),
+  });
   return {
     installed: check.installed,
     reason: check.reason,

@@ -215,7 +215,55 @@ describe("verifyHookInstalled", () => {
         KIMI_PLUGIN_CC_HOOK_SCRIPT: newHookPath,
       });
       expect(status.installed).toBe(false);
-      expect(status.reason).toContain("does not match the canonical command");
+      // H4: the verifier now classifies the mismatch. Same node (process.execPath),
+      // different hook script path → a "hook script path drift" diagnosis with the
+      // actionable /kimi:setup fix, instead of the raw expected-vs-got dump.
+      expect(status.reason).toContain("Hook script path drift");
+      expect(status.reason).toContain(oldHookPath);
+      expect(status.reason).toContain("Run /kimi:setup");
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
+  test("classifies a Node-binary drift (pinned interpreter gone) — the live H4 case", async () => {
+    // The hook was installed pinning an absolute Node path; Node later upgraded
+    // (Homebrew Cellar bump / nvm/asdf switch) and that path vanished. The block
+    // is structurally valid — only the Node token drifted and the old binary is
+    // gone — so the verifier should say exactly that, not a raw expected-vs-got dump.
+    const home = await createTestPluginDataRoot("hook-install-node-drift");
+    try {
+      const hookPath = "/abs/plugin/dist/hooks/approval-hook.js";
+      const goneNode = "/opt/homebrew/Cellar/node/26.0.0/bin/node"; // upgraded away
+      const staleCommand = buildHookShellCommand(hookPath, {
+        KIMI_PLUGIN_CC_NODE_BIN: goneNode,
+      });
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v1.2.0) ===",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          `command = ${JSON.stringify(staleCommand)}`,
+          "timeout = 15",
+          "# === END kimi-plugin-cc-managed ===",
+        ].join("\n"),
+        "utf8",
+      );
+      // Verify env pins the SAME hook path but no NODE_BIN override, so expected
+      // Node = process.execPath (a real, existing binary) ≠ the gone path.
+      const status = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      });
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain("Node binary drift");
+      expect(status.reason).toContain(goneNode);
+      expect(status.reason).toContain("no longer exists");
+      expect(status.reason).toContain("Run /kimi:setup");
+      // Pure Node drift — the hook path matched, so don't mislabel it as path drift.
+      expect(status.reason).not.toContain("Hook script path drift");
     } finally {
       await cleanupTestPath(home);
     }

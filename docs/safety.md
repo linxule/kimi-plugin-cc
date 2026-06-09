@@ -180,7 +180,9 @@ If you want to silence the warning (e.g., you're running tests, or you've delibe
 
 The verifier does exact equality on the installed `command = "..."` against the canonical command for the **current** `process.execPath`. If you use `nvm`, `asdf`, `mise`, or `fnm` and switch the active Node version after `/kimi:setup`, the canonical command's Node binary path changes and the verifier rejects the previously-installed block. Every read-only command will emit a hook-missing warning; `/kimi:rescue` will refuse to run.
 
-The workaround is to re-run `/kimi:setup` after any Node version switch. The strict behavior is deliberate — a hash-based verification scheme that would survive Node moves is in the v1.1 roadmap (see [ROADMAP-TO-GA.md](../ROADMAP-TO-GA.md), item G2/H4); shipping it pre-GA would add surface area without addressing a security gap.
+The workaround is to re-run `/kimi:setup` after any Node version switch. The strict behavior is deliberate — loosening the exact-equality check to "survive" Node moves would reopen the crafted-command bypass the audit closed (reports 27/28), so it stays strict by design.
+
+**Soft-recovery (H4):** to make that strict failure *legible* instead of cryptic, the verifier classifies a command mismatch when the block is otherwise valid. Rather than dumping the raw expected-vs-got command, it reports the drift class — e.g. *"Node binary drift: the installed hook pins `/opt/homebrew/Cellar/node/26.0.0/bin/node`, which no longer exists on disk (this companion runs `…/26.3.0/…`) — the classic Node-upgrade / version-manager drift … Run /kimi:setup to re-pin"*, or *"Hook script path drift … likely a plugin update or move"* when the version-stamped plugin path moved instead. A gone interpreter is the unambiguous signal. The same classified reason surfaces from `/kimi:setup --check`. This changes only the message; the strict installed/not-installed decision is unchanged.
 
 ## Reporting safety issues
 

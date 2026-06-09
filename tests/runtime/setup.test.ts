@@ -236,6 +236,39 @@ describe("setup managed-block installer", () => {
     expect(result.warnings.join("\n")).toContain('deny pattern "*"');
   });
 
+  test("H8: surfaces installed+enabled kimi-code plugins as a non-blocking notice", async () => {
+    const { env } = await makeCase("kimi-plugins-notice");
+    const kimiCodeHome = env.KIMI_CODE_HOME!;
+    await mkdir(path.join(kimiCodeHome, "plugins"), { recursive: true });
+    await writeFile(
+      path.join(kimiCodeHome, "plugins", "installed.json"),
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: "acme-search", root: "/p/acme", source: {}, enabled: true, installedAt: "x" },
+          { id: "disabled-one", root: "/p/dis", source: {}, enabled: false, installedAt: "x" },
+        ],
+      }),
+      "utf8",
+    );
+    const result = await runSetup([], makeContext(env));
+    const joined = result.warnings.join("\n");
+    // Enabled plugin is named; the read-only turn-waste expectation is set.
+    expect(joined).toContain("kimi-code plugin(s) installed and enabled");
+    expect(joined).toContain("acme-search");
+    expect(joined).toContain("waste model turns");
+    // The explicitly-disabled plugin is NOT surfaced.
+    expect(joined).not.toContain("disabled-one");
+    // It is a non-blocking notice — setup still installs successfully.
+    expect(result.blockWritten).toBe(true);
+  });
+
+  test("H8: no plugin notice when kimi-code has no installed.json", async () => {
+    const { env } = await makeCase("kimi-plugins-absent");
+    const result = await runSetup([], makeContext(env));
+    expect(result.warnings.join("\n")).not.toContain("kimi-code plugin(s) installed");
+  });
+
   test("rejects unknown flags and conflicting review-gate flags", async () => {
     const { env } = await makeCase("invalid-args");
     await expect(runSetup(["--bogus"], makeContext(env))).rejects.toMatchObject({

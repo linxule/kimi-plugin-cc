@@ -307,16 +307,45 @@ export function isInTestedRange(major: number, minor: number): boolean {
 }
 
 /**
+ * The newest `{major, minor}` in the tested set — the known-good upper bound
+ * (H9). Set-membership in `isInTestedRange` already warns for anything outside
+ * the tested range; this lets the warning distinguish the COMMON case (a kimi
+ * release NEWER than our last compat audit — likely fine but unverified) from a
+ * below/gap version, which is the more suspicious shape.
+ */
+export function maxTestedMinor(): { major: number; minor: number } {
+  return KIMI_TESTED_MINORS.reduce((max, entry) =>
+    entry.major > max.major || (entry.major === max.major && entry.minor > max.minor)
+      ? entry
+      : max,
+  );
+}
+
+/**
  * Format a user-facing warning line for an out-of-range version probe.
  * Includes the canonical "not a block, just a heads up" framing so the
  * caller agent doesn't misinterpret this as fatal.
  */
 export function formatVersionOutOfRangeWarning(probe: KimiVersionProbeOk, pluginVersion: string): string {
   const tested = KIMI_TESTED_MINORS.map((entry) => `${entry.major}.${entry.minor}.x`).join(", ");
-  return [
+  const max = maxTestedMinor();
+  const aboveMax =
+    probe.major > max.major || (probe.major === max.major && probe.minor > max.minor);
+  const lines = [
     `WARNING: kimi-code version ${probe.version} is outside the range kimi-plugin-cc ${pluginVersion} was tested against (${tested}).`,
+  ];
+  if (aboveMax) {
+    // H9: the known-good upper bound. Above it = a release newer than our last
+    // compat audit — usually fine, but unverified (and the case the version
+    // probe exists to flag when out-of-band auto-upgrade drifts the binary).
+    lines.push(
+      `  This is NEWER than the newest version we have tested (${max.major}.${max.minor}.x) — likely fine, but unverified; kimi-code behaviors may have changed since our last compatibility audit.`,
+    );
+  }
+  lines.push(
     `  The plugin will still run, but a silent breakage may exist for behaviors that changed in your version.`,
     `  If something looks off (missing session ids, malformed records, hook bypasses), check the kimi-code changelog`,
     `  for changes since the last tested range and report mismatches via the plugin issue tracker.`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }

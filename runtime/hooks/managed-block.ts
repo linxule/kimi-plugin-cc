@@ -16,6 +16,11 @@
 //   This module owns the single source of truth for what a valid
 //   managed block looks like. Both call sites import from here.
 //
+// (The drift classifier `describeHookCommandDrift` lives in install-paths.ts —
+// the single source of truth for the hook command's byte shape — and is used
+// here to turn a command MISMATCH into an actionable diagnosis when the caller
+// supplies an `nodeExists` fs predicate.)
+//
 // What a valid managed block looks like (line-by-line, post-trim):
 //
 //   # === BEGIN kimi-plugin-cc-managed (vX.Y.Z) ===
@@ -37,6 +42,8 @@
 //     register two hooks, which is fine functionally but breaks
 //     idempotency checks.
 //   - The `command` line must contain the hook script path we expect.
+
+import { describeHookCommandDrift } from "./install-paths.js";
 
 export type ManagedBlockState =
   | { kind: "absent" }
@@ -223,9 +230,22 @@ export interface InstalledCheck {
   state: ManagedBlockState;
 }
 
+export interface EvaluateInstalledOptions {
+  /**
+   * Optional fs predicate (e.g. `existsSync`). When provided, a command
+   * MISMATCH is classified into an actionable H4 diagnosis — Node upgrade /
+   * version-manager switch (old interpreter gone) vs. plugin-path drift — via
+   * `describeHookCommandDrift`, instead of the generic expected-vs-got reason.
+   * Omitted (pure callers / most tests) keeps the generic reason. Classification
+   * NEVER changes the installed decision, only the human/LLM-facing reason.
+   */
+  nodeExists?: (binPath: string) => boolean;
+}
+
 export function evaluateInstalled(
   contents: string,
   expectedCommand: string,
+  opts?: EvaluateInstalledOptions,
 ): InstalledCheck {
   const { state } = parseManagedBlock(contents);
   if (state.kind === "absent") {
@@ -255,9 +275,15 @@ export function evaluateInstalled(
     };
   }
   if (state.commandPath !== expectedCommand) {
+    const classified =
+      opts?.nodeExists !== undefined
+        ? describeHookCommandDrift(state.commandPath, expectedCommand, opts.nodeExists)
+        : undefined;
     return {
       installed: false,
-      reason: `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
+      reason:
+        classified ??
+        `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
       state,
     };
   }

@@ -16,6 +16,11 @@
 //   This module owns the single source of truth for what a valid
 //   managed block looks like. Both call sites import from here.
 //
+// (The drift classifier `describeHookCommandDrift` lives in install-paths.ts —
+// the single source of truth for the hook command's byte shape — and is used
+// here to turn a command MISMATCH into an actionable diagnosis when the caller
+// supplies an `nodeExists` fs predicate.)
+//
 // What a valid managed block looks like (line-by-line, post-trim):
 //
 //   # === BEGIN kimi-plugin-cc-managed (vX.Y.Z) ===
@@ -37,6 +42,7 @@
 //     register two hooks, which is fine functionally but breaks
 //     idempotency checks.
 //   - The `command` line must contain the hook script path we expect.
+import { describeHookCommandDrift } from "./install-paths.js";
 const MARKER_TAG = "kimi-plugin-cc-managed";
 /**
  * Strict BEGIN matcher. Accepts `# === BEGIN kimi-plugin-cc-managed`
@@ -164,7 +170,7 @@ export function parseManagedBlock(contents) {
         lines,
     };
 }
-export function evaluateInstalled(contents, expectedCommand) {
+export function evaluateInstalled(contents, expectedCommand, opts) {
     const { state } = parseManagedBlock(contents);
     if (state.kind === "absent") {
         return { installed: false, reason: "managed block is not present", state };
@@ -193,9 +199,13 @@ export function evaluateInstalled(contents, expectedCommand) {
         };
     }
     if (state.commandPath !== expectedCommand) {
+        const classified = opts?.nodeExists !== undefined
+            ? describeHookCommandDrift(state.commandPath, expectedCommand, opts.nodeExists)
+            : undefined;
         return {
             installed: false,
-            reason: `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
+            reason: classified ??
+                `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
             state,
         };
     }

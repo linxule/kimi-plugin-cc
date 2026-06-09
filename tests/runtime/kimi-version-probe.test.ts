@@ -5,6 +5,7 @@ import {
   formatVersionOutOfRangeWarning,
   isInTestedRange,
   KIMI_TESTED_MINORS,
+  maxTestedMinor,
   parseVersionLine,
   probeKimiVersion,
 } from "../../runtime/kimi-version-probe.js";
@@ -107,6 +108,42 @@ describe("formatVersionOutOfRangeWarning", () => {
     expect(text).toContain("0.1.x");
     expect(text).toContain("0.2.x");
     expect(text).toContain("plugin will still run");
+  });
+
+  test("H9: flags a version NEWER than the tested max with an above-bound note", () => {
+    const max = maxTestedMinor();
+    const text = formatVersionOutOfRangeWarning(
+      {
+        kind: "ok",
+        version: `${max.major}.${max.minor + 5}.0`,
+        major: max.major,
+        minor: max.minor + 5,
+        patch: 0,
+        inTestedRange: false,
+      },
+      "1.2.1-test",
+    );
+    expect(text).toContain("NEWER than the newest version we have tested");
+    expect(text).toContain(`${max.major}.${max.minor}.x`);
+  });
+
+  test("H9: a version BELOW the tested max does not get the above-bound note", () => {
+    const text = formatVersionOutOfRangeWarning(
+      { kind: "ok", version: "0.0.9", major: 0, minor: 0, patch: 9, inTestedRange: false },
+      "1.2.1-test",
+    );
+    expect(text).not.toContain("NEWER than the newest version we have tested");
+  });
+});
+
+describe("maxTestedMinor", () => {
+  test("returns the highest {major, minor} in the tested set", () => {
+    const max = maxTestedMinor();
+    for (const entry of KIMI_TESTED_MINORS) {
+      const notNewer =
+        entry.major < max.major || (entry.major === max.major && entry.minor <= max.minor);
+      expect(notNewer).toBe(true);
+    }
   });
 });
 

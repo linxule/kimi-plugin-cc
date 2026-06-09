@@ -156,6 +156,133 @@ function resolveHookFailure(here: string): RuntimeError {
 }
 
 /**
+ * Parse a hook shell command of the canonical `'<nodeBin>' '<hookScript>'`
+ * shape (two POSIX single-quoted tokens, space-separated) back into its two
+ * tokens. The exact inverse of `buildHookShellCommand` →
+ * `shellSingleQuote(nodeBin) + " " + shellSingleQuote(hookScript)`.
+ *
+ * Returns `null` for any command that isn't exactly two single-quoted tokens
+ * (e.g. a legacy bare-`node` form, a crafted/garbage command, or anything with
+ * unquoted bare words) — callers treat `null` as "can't classify; use the
+ * generic mismatch message". Strict by design: it only recognizes the canonical
+ * single-quoted form this module emits, so it never mis-attributes a hand-rolled
+ * command's tokens. Tokens with embedded spaces or apostrophes round-trip
+ * (spaces live inside the quotes; `'` is encoded as `'\''`).
+ */
+export function parseHookShellCommand(
+  command: string,
+): { nodeBin: string; hookScript: string } | null {
+  const tokens = parseSingleQuotedTokens(command);
+  if (tokens === null || tokens.length !== 2) {
+    return null;
+  }
+  return { nodeBin: tokens[0]!, hookScript: tokens[1]! };
+}
+
+/**
+ * Tokenize a string of POSIX single-quoted tokens as produced by
+ * `shellSingleQuote` (`'...'` with inner `'` encoded as `'\''`). Returns the
+ * decoded token list, or `null` if the input contains any unquoted bare
+ * character or an unterminated quote — i.e. anything outside the grammar this
+ * module emits.
+ */
+function parseSingleQuotedTokens(input: string): string[] | null {
+  const tokens: string[] = [];
+  let i = 0;
+  const n = input.length;
+  while (i < n) {
+    if (input[i] === " ") {
+      i += 1;
+      continue;
+    }
+    let token = "";
+    let consumedAny = false;
+    while (i < n && input[i] !== " ") {
+      const ch = input[i]!;
+      if (ch === "'") {
+        // A '...'  quoted segment. Single-quoted content can never contain a
+        // literal "'", so the next "'" is always the real close.
+        const close = input.indexOf("'", i + 1);
+        if (close === -1) return null; // unterminated quote
+        token += input.slice(i + 1, close);
+        i = close + 1;
+        consumedAny = true;
+      } else if (ch === "\\") {
+        // The `\'` half of a `'\''` escape (an apostrophe in the value).
+        if (i + 1 >= n) return null;
+        token += input[i + 1]!;
+        i += 2;
+        consumedAny = true;
+      } else {
+        // A bare unquoted character — not part of the canonical grammar.
+        return null;
+      }
+    }
+    if (!consumedAny) return null;
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * H4 — classify a hook-command MISMATCH into an actionable diagnosis. When the
+ * managed block is structurally valid but its `command` differs from what this
+ * companion would write, the raw "expected X; got Y" dump is hard to act on. The
+ * common real cause is environment drift: a Node upgrade or version-manager
+ * (nvm/asdf/mise/fnm/Homebrew) switch moved the pinned interpreter, or a plugin
+ * update changed the version-stamped hook-script path. This names which token
+ * drifted and, for Node, whether the old binary still exists on disk (a gone
+ * binary is the unambiguous "your Node moved" signal).
+ *
+ * Returns `undefined` when it can't classify (either command isn't the canonical
+ * two-single-quoted-token shape, or the tokens are somehow equal) — the caller
+ * then falls back to the generic mismatch message. Pure except for the injected
+ * `nodeExists` predicate (so the fs probe stays at the call site). Does NOT alter
+ * the verifier's exact-equality decision — only the human/LLM-facing reason.
+ */
+export function describeHookCommandDrift(
+  installedCommand: string,
+  expectedCommand: string,
+  nodeExists: (binPath: string) => boolean,
+): string | undefined {
+  const installed = parseHookShellCommand(installedCommand);
+  const expected = parseHookShellCommand(expectedCommand);
+  if (installed === null || expected === null) {
+    return undefined;
+  }
+  const nodeDrift = installed.nodeBin !== expected.nodeBin;
+  const hookDrift = installed.hookScript !== expected.hookScript;
+  if (!nodeDrift && !hookDrift) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  if (nodeDrift) {
+    if (!nodeExists(installed.nodeBin)) {
+      parts.push(
+        `Node binary drift: the installed hook pins ${installed.nodeBin}, which no longer exists on disk ` +
+          `(this companion runs ${expected.nodeBin}). This is the classic Node-upgrade / version-manager ` +
+          `(nvm, asdf, mise, fnm, Homebrew) drift — the pinned interpreter moved, so kimi-code can no longer ` +
+          `spawn the hook and read-only enforcement silently degrades.`,
+      );
+    } else {
+      parts.push(
+        `Node binary changed: the installed hook pins ${installed.nodeBin}, but this companion runs ` +
+          `${expected.nodeBin} (both exist on disk — likely a Node version-manager switch between runs).`,
+      );
+    }
+  }
+  if (hookDrift) {
+    parts.push(
+      `Hook script path drift: the installed hook points at ${installed.hookScript}, but this companion's ` +
+        `hook is ${expected.hookScript} (likely a plugin update or move — the install path is version-stamped).`,
+    );
+  }
+  parts.push("Run /kimi:setup to re-pin the managed block to this companion's current paths.");
+  return parts.join(" ");
+}
+
+/**
  * Best-effort: compute the canonical expected shell command for the
  * current env. Returns `undefined` if either path can't be resolved
  * (caller treats this as "managed block is unverifiable; do not assume

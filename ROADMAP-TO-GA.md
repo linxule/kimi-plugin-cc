@@ -69,9 +69,11 @@ The `CliClientOptions.thinking` field stays in the runtime contract as a reserve
 
 **Decision (for v1.1):** File an upstream kimi-code issue requesting `--thinking-mode <auto|on|off>` (or equivalent). Until upstream lands, review-gate behaves correctly only when the user has `default_thinking = false` or selects a non-thinking-capable model — documented in `docs/safety.md`.
 
-### H4 — Verifier soft-recovery for Node version manager switches (was G2)
+### H4 — Verifier soft-recovery for Node version manager switches (was G2) — **DELIVERED in v1.2.1 (as diagnosis, not auto-refresh)**
 **Severity:** UX-pain for users on nvm/asdf/mise/fnm
 **Effort:** Medium (~half day)
+
+**Delivered 2026-06-09 (v1.2.1).** Shipped as **precise drift diagnosis**, deliberately NOT the auto-refresh in the original decision below. `runtime/hooks/install-paths.ts` gained `parseHookShellCommand` (inverse of `buildHookShellCommand`) + `describeHookCommandDrift`; `evaluateInstalled` takes an optional `nodeExists` predicate and, on a structurally-valid command mismatch, classifies it — "Node binary drift" (pinned interpreter gone → the classic version-manager/Homebrew move), "Node binary changed" (both exist), or "Hook script path drift" (plugin moved/updated) — with the actionable `/kimi:setup` remedy. Surfaced from both `verifyHookInstalled` (the runtime gate behind rescue/swarm/pursue refusal + read-only warnings) and `/kimi:setup --check`. **Why diagnosis over auto-refresh:** silently rewriting the security-config block from a read-only verify path was judged riskier (surprising mutation of a security surface, could mask a real problem) than a clear, classified message; the strict exact-equality decision and the manual `/kimi:setup` remedy stay. Hash-based verification (long-term, below) remains unbuilt — not needed once the diagnosis makes the strict failure legible. Tests: `tests/runtime/install-paths.test.ts` (parser round-trip + classifier matrix), `tests/runtime/hook-install.test.ts` (node-drift + path-drift integration).
 
 Promoted from GA-blocker to v1.1 candidate in alpha.4 triage. Current strict-equality verifier rejects a managed block whose Node binary path no longer matches `process.execPath` — correct safety posture but forces a re-run of `/kimi:setup` after every Node version switch. Documented in `docs/safety.md` under "Known limitation."
 
@@ -105,17 +107,21 @@ Today `bun test` stubs the kimi process — no test exercises the full policy qu
 
 **Remaining (deliberate choices, not blockers):** (1) the operator adds `KIMI_MODEL_API_KEY` + `KIMI_MODEL_NAME` as repo secrets to activate `smoke.yml` (inert until then); (2) the smoke is **dispatch-only, not per-push/scheduled, by design** — a goal-mode run is ~1–2 min of real model tokens (the model retries the deny-wall for the full `--budget`), so per-push would bill every push. Flip on a `schedule:` trigger if continuous verification is wanted. Because the gate isn't yet *continuously* auto-run, `/kimi:pursue` stays labeled **experimental** (also honest because kimi-code's `goal-command` is itself an off-by-default experimental flag upstream).
 
-### H8 — `/kimi:setup` surfaces installed kimi-code plugins (new for v1.1)
+### H8 — `/kimi:setup` surfaces installed kimi-code plugins (new for v1.1) — **DELIVERED in v1.2.1**
 **Severity:** UX — closes the turn-waste concern from the 2026-05-27 audit's adversarial review (report 34 §4)
 **Effort:** Small (~half day)
+
+**Delivered 2026-06-09 (v1.2.1).** `runtime/commands/setup.ts::collectInstalledKimiPluginsNotice` reads `~/.kimi-code/plugins/installed.json` (path + `{plugins:[{id,enabled,…}]}` shape re-verified against `packages/agent-core/src/plugin/store.ts` at 0.12.0) and, on both the install and `--check` paths, pushes a non-blocking notice naming installed+enabled plugins with a one-liner that their tool calls are denied (and waste turns) under the read-only commands. Best-effort: missing/unreadable/malformed manifest → no notice; never blocks setup; never mutates the plugin list. Test: `tests/runtime/setup.test.ts` (H8 notice + absent-manifest cases).
 
 kimi-code 0.4.0 (PR #119) added user-global plugin installation. Plugin-provided MCP tools register on every session creation. Our PreToolUse hook denies any unrecognized tool name for review/challenge/ask/review_gate, so plugins don't escalate privilege — but they DO add tool calls that get denied silently inside the kimi turn, wasting model turns. Users would file confused "kimi did nothing useful" bugs.
 
 **Decision (for v1.1):** During `/kimi:setup`, probe `~/.kimi-code/plugins/installed.json` (kimi-code's home dir is `~/.kimi-code/`, not `~/.kimi/`; confirmed against `packages/agent-core/src/plugin/store.ts` + `docs/en/configuration/data-locations.md` in 0.4.0) and emit a non-blocking notice listing any installed kimi-code plugins, with a one-liner explaining that their MCP tool calls will be denied under review/challenge/ask. Don't block setup. Don't mutate the plugin list. Just set the user's expectations.
 
-### H9 — Pin known-good kimi-code version range at setup (new for v1.1, extends H6)
+### H9 — Pin known-good kimi-code version range at setup (new for v1.1, extends H6) — **DELIVERED in v1.2.1 (clarification)**
 **Severity:** Architectural — completes the H6/H7 pair
 **Effort:** Small (~quarter day, once H7 lands)
+
+**Delivered 2026-06-09 (v1.2.1).** Set-membership in `isInTestedRange` already warned for ANY untested `{major,minor}` (including above the range), so no separate `UPPER_BOUND` gate was needed. Added `maxTestedMinor()` and taught `formatVersionOutOfRangeWarning` to distinguish the common, less-suspicious case — a kimi-code release NEWER than our newest tested minor ("likely fine, but unverified; behaviors may have changed since our last compat audit") — from a below/gap version. This is the user-facing signal the adversarial review asked for (we've verified the index-0 hook contract up to this max). Test: `tests/runtime/kimi-version-probe.test.ts` (above-max note + `maxTestedMinor`).
 
 H6 ships a "warn if version outside tested range" probe. H7 makes "tested" a real assertion (CI-enforced). H9 closes the loop by pinning a known-good upper bound (`>=0.2.0 <0.5.0` once 0.4.0 ships through H7) and emitting a setup-time warning above the upper bound. Adversarial review (report 34 §1) specifically called out that the hook-policy-index-0 contract is undocumented upstream — pinning a tested upper bound is the user-facing signal that we have verified the contract holds for this range.
 

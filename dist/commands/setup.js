@@ -39,7 +39,7 @@
 // block is owned by us; the rest of the file is the user's, untouched.
 import { spawn } from "node:child_process";
 import { access, chmod, mkdir, readFile, rename, unlink, writeFile, } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -156,6 +156,7 @@ async function runInstall(configPath, hookScriptPath, reviewGateEnabled, warning
     }
     collectPermissionRuleWarnings(next, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
+    await collectInstalledKimiPluginsNotice(context.env, warnings);
     const probe = await probeHook(hookScriptPath, context.env);
     const summary = probe.ok
         ? blockWritten
@@ -188,7 +189,11 @@ async function runInstall(configPath, hookScriptPath, reviewGateEnabled, warning
 async function runCheck(configPath, hookScriptPath, reviewGateEnabled, warnings, context) {
     const existing = await readConfigSafe(configPath);
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-    const installedCheck = evaluateInstalled(existing, expectedCommand);
+    // nodeExists → a command mismatch is reported as a classified H4 drift
+    // diagnosis (Node upgrade / version-manager switch vs. plugin path move).
+    const installedCheck = evaluateInstalled(existing, expectedCommand, {
+        nodeExists: (binPath) => existsSync(binPath),
+    });
     if (!installedCheck.installed) {
         return {
             action: "check",
@@ -217,6 +222,7 @@ async function runCheck(configPath, hookScriptPath, reviewGateEnabled, warnings,
     }
     collectPermissionRuleWarnings(existing, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
+    await collectInstalledKimiPluginsNotice(context.env, warnings);
     // Block is structurally valid AND points at the resolved hook
     // script — now confirm the script itself still loads and behaves.
     try {
@@ -708,6 +714,57 @@ async function collectKimiVersionWarnings(env, warnings) {
     if (probe.inTestedRange)
         return;
     warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION));
+}
+/**
+ * H8 — non-blocking notice listing kimi-code's OWN installed plugins (the
+ * user-global plugin system kimi-code 0.4.0+ added; manifest at
+ * `~/.kimi-code/plugins/installed.json`, shape verified through 0.12.0:
+ * `{ plugins: [{ id, enabled, ... }] }`). kimi-code registers their tools
+ * (incl. MCP) on every session. Under kimi-plugin-cc's read-only commands the
+ * PreToolUse hook denies any tool outside Read/Grep/Glob, so calls to these
+ * plugins' tools are blocked — safe, but they silently burn model turns. We
+ * surface that expectation at setup time so a confused "kimi did nothing" report
+ * doesn't follow. Best-effort: a missing/unreadable/malformed manifest yields no
+ * notice. Never blocks setup; never mutates the plugin list.
+ */
+async function collectInstalledKimiPluginsNotice(env, warnings) {
+    const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
+    const installedPath = path.join(home, "plugins", "installed.json");
+    let raw;
+    try {
+        raw = await readFile(installedPath, "utf8");
+    }
+    catch {
+        return; // ENOENT / unreadable — kimi-code's plugin system isn't in use here.
+    }
+    let enabledIds;
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed === null || typeof parsed !== "object" || !Array.isArray(parsed.plugins)) {
+            return;
+        }
+        enabledIds = parsed.plugins
+            .filter((entry) => entry !== null && typeof entry === "object")
+            // `enabled !== false` so an explicitly-disabled plugin is hidden while an
+            // enabled or format-ambiguous one is surfaced (it can still register tools).
+            .filter((entry) => entry.enabled !== false)
+            .map((entry) => (typeof entry.id === "string" ? entry.id : ""))
+            .filter((id) => id.length > 0);
+    }
+    catch {
+        return; // Malformed JSON — don't guess.
+    }
+    if (enabledIds.length === 0)
+        return;
+    warnings.push([
+        `NOTE: ${enabledIds.length} kimi-code plugin(s) installed and enabled: ${enabledIds.join(", ")}.`,
+        "  kimi-code registers their tools (including MCP) on every session. Under kimi-plugin-cc's",
+        "  read-only commands (/kimi:review, /kimi:challenge, /kimi:ask, and the review gate) the",
+        "  PreToolUse hook denies any tool outside Read/Grep/Glob, so calls to these plugins' tools",
+        "  are blocked — safe, but they can waste model turns. This is expected; no action needed.",
+        "  (/kimi:rescue and /kimi:swarm apply their own allowlists.) To avoid the turn-waste, disable",
+        "  kimi-code plugins you don't need for delegated work in your kimi-code config.",
+    ].join("\n"));
 }
 function collectPermissionRuleWarnings(contents, warnings) {
     const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
