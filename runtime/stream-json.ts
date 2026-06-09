@@ -127,10 +127,28 @@ export interface GoalSummaryRecord {
   readonly wallClockMs: number | null;
 }
 
+/**
+ * An object line carrying a string `role` the parser doesn't model
+ * (assistant/tool/meta). H3 forward-compat: a future kimi-code version may add
+ * a new top-level role; rather than flagging it as `malformed` (error framing +
+ * diagnostic noise for a legitimate-but-new record), the parser surfaces it
+ * here, out-of-band — the same posture as `meta`/`goalSummary`. It is NOT placed
+ * in `records[]`: the sweep (2026-06-09) confirmed the only `records[]` consumer,
+ * `reassembleProseFromRecords`, reads `role === "assistant"` exclusively, so
+ * keeping unknown roles out-of-band cannot affect any command's output. The raw
+ * parsed object is preserved for diagnostics / future opt-in handling.
+ */
+export interface UnknownRoleRecord {
+  readonly role: string;
+  readonly raw: Record<string, unknown>;
+}
+
 export interface StreamJsonOutcome {
   readonly record?: StreamJsonRecord;
   /** Out-of-band goal-mode summary (role-less); see GoalSummaryRecord. */
   readonly goalSummary?: GoalSummaryRecord;
+  /** Out-of-band unknown-role record (H3 forward-compat); see UnknownRoleRecord. */
+  readonly unknownRecord?: UnknownRoleRecord;
   readonly malformedLine?: string;
   readonly malformedReason?: string;
 }
@@ -226,6 +244,16 @@ function parseLine(line: string): StreamJsonOutcome {
   if (role === undefined && parsed["type"] === "goal.summary") {
     return validateGoalSummary(parsed, line);
   }
+  // H3 forward-compat: a non-empty string role we don't model (a role a future
+  // kimi-code adds). Surface it out-of-band on the unknownRecord channel —
+  // tolerated, not malformed — so the parser keeps working and the diagnostic
+  // log distinguishes "new upstream role" from a genuinely broken line. It
+  // never enters records[] (see UnknownRoleRecord + the consumer sweep).
+  if (typeof role === "string" && role.length > 0) {
+    return { unknownRecord: { role, raw: parsed } };
+  }
+  // Genuinely malformed: no `role` at all (and not a recognized role-less typed
+  // record like goal.summary), or a non-string role. Surface as malformed.
   return {
     malformedLine: line,
     malformedReason: `unknown role: ${JSON.stringify(role)}`,

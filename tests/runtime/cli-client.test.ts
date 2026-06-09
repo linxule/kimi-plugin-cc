@@ -271,6 +271,36 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("H3: an unknown-role record is tolerated out-of-band — kept out of records[]/onRecord, not malformed, assistant still captured", async () => {
+    // A future kimi-code role we don't model. cli-client must not crash, must
+    // keep it out of the consumer-facing record surfaces, and must NOT count it
+    // as malformed (it's forward-compat, not a broken line).
+    const root = await createTestPluginDataRoot("cli-client-unknown-role");
+    try {
+      const seen: StreamJsonRecord[] = [];
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [
+            { role: "assistant", content: "hello" },
+            { role: "future_role", content: "from a newer kimi-code" },
+          ],
+          announceVia: "stdout-meta",
+          onRecord: (r) => seen.push(r),
+        }),
+      );
+      // Unknown-role record filtered from records[] and onRecord.
+      expect(result.records).toHaveLength(1);
+      expect(result.records[0]!.role).toBe("assistant");
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.role).toBe("assistant");
+      // It is NOT routed to the malformed channel (forward-compat, not broken).
+      expect(result.malformed).toHaveLength(0);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("survives chunk-boundary splits in stream-json output", async () => {
     const root = await createTestPluginDataRoot("cli-client-chunks");
     try {
@@ -371,14 +401,13 @@ describe("runCliPrompt", () => {
   test("captures malformed lines without crashing", async () => {
     const root = await createTestPluginDataRoot("cli-client-malformed");
     try {
-      // KIMI_MOCK_RECORDS is JSON-parsed, so we can't inject a malformed
-      // line through it directly. Instead, drive a stderr-only run with a
-      // valid record plus a malformed line baked into stderrPrefix... no,
-      // stderr won't reach the stdout parser. The cleanest way is to use
-      // stderrPrefix for noise and pass a record whose shape is invalid
-      // (unknown role).
+      // KIMI_MOCK_RECORDS is JSON-parsed, so we can't inject a syntactically
+      // malformed line through it. Use a record the PARSER rejects as malformed:
+      // a role-less object that isn't a recognized role-less type (goal.summary).
+      // NB: since H3, an unknown *string* role is forward-compat (unknownRecord),
+      // NOT malformed — so the malformed proxy must be the role-less shape.
       const records = [
-        { role: "system", content: "I shouldn't be valid" },
+        { content: "no role here — malformed" },
         { role: "assistant", content: "still here" },
       ];
       const result = await runCliPrompt(

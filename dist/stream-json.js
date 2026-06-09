@@ -138,6 +138,16 @@ function parseLine(line) {
     if (role === undefined && parsed["type"] === "goal.summary") {
         return validateGoalSummary(parsed, line);
     }
+    // H3 forward-compat: a non-empty string role we don't model (a role a future
+    // kimi-code adds). Surface it out-of-band on the unknownRecord channel —
+    // tolerated, not malformed — so the parser keeps working and the diagnostic
+    // log distinguishes "new upstream role" from a genuinely broken line. It
+    // never enters records[] (see UnknownRoleRecord + the consumer sweep).
+    if (typeof role === "string" && role.length > 0) {
+        return { unknownRecord: { role, raw: parsed } };
+    }
+    // Genuinely malformed: no `role` at all (and not a recognized role-less typed
+    // record like goal.summary), or a non-string role. Surface as malformed.
     return {
         malformedLine: line,
         malformedReason: `unknown role: ${JSON.stringify(role)}`,

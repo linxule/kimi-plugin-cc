@@ -59,6 +59,8 @@ Setup's probe validates the install moment; nothing guards runtime drift.
 
 **Remaining for v1.1:** Treating unknown top-level **roles** (not meta types — full unknown `role` strings) as forward-compat. Currently still flagged as malformed because consumers' assumptions about what `records[]` can contain are baked in. Changing this requires a sweep through the command handlers to confirm none of them break on an unrecognized role landing in their iteration.
 
+**DELIVERED 2026-06-09 (v1.2.2).** The sweep (recorded in code comments) found the **only** `records[]` consumer is `reassembleProseFromRecords`, which reads `role === "assistant"` exclusively and skips everything else (`onRecord` has no production caller). So unknown roles are safe either way. Rather than churn the role-keyed `StreamJsonRecord` union (and its `.role` narrowing) by admitting an arbitrary-role member, an unknown non-empty **string** role is now surfaced **out-of-band** on `StreamJsonOutcome.unknownRecord` (`{role, raw}`) — the same posture as `meta`/`goalSummary` — and `cli-client` logs it (`event:"unknown_record"`) but keeps it out of `records[]`/`onRecord`. It is no longer counted as `malformed` (forward-compat framing, not error). A role-less line that isn't `goal.summary`, or a non-string role, stays `malformed` (genuinely unexpected). Tests: `stream-json.test.ts` (unknownRecord vs. malformed matrix), `cli-client.test.ts` (out-of-band, not malformed, assistant still captured).
+
 ### H5 — Per-spawn thinking control via kimi-code CLI (was alpha.4 internal bug)
 **Severity:** Functional — review-gate's 8s budget assumes thinking-off but cannot enforce it
 **Effort:** Negotiation with kimi-code team + tiny buildArgs wiring on our side

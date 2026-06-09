@@ -83,11 +83,31 @@ describe("StreamJsonParser", () => {
     expect(outcomes[0]!.malformedReason).toContain("json parse");
   });
 
-  test("reports unknown role as malformed", () => {
+  test("H3: an unknown string role is forward-compat (unknownRecord, NOT malformed)", () => {
     const parser = new StreamJsonParser();
     const [outcome] = parser.push('{"role":"system","content":"x"}\n');
+    // Tolerated as a future-role record, surfaced out-of-band — not malformed,
+    // not in records[].
+    expect(outcome!.malformedLine).toBeUndefined();
+    expect(outcome!.record).toBeUndefined();
+    expect(outcome!.unknownRecord).toEqual({
+      role: "system",
+      raw: { role: "system", content: "x" },
+    });
+  });
+
+  test("H3: a role-less line that isn't goal.summary is still malformed", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push('{"content":"x"}\n');
+    expect(outcome!.unknownRecord).toBeUndefined();
     expect(outcome!.malformedReason).toContain("unknown role");
-    expect(outcome!.malformedLine).toBe('{"role":"system","content":"x"}');
+  });
+
+  test("H3: a non-string role is still malformed (not forward-compat)", () => {
+    const parser = new StreamJsonParser();
+    const [outcome] = parser.push('{"role":123,"content":"x"}\n');
+    expect(outcome!.unknownRecord).toBeUndefined();
+    expect(outcome!.malformedReason).toContain("unknown role");
   });
 
   test("parses the kimi 0.2.0 session.resume_hint meta record", () => {

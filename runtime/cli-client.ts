@@ -237,6 +237,17 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
 
   const consumeOutcomes = (outcomes: StreamJsonOutcome[]) => {
     for (const outcome of outcomes) {
+      if (outcome.unknownRecord !== undefined) {
+        // H3 forward-compat: a stream-json line with a role we don't model
+        // (a future kimi-code role). Log it for diagnostics but keep it OUT of
+        // records[] and out of onRecord — consumers iterate records[] expecting
+        // assistant/tool only. Tolerated, not treated as malformed/error.
+        appendLogLine({
+          event: "unknown_record",
+          role: outcome.unknownRecord.role,
+        });
+        continue;
+      }
       if (outcome.goalSummary !== undefined) {
         // Goal-mode summary is out-of-band metadata for our wrapper, not a
         // consumer-facing record. First-announce wins (a run emits exactly one,
