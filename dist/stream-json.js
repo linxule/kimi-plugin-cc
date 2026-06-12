@@ -15,11 +15,15 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.12.0. 2026-05-27 audit covered 0.4.0,
+//     verified byte-identical (by blob SHA) through 0.14.1. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
-//     0.10.0/0.11.0/0.12.0 in one cumulative 0.9.0→0.12.0 pass. NB: from 0.6.0 run-prompt.ts
+//     0.10.0/0.11.0/0.12.0 in one cumulative 0.9.0→0.12.0 pass, 2026-06-12 audit
+//     covered 0.12.1/0.13.0/0.13.1/0.14.0/0.14.1 in one cumulative 0.12.0→0.14.1
+//     pass (records/ dir empty diff; the 0.13/0.14 packages/protocol/ REST+WS
+//     control API is a separate transport — run-prompt.ts imports none of it,
+//     `-p` stdout stays the direct PromptJsonWriter). NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
 //     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the
@@ -33,7 +37,7 @@
 //     the intentional consumer — it is recognized as a first-class record on
 //     the dedicated `StreamJsonOutcome.goalSummary` channel (see
 //     GoalSummaryRecord below), NOT routed to the malformed channel. See
-//     reports 47-65).
+//     reports 47-65, 72-76).
 //     The hint is emitted once per prompt run at session END
 //     (after runPromptTurn settles), not at session start. In 0.1.x the
 //     resume hint went to stderr only; 0.2.0+ emits a structured

@@ -157,6 +157,48 @@ export const KIMI_TESTED_MINORS = [
     { major: 0, minor: 10 },
     { major: 0, minor: 11 },
     { major: 0, minor: 12 },
+    // 0.13 / 0.14 added in v1.2.3 (2026-06-12) after a 4-reviewer audit
+    // (+ adversarial pass) certified compat through @moonshot-ai/kimi-code@0.14.1,
+    // backed by a GREEN real-binary smoke against the installed 0.14.1 binary
+    // (review/challenge/ask/review_gate all hook-denied; pursue goal-mode wrote
+    // zero files across a multi-turn budget; the swarm smoke confirmed a spawned
+    // swarm subagent's forced write is hook-denied). The safety chain is intact:
+    //   - The hook engine (session/hooks/{engine,runner}.ts) and the
+    //     pre-tool-call-hook.ts policy are byte-identical 0.12.0→0.14.1; the only
+    //     change under session/hooks/ is an additive `Interrupt` event type
+    //     (types.ts), inert for a PreToolUse-only consumer.
+    //   - The stream-json writer (writeResumeHint/PromptJsonWriter) and the
+    //     records/ dir are byte-identical; the goal.summary shape is unchanged
+    //     (smoke parsed turnsUsed/tokensUsed/goalId cleanly on 0.14.1).
+    //   - CLI argv (options.ts/commands.ts) is byte-identical 0.12.0→0.14.1.
+    // PreToolCallHookPermissionPolicy is STILL index 0. Two permission-stack
+    // changes, both compat-benign:
+    //   - NEW AgentSwarmExclusiveDenyPermissionPolicy at index 1 (#643):
+    //     a pure DENY that fires only on multi/mixed-AgentSwarm batches
+    //     ("first non-undefined wins" → it can never pre-empt the index-0 hook).
+    //     It enforces "one AgentSwarm per response, alone in its batch" — a
+    //     behavioral refinement for /kimi:swarm coordinators, not a write surface.
+    //   - REMOVED CwdOutsideFileWriteAskPermissionPolicy: this was an `ask`
+    //     policy sitting AFTER auto-mode-approve, so it was already dead in `-p`
+    //     auto mode. Its removal opens zero new write surface — the plugin owns
+    //     workspace confinement via rescue-approval.ts, never kimi's cwd-ask.
+    //   NB: the new index-1 deny shifts AutoModeApprovePermissionPolicy from
+    //   index 4 (its position 0.6.0–0.12.0) to index 5 in 0.14.1. The STRUCTURAL
+    //   invariant is unchanged — every policy between the index-0 hook and the
+    //   first approve is a DENY, so nothing approves before the hook denies.
+    // Other 0.13/0.14 additions are off our `-p` path: a new packages/protocol/
+    // REST+WebSocket control API (a separate transport — run-prompt.ts does not
+    // import it; `-p` stdout stays the direct PromptJsonWriter), session-lifecycle
+    // changes that only HELP our cancellation story (active-turn cancel on close +
+    // BACKGROUND_KEEP_ALIVE_ON_EXIT default flipped true→false), an `alwaysThinking`
+    // model-capability flag (read-only detection, the H5 thinking-control knob is
+    // still upstream-blocked), a SIGHUP cleanup handler (exit 129; SIGTERM still
+    // exits 143 and runs cleanup — our SIGTERM→SIGKILL reaping is unaffected), and
+    // a new builtin `import-from-cc-codex` skill (not a plugin surface).
+    // See .claude/kimi-code-research/reports/72-76 for the audit reports.
+    // Tag: compat-verified-kimi-code-0.14.1.
+    { major: 0, minor: 13 },
+    { major: 0, minor: 14 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;
