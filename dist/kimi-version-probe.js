@@ -199,6 +199,20 @@ export const KIMI_TESTED_MINORS = [
     // Tag: compat-verified-kimi-code-0.14.1.
     { major: 0, minor: 13 },
     { major: 0, minor: 14 },
+    // 0.14.2 (patch, 2026-06-13) verified COMPAT-PRESERVED within the already-
+    // listed {0,14} — no array change needed (membership is minor-level).
+    // The 0.14.1→0.14.2 diff leaves our surfaces 0-byte: the permission policy
+    // queue (PreToolCallHookPermissionPolicy still index 0), the hook engine
+    // (session/hooks/), and the stream-json writer + records/ are all unchanged,
+    // and the AgentSwarm tool name is unchanged. The patch is a repo-wide
+    // `.md`→`.md?raw` bundler-import migration + a Bash-tool stdout/stderr
+    // streaming `onUpdate` callback (observability; approval path untouched) + a
+    // run-prompt.ts config-diagnostics line written to STDERR (humans-only) +
+    // removal of three `!promptMode`-gated CLI conflict checks (dead in `-p`).
+    // Backed by a GREEN `bun run smoke:real` on the operator's auto-upgraded
+    // 0.14.2 binary (review/challenge/ask/review_gate hook-denied; pursue
+    // goal-mode wrote zero files; swarm subagent write hook-denied).
+    // Tag: compat-verified-kimi-code-0.14.2.
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

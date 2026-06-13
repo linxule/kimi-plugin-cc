@@ -724,8 +724,20 @@ describe("SIGKILL escalation", () => {
     const root = await createTestPluginDataRoot("cli-sigkill-optout");
     try {
       const controller = new AbortController();
-      setTimeout(() => controller.abort(), 100).unref();
 
+      // Abort the instant the child emits its first record — proof it is
+      // alive — rather than on a wall-clock timer. The stub self-exits at
+      // 500ms (below); a nominal-100ms abort timer competes with that
+      // 500ms timer across two processes, and under heavy parallel-suite
+      // load the test runner's event loop can be starved enough to delay
+      // the 100ms abort past the stub's self-exit. The stub then exits
+      // cleanly before onAbort ever runs, so `aborted` stays false and
+      // this test flakes. Tying the abort to the first record makes the
+      // ordering causal (record → abort, always before the 500ms exit),
+      // not a timer race. invokeOnRecord fires only from the stdout data
+      // handler, which is attached after the abort listener, so the abort
+      // reliably triggers onAbort.
+      //
       // Stub eventually exits cleanly on its own (after ~500ms). With
       // escalation disabled, cli-client only sends SIGTERM, which the
       // stub ignores; the stub's own self-exit ends the call.
@@ -741,6 +753,7 @@ describe("SIGKILL escalation", () => {
         prefixArgs: ["run", stubKimiPath],
         prompt: "x",
         signal: controller.signal,
+        onRecord: () => controller.abort(),
         escalationMs: Number.POSITIVE_INFINITY,
       });
 
