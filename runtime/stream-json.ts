@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.14.2. 2026-05-27 audit covered 0.4.0,
+//     verified byte-identical (by blob SHA) through 0.14.3. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -27,7 +27,9 @@
 //     the 0.14.2 patch (records/ + the PromptJsonWriter/writeResumeHint region
 //     both 0-byte; the patch is a repo-wide `.md`→`.md?raw` bundler-import
 //     migration plus a Bash-tool stdout/stderr streaming callback, neither
-//     touching the writer). NB: from 0.6.0 run-prompt.ts
+//     touching the writer), and 2026-06-14 covered the 0.14.3 patch (all four
+//     scoped diffs 0-byte; the entire patch is a TUI model-picker
+//     provider-refresh change — PR #713 — off the `-p` path). NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
 //     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the

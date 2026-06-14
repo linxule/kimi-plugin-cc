@@ -216,6 +216,26 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // 0.14.2 binary (review/challenge/ask/review_gate hook-denied; pursue
   // goal-mode wrote zero files; swarm subagent write hook-denied).
   // Tag: compat-verified-kimi-code-0.14.2.
+  // 0.14.3 (patch, 2026-06-14) verified COMPAT-PRESERVED within the already-
+  // listed {0,14} — no array change needed. All four scoped diffs
+  // (@moonshot-ai/kimi-code@0.14.2..0.14.3) are 0-byte: run-prompt.ts +
+  // options.ts/commands.ts, the permission policy queue
+  // (PreToolCallHookPermissionPolicy still index 0), the hook engine, and
+  // records/ + session/. The entire patch is one TUI change — PR #713,
+  // "Refresh provider model metadata before opening the model picker": the
+  // interactive `/model` slash command (tui/commands/config.ts +
+  // dispatch.ts) now calls a new `refreshOAuthProviderModels()` (a scoped
+  // 'oauth' variant added to tui/controllers/auth-flow.ts +
+  // tui/utils/refresh-providers.ts) with a 2s timeout before opening the
+  // picker. None of it is on the `-p` headless path (refreshAllProviderModels
+  // is invoked only from the TUI auth-flow controller; the sole reference
+  // outside tui/ is a JSDoc mention in cli/sub/provider.ts, the `kimi
+  // provider` subcommand we never invoke, which doesn't call it; the new
+  // `scope` param is optional, defaulting to 'all'). Backed by a GREEN `bun run
+  // smoke:real` on the operator's 0.14.3 binary (7 pass / 0 fail;
+  // review/challenge/ask/review_gate hook-denied; pursue goal-mode wrote
+  // zero files; swarm subagent write hook-denied).
+  // Tag: compat-verified-kimi-code-0.14.3.
 ];
 
 export interface KimiVersionProbeOk {
