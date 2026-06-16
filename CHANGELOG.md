@@ -1,5 +1,28 @@
 # Changelog
 
+> **Post-1.0 release history (v1.0.1 → present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
+
+## 1.2.4 — 2026-06-16
+
+**kimi-code 0.15.0 compatibility.** Extends `KIMI_TESTED_MINORS` to `{0,15}` so the `/kimi:setup` version probe stops firing the H9 "newer than tested max" warning for operators whose kimi binary auto-upgraded to 0.15.0. COMPAT-PRESERVED: the four scoped diffs (0.14.3→0.15.0) leave the permission queue, hook engine, `run-prompt.ts`, and CLI argv **0-byte** (re-confirmed independently by `git diff` byte-count, not just the routine's report); the only scoped change is `records/`+`session/` persistence churn off the `-p` path (PR #786 drops `app_version`/`resumed` from the `.records/` metadata artifact, a `SessionSkillRegistry` rename, a static model-capability lookup) plus an additive `transport:'sse'` MCP config variant the plugin never writes. Backed by a GREEN `bun run smoke:real` on the 0.15.0 binary (7 pass / 0 fail; read-only commands hook-denied, pursue wrote zero files, swarm subagent write denied). A real patch bump (not docs-only) because extending the tested-minors array is a runtime change. Tag `compat-verified-kimi-code-0.15.0`.
+
+- **Runtime:** `runtime/kimi-version-probe.ts` adds `{ major: 0, minor: 15 }`.
+- **Docs currency pass:** revived this changelog (pointer banner above); corrected a stale `auto-mode-approve at index 4`→`5` parenthetical in `docs/safety.md` (drifted since kimi-code 0.14.1 inserted a policy at index 1); refreshed `CONTRIBUTING.md` (dead `tests/wire/` live-test reference → `bun run smoke:real`), the `smoke.yml` / `docs/ci.md` example kimi-code pin (0.9.0 → 0.15.0), and the `docs/upstream-compat-audit.md` playbook (hook diff-scope now names the load-bearing `session/hooks/`).
+
+## Post-1.0 releases (summary — full detail in [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md#post-ga-audit-log))
+
+- **1.2.3** — 2026-06-12 — verified kimi-code 0.12.0→0.14.1 compat (4-reviewer audit + adversarial pass + GREEN smoke); extended `KIMI_TESTED_MINORS`.
+- **1.2.2** — 2026-06-09 — H3 closed: an unknown stream-json top-level role is forward-compat (surfaced out-of-band on `StreamJsonOutcome.unknownRecord`, no longer `malformed`).
+- **1.2.1** — 2026-06-09 — hardening: H4 (actionable hook-drift diagnosis), H8 (installed kimi-code plugin notice at setup), H9 (out-of-range version warning flags "newer than tested max").
+- **1.2.0** — 2026-06-09 — read-only `/kimi:swarm` parallel-review fan-out, built on kimi-code 0.12.0's `AgentSwarm` tool.
+- **1.1.1** — 2026-06-09 — verified kimi-code 0.12.0 compat; corrected stale "double-gated goal mode" docs (0.12.0 removed the experimental-flag gate).
+- **1.1.0** — 2026-06-03 — experimental `/kimi:pursue` autonomous goal mode + `goal.summary` stream-json parser.
+- **1.0.5** — 2026-06-03 — verified kimi-code 0.7/0.8/0.9 compat.
+- **1.0.4** — 2026-05-31 — verified kimi-code 0.6.0 compat.
+- **1.0.3** — 2026-05-29 — **rescue allowlist flag hardening (critical RCE fix)** — exec-delegating / report-writer flags rejected.
+- **1.0.2** — 2026-05-29 — kimi-code 0.5.0 compat.
+- **1.0.1** — 2026-05-27 — extended `KIMI_TESTED_MINORS` to 0.3 + 0.4.
+
 ## 1.0.0 — 2026-05-26 (GA)
 
 > **GA release.** Closes the kimi-code 0.2.0 stream-json session-meta compat gap discovered in alpha.4 production smoke, plus the alpha.4 Round-4 closeout polish items (parser `=value` rejection, safety.md template), plus H6 (kimi-code version probe) per the post-hotfix Codex audit, plus two review-smoke catches (stderr regex tightening, missing challenge test). Two parallel deep audits (Claude opus + Codex via codex-rescue) over the kimi-code 0.1.1→0.2.0 source diff converge: session-id capture is the only break that affects our plugin invariants; hook contract, exit-code semantics, cancellation behavior, config schema, and output framing are all byte-identical between kimi-code 0.1.1 and 0.2.0. Live review-smoke against kimi 0.2.0 (8m 37s) returns clean. **391 tests pass, drift gate clean.**

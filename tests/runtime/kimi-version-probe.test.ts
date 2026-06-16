@@ -66,10 +66,11 @@ describe("isInTestedRange", () => {
     expect(isInTestedRange(0, 12)).toBe(true);
     expect(isInTestedRange(0, 13)).toBe(true);
     expect(isInTestedRange(0, 14)).toBe(true);
+    expect(isInTestedRange(0, 15)).toBe(true);
   });
 
   test("returns false for an unknown minor", () => {
-    expect(isInTestedRange(0, 15)).toBe(false);
+    expect(isInTestedRange(0, 16)).toBe(false);
     expect(isInTestedRange(0, 99)).toBe(false);
   });
 

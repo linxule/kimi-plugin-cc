@@ -27,7 +27,7 @@ on:
       kimi_version:
         description: "kimi-code version to smoke against (must be >= 0.8.0 for goal mode)"
         type: string
-        default: "0.9.0"
+        default: "0.15.0"
       goal_budget_ms:
         description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
         type: string

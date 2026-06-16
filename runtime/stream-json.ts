@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.14.3. 2026-05-27 audit covered 0.4.0,
+//     verified byte-identical (by blob SHA) through 0.15.0. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -29,7 +29,14 @@
 //     migration plus a Bash-tool stdout/stderr streaming callback, neither
 //     touching the writer), and 2026-06-14 covered the 0.14.3 patch (all four
 //     scoped diffs 0-byte; the entire patch is a TUI model-picker
-//     provider-refresh change — PR #713 — off the `-p` path). NB: from 0.6.0 run-prompt.ts
+//     provider-refresh change — PR #713 — off the `-p` path), and 2026-06-16
+//     covered the 0.15.0 minor (permission/hooks/run-prompt/cli all 0-byte by
+//     independent `git diff` byte-count; the only scoped change is records/ +
+//     session/ persistence churn — PR #786 drops app_version/resumed from the
+//     .records/ metadata artifact, a SessionSkillRegistry rename, a static
+//     model-capability lookup — none of it on the `-p` stdout stream; plus an
+//     additive `transport:'sse'` MCP config variant the plugin never writes).
+//     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
 //     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the

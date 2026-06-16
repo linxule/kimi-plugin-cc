@@ -21,15 +21,15 @@ Installed plugins run as plain JavaScript with no build step. `dist/` is the pre
 - `bun run build` -- recompile `runtime/**/*.ts` to `dist/**/*.js`
 - `bun test <path>` -- run a single test file
 
-## Live integration test
+## Real-binary smoke test
 
-The test suite includes a real-kimi smoke test that talks to an actual Kimi CLI:
+The test suite includes opt-in real-binary smokes that spawn the actual `kimi -p` and prove read-only commands deny writes end-to-end (plus that autonomous goal mode is hook-gated on every continuation turn):
 
 ```bash
-KIMI_PLUGIN_CC_LIVE_TEST=1 bun test tests/wire/live-kimi.integration.test.ts
+bun run smoke:real   # = KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts
 ```
 
-This requires a local `kimi` CLI install with valid authentication. It is skipped by default in `bun run check`.
+This requires a local kimi-code install with valid authentication (OAuth seeded from `~/.kimi-code`, or env-model `KIMI_MODEL_*` auth). The smokes are skipped by default in `bun run check`. To smoke against a specific kimi-code release without touching your install, see [docs/ci.md](./docs/ci.md).
 
 ## Platform support
 

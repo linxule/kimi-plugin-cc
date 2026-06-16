@@ -233,6 +233,29 @@ export const KIMI_TESTED_MINORS = [
     // review/challenge/ask/review_gate hook-denied; pursue goal-mode wrote
     // zero files; swarm subagent write hook-denied).
     // Tag: compat-verified-kimi-code-0.14.3.
+    // 0.15 (new minor, 2026-06-16) verified COMPAT-PRESERVED — added to the
+    // tested set because crossing the 0.14→0.15 minor boundary fired the H9
+    // "newer than tested max" probe warning (the operator's binary auto-upgraded
+    // to 0.15.0 out-of-band, PR #334 drift). All four scoped diffs
+    // (@moonshot-ai/kimi-code@0.14.3..0.15.0) leave our load-bearing surfaces
+    // 0-byte, re-confirmed independently by `git diff` byte-count (not just
+    // report 78): permission/ (PreToolCallHookPermissionPolicy STILL index 0,
+    // AgentSwarmExclusiveDenyPermissionPolicy still index 1), the hook engine
+    // (agent + session hooks/), run-prompt.ts, and cli commands.ts/options.ts.
+    // The only changed scoped surface is records/ + session/ (~5.3 KB), all
+    // internal persistence/plumbing off the -p path: PR #786 drops
+    // app_version/resumed from the persisted .records/ metadata artifact (NOT
+    // the -p stdout stream — that writer is the byte-identical PromptJsonWriter),
+    // a SessionSkillRegistry rename (#784), and a static model-capability lookup
+    // (#776). 0.15.0 also adds an ADDITIVE `transport:'sse'` MCP config variant
+    // (config/schema.ts) the plugin never writes, plus TUI/system-prompt churn.
+    // Backed by a GREEN `bun run smoke:real` on the operator's 0.15.0 binary
+    // (report 78: 7 pass / 0 fail; review/challenge/ask/review_gate hook-denied;
+    // pursue goal-mode wrote zero files, goal.summary parsed cleanly
+    // turnsUsed:2 tokensUsed:51199; swarm subagent write hook-denied).
+    // See .claude/kimi-code-research/reports/78-upstream-0150-surface.md.
+    // Tag: compat-verified-kimi-code-0.15.0.
+    { major: 0, minor: 15 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

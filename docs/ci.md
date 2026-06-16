@@ -67,7 +67,7 @@ technique — see [upstream-compat-audit.md](./upstream-compat-audit.md)):
 
 ```bash
 D=/tmp/kimi-smoke; mkdir -p "$D"; cd "$D"; echo '{"name":"x","private":true}' > package.json
-bun add @moonshot-ai/kimi-code@0.9.0; cd -
+bun add @moonshot-ai/kimi-code@0.15.0; cd -
 KIMI_PLUGIN_CC_SMOKE=1 KIMI_PLUGIN_CC_KIMI_BIN="$D/node_modules/.bin/kimi" \
   bun test tests/runtime/real-binary-smoke.test.ts
 ```
