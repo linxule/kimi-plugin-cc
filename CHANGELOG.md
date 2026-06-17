@@ -2,6 +2,12 @@
 
 > **Post-1.0 release history (v1.0.1 → present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.2.5 — 2026-06-17
+
+**kimi-code 0.16.0 compatibility.** Extends `KIMI_TESTED_MINORS` to `{0,16}`. The operator's binary auto-upgraded 0.15.0→0.16.0 within a day, re-firing the H9 "newer than tested max" warning. COMPAT-PRESERVED: `permission/`, the hook engine, and `run-prompt.ts` are **0-byte** vs 0.15.0; the only CLI argv change registers a new `kimi vis` subcommand (a visualization server — off the `-p` path; our flags are untouched), and the `records/`/`session/`/`replay/`/`agent/` churn (a compaction refactor, a new `llm-request-logger`, replay-build additions) is internal, off the `-p` stdout stream. Backed by a GREEN `bun run smoke:real` on the 0.16.0 binary (7 pass / 0 fail; read-only labels hook-denied, pursue wrote zero files, swarm subagent write denied). Tag `compat-verified-kimi-code-0.16.0`.
+
+- **Runtime:** `runtime/kimi-version-probe.ts` adds `{ major: 0, minor: 16 }`.
+
 ## 1.2.4 — 2026-06-16
 
 **kimi-code 0.15.0 compatibility.** Extends `KIMI_TESTED_MINORS` to `{0,15}` so the `/kimi:setup` version probe stops firing the H9 "newer than tested max" warning for operators whose kimi binary auto-upgraded to 0.15.0. COMPAT-PRESERVED: the four scoped diffs (0.14.3→0.15.0) leave the permission queue, hook engine, `run-prompt.ts`, and CLI argv **0-byte** (re-confirmed independently by `git diff` byte-count, not just the routine's report); the only scoped change is `records/`+`session/` persistence churn off the `-p` path (PR #786 drops `app_version`/`resumed` from the `.records/` metadata artifact, a `SessionSkillRegistry` rename, a static model-capability lookup) plus an additive `transport:'sse'` MCP config variant the plugin never writes. Backed by a GREEN `bun run smoke:real` on the 0.15.0 binary (7 pass / 0 fail; read-only commands hook-denied, pursue wrote zero files, swarm subagent write denied). A real patch bump (not docs-only) because extending the tested-minors array is a runtime change. Tag `compat-verified-kimi-code-0.15.0`.

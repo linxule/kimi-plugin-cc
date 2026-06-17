@@ -259,6 +259,21 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // See .claude/kimi-code-research/reports/78-upstream-0150-surface.md.
   // Tag: compat-verified-kimi-code-0.15.0.
   { major: 0, minor: 15 },
+  // 0.16 (new minor, 2026-06-17) verified COMPAT-PRESERVED — the operator's
+  // binary auto-upgraded 0.15.0→0.16.0 within a day (PR #334 drift), re-firing
+  // the H9 "newer than tested max" probe warning. permission/, the hook engine
+  // (agent + session hooks/), and run-prompt.ts are 0-byte vs 0.15.0
+  // (independent `git diff` byte-count). The only CLI argv change registers a
+  // new `kimi vis` subcommand (a visualization server) — off the -p path; our
+  // -p/-r/--output-format/-m/--skills-dir flags are untouched. The records/ +
+  // session/ + replay/ + agent/ changes (a compaction refactor, a new
+  // llm-request-logger, replay-build additions) are internal and off the -p
+  // stdout stream our parser reads. Backed by a GREEN `bun run smoke:real` on
+  // the operator's 0.16.0 binary (7 pass / 0 fail; review/challenge/ask/
+  // review_gate hook-denied; pursue goal-mode wrote zero files, goal.summary
+  // parsed cleanly turnsUsed:2 tokensUsed:52211; swarm subagent write denied).
+  // Tag: compat-verified-kimi-code-0.16.0.
+  { major: 0, minor: 16 },
 ];
 
 export interface KimiVersionProbeOk {
