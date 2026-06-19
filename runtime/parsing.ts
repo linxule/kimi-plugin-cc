@@ -111,8 +111,14 @@ export interface SwarmArgs extends KimiFlagState {
    */
   budgetMs?: number;
   /**
-   * Soft cap on subagent count. NOT hook-enforceable (the hook is stateless and
-   * can't count subagents) — injected into the prompt as a model instruction.
+   * Cap on subagents, enforced in two tiers:
+   *   - Always: a SOFT count hint injected into the prompt (the hook is
+   *     stateless and can't count subagents).
+   *   - kimi-code 0.18.0+ (PR #888): the SAME value is ALSO exported as
+   *     KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY, a HARD ceiling on how many
+   *     subagents run concurrently (older binaries ignore the unknown env var).
+   *     Concurrency ≠ total count, but both bound the swarm's cost/runaway risk.
+   * See runtime/cli-client.ts buildEnv and runtime/commands/swarm.ts.
    */
   cap?: number;
   objective?: string;

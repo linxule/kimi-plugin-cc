@@ -24,7 +24,10 @@ import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMiss
 // PROTOTYPE SCOPE (v1.2). The lowest-risk swarm shape: parallel review/analysis
 // over N targets, with NO write surface. Deliberately narrow:
 //   - FOREGROUND ONLY. No --background/--detach. A hard wall-clock budget
-//     bounds the run.
+//     bounds the run. On kimi-code 0.18.0+ (PR #888), --cap is ALSO a HARD
+//     ceiling on concurrent subagents via KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
+//     (older binaries ignore it; the soft prompt hint remains the only count
+//     bound there).
 //   - READ-ONLY. The PreToolUse hook runs under the "swarm" label, which
 //     allowlists the read-only tool set PLUS the AgentSwarm tool. Every
 //     subagent inherits that label and fires the SAME hook at policy index 0
@@ -52,8 +55,12 @@ const SWARM_AGENT_PROFILE = "<swarm>";
 /**
  * Build the swarm coordination prompt. Instructs Kimi to use the AgentSwarm
  * tool to fan READ-ONLY review work over the targets implied by the objective,
- * then consolidate. The optional `cap` is a SOFT subagent-count hint (the hook
- * cannot enforce a count); the hard bound is always the wall-clock budget.
+ * then consolidate. The optional `cap` is a SOFT subagent-count hint here (the
+ * hook cannot enforce a count); on kimi-code 0.18.0+ the SAME --cap value is
+ * ALSO exported as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (a HARD ceiling on
+ * how many subagents run concurrently — see executeSwarmJob / cli-client
+ * buildEnv). The wall-clock budget is the always-on hard bound regardless of
+ * kimi-code version.
  */
 export function buildSwarmPrompt(objective: string, cap?: number): string {
   const trimmed = objective.trim();
@@ -151,6 +158,7 @@ export async function runSwarm(argv: string[], context: CommandContext): Promise
       prompt,
       objective,
       parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
+      parsed.cap,
       context,
     );
     if (!completed.final_output_path) {
@@ -167,6 +175,7 @@ async function executeSwarmJob(
   prompt: string,
   objective: string,
   budgetMs: number,
+  cap: number | undefined,
   context: CommandContext,
 ): Promise<JobRecord> {
   const paths = resolvePluginPaths(context.env);
@@ -222,6 +231,10 @@ async function executeSwarmJob(
         // The "swarm" label drives the read-only-plus-AgentSwarm allowlist in
         // the PreToolUse hook, for the coordinator AND every spawned subagent.
         commandLabel: "swarm",
+        // --cap becomes a HARD concurrency ceiling on kimi-code 0.18.0+
+        // (KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY); ignored by older binaries,
+        // where the soft prompt-count hint in buildSwarmPrompt is the only bound.
+        swarmMaxConcurrency: cap,
         model: job.model ?? undefined,
         logPath: job.stream_log_path,
         signal: handlers.signal,

@@ -101,6 +101,7 @@ export async function runCliPrompt(opts) {
         args,
         cwd: opts.cwd,
         command_label: opts.commandLabel ?? null,
+        swarm_max_concurrency: opts.swarmMaxConcurrency ?? null,
     });
     const invokeOnRecord = (record) => {
         if (opts.onRecord === undefined)
@@ -487,6 +488,11 @@ function buildEnv(opts) {
     const env = { ...opts.env };
     if (opts.commandLabel !== undefined) {
         env.KIMI_PLUGIN_CC_CMD = opts.commandLabel;
+    }
+    if (opts.swarmMaxConcurrency !== undefined) {
+        // kimi-code 0.18.0+ caps AgentSwarm's normal-phase concurrency at this
+        // value; older binaries ignore it. See the field doc on CliClientOptions.
+        env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY = String(opts.swarmMaxConcurrency);
     }
     return env;
 }

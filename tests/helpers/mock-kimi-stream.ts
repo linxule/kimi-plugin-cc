@@ -27,6 +27,12 @@
 //   KIMI_MOCK_DELAY_MS        Optional milliseconds to sleep after writing
 //                             records but before the session announce / exit.
 //                             Useful for testing AbortSignal-driven SIGTERM.
+//   KIMI_MOCK_ECHO_ENV        Optional name of an env var the child should echo
+//                             back as an extra assistant record
+//                             (`<name>=<value|UNSET>`). Lets a test assert that
+//                             an env-overlay option (e.g. swarmMaxConcurrency →
+//                             KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY) actually
+//                             reaches the spawned process, not just the log.
 
 const records: unknown[] = (() => {
   const raw = process.env.KIMI_MOCK_RECORDS;
@@ -48,10 +54,16 @@ const announceVia = process.env.KIMI_MOCK_ANNOUNCE_VIA ?? "stderr";
 const exitCode = Number.parseInt(process.env.KIMI_MOCK_EXIT_CODE ?? "0", 10) || 0;
 const interleave = process.env.KIMI_MOCK_INTERLEAVE_LF === "1";
 const delayMs = Number.parseInt(process.env.KIMI_MOCK_DELAY_MS ?? "0", 10) || 0;
+const echoEnvName = process.env.KIMI_MOCK_ECHO_ENV;
 
 async function main(): Promise<void> {
   if (stderrPrefix.length > 0) {
     process.stderr.write(stderrPrefix.endsWith("\n") ? stderrPrefix : `${stderrPrefix}\n`);
+  }
+
+  if (echoEnvName !== undefined && echoEnvName.length > 0) {
+    const value = process.env[echoEnvName] ?? "UNSET";
+    process.stdout.write(`${JSON.stringify({ role: "assistant", content: `${echoEnvName}=${value}` })}\n`);
   }
 
   for (const record of records) {

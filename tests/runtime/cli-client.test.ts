@@ -33,6 +33,7 @@ function mockOptions(overrides: {
   exitCode?: number;
   interleave?: boolean;
   commandLabel?: string;
+  swarmMaxConcurrency?: number;
     logPath?: string;
     stderrPrefix?: string;
     stderrSuffix?: string;
@@ -65,6 +66,7 @@ function mockOptions(overrides: {
     prefixArgs: ["run", mockKimiStreamPath],
     prompt: overrides.prompt ?? "test prompt",
     commandLabel: overrides.commandLabel,
+    swarmMaxConcurrency: overrides.swarmMaxConcurrency,
     logPath: overrides.logPath,
     signal: overrides.signal,
     onRecord: overrides.onRecord,
@@ -363,6 +365,76 @@ describe("runCliPrompt", () => {
         .find((entry) => entry["event"] === "spawn");
       expect(spawnLine).toBeDefined();
       expect(spawnLine!["command_label"]).toBe("review");
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("exports swarmMaxConcurrency as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY to the child", async () => {
+    const root = await createTestPluginDataRoot("cli-client-swarm-concurrency");
+    try {
+      const logPath = path.join(root, "diag.jsonl");
+      const opts = mockOptions({
+        cwd: root,
+        records: [],
+        commandLabel: "swarm",
+        swarmMaxConcurrency: 3,
+        logPath,
+      });
+      // Ask the child to echo the env var so we prove buildEnv set it on the
+      // spawn, not merely that the option threaded into the diagnostics log.
+      opts.env.KIMI_MOCK_ECHO_ENV = "KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY";
+      const result = await runCliPrompt(opts);
+      expect(result.exitCode).toBe(0);
+
+      const echoed = result.records.find(
+        (r) => r.role === "assistant" && typeof r.content === "string",
+      );
+      expect(echoed).toBeDefined();
+      expect((echoed as { content: string }).content).toBe(
+        "KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY=3",
+      );
+
+      const spawnLine = (await readFile(logPath, "utf8"))
+        .split("\n")
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .find((entry) => entry["event"] === "spawn");
+      expect(spawnLine!["swarm_max_concurrency"]).toBe(3);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("leaves KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY unset when swarmMaxConcurrency is omitted", async () => {
+    const root = await createTestPluginDataRoot("cli-client-no-swarm-concurrency");
+    try {
+      const logPath = path.join(root, "diag.jsonl");
+      const opts = mockOptions({
+        cwd: root,
+        records: [],
+        commandLabel: "review",
+        logPath,
+      });
+      // The parent env must not already carry it, or the "unset" claim is moot.
+      delete opts.env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY;
+      opts.env.KIMI_MOCK_ECHO_ENV = "KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY";
+      const result = await runCliPrompt(opts);
+      expect(result.exitCode).toBe(0);
+
+      const echoed = result.records.find(
+        (r) => r.role === "assistant" && typeof r.content === "string",
+      );
+      expect((echoed as { content: string }).content).toBe(
+        "KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY=UNSET",
+      );
+
+      const spawnLine = (await readFile(logPath, "utf8"))
+        .split("\n")
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .find((entry) => entry["event"] === "spawn");
+      expect(spawnLine!["swarm_max_concurrency"]).toBeNull();
     } finally {
       await cleanupTestPath(root);
     }

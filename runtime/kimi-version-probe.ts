@@ -274,6 +274,61 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // parsed cleanly turnsUsed:2 tokensUsed:52211; swarm subagent write denied).
   // Tag: compat-verified-kimi-code-0.16.0.
   { major: 0, minor: 16 },
+  // 0.17 / 0.18 added in v1.2.6 (2026-06-19) — the 0.16.0→0.18.0 jump
+  // (0.17.0/0.17.1/0.18.0) verified COMPAT-PRESERVED by a reproduced
+  // source-level audit. The operator's binary auto-upgraded past the tested
+  // 0.16 max (PR #334 drift), firing the H9 "newer than tested max" probe
+  // warning. The safety chain is intact:
+  //   - 03-hooks.diff is 0 bytes (BOTH agent/hooks/ AND session/hooks/) and
+  //     pre-tool-call-hook.ts is 0-byte 0.16.0→0.18.0 — the hook engine and the
+  //     policy that wires our PreToolUse hook in are byte-identical.
+  //   - PreToolCallHookPermissionPolicy is STILL index 0,
+  //     AgentSwarmExclusiveDenyPermissionPolicy still index 1, and
+  //     AutoModeApprovePermissionPolicy still index 5 (the first approve; every
+  //     policy between the index-0 hook and it is a DENY). The ONLY permission
+  //     change is a NEW GoalStartReviewAskPermissionPolicy (#839, "guided goal
+  //     authoring") inserted at index ~10 (AFTER auto-mode-approve): an `ask`
+  //     gated to a MODEL-ISSUED CreateGoal in NON-auto mode (it returns early
+  //     when permission.mode === 'auto'), so it is triple-dead on the `-p` auto
+  //     path and is an `ask` that cannot approve a write. It does not affect
+  //     /kimi:pursue, which uses the /goal COMMAND path, runs auto, and is
+  //     governed by the index-0 hook on every turn.
+  //   - options.ts is BYTE-IDENTICAL (argv intact: -p/-r/--output-format/-m/
+  //     --skills-dir; --auto/--yolo/--plan still rejected with -p). run-prompt.ts
+  //     changes ONLY in a telemetry refactor (the `started` event moved into
+  //     harness `sessionStartedProperties`); the permission-forcing chain
+  //     (permission:'auto', forcePromptPermission, installHeadlessHandlers) and
+  //     the stream-json writer (PromptJsonWriter/resume_hint/goal.summary) are
+  //     unchanged.
+  // Off-path additions (all benign for a `kimi -p` wrapper):
+  //   - A new `kimi server`/`kimi web` subcommand stack (#625, "Kimi web app +
+  //     daemon gateway") — like `vis`/`doctor`, never invoked; the plugin passes
+  //     the prompt as the VALUE of `-p`, never a bare positional.
+  //   - Session ARCHIVE (#625): an `archived` flag + archive()/includeArchive in
+  //     the session store + rpc core-api (the surface the Kimi web UI lists/
+  //     archives sessions through). The plugin owns its OWN SQLite job store and
+  //     never reads kimi's session list — off our path.
+  //   - OAuth-error fidelity (provider-manager throws the original error instead
+  //     of re-wrapping every failure as loginRequired) — off the -p stdout shape;
+  //     an expired token still surfaces as auth.login_required (the smoke's
+  //     operator-auth false-alarm note in docs/upstream-compat-audit.md holds).
+  //   - git-context process disposal + a turn-counter restore fix
+  //     (records/index.ts, the record-RESTORE path) — both off the -p stdout
+  //     stream our parser reads.
+  //   - NEW in 0.18.0: KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (#888) — an opt-in
+  //     HARD cap on concurrent AgentSwarm subagents. /kimi:swarm now sets it from
+  //     --cap (v1.2.6); older binaries ignore the unknown env var.
+  // SMOKE: the 0.16.0→0.18.0 source audit was prepared in a cloud session with
+  // no kimi binary, so its Phase 1b smoke was deferred. It was then run locally
+  // against the operator's installed 0.18.0 binary before merge — GREEN, 7 pass
+  // / 0 fail: review/challenge/ask/review_gate forced writes hook-denied; pursue
+  // multi-turn goal wrote zero files (`goal.summary` parsed cleanly turnsUsed:2);
+  // a spawned swarm subagent's forced write hook-denied. Six-reviewer + adversarial
+  // re-verification all returned CONFIRMED-SAFE (the new --cap → env wiring round-
+  // trips safely across 19 edge inputs; identical positive-integer validator).
+  // Tag: compat-verified-kimi-code-0.18.0.
+  { major: 0, minor: 17 },
+  { major: 0, minor: 18 },
 ];
 
 export interface KimiVersionProbeOk {
