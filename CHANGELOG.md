@@ -2,6 +2,16 @@
 
 > **Post-1.0 release history (v1.0.1 → present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.2.7 — 2026-06-19
+
+**`/kimi:swarm`: split `--cap` into a soft total-count hint + a hard `--max-concurrency` ceiling.** A fast-follow surface correction to v1.2.6, which had overloaded a single `--cap N` to mean *both* a soft prompt-injected total-subagent-count hint *and* a hard concurrency ceiling (`KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`). A `/kimi:ask` shape consult flagged the **"cap-as-total-count illusion"**: a user reading `--cap 5` (and the injected prompt's "≤5 subagents") reasonably expects a *total*-cost bound, but the env var only caps *peak concurrency* — a coordinator can still launch many subagents sequentially. Overloading one value onto two different risk levers (lifetime total vs. simultaneous spend) hid the real semantics.
+
+- **`--cap N`** is now purely the SOFT total-subagent-count hint injected into `buildSwarmPrompt` (advisory; the hook is stateless and can't count subagents). It no longer touches any env var.
+- **`--max-concurrency N`** (new) is the HARD ceiling on how many subagents run *at once*, exported as `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` on kimi-code **0.18.0+** (older binaries ignore the unknown env var). The two flags are independent: `--cap 20 --max-concurrency 4` means "aim for ≤20 total, never more than 4 running simultaneously".
+- The always-on hard bound on the whole run remains the `--budget` wall-clock ceiling (default 30m). Concurrency ≠ total count, so `--budget` stays the real bound on total cost; `--max-concurrency` bounds peak parallelism.
+- **Runtime:** `runtime/parsing.ts` adds `SwarmArgs.maxConcurrency` + a `--max-concurrency` case (sharing a `parsePositiveIntFlag` helper with `--cap`, so both apply the same `Number.isInteger && > 0` predicate upstream's `resolveSwarmMaxConcurrency` requires); `runtime/commands/swarm.ts` threads `--max-concurrency` (not `--cap`) into `CliClientOptions.swarmMaxConcurrency`. No compat change, no new write/permission surface — `--max-concurrency` only sets a concurrency-bounding env var; the `swarm` hook label and read-only allowlist are untouched.
+- **Tests:** `swarm.test.ts` asserts the split — `--cap` does NOT set `maxConcurrency`, `--max-concurrency` is validated as a positive integer, and the two are independently parseable. `bun run check` green.
+
 ## 1.2.6 — 2026-06-19
 
 **kimi-code 0.18.0 compatibility + `/kimi:swarm` hard concurrency cap.** Extends `KIMI_TESTED_MINORS` to `{0,17}` and `{0,18}` (the 0.16.0→0.18.0 jump — 0.17.0/0.17.1/0.18.0 — another out-of-band auto-upgrade past the tested 0.16 max, re-firing the H9 "newer than tested max" warning), and wires kimi-code 0.18.0's new `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` env var (PR #888) into `/kimi:swarm`.

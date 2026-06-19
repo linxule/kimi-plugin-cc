@@ -1,6 +1,6 @@
 ---
 description: Fan out a READ-ONLY parallel review across the workspace using Kimi's AgentSwarm tool, bounded by a hard wall-clock budget. Read-only — enforced by the same PreToolUse hook as review, applied to every subagent.
-argument-hint: "[--budget <30m|1h>] [--cap <N>] [-m <model>] <what to review across the workspace>"
+argument-hint: "[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] <what to review across the workspace>"
 disable-model-invocation: true
 ---
 
@@ -13,7 +13,8 @@ Run the companion with any user-supplied flags appended after `task swarm`:
 Supported flags:
 
 - `--budget <duration>` — HARD wall-clock ceiling (e.g. `30m`, `1h`, `90s`; bare number = minutes). Default 30m. Read-only swarm opens no write surface, so this is the bound on COST/runaway from N parallel model runs.
-- `--cap <N>` — SOFT cap on subagent count: injected into the prompt as a model instruction. Advisory, not hook-enforced (the hook is stateless and can't count subagents).
+- `--cap <N>` — SOFT cap on TOTAL subagent count: injected into the prompt as a model instruction. Advisory, not hook-enforced (the hook is stateless and can't count subagents), so the model may exceed it. Bounds lifetime total, not peak parallelism.
+- `--max-concurrency <N>` — HARD ceiling on how many subagents run AT ONCE, on kimi-code **0.18.0+** (exported as `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`; older binaries ignore it). Distinct from `--cap`: concurrency (simultaneous) ≠ total count (lifetime). Use it to throttle peak model spend; the `--budget` wall-clock ceiling remains the bound on total cost.
 - `-m`, `--model <name>`
 
 Prototype limitations (v1.2):

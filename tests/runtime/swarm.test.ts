@@ -10,13 +10,37 @@ describe("parseSwarmArgs", () => {
     expect(args.objective).toBe("review the auth module for races");
     expect(args.budgetMs).toBeUndefined();
     expect(args.cap).toBeUndefined();
+    expect(args.maxConcurrency).toBeUndefined();
   });
 
-  test("parses --budget into ms and --cap into an integer", () => {
+  test("parses --budget into ms and --cap into an integer (cap does NOT set maxConcurrency)", () => {
     const args = parseSwarmArgs(["--budget", "1h", "--cap", "6", "audit", "every", "route"]);
     expect(args.budgetMs).toBe(3_600_000);
     expect(args.cap).toBe(6);
+    // --cap is the SOFT total-count hint only; it must NOT feed the hard
+    // concurrency ceiling (that is --max-concurrency's job after the v1.2.7 split).
+    expect(args.maxConcurrency).toBeUndefined();
     expect(args.objective).toBe("audit every route");
+  });
+
+  test("--cap and --max-concurrency are independent (soft total vs hard concurrency)", () => {
+    const args = parseSwarmArgs(["--cap", "20", "--max-concurrency", "4", "sweep", "the", "repo"]);
+    expect(args.cap).toBe(20);
+    expect(args.maxConcurrency).toBe(4);
+    expect(args.objective).toBe("sweep the repo");
+  });
+
+  test("--max-concurrency alone sets only the hard ceiling", () => {
+    const args = parseSwarmArgs(["--max-concurrency", "3", "review", "x"]);
+    expect(args.maxConcurrency).toBe(3);
+    expect(args.cap).toBeUndefined();
+  });
+
+  test("rejects a non-positive or non-integer --max-concurrency", () => {
+    expect(() => parseSwarmArgs(["--max-concurrency", "0", "x"])).toThrow(RuntimeError);
+    expect(() => parseSwarmArgs(["--max-concurrency", "2.5", "x"])).toThrow(RuntimeError);
+    expect(() => parseSwarmArgs(["--max-concurrency", "-1", "x"])).toThrow(RuntimeError);
+    expect(() => parseSwarmArgs(["--max-concurrency", "audit", "x"])).toThrow(RuntimeError);
   });
 
   test("parses -m/--model", () => {

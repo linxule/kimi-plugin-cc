@@ -64,13 +64,15 @@ export interface CliClientOptions {
    * Hard cap on how many AgentSwarm subagents kimi-code runs CONCURRENTLY,
    * exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (kimi-code
    * 0.18.0+, PR #888). Older binaries silently ignore the unknown env var, so
-   * the soft prompt-count hint stays the only bound on < 0.18. Only /kimi:swarm
-   * sets this (from --cap). Upstream's `resolveSwarmMaxConcurrency` THROWS on a
+   * on < 0.18 the soft --cap prompt-count hint is the only count bound. Only
+   * /kimi:swarm sets this (from --max-concurrency, distinct from the soft --cap
+   * total-count hint). Upstream's `resolveSwarmMaxConcurrency` THROWS on a
    * non-positive-integer value; the swarm parser rejects anything that isn't a
    * positive `Number.isInteger` (the same predicate upstream applies), so every
-   * accepted --cap round-trips through `String(swarmMaxConcurrency)` without
-   * throwing — verified across 19 edge inputs incl. the integer-valued-float
-   * extreme (e.g. 1e21 → "1e+21", accepted by both sides as effectively uncapped).
+   * accepted --max-concurrency round-trips through `String(swarmMaxConcurrency)`
+   * without throwing — verified across 19 edge inputs incl. the integer-valued-
+   * float extreme (e.g. 1e21 → "1e+21", accepted by both sides as effectively
+   * uncapped).
    */
   swarmMaxConcurrency?: number;
   /** Model override; falls through to kimi-code's default_model if omitted. */

@@ -111,20 +111,26 @@ export interface SwarmArgs extends KimiFlagState {
    */
   budgetMs?: number;
   /**
-   * Cap on subagents, enforced in two tiers:
-   *   - Always: a SOFT count hint injected into the prompt (the hook is
-   *     stateless and can't count subagents).
-   *   - kimi-code 0.18.0+ (PR #888): the SAME value is ALSO exported as
-   *     KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY, a HARD ceiling on how many
-   *     subagents run concurrently (older binaries ignore the unknown env var).
-   *     Concurrency ≠ total count, but both bound the swarm's cost/runaway risk.
-   * See runtime/cli-client.ts buildEnv and runtime/commands/swarm.ts.
+   * SOFT cap on TOTAL subagent count — a hint injected into the coordinator
+   * prompt (buildSwarmPrompt). NOT hook-enforceable (the hook is stateless and
+   * can't count subagents), so the model may exceed it. For a HARD bound on how
+   * many subagents run AT ONCE, see `maxConcurrency`; the always-on hard bound
+   * on the whole run is the wall-clock `--budget`.
    */
   cap?: number;
+  /**
+   * HARD ceiling on CONCURRENT subagents, exported to the spawn as
+   * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (kimi-code 0.18.0+, PR #888); older
+   * binaries ignore the unknown env var. Distinct from `cap`: concurrency
+   * (how many run simultaneously) ≠ total count (how many run over the whole
+   * life of the swarm). See runtime/cli-client.ts buildEnv.
+   */
+  maxConcurrency?: number;
   objective?: string;
 }
 
-const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>";
+const SWARM_SUPPORTED_FLAGS =
+  "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>";
 
 /**
  * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
@@ -135,6 +141,7 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
   const thinking: boolean | undefined = true;
   let budgetMs: number | undefined;
   let cap: number | undefined;
+  let maxConcurrency: number | undefined;
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -182,15 +189,12 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
         break;
       }
       case "--cap": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError("INVALID_ARGS", "--cap requires a positive integer.", "swarm.parse");
-        }
-        const parsedCap = Number(value);
-        if (!Number.isInteger(parsedCap) || parsedCap <= 0) {
-          throw new RuntimeError("INVALID_ARGS", "--cap must be a positive integer.", "swarm.parse");
-        }
-        cap = parsedCap;
+        cap = parsePositiveIntFlag("--cap", argv[index + 1]);
+        index += 1;
+        break;
+      }
+      case "--max-concurrency": {
+        maxConcurrency = parsePositiveIntFlag("--max-concurrency", argv[index + 1]);
         index += 1;
         break;
       }
@@ -214,10 +218,29 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
   return {
     budgetMs,
     cap,
+    maxConcurrency,
     model,
     thinking,
     objective: trailingTokens?.join(" "),
   };
+}
+
+/**
+ * Shared positive-integer flag parser for swarm's `--cap` / `--max-concurrency`.
+ * Both must be a strict positive integer; `--max-concurrency` in particular maps
+ * to kimi-code's `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`, whose upstream resolver
+ * THROWS on a non-positive-integer — so the same `Number.isInteger && > 0`
+ * predicate guarantees every accepted value round-trips through `String()`.
+ */
+function parsePositiveIntFlag(flag: string, value: string | undefined): number {
+  if (!value || value.startsWith("-")) {
+    throw new RuntimeError("INVALID_ARGS", `${flag} requires a positive integer.`, "swarm.parse");
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive integer.`, "swarm.parse");
+  }
+  return parsed;
 }
 
 /**
