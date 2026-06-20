@@ -91,6 +91,8 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 **CI** ([`.github/workflows/`](./.github/workflows/), see [docs/ci.md](./docs/ci.md)). `bun run check` runs on every push to `main` and every PR (`ci.yml`) — free, no secrets, smokes auto-skip. The real-binary smokes (including the `/kimi:pursue` goal-mode safety gate) run on **manual dispatch** (`smoke.yml`), authenticated via an API-key secret so they don't depend on the expiry-prone OAuth subscription; the workflow is inert until that secret is added.
 
+**Also surfaces in Codex desktop.** Because the plugin uses the standard Claude Code plugin format (`plugin.json` + `marketplace.json` + `commands/`/`agents/`/`hooks/`), the Codex desktop app lists it in its plugins panel as a one-click add. (The runtime targets Claude Code + kimi-code — it spawns `kimi -p` and installs a PreToolUse hook into `~/.kimi-code/config.toml` — so behavior under other hosts isn't tested yet.)
+
 ## Install
 
 ### Via the Claude Code marketplace (recommended)
