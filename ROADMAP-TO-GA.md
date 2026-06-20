@@ -2,7 +2,7 @@
 
 Snapshot updated at **v1.0.0-alpha.4 candidate** (2026-05-25, post-user-directive). Captures everything surfaced by three audit rounds + production smoke testing + the user's reset of the thinking-on default. Each item has a triage decision: severity, effort, GA-blocker status, and the proposed approach.
 
-> **This is the historical pre-GA snapshot.** The living post-GA record is the [Post-GA audit log](#post-ga-audit-log) at the end of this file. Current shipped version: **v1.4.0 / kimi-code 0.18.0** (2026-06-20; write-capable swarm `/kimi:swarm --write` — `coder` subagents edit in a throwaway worktree off HEAD, result captured as a reviewable patch, confined by the new `swarm-write` hook label to a forge-proof trusted root; human-only, gated to kimi-code ≥ 0.18.0).
+> **This is the historical pre-GA snapshot.** The living post-GA record is the [Post-GA audit log](#post-ga-audit-log) at the end of this file. **For the current shipped version and what it contains, see the "Version" line at the top of [AGENTS.md](./AGENTS.md)** — that is the single source of truth, so this banner no longer restates a version number (it kept drifting a release behind).
 
 Cross-references:
 - `CHANGELOG.md` for what's already shipped (alpha.1 → alpha.4)
@@ -48,6 +48,8 @@ kimi-code's hook protocol treats exit-code-not-0-and-not-2 as ALLOW. If the hook
 Setup's probe validates the install moment; nothing guards runtime drift.
 
 **Decision (for v1.1):** Runtime-side allowlist post-validation. The cli-client receives `tool_calls` records from kimi-code's stream-json; before the model's text response is finalized, re-validate that every emitted tool call is consistent with the current command's read-only allowlist. If a tool call lands that the hook should have blocked, hard-fail the job and surface a loud error. Belt-and-suspenders: hook stays as the primary gate, runtime catches hook escape.
+
+**Status (v1.5.0 — deliberately still deferred).** Considered during the v1.5.0 open-thread sweep and consciously NOT rushed into the batch. Two reasons: (1) it is an explicitly ~2-3 day *architectural* change touching the cli-client hot path that all commands flow through, with subtle semantics (per-label write-class classification, failure semantics, and — for rescue/pursue/swarm-write, which legitimately write — re-running `evaluateRescueHookRequest` on each `tool_call`); and (2) it is **defense-in-depth behind a primary gate that is now field-proven** by the real-binary smokes (read-only write-denial, goal-mode per-turn gating, and the v1.4.1 write-swarm worktree confinement all GREEN against 0.18.0). Rushing a safety mechanism is worse than a clean deferral. Note the detection-after-execution caveat that bounds its value: by the time the cli-client sees a `tool_call` record, a hook that failed open would have already executed the tool — so runtime post-validation is a loud alarm + hard-fail, not prevention (as the original decision states). Remains a good dedicated next effort; the highest-value, lowest-risk slice is read-only commands (any write-class `tool_call` under a read-only label = escape → hard-fail).
 
 ### H2 — Session-id stderr format coupling — **CLOSED in v1.0.0**
 

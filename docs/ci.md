@@ -13,34 +13,58 @@ the repo previously only had locally. Nothing to configure; it just runs.
 A red `ci.yml` means a real regression: a build break, a type error, a failing
 test, or a forgotten `dist/` rebuild (the drift gate).
 
-## `smoke.yml` — real-binary safety gate (manual dispatch)
+## `smoke.yml` — real-binary safety gate (run it LOCALLY)
 
 Spawns the **actual** `kimi -p` against a real PreToolUse hook and proves the
 safety contract end to end:
 
 1. read-only commands (review/challenge/ask/review_gate) — a forced write is denied;
 2. **autonomous goal mode** (`/kimi:pursue`) — zero files land across a full
-   multi-turn run, i.e. the hook fires on **every** continuation turn.
+   multi-turn run, i.e. the hook fires on **every** continuation turn;
+3. **write-capable swarm** (`/kimi:swarm --write`) — coder-subagent edits land in
+   the throwaway worktree only, the user tree is untouched, and an out-of-root
+   write is denied (needs kimi-code ≥ 0.18.0).
 
-**Manual-dispatch only** (Actions tab → "Real-binary smoke" → Run workflow). It is
-*not* scheduled because a goal-mode run is ~1–2 minutes of **real model tokens**
-(the model retries against the deny-wall for the whole `--budget`), so each run
-bills. Run it before a release, or whenever you want to re-confirm the gate. To
-make it recurring, add a `schedule:` trigger to `smoke.yml`.
+### Run it locally — that's the intended path
 
-### Auth: API key, not the subscription
+The natural cadence for this gate is **before a release** (or after a kimi-code
+upgrade), and the simplest, cheapest way to do that is **locally against your own
+kimi-code subscription** — no secret, no API key, no recurring bill. See
+"[Running the same gate locally](#running-the-same-gate-locally)" below. This is
+the recommended workflow.
 
-CI authenticates via kimi-code's **env-model channel** (`KIMI_MODEL_*`), which
-points kimi at a provider using an **API key** — a *separate* billing path from
-your kimi-code **subscription**. We use this (not the subscription's OAuth)
-because OAuth tokens **expire**, which makes them brittle in CI (the smoke would
-go red whenever the token lapsed). The plugin's normal runtime never sets
-`KIMI_MODEL_*`; this is CI-only auth, scoped to the workflow's env.
+### The CI workflow is optional, manual, and inert by default
 
-The workflow is **inert until you add the secret** — without `KIMI_MODEL_API_KEY`
-it logs a warning and skips, so it's safe to keep in the repo unconfigured.
+`smoke.yml` exists as a convenience for anyone who wants the gate in Actions, but:
 
-### One-time setup
+- **Manual-dispatch only** (Actions tab → "Real-binary smoke" → Run workflow) —
+  nothing runs until you click Run, so nothing bills on its own.
+- **No `schedule:`** — a recurring token bill was deliberately rejected. The
+  check's natural cadence is "before release", which the local path covers; a
+  weekly canary would burn real tokens for marginal benefit.
+- **Inert until configured** — without `KIMI_MODEL_API_KEY` the auth-probe step
+  logs a warning and skips, so the workflow is safe to keep in the repo unused.
+
+### Secrets are never in the repo
+
+If you *do* opt into CI, the API key lives in **GitHub's encrypted secret store**
+(repo Settings → Secrets and variables → Actions). The committed YAML references
+only the secret **name** (`${{ secrets.KIMI_MODEL_API_KEY }}`) — the value is
+never written to any file in the repo and never appears in logs (Actions masks
+it). If you'd rather not manage a CI secret at all, just run the gate locally;
+you lose nothing.
+
+### Auth (CI only): API key, not the subscription
+
+When run in CI, the smoke authenticates via kimi-code's **env-model channel**
+(`KIMI_MODEL_*`), which points kimi at a provider using an **API key** — a
+*separate* billing path from your kimi-code **subscription**. CI uses this (not
+the subscription's OAuth) because OAuth tokens **expire**, which makes them
+brittle in CI (the smoke would go red whenever the token lapsed). The plugin's
+normal runtime never sets `KIMI_MODEL_*`; this is CI-only auth, scoped to the
+workflow's env. Locally, your OAuth subscription works directly (next section).
+
+### One-time setup (only if you opt into CI)
 
 Repo → **Settings → Secrets and variables → Actions**:
 
@@ -67,7 +91,7 @@ technique — see [upstream-compat-audit.md](./upstream-compat-audit.md)):
 
 ```bash
 D=/tmp/kimi-smoke; mkdir -p "$D"; cd "$D"; echo '{"name":"x","private":true}' > package.json
-bun add @moonshot-ai/kimi-code@0.15.0; cd -
+bun add @moonshot-ai/kimi-code@0.18.0; cd -  # >= 0.18.0 to exercise the write-swarm smoke
 KIMI_PLUGIN_CC_SMOKE=1 KIMI_PLUGIN_CC_KIMI_BIN="$D/node_modules/.bin/kimi" \
   bun test tests/runtime/real-binary-smoke.test.ts
 ```

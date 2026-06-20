@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseDurationMs, parsePursueArgs } from "../../runtime/parsing.js";
+import { MAX_DURATION_MS, parseDurationMs, parsePursueArgs } from "../../runtime/parsing.js";
 import { buildGoalPrompt, classifyGoalExit } from "../../runtime/commands/pursue.js";
 import { RuntimeError } from "../../runtime/errors.js";
 
@@ -20,6 +20,21 @@ describe("parseDurationMs", () => {
     expect(() => parseDurationMs("0m", "--budget")).toThrow(RuntimeError);
     expect(() => parseDurationMs("-5", "--budget")).toThrow(RuntimeError);
     expect(() => parseDurationMs("30x", "--budget")).toThrow(RuntimeError);
+  });
+
+  test("accepts a duration at the 24h ceiling", () => {
+    expect(parseDurationMs("24h", "--budget")).toBe(MAX_DURATION_MS);
+    expect(parseDurationMs("1440", "--budget")).toBe(MAX_DURATION_MS); // 1440 min = 24h
+    expect(parseDurationMs("86400s", "--budget")).toBe(MAX_DURATION_MS);
+  });
+
+  test("rejects absurdly large durations above the 24h ceiling", () => {
+    // The budget is the SOLE hard wall-clock bound on pursue/swarm; a runaway
+    // value would effectively disable it, so it must hard-fail, not clamp.
+    expect(() => parseDurationMs("25h", "--budget")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("1441", "--budget")).toThrow(RuntimeError); // 1441 min > 24h
+    expect(() => parseDurationMs("999999h", "--budget")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("86401s", "--budget")).toThrow(RuntimeError);
   });
 });
 

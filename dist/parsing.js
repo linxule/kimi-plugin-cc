@@ -139,8 +139,20 @@ function parsePositiveIntFlag(flag, value) {
     return parsed;
 }
 /**
+ * Upper bound for any `--budget` duration. The budget is the SOLE hard
+ * wall-clock bound on the plugin's autonomous/fan-out surfaces (pursue, swarm),
+ * so a typo'd or absurd value (`999999h`, a pasted nanosecond count) would
+ * effectively disable that bound — defeating the one guarantee these modes rest
+ * on. 24h is far above any legitimate budget (pursue defaults to 45m, swarm to
+ * 30m) yet still finite, so the AbortController always fires. Above it we
+ * hard-fail INVALID_ARGS rather than silently clamp — a wrapper LLM passing a
+ * runaway budget should see the rejection, not a quietly-different value.
+ */
+export const MAX_DURATION_MS = 24 * 60 * 60 * 1_000;
+/**
  * Parse a duration token (`30m`, `1h`, `90s`, or a bare integer = minutes)
- * into milliseconds. Throws INVALID_ARGS on a malformed or non-positive value.
+ * into milliseconds. Throws INVALID_ARGS on a malformed, non-positive, or
+ * absurdly large value (> {@link MAX_DURATION_MS}).
  */
 export function parseDurationMs(token, flag) {
     const match = /^(\d+)(s|m|h)?$/.exec(token.trim());
@@ -153,7 +165,11 @@ export function parseDurationMs(token, flag) {
         throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive duration.`, "pursue.parse");
     }
     const unitMs = unit === "s" ? 1_000 : unit === "h" ? 3_600_000 : 60_000;
-    return value * unitMs;
+    const ms = value * unitMs;
+    if (ms > MAX_DURATION_MS) {
+        throw new RuntimeError("INVALID_ARGS", `${flag} must be at most 24h (got "${token}"); the budget is a safety ceiling, not a scheduler.`, "pursue.parse");
+    }
+    return ms;
 }
 /**
  * Parser for /kimi:pursue (autonomous goal mode). Foreground-only in the

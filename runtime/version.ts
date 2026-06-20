@@ -4,4 +4,4 @@
 // and AGENTS.md on every release. A future improvement would read this from
 // package.json at build time, but that adds a build-step dependency we
 // don't want yet.
-export const KIMI_PLUGIN_CC_VERSION = "1.4.1";
+export const KIMI_PLUGIN_CC_VERSION = "1.5.0";

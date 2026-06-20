@@ -2,17 +2,29 @@ name: Real-binary smoke
 
 # The real-binary safety gate: spawns the ACTUAL `kimi -p` against a real
 # PreToolUse hook and proves end-to-end that (1) read-only commands' forced
-# writes are denied, and (2) autonomous goal mode (/kimi:pursue) is hook-gated on
-# EVERY continuation turn (zero files land across a multi-turn run).
+# writes are denied, (2) autonomous goal mode (/kimi:pursue) is hook-gated on
+# EVERY continuation turn (zero files land across a multi-turn run), and (3)
+# write-swarm (/kimi:swarm --write) edits land only in the throwaway worktree
+# (user tree untouched) while out-of-root writes are denied (needs kimi >= 0.18.0).
 #
-# MANUAL-DISPATCH ONLY (no schedule) — a goal-mode run is ~1-2 min of REAL model
-# tokens (the model retries against the deny-wall for the whole budget), so this
-# bills per run. You trigger it on demand (e.g. before a release). To make it
-# recurring later, add a `schedule:` trigger below.
+# MANUAL-DISPATCH ONLY (no schedule) — a goal-mode + write-swarm run is a few
+# minutes of REAL model tokens (the model retries against the deny-wall for the
+# whole budget; write-swarm runs two real fan-outs), so this BILLS PER RUN.
 #
-# Auth uses kimi-code's env-model channel (API key), NOT the OAuth subscription —
-# OAuth tokens expire and are brittle in CI. It is INERT until you add the secret
-# (the job no-ops with a warning), so this workflow is safe to merge as-is.
+# The PRIMARY way to run this gate is LOCALLY against your own kimi-code
+# subscription before a release (see docs/ci.md → "Running the same gate
+# locally") — no secret, no recurring bill. This CI workflow is an OPTIONAL
+# convenience for anyone who wants the gate in Actions; it stays MANUAL so nothing
+# bills unless you click Run, and it is INERT until you add the KIMI_MODEL_API_KEY
+# secret (the auth-probe step skips with a warning when absent). A weekly
+# `schedule:` was considered and deliberately NOT added: a recurring token bill
+# isn't worth it for a check whose natural cadence is "before release", which the
+# local path already covers.
+#
+# Auth (only if you opt into CI) uses kimi-code's env-model channel (API key),
+# NOT the OAuth subscription — OAuth tokens expire and are brittle in CI. The key
+# lives in GitHub's ENCRYPTED SECRET STORE (Settings → Secrets), never in the
+# repo; the YAML below references only the secret NAME.
 #
 # ── One-time setup (repo Settings → Secrets and variables → Actions) ──
 #   Secret  KIMI_MODEL_API_KEY   a pay-per-token API key (Moonshot / OpenAI / Anthropic)
@@ -25,9 +37,9 @@ on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "kimi-code version to smoke against (must be >= 0.8.0 for goal mode)"
+        description: "kimi-code version to smoke against (>= 0.8.0 for goal mode; >= 0.18.0 for the write-swarm smoke)"
         type: string
-        default: "0.15.0"
+        default: "0.18.0"
       goal_budget_ms:
         description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
         type: string
@@ -39,7 +51,9 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30 min: read-only + goal-mode smokes plus the two write-swarm fan-outs
+    # (each bounded by its own budget, ~10m + ~6m worst case).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

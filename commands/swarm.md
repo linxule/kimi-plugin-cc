@@ -23,7 +23,7 @@ Supported flags:
 Prototype limitations:
 
 - **Foreground only.** No `--background` — watch the run; cancel with Ctrl+C or `/kimi:cancel <job-id>`.
-- **`--write` is human-only.** There is no `kimi-swarm-write` agent (the read-only `kimi-swarm` agent stays read-only); auto-dispatching a write fan-out is deferred until `--write` is field-proven.
+- **`--write` also has a model-invocable agent (v1.5):** the `kimi-swarm-write` subagent lets the main Claude thread dispatch a write fan-out on its own judgement, with strict triggering (many disjoint write targets AND explicit fan-out intent). Auto-dispatch widens no write surface — it is **patch-only** (edits stay in the throwaway worktree; the plugin never applies or commits; the user owns the merge) and keeps every bound (`--budget`, `--max-concurrency` default 1, hook required). The slash command itself stays human-only (`disable-model-invocation: true`, the blanket convention for all commands).
 - Read-only swarm requires kimi-code **>= 0.12.0** (the `AgentSwarm` tool); `--write` requires **>= 0.18.0** (the hard concurrency cap). Both **refuse** without the `/kimi:setup` PreToolUse hook (a fan-out with no enforcement is an N-fold blast radius).
 
 Return the companion stdout verbatim.
