@@ -80,14 +80,42 @@ describe("evaluateRescueHookRequest", () => {
       }
     });
 
-    test("denies file edits with missing file_path", async () => {
+    // Regression for the v1.4.1 fix: kimi-code's Write/Edit tools name the path
+    // field `path` (write.ts/edit.ts: z.object({ path })), NOT `file_path`. The
+    // allowlist must evaluate `path`, else every real Write/Edit is denied with
+    // "no path field" — the bug the write-swarm real-binary smoke exposed.
+    test("evaluates the kimi-code `path` field (Write/Edit use path, not file_path)", async () => {
+      const repoRoot = await createGitRepoFixture("approval-path-key");
+      const outsideRoot = await createTestPluginDataRoot("approval-path-outside");
+      try {
+        // in-workspace `path` → allowed (the case that was wrongly denied)
+        await expect(
+          evaluateRescueHookRequest(repoRoot, "Write", { path: path.join(repoRoot, "note.txt") }),
+        ).resolves.toEqual({ decision: "allow" });
+        await expect(
+          evaluateRescueHookRequest(repoRoot, "Edit", { path: path.join(repoRoot, "src.ts") }),
+        ).resolves.toEqual({ decision: "allow" });
+        // out-of-workspace `path` → denied with the out-of-workspace reason
+        await expect(
+          evaluateRescueHookRequest(repoRoot, "Write", { path: path.join(outsideRoot, "escape.txt") }),
+        ).resolves.toMatchObject({
+          decision: "deny",
+          reason: expect.stringContaining("outside the workspace"),
+        });
+      } finally {
+        await cleanupTestPath(repoRoot);
+        await cleanupTestPath(outsideRoot);
+      }
+    });
+
+    test("denies file edits with neither path nor file_path", async () => {
       const repoRoot = await createGitRepoFixture("approval-missing-path");
       try {
         await expect(
           evaluateRescueHookRequest(repoRoot, "Write", { not_a_path: "foo" }),
         ).resolves.toMatchObject({
           decision: "deny",
-          reason: expect.stringContaining("no file_path field"),
+          reason: expect.stringContaining("no path field"),
         });
       } finally {
         await cleanupTestPath(repoRoot);

@@ -166,7 +166,7 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
         if (filePath === null) {
             return {
                 decision: "deny",
-                reason: `rescue cannot evaluate ${toolName} input with no file_path field`,
+                reason: `rescue cannot evaluate ${toolName} input with no path field`,
             };
         }
         return pathDecision(await checkApprovedPath(root, filePath), filePath);
@@ -176,7 +176,7 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
         if (filePath === null) {
             return {
                 decision: "deny",
-                reason: "rescue cannot evaluate MultiEdit input with no file_path field",
+                reason: "rescue cannot evaluate MultiEdit input with no path field",
             };
         }
         return pathDecision(await checkApprovedPath(root, filePath), filePath);
@@ -209,8 +209,16 @@ function extractBashCommand(toolInput) {
 function extractFilePath(toolInput) {
     if (!isObject(toolInput))
         return null;
-    const filePath = toolInput.file_path;
-    return typeof filePath === "string" && filePath.length > 0 ? filePath : null;
+    // kimi-code's Write/Edit tools name the path field `path`
+    // (packages/agent-core/src/tools/builtin/file/{write,edit}.ts:
+    // z.object({ path: ... })) — NOT `file_path` (the Anthropic/Claude Code
+    // convention). The original `file_path`-only read meant EVERY real Write/Edit
+    // was denied with "no path field" (fail-closed but broken) for rescue/pursue/
+    // swarm-write — invisible to the unit tests, which all mock `file_path`, and
+    // only caught once the write-swarm real-binary smoke landed (v1.4.1). Prefer
+    // the kimi-code key; accept `file_path` too for forward/backward compat.
+    const candidate = toolInput.path ?? toolInput.file_path;
+    return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 function isObject(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
