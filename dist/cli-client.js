@@ -494,6 +494,11 @@ function buildEnv(opts) {
         // value; older binaries ignore it. See the field doc on CliClientOptions.
         env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY = String(opts.swarmMaxConcurrency);
     }
+    if (opts.swarmWriteWorkspaceRoot !== undefined) {
+        // Trusted allowlist root for the swarm-write PreToolUse hook (v1.4). Forge-
+        // proof (env on the spawned process; the model can't set it). See field doc.
+        env.KIMI_PLUGIN_CC_WORKSPACE_ROOT = opts.swarmWriteWorkspaceRoot;
+    }
     return env;
 }
 function appendToTail(tail, chunk, maxBytes) {

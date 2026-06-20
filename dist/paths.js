@@ -14,6 +14,7 @@ export function resolvePluginPaths(env) {
         stateDbPath: path.join(pluginRoot, "state.db"),
         logsDir: path.join(pluginRoot, "logs"),
         artifactsDir: path.join(pluginRoot, "artifacts"),
+        worktreesDir: path.join(pluginRoot, "worktrees"),
         configPath: path.join(pluginRoot, "config.json"),
     };
 }
@@ -24,4 +25,6 @@ export async function ensurePluginPaths(paths) {
     await access(paths.pluginRoot, constants.R_OK | constants.W_OK);
     await access(paths.logsDir, constants.R_OK | constants.W_OK);
     await access(paths.artifactsDir, constants.R_OK | constants.W_OK);
+    // worktreesDir is created lazily by the write-swarm path (not every command
+    // needs it), so it is intentionally NOT required here.
 }

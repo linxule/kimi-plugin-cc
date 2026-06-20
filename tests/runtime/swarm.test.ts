@@ -3,8 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { parseSwarmArgs } from "../../runtime/parsing.js";
 import {
   buildSwarmPrompt,
+  buildSwarmWritePrompt,
   resolveSwarmMaxConcurrency,
+  resolveSwarmWriteMaxConcurrency,
   SWARM_DEFAULT_MAX_CONCURRENCY,
+  SWARM_WRITE_DEFAULT_MAX_CONCURRENCY,
 } from "../../runtime/commands/swarm.js";
 import { RuntimeError } from "../../runtime/errors.js";
 
@@ -55,7 +58,37 @@ describe("parseSwarmArgs", () => {
   test("rejects unknown flags (no silent slurp into the objective)", () => {
     expect(() => parseSwarmArgs(["--background", "do", "x"])).toThrow(RuntimeError);
     expect(() => parseSwarmArgs(["--turns", "5", "do", "x"])).toThrow(RuntimeError);
-    expect(() => parseSwarmArgs(["--write", "do", "x"])).toThrow(RuntimeError);
+    expect(() => parseSwarmArgs(["--apply", "do", "x"])).toThrow(RuntimeError);
+  });
+
+  test("--write is a recognized boolean flag (defaults off)", () => {
+    expect(parseSwarmArgs(["review", "x"]).write).toBe(false);
+    const w = parseSwarmArgs(["--write", "refactor", "the", "parser"]);
+    expect(w.write).toBe(true);
+    expect(w.objective).toBe("refactor the parser");
+  });
+
+  test("--write composes with --budget / --cap / --max-concurrency / -m", () => {
+    const w = parseSwarmArgs([
+      "--write",
+      "--budget",
+      "20m",
+      "--cap",
+      "5",
+      "--max-concurrency",
+      "2",
+      "-m",
+      "k2",
+      "fix",
+      "the",
+      "tests",
+    ]);
+    expect(w.write).toBe(true);
+    expect(w.budgetMs).toBe(1_200_000);
+    expect(w.cap).toBe(5);
+    expect(w.maxConcurrency).toBe(2);
+    expect(w.model).toBe("k2");
+    expect(w.objective).toBe("fix the tests");
   });
 
   test("rejects a non-positive or non-integer --cap", () => {
@@ -89,6 +122,21 @@ describe("resolveSwarmMaxConcurrency", () => {
   });
 });
 
+describe("resolveSwarmWriteMaxConcurrency", () => {
+  test("write mode serializes by default (1), lower than read's 4", () => {
+    // Disjoint-target partitioning is prompt-only and unenforceable; serialize
+    // concurrent writers into the shared worktree until a real-binary smoke
+    // proves clean concurrent disjoint patches.
+    expect(resolveSwarmWriteMaxConcurrency(undefined)).toBe(SWARM_WRITE_DEFAULT_MAX_CONCURRENCY);
+    expect(SWARM_WRITE_DEFAULT_MAX_CONCURRENCY).toBe(1);
+    expect(SWARM_WRITE_DEFAULT_MAX_CONCURRENCY).toBeLessThan(SWARM_DEFAULT_MAX_CONCURRENCY);
+  });
+
+  test("an explicit --max-concurrency overrides the write default", () => {
+    expect(resolveSwarmWriteMaxConcurrency(2)).toBe(2);
+  });
+});
+
 describe("buildSwarmPrompt", () => {
   test("instructs the model to use AgentSwarm and stay read-only", () => {
     const prompt = buildSwarmPrompt("review the parser");
@@ -116,5 +164,33 @@ describe("buildSwarmPrompt", () => {
     const prompt = buildSwarmPrompt("audit the routes");
     expect(prompt).not.toContain("at most");
     expect(prompt).toContain("one subagent per distinct target");
+  });
+});
+
+describe("buildSwarmWritePrompt", () => {
+  test("steers to the write-capable coder profile and disjoint editing", () => {
+    const prompt = buildSwarmWritePrompt("apply the rename across the package");
+    expect(prompt).toContain("AgentSwarm");
+    expect(prompt).toContain("coder");
+    expect(prompt).toContain("DISJOINT");
+    expect(prompt).toContain("apply the rename across the package");
+  });
+
+  test("forbids git mutation and nested swarm in-prompt", () => {
+    const prompt = buildSwarmWritePrompt("fix the failing tests");
+    expect(prompt).toContain("git");
+    expect(prompt.toLowerCase()).toContain("nested");
+    // Tells the model the human owns git / merge.
+    expect(prompt.toLowerCase()).toContain("human owns");
+  });
+
+  test("does NOT claim read-only (it is the write path)", () => {
+    const prompt = buildSwarmWritePrompt("refactor x");
+    expect(prompt).not.toContain("READ-ONLY");
+  });
+
+  test("carries the soft cap clause like the read prompt", () => {
+    expect(buildSwarmWritePrompt("x", 3)).toContain("at most 3 subagents");
+    expect(buildSwarmWritePrompt("x")).toContain("one subagent per distinct target");
   });
 });

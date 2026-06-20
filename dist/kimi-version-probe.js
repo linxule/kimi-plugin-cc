@@ -148,7 +148,13 @@ export const KIMI_TESTED_MINORS = [
     //     at index ~14 (below hook(0)/auto-approve(4)), is approve-only and
     //     double-guarded, and swarmMode.enter() runs INSIDE the tool's execute()
     //     (after the index-0 hook already gated the AgentSwarm call). Swarm
-    //     subagents still inherit DenyAllPermissionPolicy (subagent-host.ts:233).
+    //     subagents use the STANDARD permission stack (hook at index 0, NO
+    //     deny-all): the lone DenyAllPermissionPolicy.unshift in subagent-host.ts
+    //     is inside startBtw() (the side-question/"btw" path), NOT the swarm spawn
+    //     path (re-verified against the 0.18.0 checkout 2026-06-20 during the v1.4
+    //     write-swarm build — earlier notes here mis-cited it as "inherit
+    //     deny-all"). So a `coder` swarm subagent's write IS gated solely by our
+    //     index-0 hook — which is exactly what makes /kimi:swarm --write possible.
     //   - New `doctor` subcommand + a `program.argument('[args...]')` unknown-
     //     positional error: both unreachable — the plugin passes the prompt as
     //     the VALUE of `-p, --prompt`, never a bare positional.

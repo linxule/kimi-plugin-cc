@@ -25,7 +25,12 @@ export type RuntimeCommandType =
   // the review *job* lineage (command_type "review") so it is NOT a
   // ManagedCommandType; this entry only names it in the invocation-log header.
   // The PreToolUse hook label is "swarm" (see runtime/hooks/approval-policy.ts).
-  | "swarm";
+  | "swarm"
+  // Diagnostic/logging label only. Write-swarm (--write, v1.4) reuses the rescue
+  // *job* lineage (command_type "rescue", like pursue) so it is NOT a
+  // ManagedCommandType; this entry only names it in the invocation-log header.
+  // The PreToolUse hook label is "swarm-write" (runtime/hooks/approval-policy.ts).
+  | "swarm-write";
 
 export type ManagedCommandType =
   | "review"

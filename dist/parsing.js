@@ -40,7 +40,7 @@ function isRemovedThinkingFlag(token) {
         token.startsWith("--no-thinking="));
 }
 const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --turns <N>";
-const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>";
+const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
 /**
  * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
  * no --background/--fresh/--resume. Trailing tokens are the objective.
@@ -51,6 +51,7 @@ export function parseSwarmArgs(argv) {
     let budgetMs;
     let cap;
     let maxConcurrency;
+    let write = false;
     let trailingTokens;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
@@ -76,6 +77,9 @@ export function parseSwarmArgs(argv) {
                 index += 1;
                 break;
             }
+            case "--write":
+                write = true;
+                break;
             case "--budget": {
                 const value = argv[index + 1];
                 if (!value || value.startsWith("-")) {
@@ -111,6 +115,7 @@ export function parseSwarmArgs(argv) {
         budgetMs,
         cap,
         maxConcurrency,
+        write,
         model,
         thinking,
         objective: trailingTokens?.join(" "),

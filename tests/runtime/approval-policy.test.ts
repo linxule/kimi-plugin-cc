@@ -97,6 +97,75 @@ describe("decideHookOutcome", () => {
     });
   });
 
+  describe("swarm-write label (write-capable fan-out, v1.4)", () => {
+    test("allows read-only tools and AgentSwarm", async () => {
+      for (const tool of ["Read", "Grep", "Glob", "AgentSwarm"]) {
+        const decision = await decideHookOutcome(
+          { tool_name: tool, tool_input: {} },
+          { commandLabel: "swarm-write", swarmWriteWorkspaceRoot: "/wt" },
+        );
+        expect(decision.decision).toBe("allow");
+      }
+    });
+
+    test("denies the singular Agent tool", async () => {
+      const decision = await decideHookOutcome(
+        { tool_name: "Agent", tool_input: {} },
+        { commandLabel: "swarm-write", swarmWriteWorkspaceRoot: "/wt" },
+      );
+      expect(decision.decision).toBe("deny");
+    });
+
+    test("confines writes to the TRUSTED env root, NOT the hook payload cwd", async () => {
+      // The load-bearing safety property: even if the payload cwd is the user's
+      // real repo, the evaluator is called with the trusted worktree root from
+      // ctx.swarmWriteWorkspaceRoot (forge-proof env), never input.cwd.
+      let seenRoot: string | undefined;
+      const decision = await decideHookOutcome(
+        { tool_name: "Write", tool_input: { file_path: "x" }, cwd: "/users/real-repo" },
+        {
+          commandLabel: "swarm-write",
+          swarmWriteWorkspaceRoot: "/plugin/worktrees/swarm-write-abc",
+          rescueEvaluator: async (workspaceRoot) => {
+            seenRoot = workspaceRoot;
+            return { decision: "allow" };
+          },
+        },
+      );
+      expect(seenRoot).toBe("/plugin/worktrees/swarm-write-abc");
+      expect(seenRoot).not.toBe("/users/real-repo");
+      expect(decision.decision).toBe("allow");
+    });
+
+    test("delegates write/edit/shell to the rescue evaluator (forwards deny)", async () => {
+      const decision = await decideHookOutcome(
+        { tool_name: "Bash", tool_input: { command: "rm -rf /" } },
+        {
+          commandLabel: "swarm-write",
+          swarmWriteWorkspaceRoot: "/wt",
+          rescueEvaluator: async () => ({ decision: "deny", reason: "destructive command" }),
+        },
+      );
+      expect(decision).toEqual({ decision: "deny", reason: "destructive command" });
+    });
+
+    test.each(["Write", "Edit", "Bash"])(
+      "fail-CLOSES on a missing trusted workspace root (%s denied)",
+      async (tool) => {
+        const decision = await decideHookOutcome(
+          { tool_name: tool, tool_input: { file_path: "x", command: "ls" } },
+          {
+            commandLabel: "swarm-write",
+            // No swarmWriteWorkspaceRoot — misconfiguration.
+            rescueEvaluator: async () => ({ decision: "allow" }),
+          },
+        );
+        expect(decision.decision).toBe("deny");
+        expect(decision.reason).toContain("no trusted workspace root");
+      },
+    );
+  });
+
   describe("rescue label without evaluator (stub)", () => {
     test("allows Read/Grep/Glob", async () => {
       for (const tool of ["Read", "Grep", "Glob"]) {

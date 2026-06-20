@@ -101,6 +101,16 @@ export interface PolicyContext {
    * undefined, the policy falls back to a deny-by-default stub.
    */
   rescueEvaluator?: RescueEvaluator;
+  /**
+   * Trusted workspace root for the "swarm-write" label (v1.4), from the
+   * KIMI_PLUGIN_CC_WORKSPACE_ROOT env the plugin exports on the spawn (the
+   * ephemeral worktree path). The swarm-write case confines writes to THIS
+   * path via the rescue evaluator, NOT the hook payload `cwd` — so confinement
+   * cannot be defeated by upstream changing how it derives the payload cwd, and
+   * the model inside kimi cannot forge it. Undefined ⇒ swarm-write denies all
+   * writes (fail-closed misconfiguration).
+   */
+  swarmWriteWorkspaceRoot?: string;
 }
 
 /**
@@ -115,6 +125,7 @@ const KNOWN_LABELS = new Set<string>([
   "review_gate",
   "rescue",
   "swarm",
+  "swarm-write",
 ]);
 
 export async function decideHookOutcome(
@@ -170,6 +181,45 @@ export async function decideHookOutcome(
         decision: "deny",
         reason: denySwarmMessage(toolName),
       };
+
+    case "swarm-write": {
+      // /kimi:swarm --write — WRITE-capable parallel fan-out (v1.4). The
+      // coordinator and `coder` subagents run in an EPHEMERAL THROWAWAY WORKTREE
+      // (off the user's HEAD). Allow AgentSwarm (else the swarm never launches)
+      // plus the read-only set; deny the singular Agent. Every write/edit/shell
+      // goes through the rescue allowlist — but scoped to the TRUSTED env-provided
+      // worktree root (ctx.swarmWriteWorkspaceRoot), NOT the hook payload `cwd`.
+      // Rationale: the worktree path is exported as KIMI_PLUGIN_CC_WORKSPACE_ROOT
+      // by the same trusted plugin spawn that sets KIMI_PLUGIN_CC_CMD, so the
+      // model running inside kimi cannot forge it, and confinement does not
+      // depend on how upstream derives the payload cwd for an in-process
+      // subagent. Missing root ⇒ fail-closed (deny writes).
+      if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
+        return { decision: "allow" };
+      }
+      const workspaceRoot =
+        typeof ctx.swarmWriteWorkspaceRoot === "string" ? ctx.swarmWriteWorkspaceRoot : "";
+      if (workspaceRoot.length === 0) {
+        return {
+          decision: "deny",
+          reason:
+            `kimi-plugin-cc safety hook: swarm-write received no trusted workspace root; tool "${toolName}" denied. ` +
+            "This is a plugin misconfiguration — writes are refused rather than risk the user's working tree.",
+        };
+      }
+      if (ctx.rescueEvaluator !== undefined) {
+        return await ctx.rescueEvaluator(workspaceRoot, toolName, input.tool_input);
+      }
+      // Stub for callers that didn't inject the evaluator (tests of the policy
+      // function alone). The production entry script always injects it.
+      if (READ_ONLY_TOOLS.has(toolName)) {
+        return { decision: "allow" };
+      }
+      return {
+        decision: "deny",
+        reason: `kimi-plugin-cc safety hook: swarm-write evaluator not configured; tool "${toolName}" denied as a safety default.`,
+      };
+    }
 
     case "rescue":
       if (ctx.rescueEvaluator !== undefined) {

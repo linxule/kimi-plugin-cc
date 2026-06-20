@@ -132,11 +132,20 @@ export interface SwarmArgs extends KimiFlagState {
    * construction.
    */
   maxConcurrency?: number;
+  /**
+   * WRITE MODE (v1.4). Default false → today's read-only fan-out, unchanged. When
+   * true, the swarm spawns its coordinator in an ephemeral throwaway git worktree
+   * (off HEAD) and lets `coder` subagents EDIT files there; the result is a
+   * reviewable patch the main thread applies (see runtime/commands/swarm.ts and
+   * .claude/docs/write-swarm-spec.md). Write mode requires kimi-code >= 0.18.0
+   * (hard concurrency env), a git repo with a born HEAD, and the PreToolUse hook.
+   */
+  write?: boolean;
   objective?: string;
 }
 
 const SWARM_SUPPORTED_FLAGS =
-  "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>";
+  "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
 
 /**
  * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
@@ -148,6 +157,7 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
   let budgetMs: number | undefined;
   let cap: number | undefined;
   let maxConcurrency: number | undefined;
+  let write = false;
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -181,6 +191,9 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
         index += 1;
         break;
       }
+      case "--write":
+        write = true;
+        break;
       case "--budget": {
         const value = argv[index + 1];
         if (!value || value.startsWith("-")) {
@@ -225,6 +238,7 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
     budgetMs,
     cap,
     maxConcurrency,
+    write,
     model,
     thinking,
     objective: trailingTokens?.join(" "),

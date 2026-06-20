@@ -1,19 +1,29 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
 import { runCliPromptWithBudget } from "../cli-client.js";
 import { resolveKimiCliCommand } from "../kimi-command.js";
 import { RuntimeError } from "../errors.js";
-import { resolveRepoIdentity } from "../git.js";
+import {
+  captureWorktreePatch,
+  createEphemeralWorktree,
+  hasBornHead,
+  isWorkingTreeDirty,
+  pruneWorktrees,
+  removeWorktree,
+  resolveRepoIdentity,
+  type RepoIdentity,
+} from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_SWARM_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
 import { probeKimiVersion } from "../kimi-version-probe.js";
 import { writeInvocationLogHeader } from "../logging.js";
-import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
-import { parseSwarmArgs } from "../parsing.js";
+import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
+import { parseSwarmArgs, type SwarmArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
@@ -50,8 +60,24 @@ import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMiss
 
 /** kimi-code minor that introduced the AgentSwarm tool (#424, 0.12.0). */
 const SWARM_MIN_MINOR = 12;
+/**
+ * kimi-code minor required for WRITE mode (--write). 0.18.0 is the first version
+ * that honors KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (PR #888); below it a write
+ * fan-out has NO hard peak-parallelism bound (the batch ramps to 5 immediately),
+ * which is unacceptable for concurrent writers into one shared worktree. So write
+ * mode refuses on < 0.18 even though the AgentSwarm tool itself exists from 0.12.
+ */
+const WRITE_SWARM_MIN_MINOR = 18;
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
+const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
+/**
+ * Orphaned write-swarm worktrees older than this are reaped by the startup sweep.
+ * Every normal run removes its own worktree in a finally; an orphan only survives
+ * a hard kill (SIGKILL of the plugin process). Generous vs the default 30m budget
+ * so the sweep never races a live concurrent run.
+ */
+const WORKTREE_ORPHAN_TTL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Default HARD concurrency ceiling applied when the user passes no
@@ -74,6 +100,22 @@ export const SWARM_DEFAULT_MAX_CONCURRENCY = 4;
  */
 export function resolveSwarmMaxConcurrency(requested: number | undefined): number {
   return requested ?? SWARM_DEFAULT_MAX_CONCURRENCY;
+}
+
+/**
+ * Default HARD concurrency ceiling for WRITE mode — 1 (serialized) vs read's 4.
+ * Writes are riskier than reads: disjoint-target partitioning is prompt-only and
+ * unenforceable (the hook is stateless), so two concurrent `coder` subagents
+ * racing the same file in the shared worktree would corrupt the patch. Serialize
+ * by default until a real-binary smoke proves clean concurrent disjoint writes;
+ * override with an explicit `--max-concurrency N`. Effective only on kimi-code
+ * 0.18.0+ (the write-mode version gate), so the ceiling is always enforced.
+ */
+export const SWARM_WRITE_DEFAULT_MAX_CONCURRENCY = 1;
+
+/** Resolve the write-mode concurrency ceiling: explicit wins, else default 1. */
+export function resolveSwarmWriteMaxConcurrency(requested: number | undefined): number {
+  return requested ?? SWARM_WRITE_DEFAULT_MAX_CONCURRENCY;
 }
 
 /**
@@ -112,17 +154,70 @@ export function buildSwarmPrompt(objective: string, cap?: number): string {
   ].join("\n");
 }
 
+/**
+ * Build the WRITE-mode coordination prompt. Unlike the read-only prompt, this
+ * sets subagent_type="coder" (write-capable) and instructs DISJOINT one-target-
+ * per-subagent editing with NO git and NO nested swarm. The coordinator and all
+ * subagents run in an ephemeral throwaway worktree; the PreToolUse hook
+ * (swarm-write label) confines writes there and the plugin captures a patch the
+ * user reviews. The `cap` is the same SOFT total-count hint as read mode.
+ */
+export function buildSwarmWritePrompt(objective: string, cap?: number): string {
+  const trimmed = objective.trim();
+  const capClause =
+    cap !== undefined
+      ? `Launch at most ${cap} subagents (soft cap — split or group targets to stay within it).`
+      : "Launch one subagent per distinct target; group related targets if there are many.";
+  return [
+    "Coordinate a parallel CODE-EDITING task using the AgentSwarm tool.",
+    "",
+    `Objective: ${trimmed}`,
+    "",
+    "You are running inside a throwaway git worktree dedicated to this task — edit freely;",
+    "your changes will be captured as a patch for the human to review and apply. Use the",
+    'AgentSwarm tool to fan the work out across subagents. Set subagent_type to "coder" (the',
+    "write-capable profile). Give each subagent ONE distinct, DISJOINT target via prompt_template",
+    "+ items: a single file or module per subagent, with NO overlap between subagents (two",
+    "subagents editing the same file will corrupt the result).",
+    capClause,
+    "",
+    "Hard rules for every subagent (the safety hook enforces these — violations are denied):",
+    "- Edit ONLY your assigned target. Writes are confined to this worktree; an out-of-worktree",
+    "  write is denied.",
+    "- Do NOT run any git command that mutates state (no add/commit/checkout/etc.) — git mutation",
+    "  is denied. The human owns all git operations.",
+    "- Do NOT call AgentSwarm yourself (no nested fan-out). One flat generation only.",
+    "- Report exactly what you changed and why.",
+    "",
+    "After the subagents return, consolidate into a single markdown report: a short verdict line,",
+    "a summary of what changed across all targets, then one section per target listing the edited",
+    "files. Do NOT paste full diffs (the patch is captured separately). Return plain markdown —",
+    "no JSON wrapper, no outer code fences.",
+  ].join("\n");
+}
+
 export async function runSwarm(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseSwarmArgs(argv);
   const objective = parsed.objective?.trim();
   if (!objective) {
     throw new RuntimeError(
       "INVALID_ARGS",
-      "/kimi:swarm requires an objective. Usage: /kimi:swarm [--budget 30m] [--cap N] [--max-concurrency N] [-m model] <what to review across the workspace>",
+      "/kimi:swarm requires an objective. Usage: /kimi:swarm [--write] [--budget 30m] [--cap N] [--max-concurrency N] [-m model] <objective>",
       "swarm.parse",
     );
   }
 
+  return parsed.write
+    ? runWriteSwarm(parsed, objective, context)
+    : runReadSwarm(parsed, objective, context);
+}
+
+/** READ-ONLY swarm (default). Unchanged from v1.2/v1.3. */
+async function runReadSwarm(
+  parsed: SwarmArgs,
+  objective: string,
+  context: CommandContext,
+): Promise<string> {
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
@@ -130,7 +225,7 @@ export async function runSwarm(argv: string[], context: CommandContext): Promise
 
   try {
     await sweepStaleJobs(store, paths);
-    await assertSwarmSupported(context);
+    await assertSwarmSupported(context, SWARM_MIN_MINOR);
 
     const prompt = buildSwarmPrompt(objective, parsed.cap);
     const jobId = randomUUID();
@@ -193,6 +288,215 @@ export async function runSwarm(argv: string[], context: CommandContext): Promise
   }
 }
 
+/**
+ * WRITE-capable swarm (--write, v1.4). Spawns the coordinator in an ephemeral
+ * throwaway worktree off HEAD; `coder` subagents edit there; writes are confined
+ * by the swarm-write hook label; the result is captured as a patch the main
+ * thread reviews + applies. The worktree is created here and removed on EVERY
+ * terminal path (the patch is captured inside executeSwarmJob, before this
+ * finally removes the tree). Reuses the rescue (write-capable) job lineage.
+ */
+async function runWriteSwarm(
+  parsed: SwarmArgs,
+  objective: string,
+  context: CommandContext,
+): Promise<string> {
+  const paths = resolvePluginPaths(context.env);
+  await ensurePluginPaths(paths);
+  const repoIdentity = await resolveRepoIdentity(context.cwd);
+  const store = new JobStore(paths);
+
+  try {
+    await sweepStaleJobs(store, paths);
+    // Write mode needs the hard concurrency env (kimi-code 0.18.0+), a real git
+    // repo, and a born HEAD before any job state is created.
+    await assertSwarmSupported(context, WRITE_SWARM_MIN_MINOR);
+    assertWriteSwarmPreconditions(repoIdentity);
+    if (!(await hasBornHead(context.cwd))) {
+      throw new RuntimeError(
+        "WRITE_SWARM_NO_HEAD",
+        "/kimi:swarm --write needs a git repository with at least one commit (HEAD). This repo has an unborn HEAD; make an initial commit first.",
+        "swarm.precondition",
+      );
+    }
+    await sweepStaleWorktrees(paths, repoIdentity);
+    if (await isWorkingTreeDirty(context.cwd)) {
+      context.stderr.write(
+        "[kimi-plugin-cc] /kimi:swarm --write bases its worktree on HEAD — your uncommitted changes are NOT visible to the swarm. Commit or stash them first if the swarm needs them.\n",
+      );
+    }
+
+    const prompt = buildSwarmWritePrompt(objective, parsed.cap);
+    const jobId = randomUUID();
+    const logPath = path.join(paths.logsDir, `swarm-write-${jobId}.jsonl`);
+
+    const job = store.createJob({
+      job_id: jobId,
+      repo_id: repoIdentity.repoId,
+      // Reuse the rescue (write-capable) lineage, like pursue; the hook label
+      // below ("swarm-write") drives the allowlist. cwd stays the USER's real
+      // cwd for lineage — the kimi spawn cwd is the worktree (threaded via the
+      // writeMode arg to executeSwarmJob).
+      command_type: "rescue",
+      cwd: context.cwd,
+      model: parsed.model ?? null,
+      thinking: parsed.thinking ?? null,
+      background: false,
+      pid: process.pid,
+      kimi_pid: null,
+      status: "running",
+      kimi_session_id: null,
+      agent_profile: SWARM_WRITE_AGENT_PROFILE,
+      prompt_digest: digestPrompt(prompt),
+      summary: `[swarm-write] ${shorten(objective, SWARM_SUMMARY_MAX)}`,
+      phase: "starting",
+      final_output_path: null,
+      stream_log_path: logPath,
+      error: null,
+    });
+
+    try {
+      await writeInvocationLogHeader(logPath, {
+        commandType: "swarm-write",
+        kimiSessionId: "(pending)",
+        cwd: context.cwd,
+      });
+    } catch (error) {
+      const classified = new RuntimeError(
+        "SWARM_LOG_HEADER_FAILED",
+        `Failed to write swarm-write invocation log header: ${(error as Error).message ?? String(error)}`,
+        "swarm.log-header",
+        error instanceof Error ? { cause: error } : undefined,
+      );
+      await markJobFailed(store, paths, job, classified, "Swarm (write) failed.", { phase: "failed" });
+      throw classified;
+    }
+
+    // Namespace worktrees per repo so the cross-repo sweep below only ever
+    // touches THIS repo's subtree (the worktreesDir is a single global dir shared
+    // across every repo the user runs --write in).
+    const worktreePath = path.join(paths.worktreesDir, repoIdentity.repoId, `swarm-write-${jobId}`);
+    await mkdir(path.dirname(worktreePath), { recursive: true });
+    try {
+      await createEphemeralWorktree(repoIdentity.repoRoot, "HEAD", worktreePath);
+    } catch (error) {
+      const classified =
+        error instanceof RuntimeError
+          ? error
+          : new RuntimeError("GIT_WORKTREE_ADD_FAILED", String(error), "swarm.worktree");
+      await markJobFailed(store, paths, job, classified, "Swarm (write) failed.", { phase: "failed" });
+      throw classified;
+    }
+
+    try {
+      const completed = await executeSwarmJob(
+        job.job_id,
+        prompt,
+        objective,
+        parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
+        resolveSwarmWriteMaxConcurrency(parsed.maxConcurrency),
+        context,
+        { spawnCwd: worktreePath, workspaceRoot: worktreePath },
+      );
+      if (!completed.final_output_path) {
+        throw new RuntimeError(
+          "SWARM_RESULT_MISSING",
+          "Swarm (write) finished without a rendered result.",
+          "swarm.result",
+        );
+      }
+      return readArtifact(completed.final_output_path);
+    } finally {
+      // Patch was captured inside executeSwarmJob (before this runs) on every
+      // terminal path; --force discards the now-disposable worktree.
+      await removeWorktree(repoIdentity.repoRoot, worktreePath);
+    }
+  } finally {
+    store.close();
+  }
+}
+
+/** Refuse --write outside a git repo (git worktree add has nothing to fork). */
+function assertWriteSwarmPreconditions(repoIdentity: RepoIdentity): void {
+  if (!repoIdentity.isGitRepo) {
+    throw new RuntimeError(
+      "WRITE_SWARM_NOT_A_REPO",
+      "/kimi:swarm --write requires a git repository (it works in a throwaway worktree off HEAD). The current directory is not inside a git repo.",
+      "swarm.precondition",
+    );
+  }
+}
+
+/**
+ * Reap orphaned write-swarm worktrees from prior crashed runs. Normal runs remove
+ * their own worktree in a finally; an orphan only survives a hard kill. Prunes
+ * stale admin entries (current repo) then force-removes on-disk worktree dirs
+ * older than the TTL. Best-effort — never blocks the run.
+ */
+async function sweepStaleWorktrees(paths: PluginPaths, repoIdentity: RepoIdentity): Promise<void> {
+  await pruneWorktrees(repoIdentity.repoRoot);
+  // Only sweep THIS repo's namespaced subdir, so we never `rm` a worktree that a
+  // different repo still considers live (and never leave that repo a dangling
+  // admin entry). repoId is the realpath-stable hash from resolveRepoIdentity.
+  const repoWorktreesDir = path.join(paths.worktreesDir, repoIdentity.repoId);
+  const entries = await readdir(repoWorktreesDir, { withFileTypes: true }).catch(() => null);
+  if (entries === null) return; // not created yet — nothing to sweep.
+  const now = Date.now();
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("swarm-write-")) continue;
+    const full = path.join(repoWorktreesDir, entry.name);
+    try {
+      const st = await stat(full);
+      if (now - st.mtimeMs > WORKTREE_ORPHAN_TTL_MS) {
+        await removeWorktree(repoIdentity.repoRoot, full);
+      }
+    } catch {
+      // best-effort per entry
+    }
+  }
+}
+
+/**
+ * Capture the worktree change set as a `.patch` artifact (write mode). Returns
+ * the artifact path + size, or null on capture failure. Called on EVERY terminal
+ * path so partial work survives a cancel/budget-expiry.
+ */
+async function capturePatchArtifact(
+  paths: PluginPaths,
+  jobId: string,
+  worktreePath: string,
+  stderr: CommandContext["stderr"],
+): Promise<{ path: string; bytes: number; empty: boolean } | null> {
+  try {
+    const patch = await captureWorktreePatch(worktreePath);
+    const patchPath = path.join(paths.artifactsDir, `swarm-write-${jobId}.patch`);
+    await writeFile(patchPath, patch, "utf8");
+    return { path: patchPath, bytes: Buffer.byteLength(patch, "utf8"), empty: patch.trim().length === 0 };
+  } catch (error) {
+    stderr.write(
+      `[kimi-plugin-cc] swarm-write patch capture failed for job ${jobId}: ${(error as Error).message ?? String(error)}\n`,
+    );
+    return null;
+  }
+}
+
+/** Render the patch-handoff header prepended to a write-swarm report. */
+function renderWriteSwarmHeader(captured: { path: string; bytes: number; empty: boolean } | null): string {
+  if (captured === null) {
+    return "**Patch:** capture FAILED — no patch was written; inspect the run logs.";
+  }
+  if (captured.empty) {
+    return "**Patch:** the swarm made NO changes (empty patch).";
+  }
+  return [
+    `**Patch written to:** \`${captured.path}\` (${captured.bytes} bytes).`,
+    `Review it, then apply from the repo root with: \`git apply --3way ${captured.path}\` ` +
+      "(the worktree was based on HEAD, so `--3way` reconciles against your current tree; " +
+      "plain `git apply` works only if your tree hasn't moved since).",
+    "The plugin did NOT apply or commit anything — you own the merge.",
+  ].join("\n");
+}
+
 async function executeSwarmJob(
   jobId: string,
   prompt: string,
@@ -200,6 +504,13 @@ async function executeSwarmJob(
   budgetMs: number,
   maxConcurrency: number,
   context: CommandContext,
+  /**
+   * Write mode (v1.4): when set, the kimi spawn cwd is the throwaway worktree
+   * (`spawnCwd`), the hook label is "swarm-write", and `workspaceRoot` (the same
+   * worktree) is exported as the trusted allowlist root + used to capture the
+   * patch. Undefined ⇒ read-only swarm (label "swarm", spawn cwd = job.cwd).
+   */
+  writeMode?: { spawnCwd: string; workspaceRoot: string },
 ): Promise<JobRecord> {
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
@@ -246,20 +557,28 @@ async function executeSwarmJob(
 
     const result = await runCliPromptWithBudget(
       {
-        cwd: job.cwd,
+        // Read mode spawns in the user's cwd; WRITE mode spawns in the throwaway
+        // worktree so coder subagents edit there (job.cwd stays the user's real
+        // cwd for lineage). This is the load-bearing isolation seam.
+        cwd: writeMode?.spawnCwd ?? job.cwd,
         env: context.env,
         command: kimi.command,
         prefixArgs: kimi.prefixArgs,
         prompt,
-        // The "swarm" label drives the read-only-plus-AgentSwarm allowlist in
-        // the PreToolUse hook, for the coordinator AND every spawned subagent.
-        commandLabel: "swarm",
+        // "swarm" → read-only-plus-AgentSwarm allowlist; "swarm-write" → the same
+        // PLUS rescue-grade write confinement to the trusted worktree root. The
+        // label drives the hook for the coordinator AND every spawned subagent.
+        commandLabel: writeMode ? "swarm-write" : "swarm",
         // The HARD concurrency ceiling on kimi-code 0.18.0+ (exported as
         // KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; ignored by older binaries).
-        // ALWAYS set: defaults to SWARM_DEFAULT_MAX_CONCURRENCY when the user
-        // passes no --max-concurrency, so an auto-dispatched fan-out is never
-        // unbounded. Distinct from --cap (the soft total-count prompt hint).
+        // ALWAYS set: defaults to SWARM_DEFAULT_MAX_CONCURRENCY (read) /
+        // SWARM_WRITE_DEFAULT_MAX_CONCURRENCY (write) when the user passes no
+        // --max-concurrency, so a fan-out is never unbounded. Distinct from --cap
+        // (the soft total-count prompt hint).
         swarmMaxConcurrency: maxConcurrency,
+        // Trusted allowlist root for the swarm-write hook (forge-proof; ignored
+        // by other labels). Only set in write mode.
+        swarmWriteWorkspaceRoot: writeMode?.workspaceRoot,
         model: job.model ?? undefined,
         logPath: job.stream_log_path,
         signal: handlers.signal,
@@ -283,7 +602,15 @@ async function executeSwarmJob(
     }
     warnIfSessionIdMissing(result, "swarm", job.job_id, context.stderr);
 
-    const finalText = reassembleProseFromRecords(result.records);
+    const prose = reassembleProseFromRecords(result.records);
+    // WRITE mode: capture the worktree change set as a .patch artifact (before
+    // runWriteSwarm's finally removes the worktree) and prepend the patch-handoff
+    // header so the consolidated report tells the main thread where the patch is.
+    const finalText = writeMode
+      ? `${renderWriteSwarmHeader(
+          await capturePatchArtifact(paths, job.job_id, writeMode.workspaceRoot, context.stderr),
+        )}\n\n---\n\n${prose}`.trimEnd()
+      : prose;
     const rendered = renderManagedJobOutput(job, finalText);
 
     let artifactPath: string;
@@ -318,6 +645,22 @@ async function executeSwarmJob(
       }) ?? job
     );
   } catch (error) {
+    // WRITE mode: best-effort capture of any PARTIAL work before we mark the job
+    // and before runWriteSwarm's finally removes the worktree, so a cancel /
+    // budget-expiry doesn't silently discard edits the subagents already made.
+    if (writeMode) {
+      const captured = await capturePatchArtifact(
+        paths,
+        job.job_id,
+        writeMode.workspaceRoot,
+        context.stderr,
+      );
+      if (captured && !captured.empty) {
+        context.stderr.write(
+          `[kimi-plugin-cc] swarm-write run ended early; partial patch captured at ${captured.path}.\n`,
+        );
+      }
+    }
     if (handlers.cancelling) {
       const cancelledError = new RuntimeError(
         "SWARM_CANCELLED",
@@ -329,7 +672,9 @@ async function executeSwarmJob(
         phase: "cancelled",
       });
     }
-    const classified = classifyManagedCommandFailure(error, "review", job.job_id, { preserveStage: true });
+    const classified = classifyManagedCommandFailure(error, writeMode ? "rescue" : "review", job.job_id, {
+      preserveStage: true,
+    });
     return await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
   } finally {
     handlers.dispose();
@@ -344,16 +689,20 @@ async function executeSwarmJob(
  * Refuse on a confirmed-too-old version; a failed probe (flaky spawn) does not
  * block. Honors KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1 (the smoke harness sets it).
  */
-async function assertSwarmSupported(context: CommandContext): Promise<void> {
+async function assertSwarmSupported(context: CommandContext, minMinor: number): Promise<void> {
   if (context.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1") return;
   const kimi = resolveKimiCliCommand(context.env);
   const probe = await probeKimiVersion({ kimiBin: kimi.command, env: context.env });
   if (probe.kind !== "ok") return;
-  const supported = probe.major > 0 || (probe.major === 0 && probe.minor >= SWARM_MIN_MINOR);
+  const supported = probe.major > 0 || (probe.major === 0 && probe.minor >= minMinor);
   if (!supported) {
+    const reason =
+      minMinor >= WRITE_SWARM_MIN_MINOR
+        ? `/kimi:swarm --write needs kimi-code >= 0.${WRITE_SWARM_MIN_MINOR}.0 (the hard AgentSwarm concurrency cap, required for safe concurrent writes)`
+        : `/kimi:swarm needs kimi-code >= 0.${SWARM_MIN_MINOR}.0 (the AgentSwarm tool)`;
     throw new RuntimeError(
       "SWARM_UNSUPPORTED",
-      `/kimi:swarm needs kimi-code >= 0.${SWARM_MIN_MINOR}.0 (the AgentSwarm tool); detected ${probe.version}. Upgrade kimi-code and retry.`,
+      `${reason}; detected ${probe.version}. Upgrade kimi-code and retry.`,
       "swarm.version-gate",
     );
   }

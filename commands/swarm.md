@@ -1,6 +1,6 @@
 ---
-description: Fan out a READ-ONLY parallel review across the workspace using Kimi's AgentSwarm tool, bounded by a hard wall-clock budget. Read-only — enforced by the same PreToolUse hook as review, applied to every subagent.
-argument-hint: "[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] <what to review across the workspace>"
+description: Fan out a parallel review across the workspace using Kimi's AgentSwarm tool, bounded by a hard wall-clock budget. Read-only by default (enforced by the same PreToolUse hook as review, applied to every subagent); --write fans out edits in a throwaway worktree and returns a patch.
+argument-hint: "[--write] [--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] <objective>"
 disable-model-invocation: true
 ---
 
@@ -8,19 +8,22 @@ Run the companion with any user-supplied flags appended after `task swarm`:
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh task swarm <args>`
 
-`/kimi:swarm` is a **read-only parallel review**: Kimi uses the `AgentSwarm` tool to fan the work out across subagents (one per file/module/question), each inspecting the workspace with read tools only, then consolidates their findings into one markdown report. It is **read-only and enforced by the same PreToolUse hook as `/kimi:review`** — the hook runs under the `swarm` label, which allows the read-only tool set plus `AgentSwarm`, and **every spawned subagent inherits that label and fires the same hook** (policy index 0), so a subagent's write/edit/shell call is denied exactly like a single-turn review's.
+`/kimi:swarm` is a **parallel fan-out**: Kimi uses the `AgentSwarm` tool to fan the work out across subagents (one per file/module/question), then consolidates into one markdown report. **By default it is read-only**, enforced by the same PreToolUse hook as `/kimi:review` — the hook runs under the `swarm` label (read-only tool set plus `AgentSwarm`), and **every spawned subagent inherits that label and fires the same hook** (policy index 0), so a subagent's write/edit/shell call is denied exactly like a single-turn review's.
+
+**`--write` (v1.4)** turns it into a write-capable fan-out: the coordinator and `coder` subagents run inside an **ephemeral throwaway git worktree off your HEAD**, edit disjoint targets there, and the result is captured as a **reviewable patch** (written to a `.patch` file whose path is printed in the report). Writes are confined to that worktree by the `swarm-write` hook label (rescue-grade allowlist, scoped to a forge-proof trusted worktree root — not the payload cwd); git mutation and out-of-worktree writes are denied; **the plugin never applies or commits — you own the merge.** Your real working tree is never touched.
 
 Supported flags:
 
-- `--budget <duration>` — HARD wall-clock ceiling (e.g. `30m`, `1h`, `90s`; bare number = minutes). Default 30m. Read-only swarm opens no write surface, so this is the bound on COST/runaway from N parallel model runs.
+- `--write` — fan out EDITS (not just review). Requires kimi-code **>= 0.18.0**, a git repo with a committed HEAD, and the PreToolUse hook. Bases the worktree on HEAD: **uncommitted changes are NOT included** (you'll get a warning) — commit or stash first if the swarm needs them.
+- `--budget <duration>` — HARD wall-clock ceiling (e.g. `30m`, `1h`, `90s`; bare number = minutes). Default 30m. The always-on bound on cost/runaway.
 - `--cap <N>` — SOFT cap on TOTAL subagent count: injected into the prompt as a model instruction. Advisory, not hook-enforced (the hook is stateless and can't count subagents), so the model may exceed it. Bounds lifetime total, not peak parallelism.
-- `--max-concurrency <N>` — HARD ceiling on how many subagents run AT ONCE, on kimi-code **0.18.0+** (exported as `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`; older binaries ignore it). **Defaults to 4** when omitted (since v1.3, so the model-invocable `kimi-swarm` agent can't auto-dispatch an unbounded fan-out) — pass a higher value to widen, a lower one to throttle. Distinct from `--cap`: concurrency (simultaneous) ≠ total count (lifetime). The `--budget` wall-clock ceiling remains the bound on total cost.
+- `--max-concurrency <N>` — HARD ceiling on how many subagents run AT ONCE, on kimi-code **0.18.0+** (exported as `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`; older binaries ignore it). **Defaults to 4 for read, 1 for `--write`** (writes serialize by default since disjoint-target partitioning is prompt-only) — pass a value to widen or throttle. Distinct from `--cap`: concurrency (simultaneous) ≠ total count (lifetime).
 - `-m`, `--model <name>`
 
-Prototype limitations (v1.2):
+Prototype limitations:
 
-- **Foreground only.** No `--background` yet — watch the run; cancel with Ctrl+C or `/kimi:cancel <job-id>`.
-- **Read-only only.** No `--write` mode yet (a write-capable swarm needs per-subagent worktree isolation to be safe — deferred). For writes, use `/kimi:rescue`.
-- Requires kimi-code **>= 0.12.0** (the `AgentSwarm` tool) and the `/kimi:setup` PreToolUse hook. Unlike single-turn review, swarm **refuses** without the hook (a fan-out with no enforcement is an N-fold blast radius).
+- **Foreground only.** No `--background` — watch the run; cancel with Ctrl+C or `/kimi:cancel <job-id>`.
+- **`--write` is human-only.** There is no `kimi-swarm-write` agent (the read-only `kimi-swarm` agent stays read-only); auto-dispatching a write fan-out is deferred until `--write` is field-proven.
+- Read-only swarm requires kimi-code **>= 0.12.0** (the `AgentSwarm` tool); `--write` requires **>= 0.18.0** (the hard concurrency cap). Both **refuse** without the `/kimi:setup` PreToolUse hook (a fan-out with no enforcement is an N-fold blast radius).
 
 Return the companion stdout verbatim.

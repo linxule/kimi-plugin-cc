@@ -56,10 +56,19 @@ export interface CliClientOptions {
   prompt: string;
   /**
    * Per-command label propagated to the PreToolUse hook via env.
-   * Recognized values: "ask" | "review" | "challenge" | "review_gate" | "rescue" | "swarm".
+   * Recognized values: "ask" | "review" | "challenge" | "review_gate" | "rescue" | "swarm" | "swarm-write".
    * Unset means the hook treats the call as out-of-plugin context (allows everything).
    */
   commandLabel?: string;
+  /**
+   * Trusted workspace root for the "swarm-write" label (v1.4), exported to the
+   * spawn as KIMI_PLUGIN_CC_WORKSPACE_ROOT. The swarm-write hook case confines
+   * every subagent write to THIS path instead of the hook payload's `cwd`,
+   * removing any dependence on upstream payload-cwd semantics: the model running
+   * inside kimi cannot forge an env var on the already-spawned process. Set by
+   * swarm.ts to the ephemeral worktree path. Ignored by every other label.
+   */
+  swarmWriteWorkspaceRoot?: string;
   /**
    * Hard cap on how many AgentSwarm subagents kimi-code runs CONCURRENTLY,
    * exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (kimi-code
@@ -687,6 +696,11 @@ function buildEnv(opts: CliClientOptions): NodeJS.ProcessEnv {
     // kimi-code 0.18.0+ caps AgentSwarm's normal-phase concurrency at this
     // value; older binaries ignore it. See the field doc on CliClientOptions.
     env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY = String(opts.swarmMaxConcurrency);
+  }
+  if (opts.swarmWriteWorkspaceRoot !== undefined) {
+    // Trusted allowlist root for the swarm-write PreToolUse hook (v1.4). Forge-
+    // proof (env on the spawned process; the model can't set it). See field doc.
+    env.KIMI_PLUGIN_CC_WORKSPACE_ROOT = opts.swarmWriteWorkspaceRoot;
   }
   return env;
 }

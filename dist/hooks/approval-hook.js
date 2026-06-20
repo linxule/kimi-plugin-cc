@@ -56,6 +56,9 @@ async function main() {
     const decision = await decideHookOutcome(input, {
         commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
         rescueEvaluator: evaluateRescueHookRequest,
+        // Trusted worktree root for the swarm-write label (v1.4). Set by the plugin
+        // spawn; the model inside kimi cannot forge it. Unused by other labels.
+        swarmWriteWorkspaceRoot: process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT,
     });
     if (decision.decision === "deny") {
         // stderr.trim() in runner.ts:118 becomes the model-visible reason.
