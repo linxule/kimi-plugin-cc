@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import { parseSwarmArgs } from "../../runtime/parsing.js";
-import { buildSwarmPrompt } from "../../runtime/commands/swarm.js";
+import {
+  buildSwarmPrompt,
+  resolveSwarmMaxConcurrency,
+  SWARM_DEFAULT_MAX_CONCURRENCY,
+} from "../../runtime/commands/swarm.js";
 import { RuntimeError } from "../../runtime/errors.js";
 
 describe("parseSwarmArgs", () => {
@@ -67,6 +71,21 @@ describe("parseSwarmArgs", () => {
 
   test("no objective yields undefined (runSwarm surfaces the INVALID_ARGS)", () => {
     expect(parseSwarmArgs(["--budget", "30m"]).objective).toBeUndefined();
+  });
+});
+
+describe("resolveSwarmMaxConcurrency", () => {
+  test("applies the hard concurrency default when --max-concurrency is unset", () => {
+    // v1.3: swarm is model-invocable via the kimi-swarm agent, so an
+    // auto-dispatched fan-out must never run with an unbounded peak. The runtime
+    // enforces a finite ceiling by construction rather than trusting agent prose.
+    expect(resolveSwarmMaxConcurrency(undefined)).toBe(SWARM_DEFAULT_MAX_CONCURRENCY);
+    expect(SWARM_DEFAULT_MAX_CONCURRENCY).toBe(4);
+  });
+
+  test("an explicit --max-concurrency overrides the default", () => {
+    expect(resolveSwarmMaxConcurrency(8)).toBe(8);
+    expect(resolveSwarmMaxConcurrency(1)).toBe(1);
   });
 });
 

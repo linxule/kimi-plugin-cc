@@ -49,6 +49,27 @@ const SWARM_MIN_MINOR = 12;
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
 /**
+ * Default HARD concurrency ceiling applied when the user passes no
+ * `--max-concurrency`. Since v1.3 `/kimi:swarm` is ALSO reachable via the
+ * model-invocable `kimi-swarm` agent (Claude can auto-dispatch a fan-out), so an
+ * unbounded peak-parallelism default is no longer acceptable: we always export
+ * `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` (effective on kimi-code 0.18.0+; older
+ * binaries ignore it) so simultaneous model spend is capped BY CONSTRUCTION for
+ * every swarm run — agent-dispatched or human-typed. Conservative by design;
+ * override with an explicit `--max-concurrency N`. The `--budget` wall-clock
+ * ceiling remains the always-on hard bound on TOTAL cost; this bounds the peak.
+ */
+export const SWARM_DEFAULT_MAX_CONCURRENCY = 4;
+/**
+ * Resolve the effective hard concurrency ceiling: an explicit `--max-concurrency`
+ * wins; otherwise fall back to SWARM_DEFAULT_MAX_CONCURRENCY so the ceiling is
+ * never unset. Pure + exported for unit testing (the parser leaves the value
+ * undefined; swarm.ts owns the default, mirroring `budgetMs`).
+ */
+export function resolveSwarmMaxConcurrency(requested) {
+    return requested ?? SWARM_DEFAULT_MAX_CONCURRENCY;
+}
+/**
  * Build the swarm coordination prompt. Instructs Kimi to use the AgentSwarm
  * tool to fan READ-ONLY review work over the targets implied by the objective,
  * then consolidate. The optional `cap` is a SOFT subagent-count hint (the hook
@@ -132,7 +153,7 @@ export async function runSwarm(argv, context) {
             await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
             throw classified;
         }
-        const completed = await executeSwarmJob(job.job_id, prompt, objective, parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS, parsed.maxConcurrency, context);
+        const completed = await executeSwarmJob(job.job_id, prompt, objective, parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS, resolveSwarmMaxConcurrency(parsed.maxConcurrency), context);
         if (!completed.final_output_path) {
             throw new RuntimeError("SWARM_RESULT_MISSING", "Swarm finished without a rendered result.", "swarm.result");
         }
@@ -187,9 +208,11 @@ async function executeSwarmJob(jobId, prompt, objective, budgetMs, maxConcurrenc
             // The "swarm" label drives the read-only-plus-AgentSwarm allowlist in
             // the PreToolUse hook, for the coordinator AND every spawned subagent.
             commandLabel: "swarm",
-            // --max-concurrency is the HARD concurrency ceiling on kimi-code 0.18.0+
-            // (exported as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY); ignored by older
-            // binaries. Distinct from --cap (the soft total-count prompt hint).
+            // The HARD concurrency ceiling on kimi-code 0.18.0+ (exported as
+            // KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; ignored by older binaries).
+            // ALWAYS set: defaults to SWARM_DEFAULT_MAX_CONCURRENCY when the user
+            // passes no --max-concurrency, so an auto-dispatched fan-out is never
+            // unbounded. Distinct from --cap (the soft total-count prompt hint).
             swarmMaxConcurrency: maxConcurrency,
             model: job.model ?? undefined,
             logPath: job.stream_log_path,

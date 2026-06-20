@@ -56,7 +56,7 @@ Kimi opens the file, writes the fix, runs the relevant tests, and reports back. 
 | `/kimi:swarm` | Fan out a **read-only** review across files/modules in parallel (via AgentSwarm), bounded by a hard `--budget` | No (every subagent) | Foreground-only |
 | Review gate | Kimi checks Claude's work before stopping | No | Per-stop-event |
 
-The plugin ships four Claude Code **subagents** that the main thread can dispatch proactively via the Agent tool: `kimi-rescue` (write-capable delegation), plus `kimi-review`, `kimi-challenge`, and `kimi-ask` (read-only forwarders to the matching companion surfaces). Each agent's description is Kimi's own statement of what it's good for — Claude matches the moment and dispatches; no prescriptive skill manual in between.
+The plugin ships six Claude Code **subagents** — one per delegated capability — that the main thread can dispatch via the Agent tool: the read-only `kimi-review`, `kimi-challenge`, `kimi-ask`, and `kimi-swarm` (parallel review fan-out), plus the write-capable `kimi-rescue` (a bounded delegated task) and `kimi-pursue` (experimental autonomous goal mode). The two heavy modes, `kimi-swarm` and `kimi-pursue`, carry a mandatory `--budget` ceiling. Safety does not widen on the agent path: the index-0 PreToolUse hook fires on every tool call of every turn — read-only labels deny writes; rescue/pursue apply the workspace allowlist and cannot mutate git state. Each agent's description is Kimi's own statement of what it's good for — Claude matches the moment and dispatches; no prescriptive skill manual in between.
 
 ## How it works
 

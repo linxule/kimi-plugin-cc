@@ -22,6 +22,6 @@ Prototype limitations (experimental):
 - **No `--resume`.** Goal mode emits a goalId distinct from the session id; resuming the session would not reliably re-enter the goal. The goalId is shown in the result for when resume lands.
 - Requires kimi-code **>= 0.8.0** (headless goal mode) and the `/kimi:setup` PreToolUse hook (refuses without it).
 
-Terminal outcomes are surfaced as status, not errors: `complete` (done), `blocked` (Kimi or a budget stopped it), `paused` (interrupted). The result headlines the goal status, reason, and turns/tokens/wall-clock usage.
+Terminal outcomes are surfaced as status, not errors: `complete` (done, exit 0), `blocked` (Kimi stopped itself, exit 3), `paused` (interrupted, exit 6). A run that hits the `--budget` wall-clock ceiling is instead a timeout **failure** (the goal process tree is reaped), not a terminal status. The result headlines the goal status, reason, and turns/tokens/wall-clock usage.
 
 Return the companion stdout verbatim.

@@ -124,6 +124,12 @@ export interface SwarmArgs extends KimiFlagState {
    * binaries ignore the unknown env var. Distinct from `cap`: concurrency
    * (how many run simultaneously) ≠ total count (how many run over the whole
    * life of the swarm). See runtime/cli-client.ts buildEnv.
+   *
+   * Undefined here means "apply the command default" — swarm.ts owns it
+   * (resolveSwarmMaxConcurrency → SWARM_DEFAULT_MAX_CONCURRENCY) so parsing
+   * stays policy-free, mirroring `budgetMs`. The ceiling is therefore never
+   * actually unset on a real run: an auto-dispatchable fan-out is bounded by
+   * construction.
    */
   maxConcurrency?: number;
   objective?: string;
