@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kimi Swarm"
+  short_description: "Fan out Kimi read-only review"
+  default_prompt: "Use $kimi-swarm to fan out a read-only review across these targets."
+policy:
+  allow_implicit_invocation: false

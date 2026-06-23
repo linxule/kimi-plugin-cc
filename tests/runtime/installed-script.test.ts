@@ -145,6 +145,27 @@ describe("installed-plugin script wrappers", () => {
     expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
   });
 
+  test("clean installed copy accepts Codex PLUGIN_ROOT and PLUGIN_DATA aliases", () => {
+    const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home-codex");
+    const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
+      env: {
+        PATH: SANITIZED_PATH,
+        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
+        KIMI_CODE_HOME: kimiCodeHome,
+        PLUGIN_ROOT: cleanCopyRoot,
+        PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data-codex"),
+      },
+      encoding: "utf8",
+    });
+
+    const combined = `${result.stdout}\n${result.stderr}`;
+    expect(result.status).toBe(0);
+    expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
+    expect(combined).toContain("Probe:          ok");
+    expect(combined).not.toContain("MISSING_PLUGIN_DATA");
+    expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
+  });
+
   test("companion.sh rejects Node versions below 22.5 before launching the runtime", () => {
     const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
       env: {

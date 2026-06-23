@@ -1,0 +1,20 @@
+{
+  "name": "kimi-marketplace",
+  "interface": {
+    "displayName": "Kimi Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "kimi",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kimi Status"
+  short_description: "Show Kimi job status"
+  default_prompt: "Use $kimi-status to show the latest Kimi job status."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kimi Challenge"
+  short_description: "Challenge a design or approach"
+  default_prompt: "Use $kimi-challenge to stress-test this approach."
+policy:
+  allow_implicit_invocation: true

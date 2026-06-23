@@ -1,0 +1,25 @@
+---
+name: kimi-ask
+description: "Ask Kimi a read-only free-form question about the current repository. Use for prose explanations, flow tracing, module comparisons, or conceptual reasoning where Codex should delegate the answer to local kimi-code rather than perform implementation."
+---
+
+# Kimi Ask
+
+Forward this request to the local kimi-code companion runtime by shell. Do not use MCP for this skill.
+
+## Invocation
+
+- Resolve the plugin root from this skill source path: use the parent directory of the `skills/` directory that contains this `SKILL.md`. If `PLUGIN_ROOT` is already set, use that value.
+- Launch the shell command from the user's current workspace directory so `scripts/companion.sh` captures the intended workspace cwd.
+- Run: `PLUGIN_ROOT="<plugin-root>" "<plugin-root>/scripts/companion.sh" ask <args>`
+- If the plugin host provides `PLUGIN_DATA` instead of `CLAUDE_PLUGIN_DATA`, the shell wrapper exports the Claude-compatible alias for the runtime.
+
+## Arguments
+
+Pass through: `[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] <prompt>`
+
+## Handling
+
+- Preserve the user's question and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested.
+- Choose `--background` for broad or long-running questions and return the job id that the companion prints.
+- Return companion stdout verbatim; do not summarize or re-voice Kimi's prose.

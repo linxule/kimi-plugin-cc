@@ -91,7 +91,7 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 **CI** ([`.github/workflows/`](./.github/workflows/), see [docs/ci.md](./docs/ci.md)). `bun run check` runs on every push to `main` and every PR (`ci.yml`) — free, no secrets, smokes auto-skip. The real-binary smokes (including the `/kimi:pursue` goal-mode safety gate) run on **manual dispatch** (`smoke.yml`), authenticated via an API-key secret so they don't depend on the expiry-prone OAuth subscription; the workflow is inert until that secret is added.
 
-**Also surfaces in Codex desktop.** Because the plugin uses the standard Claude Code plugin format (`plugin.json` + `marketplace.json` + `commands/`/`agents/`/`hooks/`), the Codex desktop app lists it in its plugins panel as a one-click add. (The runtime targets Claude Code + kimi-code — it spawns `kimi -p` and installs a PreToolUse hook into `~/.kimi-code/config.toml` — so behavior under other hosts isn't tested yet.)
+**Also surfaces in Codex desktop.** The repo carries Codex-native sidecars (`.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, and `skills/`) beside the Claude Code plugin files. Codex skills call the same shell companion runtime as Claude commands; there is no MCP server or second execution path.
 
 ## Install
 
@@ -113,6 +113,10 @@ claude --plugin-dir ~/kimi-plugin-cc
 ```
 
 Then run `/kimi:setup` to install the safety hook.
+
+### Via the Codex repo marketplace
+
+The Codex marketplace sidecar lives at `.agents/plugins/marketplace.json` and points at this repo root. Install the `kimi` plugin from that marketplace, then run the `$kimi-setup` skill to install/check the kimi-code safety hook. The Codex skills mirror the Claude surfaces: `$kimi-review`, `$kimi-challenge`, `$kimi-ask`, `$kimi-rescue`, `$kimi-pursue`, `$kimi-swarm`, `$kimi-swarm-write`, `$kimi-status`, `$kimi-result`, `$kimi-cancel`, and `$kimi-replay`.
 
 ### Removing the integration
 

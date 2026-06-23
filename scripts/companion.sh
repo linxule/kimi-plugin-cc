@@ -6,10 +6,19 @@ set -euo pipefail
 # user's working directory via KIMI_PLUGIN_CC_WORKSPACE_CWD.
 #
 # Required env: CLAUDE_PLUGIN_ROOT (set by Claude Code when the plugin is installed).
-# When running from the repo checkout, CLAUDE_PLUGIN_ROOT is unset — default to the script's
-# parent directory so `bun run` style local invocation still works.
+# Codex plugin hosts may provide PLUGIN_ROOT/PLUGIN_DATA instead; accept those as aliases.
+# When running from the repo checkout, both root env vars may be unset — default to the
+# script's parent directory so `bun run` style local invocation still works.
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+: "${CLAUDE_PLUGIN_ROOT:=${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+export CLAUDE_PLUGIN_ROOT
+export PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+if [ -z "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${PLUGIN_DATA:-}" ]; then
+  export CLAUDE_PLUGIN_DATA="${PLUGIN_DATA}"
+fi
+if [ -z "${PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  export PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}"
+fi
 export KIMI_PLUGIN_CC_WORKSPACE_CWD="${KIMI_PLUGIN_CC_WORKSPACE_CWD:-$PWD}"
 
 NODE_BIN="${KIMI_PLUGIN_CC_NODE_BIN:-$(command -v node 2>/dev/null || true)}"

@@ -1,0 +1,24 @@
+---
+name: kimi-replay
+description: "Re-render a stored event log for a completed plugin-managed Kimi job. Use only when the user explicitly asks to replay a Kimi job."
+---
+
+# Kimi Replay
+
+Forward this request to the local kimi-code companion runtime by shell. Do not use MCP for this skill.
+
+## Invocation
+
+- Resolve the plugin root from this skill source path: use the parent directory of the `skills/` directory that contains this `SKILL.md`. If `PLUGIN_ROOT` is already set, use that value.
+- Launch the shell command from the user's current workspace directory so `scripts/companion.sh` captures the intended workspace cwd.
+- Run: `PLUGIN_ROOT="<plugin-root>" "<plugin-root>/scripts/companion.sh" replay <args>`
+- If the plugin host provides `PLUGIN_DATA` instead of `CLAUDE_PLUGIN_DATA`, the shell wrapper exports the Claude-compatible alias for the runtime.
+
+## Arguments
+
+Pass through: `<job-id>`
+
+## Handling
+
+- Require a job id and pass it unchanged.
+- Return companion stdout verbatim because replay output is the diagnostic artifact.

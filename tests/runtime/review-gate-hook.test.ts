@@ -133,6 +133,45 @@ describe("review gate stop hook", () => {
     }
   });
 
+  test("enabled gate accepts Codex-style inline last assistant message", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("review-gate-codex-inline");
+
+    try {
+      const paths = resolvePluginPaths({
+        ...process.env,
+        PLUGIN_DATA: pluginDataRoot,
+      });
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await writeFile(paths.configPath, `${JSON.stringify({ reviewGateEnabled: true }, null, 2)}\n`, "utf8");
+
+      const output = await invokeHook(
+        {
+          ...process.env,
+          PLUGIN_DATA: pluginDataRoot,
+          KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+          KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+          KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block",
+        },
+        {
+          cwd: process.cwd(),
+          hook_event_name: "Stop",
+          stop_hook_active: false,
+          last_user_message: "Fix the failing path.",
+          last_assistant_message: {
+            role: "assistant",
+            content: [{ type: "text", text: "I fixed the issue and everything is complete." }],
+          },
+        },
+      );
+
+      expect(output.decision).toBe("block");
+      expect(output.reason).toContain("Kimi review gate blocked stop");
+      expect(output.reason).toContain("Requested fix still missing");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+    }
+  });
+
   test("enabled gate allows stop with a warning on medium-confidence block output", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-gate-medium");
 

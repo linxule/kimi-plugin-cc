@@ -42,7 +42,9 @@ export async function runReviewGateStopHook(payload, context) {
     if (payload.stop_hook_active) {
         return reviewGateSkipped("stop hook already active");
     }
-    const assistantMessage = await extractLastAssistantMessage(payload.transcript_path);
+    const cwd = payload.cwd || context.cwd;
+    const assistantMessage = extractText(payload.last_assistant_message) ??
+        (await extractLastAssistantMessage(payload.transcript_path));
     if (!assistantMessage) {
         return reviewGateSkipped("no assistant message");
     }
@@ -51,7 +53,10 @@ export async function runReviewGateStopHook(payload, context) {
         maybeWarnHookMissing(installStatus, "review_gate", context.stderr);
     }
     try {
-        const output = await executeReviewGate(payload, assistantMessage, context);
+        const output = await executeReviewGate({
+            ...payload,
+            cwd,
+        }, assistantMessage, context);
         if (output.decision === "BLOCK" && output.confidence === "high") {
             return {
                 decision: "block",
@@ -81,7 +86,8 @@ async function executeReviewGate(payload, assistantMessage, context) {
     let store;
     try {
         store = new JobStore(paths);
-        const userRequest = await extractLastUserMessage(payload.transcript_path);
+        const userRequest = extractText(payload.last_user_message ?? payload.user_request ?? payload.prompt) ??
+            (await extractLastUserMessage(payload.transcript_path));
         const jobId = randomUUID();
         const logPath = path.join(paths.logsDir, `review-gate-${jobId}.jsonl`);
         const prompt = buildReviewGatePrompt({

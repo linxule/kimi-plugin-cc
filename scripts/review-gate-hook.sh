@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Entry point for the Claude Code Stop hook. Same cwd/env dance as companion.sh — launches
-# the compiled Node runtime from the plugin root while preserving the user's workspace cwd,
-# and honors KIMI_PLUGIN_CC_NODE_BIN so sanitized-PATH environments still work.
+# Entry point for the Claude Code/Codex Stop hook. Same cwd/env dance as companion.sh —
+# launches the compiled Node runtime from the plugin root while preserving the user's
+# workspace cwd, and honors KIMI_PLUGIN_CC_NODE_BIN so sanitized-PATH environments still work.
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+: "${CLAUDE_PLUGIN_ROOT:=${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+export CLAUDE_PLUGIN_ROOT
+export PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
+if [ -z "${CLAUDE_PLUGIN_DATA:-}" ] && [ -n "${PLUGIN_DATA:-}" ]; then
+  export CLAUDE_PLUGIN_DATA="${PLUGIN_DATA}"
+fi
+if [ -z "${PLUGIN_DATA:-}" ] && [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  export PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}"
+fi
 export KIMI_PLUGIN_CC_WORKSPACE_CWD="${KIMI_PLUGIN_CC_WORKSPACE_CWD:-$PWD}"
 
 NODE_BIN="${KIMI_PLUGIN_CC_NODE_BIN:-$(command -v node 2>/dev/null || true)}"

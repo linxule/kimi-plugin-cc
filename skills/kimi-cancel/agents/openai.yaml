@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kimi Cancel"
+  short_description: "Cancel an active Kimi job"
+  default_prompt: "Use $kimi-cancel to cancel this active Kimi job."
+policy:
+  allow_implicit_invocation: false

@@ -32,9 +32,13 @@ const REVIEW_GATE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 export interface StopHookInput {
   session_id?: string;
   transcript_path?: string;
-  cwd: string;
+  cwd?: string;
   hook_event_name: "Stop";
   stop_hook_active?: boolean;
+  last_assistant_message?: unknown;
+  last_user_message?: unknown;
+  user_request?: unknown;
+  prompt?: unknown;
 }
 
 export interface StopHookOutput {
@@ -78,7 +82,10 @@ export async function runReviewGateStopHook(
     return reviewGateSkipped("stop hook already active");
   }
 
-  const assistantMessage = await extractLastAssistantMessage(payload.transcript_path);
+  const cwd = payload.cwd || context.cwd;
+  const assistantMessage =
+    extractText(payload.last_assistant_message) ??
+    (await extractLastAssistantMessage(payload.transcript_path));
   if (!assistantMessage) {
     return reviewGateSkipped("no assistant message");
   }
@@ -89,7 +96,14 @@ export async function runReviewGateStopHook(
   }
 
   try {
-    const output = await executeReviewGate(payload, assistantMessage, context);
+    const output = await executeReviewGate(
+      {
+        ...payload,
+        cwd,
+      },
+      assistantMessage,
+      context,
+    );
 
     if (output.decision === "BLOCK" && output.confidence === "high") {
       return {
@@ -117,7 +131,7 @@ function reviewGateSkipped(reason: string): StopHookOutput {
 }
 
 async function executeReviewGate(
-  payload: StopHookInput,
+  payload: StopHookInput & { cwd: string },
   assistantMessage: string,
   context: CommandContext,
 ): Promise<ReviewGateOutput> {
@@ -127,7 +141,9 @@ async function executeReviewGate(
   let store: JobStore | undefined;
   try {
     store = new JobStore(paths);
-    const userRequest = await extractLastUserMessage(payload.transcript_path);
+    const userRequest =
+      extractText(payload.last_user_message ?? payload.user_request ?? payload.prompt) ??
+      (await extractLastUserMessage(payload.transcript_path));
 
     const jobId = randomUUID();
     const logPath = path.join(paths.logsDir, `review-gate-${jobId}.jsonl`);

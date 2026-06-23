@@ -1,0 +1,6 @@
+interface:
+  display_name: "Kimi Swarm Write"
+  short_description: "Fan out patch-only Kimi edits"
+  default_prompt: "Use $kimi-swarm-write to fan out these disjoint edits into a patch."
+policy:
+  allow_implicit_invocation: false
