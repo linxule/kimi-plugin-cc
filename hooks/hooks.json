@@ -1,5 +1,4 @@
 {
-  "description": "Opt-in Kimi stop-time review gate",
   "hooks": {
     "Stop": [
       {

@@ -53,6 +53,15 @@ describe("Codex sidecar surfaces", () => {
     expect(marketplace.plugins[0].policy.authentication).toBe("ON_INSTALL");
   });
 
+  test("hook config is accepted by Codex's strict hook schema", async () => {
+    const hooks = JSON.parse(
+      await readFile(path.join(repoRoot, "hooks/hooks.json"), "utf8"),
+    ) as Record<string, unknown>;
+
+    expect(Object.keys(hooks)).toEqual(["hooks"]);
+    expect(hooks.hooks).toBeTruthy();
+  });
+
   test("skill frontmatter and implicit-invocation policy are generated for every Codex skill", async () => {
     const generated = generatedCodexSurfaceFiles();
 
