@@ -40,6 +40,7 @@ These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our
 | `kimi -p` permission mode | `apps/kimi-code/src/cli/run-prompt.ts` | hard-coded `permission: 'auto'`; `installHeadlessHandlers` auto-approves; resumed sessions force-overridden to `'auto'` | `runtime/cli-client.ts` invokes `-p`; safety relies on the hook firing |
 | PreToolUse hook engine | `packages/agent-core/src/session/hooks/` (live since kimi-code 0.5.0; `agent/hooks/` is a legacy copy — diff both) | stdin JSON shape (`{tool_name, tool_input, session_id, cwd, ...}`), exit-2-as-deny semantics, empty matcher means all tools, fail-open on internal error | `runtime/hooks/approval-hook.ts`, `runtime/hooks/approval-policy.ts` |
 | Permission policy queue order | `packages/agent-core/src/agent/permission/policies/index.ts` | `PreToolCallHookPermissionPolicy` runs **before** `auto-mode-approve` / `yolo-mode-approve` | implicit — entire safety model assumes hook fires first |
+| `-p` session bootstrap / permission-context construction | `packages/agent-core/src/rpc/core-impl.ts` (`createSessionWithOverrides` / `resumeSessionWithOverrides`), `packages/agent-core/src/config/workspace-local.ts` | `run-prompt.ts` only **delegates** to `createKimiHarness().createSession/resumeSession`; the harness impl is where the permission context is built and where project-local config (e.g. `.kimi-code/local.toml` `[workspace] additional_dir` → `additionalDirs`) is auto-loaded from disk at session start, on **all** transports incl. `-p` | implicit — what `additionalDirs`/session config holds before any policy runs decides which approve policies (e.g. `GitCwdWriteApprovePermissionPolicy`) could fire; the plugin's index-0 hook + single-root `runtime/rescue-approval.ts` must still bind first |
 | Stream-json output | `apps/kimi-code/src/cli/run-prompt.ts` (`PromptJsonWriter`, `writeResumeHint`) | NDJSON record shapes for assistant/tool/tool_result; `role:"meta", type:"session.resume_hint"` carries session id | `runtime/stream-json.ts` parser, `runtime/cli-client.ts` session pinning |
 | CLI argv | `apps/kimi-code/src/cli/commands.ts`, `options.ts` | `-p`, `-r <id>`, `--output-format stream-json`, `-m`, `--skills-dir` all accepted with current semantics | `runtime/cli-client.ts::buildArgs` |
 | Process / exit / lifecycle | `apps/kimi-code/src/cli/run-prompt.ts` and OS-level | stdout = stream-json only; stderr = humans-only; SIGTERM lands; process group enumerable | `runtime/cli-client.ts` cancellation; `runtime/background-spawn.ts` |
@@ -89,9 +90,25 @@ git diff "$PREV".."$NEW" -- \
   packages/agent-core/src/agent/records/ \
   packages/agent-core/src/session/ \
   > /tmp/kimi-<NEW>-diff/04-wire-records.diff
+
+# Session BOOTSTRAP lives in the RPC core impl, NOT run-prompt.ts. run-prompt.ts
+# only delegates: createKimiHarness().createSession/resumeSession. The harness
+# impl is rpc/core-impl.ts (createSessionWithOverrides/resumeSessionWithOverrides),
+# which is where the permission CONTEXT is constructed and where config can be
+# auto-loaded from disk at session start. Scope it explicitly — reading
+# run-prompt.ts alone hides this surface. (Added after the 0.19.1 audit, where
+# #812 wired an unconditional read of project-local .kimi-code/local.toml
+# `[workspace] additional_dir` into BOTH the -p create AND resume bootstraps via
+# config/workspace-local.ts; source-reading of run-prompt.ts made additionalDirs
+# look --add-dir-only, and only the Phase-4 adversarial pass caught it.)
+git diff "$PREV".."$NEW" -- \
+  packages/agent-core/src/rpc/core-impl.ts \
+  packages/agent-core/src/config/workspace-local.ts \
+  packages/agent-core/src/config/ \
+  > /tmp/kimi-<NEW>-diff/05-session-bootstrap.diff
 ```
 
-A 0-byte `03-hooks.diff` (now covering **both** `agent/hooks/` and the live `session/hooks/`) is the canonical "hook engine unchanged" signal. The other three need real reading. (Note: `04-wire-records.diff` scopes the whole `session/` dir, so it re-includes `session/hooks/`+`session/permission/` — that overlap is intentional belt-and-suspenders, not a bug.)
+A 0-byte `03-hooks.diff` (now covering **both** `agent/hooks/` and the live `session/hooks/`) is the canonical "hook engine unchanged" signal. The other **four** need real reading. (Note: `04-wire-records.diff` scopes the whole `session/` dir, so it re-includes `session/hooks/`+`session/permission/` — that overlap is intentional belt-and-suspenders, not a bug.) `05-session-bootstrap.diff` scopes the RPC harness impl + the whole `config/` dir, because a non-empty `05` means session construction or on-disk config-load behavior moved — exactly the surface that determines what the permission context (e.g. `additionalDirs`) holds before any policy runs. A non-empty `05` requires reading even when `01`–`04` are clean.
 
 ### Phase 1 — Multi-agent compat review (4 parallel agents)
 
@@ -219,6 +236,7 @@ The compat-marker tag (`compat-verified-kimi-code-<ver>`) is independent of the 
 - **A headless/cloud-prepared catch-up DEFERS its smoke — treat the PR as smoke-pending until you run it locally against that branch.** A catch-up prepared in a cloud/CI session with no kimi binary cannot run Phase 1b (`PREREQS_OK` is false; the suite skips — installing the binary doesn't help, the smoke needs valid Moonshot OAuth creds). Before merging such a PR, run `bun run smoke:real` **locally against the actual PR branch**, then flip the "smoke pending" docs (`CHANGELOG`, `kimi-version-probe.ts` comment, `ROADMAP`) to GREEN so the tagged commit is accurate. Do **not** substitute the daily-checkup routine's `report-NN` green smoke for this if the PR added code the report's smoke didn't cover: the 2026-06-19 v1.2.6 PR bundled the `/kimi:swarm --cap` env-wiring feature, but report 81's green smoke *predated* that code (report 81 had explicitly said the feature should NOT be bundled), so it certified only the pre-feature tree. Re-running locally against the branch is what actually closed the gate. (Same run: watch for the cwd-persisted-into-the-clone trap — `bun run check` piped through `tail` reported exit 0 while actually failing "Script not found check" because a prior `cd` had left the shell in `.claude/kimi-code-research/kimi-code-repo`; run gates unpiped from the plugin root.)
 - **Don't tag a plugin version (`vX.Y.Z`) for zero-code-change audits.** Reserve patch and minor releases for actual changes. Use the compat-marker tag for verification-only events.
 - **Don't skip the multi-reviewer pass on the audit commit.** The 2026-05-27 run caught a `~/.kimi/plugins/installed.json` path error (correct path: `~/.kimi-code/plugins/installed.json`) propagated from the source audit reports into the roadmap — exactly the kind of detail one reader misses.
+- **Don't conclude `additionalDirs`/session config is empty by reading `run-prompt.ts` alone — the harness impl (`rpc/core-impl.ts`) can auto-load project-local config at bootstrap.** `run-prompt.ts` only delegates to `createKimiHarness().createSession/resumeSession`; the real bootstrap (`createSessionWithOverrides`/`resumeSessionWithOverrides`) lives in `packages/agent-core/src/rpc/core-impl.ts` and is where on-disk config is merged into the permission context. In the 2026-06-23 0.19.1 audit, #812 (commit `c0eeca2`) made both the `-p` create and resume paths unconditionally read `.kimi-code/local.toml` `[workspace] additional_dir` into `additionalDirs` — so reading run-prompt.ts made it look `--add-dir`-only, and only the Phase-4 adversarial reviewer caught it. Always read `05-session-bootstrap.diff`; if a claim depends on a session field being empty/default on the `-p` path, trace it through `core-impl.ts`, not just the CLI entrypoint. (The safety conclusion held — the index-0 hook + single-root `rescue-approval.ts` bind before the only `additionalDirs` consumer, `GitCwdWriteApprovePermissionPolicy` at index 17, which is dead below auto-approve on `-p` — but the audit *reasoning* was wrong. See report 85's CORRECTION box.)
 
 ## Reference: the 2026-05-27 0.4.0 audit
 
