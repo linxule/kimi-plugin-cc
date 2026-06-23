@@ -332,6 +332,76 @@ export const KIMI_TESTED_MINORS = [
     // Tag: compat-verified-kimi-code-0.18.0.
     { major: 0, minor: 17 },
     { major: 0, minor: 18 },
+    // 0.19 (new minor, 2026-06-23) verified COMPAT-PRESERVED — added to the
+    // tested set in v1.5.1 because crossing the 0.18→0.19 minor fired the H9
+    // "newer than tested max" probe warning (the operator's binary auto-upgraded
+    // 0.18.0→0.19.1 out-of-band, PR #334 drift). Backed by a GREEN
+    // `bun run smoke:real` on the operator's 0.19.1 binary (9 pass / 0 fail):
+    // review/challenge/ask/review_gate forced writes hook-denied; pursue
+    // multi-turn goal wrote zero files (`goal.summary` parsed cleanly
+    // turnsUsed:2 tokensUsed:73631); a spawned read-only swarm subagent's forced
+    // write hook-denied; and BOTH write-swarm assertions held on 0.19.1 — a
+    // `coder` subagent's edits landed only in the throwaway worktree
+    // (patchBytes=306, userTreeClean=true) and an out-of-trusted-root absolute
+    // write was hook-denied. The safety chain is intact:
+    //   - 03-hooks.diff is 0 bytes (BOTH agent/hooks/ AND session/hooks/) —
+    //     the hook engine is byte-identical 0.18.0→0.19.1.
+    //   - The permission policy queue (policies/index.ts) is BYTE-IDENTICAL:
+    //     PreToolCallHookPermissionPolicy STILL index 0,
+    //     AgentSwarmExclusiveDenyPermissionPolicy index 1,
+    //     AutoModeApprovePermissionPolicy index 5 (first approve; every policy
+    //     between the index-0 hook and it is a DENY). `permission:'auto'` is
+    //     still hard-coded in run-prompt.ts createSession.
+    // The minor that bumped 0.18→0.19.0 is #812 "workspace add-dir support"
+    // (commit c0eeca2): a new repeatable --add-dir <dir> flag, additionalDirs
+    // plumbed through Session, and GitCwdWriteApprovePermissionPolicy widened to
+    // approve writes within cwd OR any additional dir. Compat-benign for the
+    // plugin — but NOT because additionalDirs is empty (see the CORRECTION
+    // below). The real reasons:
+    //   - GitCwdWriteApprovePermissionPolicy is the ONLY permission consumer of
+    //     additionalDirs (git-cwd-write-approve.ts:26 is the sole
+    //     getAdditionalDirs() call in agent/permission/), and it sits at index 17
+    //     — the last approve before FallbackAsk (the tail at index 18), BELOW
+    //     AutoModeApprovePermissionPolicy (index 5). On the `-p` auto path
+    //     auto-approve decides first for anything the index-0 hook did not deny,
+    //     so GitCwdWriteApprove is STRUCTURALLY UNREACHABLE → its add-dir
+    //     widening is dead for us regardless of what additionalDirs contains.
+    //   - Read-only commands: the index-0 hook denies every write before any
+    //     approve policy runs. Write commands (rescue/pursue/swarm-write): the
+    //     index-0 hook confines to a SINGLE root via rescue-approval.ts, which
+    //     never reads additionalDirs — the upstream widening cannot leak into our
+    //     allowlist. The 0.19.1 smoke proves it empirically (write-swarm
+    //     userTreeClean=true; an out-of-trusted-root write hook-denied).
+    //   - isWithinWorkspace with additionalDirs=[] is byte-for-byte the old
+    //     isWithinDirectory(cwd) (path-access.ts:159-163 checks workspaceDir then
+    //     loops the list), so even in the non-`-p` modes where GitCwdWriteApprove
+    //     DOES run, the empty-list case is unchanged.
+    // CORRECTION to an earlier mental model: additionalDirs is NOT guaranteed
+    // empty for a plugin `-p` spawn even with no --add-dir. #812 also wired an
+    // UNCONDITIONAL read of the project-local <root>/.kimi-code/local.toml
+    // `[workspace] additional_dir` into BOTH the -p create AND resume bootstraps
+    // (rpc/core-impl.ts:238 createSessionWithOverrides + :363
+    // resumeSessionWithOverrides, via config/workspace-local.ts; both ABSENT at
+    // 0.18.0). So getAdditionalDirs() can be non-empty whenever such a file
+    // exists in the repo — but per the reasons above that changes no approve/deny
+    // decision on our path. (Swarm `coder` subagents inherit the coordinator's
+    // additionalDirs; the same index-0 hook gating applies.)
+    // Other 0.18.0→0.19.1 changes are off the `-p` path: #963 (commit 4292ae9)
+    // adds a new `turn.ended` terminal `reason:'filtered'` (provider content
+    // filter) surfaced as a human string — a new failure REASON, not a new
+    // stdout record SHAPE, so the role-keyed stream-json parser is unaffected;
+    // #821 (detach-to-background) was already triaged in the forward-scans; and
+    // 0.19.1 over 0.19.0 is ci/ACP/kimi-web-UI only (0-byte load-bearing diff —
+    // its #992 `fix(acp)` only re-routes the workspace-local read's kaos handle).
+    // NEXT-AUDIT NOTE: the workspace-local additional_dir auto-load is LIVE on
+    // the -p path NOW (shipped 0.19.0/#812, not a future risk). It stays
+    // hook-bound for us, but the "plugin never passes --add-dir ⟹ additionalDirs
+    // empty" assumption is broken upstream — re-confirm each audit that the
+    // index-0 hook still pre-empts GitCwdWriteApprove, and consider a defensive
+    // assert/scrub if a future minor lets additionalDirs reach a policy ABOVE our
+    // hook. See .claude/kimi-code-research/reports/85-upstream-0191-surface.md.
+    // Tag: compat-verified-kimi-code-0.19.1.
+    { major: 0, minor: 19 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

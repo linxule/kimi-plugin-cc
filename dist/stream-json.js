@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.16.0. 2026-05-27 audit covered 0.4.0,
+//     verified byte-identical (by blob SHA) through 0.19.1. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -40,7 +40,16 @@
 //     0-byte; the only argv change registers a new `kimi vis` subcommand off
 //     the `-p` path, and the records/replay/compaction/logging churn is
 //     internal — not on the stdout stream; GREEN smoke 7/0 on the 0.16.0
-//     binary).
+//     binary), 2026-06-19 covered the 0.16.0→0.18.0 jump (0.17.0/0.17.1/0.18.0;
+//     03-hooks.diff 0-byte, run-prompt.ts only a telemetry refactor outside the
+//     writer, the sole permission change a NON-auto-mode GoalStartReviewAsk that
+//     is dead on `-p`), and 2026-06-23 covered the 0.18.0→0.19.1 minor (the
+//     writer + records/ 0-byte; the bumping feature #812 `--add-dir` touches
+//     only an approve policy at the queue tail and is byte-equivalent with the
+//     additionalDirs=[] the plugin always has; #963's new `turn.ended`
+//     reason:'filtered' is a failure REASON not a new stdout record SHAPE;
+//     GREEN smoke 9/0 on the operator's 0.19.1 binary —
+//     .claude/kimi-code-research/reports/85-upstream-0191-surface.md).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
