@@ -1,0 +1,38 @@
+// Derives a human-readable title for a Kimi session spawned by this plugin.
+//
+// Convention (ratified with Kimi itself in the 0.1.5 design round): a fixed
+// "Kimi Task: " prefix, followed by a shortened excerpt of the user prompt,
+// with an optional " [write]" suffix on rescue (the only write-capable command).
+//
+// A single prefix means one search string filters every plugin-created session
+// in `kimi web`. Per-command grouping was considered and rejected because it
+// fragments the query key. Capability (read vs write) matters more to a human
+// scanning a session list than command name does.
+export const KIMI_SESSION_TITLE_PREFIX = "Kimi Task";
+export const KIMI_SESSION_TITLE_EXCERPT_LENGTH = 56;
+const WRITE_CAPABLE_COMMANDS = new Set(["rescue"]);
+// Prompts that begin with a label like "Task: ..." or "TODO: ..." produce
+// doubled titles such as "Kimi Task: Task: ..." when excerpted as-is. Strip
+// leading label tokens from the excerpt so the rendered title reads cleanly.
+// The pattern is conservative on purpose: it only strips the first label,
+// only when followed by a colon and whitespace, and only for a small set of
+// recognizable meta-labels we have actually seen in the wild.
+const LEADING_LABEL_PATTERN = /^(task|todo|job|ticket|work|item)\s*:\s*/i;
+export function buildSessionTitle(commandType, prompt) {
+    const stripped = stripLeadingLabel(prompt ?? "");
+    const excerpt = shortenForTitle(stripped, KIMI_SESSION_TITLE_EXCERPT_LENGTH);
+    const base = excerpt ? `${KIMI_SESSION_TITLE_PREFIX}: ${excerpt}` : KIMI_SESSION_TITLE_PREFIX;
+    const suffix = WRITE_CAPABLE_COMMANDS.has(commandType) ? " [write]" : "";
+    return `${base}${suffix}`;
+}
+export function shortenForTitle(text, maxLength) {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (!normalized)
+        return "";
+    if (normalized.length <= maxLength)
+        return normalized;
+    return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+export function stripLeadingLabel(text) {
+    return text.replace(LEADING_LABEL_PATTERN, "");
+}

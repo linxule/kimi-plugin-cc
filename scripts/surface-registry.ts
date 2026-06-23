@@ -1,6 +1,19 @@
+import { KIMI_PLUGIN_CC_VERSION } from "../runtime/version.js";
+
 export const PLUGIN_NAME = "kimi";
 export const MARKETPLACE_NAME = "kimi-marketplace";
-export const PLUGIN_VERSION = "1.5.1";
+// Single source of truth: the Codex manifest/marketplace version derives from the
+// runtime version, so a release bump in runtime/version.ts propagates here without
+// a second edit. The codex-surfaces test asserts PLUGIN_VERSION === package.json.
+export const PLUGIN_VERSION = KIMI_PLUGIN_CC_VERSION;
+
+// The Codex plugin is a SELF-CONTAINED subfolder so its root has no overlap with the
+// Claude Code plugin root (the repo root). Claude Code auto-discovers a top-level
+// skills/ dir by convention; keeping the Codex skills out of the repo root is what
+// stops them leaking into the Claude Code surface. Codex copies this root to its
+// install cache, so the subfolder also bundles the runtime it needs (see
+// generate-surfaces.ts). One constant so the location is one-line-changeable.
+export const CODEX_PLUGIN_SUBDIR = "plugins/kimi-codex";
 
 export interface ClaudeSurfaceHash {
   path: string;
@@ -21,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "af320c2a01992c8576ba61be60b9d64e2821bb6f8c4ad8a180e96e0184cd8faa" },
-  { path: ".claude-plugin/marketplace.json", sha256: "9a43d4e84317fb068ab19098225334b1c091f04eb96f2273b971b9a2cda9567a" },
+  { path: ".claude-plugin/plugin.json", sha256: "ac40d81ef51e4eb38393513bc3f40ecdf5b66d405643a2f7b96ad76dcb7b94c6" },
+  { path: ".claude-plugin/marketplace.json", sha256: "f4f87ff136d7c403c5d9ebe5edb1c6f38fc05c6377c4484c9f5afc81e7d9f0f3" },
   { path: "commands/README.md", sha256: "f996a084f8c7762c2405c3990443cff49d96003416da8fead8fd875a0f50fd23" },
   { path: "commands/ask.md", sha256: "5ffcd405b1f905f400c00520d210afc6dbf35cae3a0b07c6189866fa639bf778" },
   { path: "commands/cancel.md", sha256: "f6fc6e474242901e2e4836956f2b67c6335ff0042a7a6e60c8baf9585cec0035" },
@@ -85,7 +98,7 @@ export const CODEX_MARKETPLACE = {
       name: PLUGIN_NAME,
       source: {
         source: "local",
-        path: "./",
+        path: "./plugins/kimi-codex",
       },
       policy: {
         installation: "AVAILABLE",
