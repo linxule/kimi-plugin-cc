@@ -44,7 +44,7 @@ tests/              bun test suite
 
 ## Commands
 
-- `bun run check` — rebuild `dist/`, typecheck, run full test suite, then drift gate (`git diff --exit-code -- dist`). If dist has unstaged changes, check fails — stage them and retry.
+- `bun run check` — rebuild `dist/`, verify generated surfaces (`check:surfaces`: Claude hash gate + Codex sidecars + the `plugins/kimi-codex` runtime mirror/orphan checks), typecheck, run full test suite, then drift gate (`git diff --exit-code -- dist plugins/kimi-codex`). If `dist/` or the bundled Codex copy has unstaged changes, check fails — stage them and retry.
 - `bun test <path>` — run a single test file
 - `bun run build` — compile `runtime/**/*.ts` → `dist/**/*.js`
 

@@ -116,7 +116,14 @@ Then run `/kimi:setup` to install the safety hook.
 
 ### Via the Codex repo marketplace
 
-The Codex marketplace sidecar lives at `.agents/plugins/marketplace.json` and points at the self-contained plugin root `plugins/kimi-codex/` (`source.path: "./plugins/kimi-codex"`). Install the `kimi` plugin from that marketplace, then run the `$kimi-setup` skill to install/check the kimi-code safety hook. The Codex skills mirror the Claude surfaces: `$kimi-review`, `$kimi-challenge`, `$kimi-ask`, `$kimi-rescue`, `$kimi-pursue`, `$kimi-swarm`, `$kimi-swarm-write`, `$kimi-status`, `$kimi-result`, `$kimi-cancel`, and `$kimi-replay`.
+The Codex marketplace sidecar lives at `.agents/plugins/marketplace.json` and points at the self-contained plugin root `plugins/kimi-codex/` (`source.path: "./plugins/kimi-codex"`). Add the marketplace and install the `kimi` plugin:
+
+```bash
+codex plugin marketplace add linxule/kimi-plugin-cc
+codex plugin add kimi@kimi-marketplace
+```
+
+Then run the `$kimi-setup` skill to install/check the kimi-code safety hook. The Codex skills mirror the Claude surfaces: `$kimi-review`, `$kimi-challenge`, `$kimi-ask`, `$kimi-rescue`, `$kimi-pursue`, `$kimi-swarm`, `$kimi-swarm-write`, `$kimi-status`, `$kimi-result`, `$kimi-cancel`, and `$kimi-replay`.
 
 ### Removing the integration
 
