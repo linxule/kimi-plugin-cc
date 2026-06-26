@@ -405,6 +405,79 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // hook. See .claude/kimi-code-research/reports/85-upstream-0191-surface.md.
   // Tag: compat-verified-kimi-code-0.19.1.
   { major: 0, minor: 19 },
+  // 0.20 (new minor, 2026-06-26) verified COMPAT-PRESERVED — the operator's
+  // binary auto-upgraded 0.19.2→0.20.0 (PR #334 drift), crossing the 0.19→0.20
+  // minor and firing the H9 "newer than tested max" probe warning. (npm went
+  // straight 0.19.2→0.20.0; no 0.19.3. 0.19.1→0.19.2 was already 0-byte on all
+  // load-bearing surfaces — report 86 — so the 0.19.1..0.20.0 diff below loses
+  // no signal.) The safety chain is intact, re-verified by `git diff … | wc -c`:
+  //   - 02-permission.diff is 0 bytes AND 03-hooks.diff is 0 bytes (BOTH
+  //     agent/hooks/ AND session/hooks/) — the permission policy queue and the
+  //     hook engine are byte-identical 0.19.1→0.20.0.
+  //   - policies/index.ts, pre-tool-call-hook.ts, run-prompt.ts, options.ts, and
+  //     agent/records/ are ALL 0-byte. PreToolCallHookPermissionPolicy STILL
+  //     index 0, AgentSwarmExclusiveDeny index 1, AutoModeApprove index 5 (the
+  //     first approve; every policy between the index-0 hook and it is a DENY).
+  //     `permission:'auto'` still hard-coded in run-prompt.ts.
+  //   - A broad-sweep risk scan over EVERY file changed OUTSIDE the five scoped
+  //     diffs found ZERO new permission/approval decisions anywhere outside the
+  //     (0-byte) permission+hooks dirs, and no swarm-subagent spawn/permission
+  //     change — so read/write-swarm `coder` subagents are still gated solely by
+  //     the index-0 hook.
+  // Notable 0.20.0 changes, all compat-benign for a `kimi -p` wrapper:
+  //   - #1040 AGENTS.md-oversized `warning` agent event: SWALLOWED on -p
+  //     (run-prompt.ts:495 `case 'warning': return;` — no stdout.write, shared
+  //     with subagent.*/compaction.*/goal.updated). Invisible to our role-keyed
+  //     runtime/stream-json.ts parser; reaches only the RPC getSessionWarnings
+  //     accessor (TUI/kimi-web) + the logger.
+  //   - #1065 Write auto-creates missing parent dirs (ensureParentDirectory
+  //     recursive mkdir on ENOENT). The `path` field name is INTACT
+  //     (WriteInputSchema = z.object({ path, content }); Bash still `command`),
+  //     so rescue-approval.ts::extractFilePath is unaffected (the v1.4.1 lesson).
+  //     mkdir runs on the parent of an ALREADY-hook-approved path → can only
+  //     create dirs INSIDE a path the index-0 hook approved; no workspace escape.
+  //   - #1062 tool-result budget: adds a `truncated` flag to tool-result CONTENT
+  //     (loop/tool-call.ts normalizeToolResult), NOT the serialized record SHAPE
+  //     (records/ + run-prompt.ts 0-byte). It ALSO persists tool results >50,000
+  //     chars to `<agent.homedir>/tool-results/<stem>-<uuid>.txt`
+  //     (agent/turn/tool-result-budget.ts, homedir = this.agent.homedir = the
+  //     KIMI home, NOT the workspace cwd) — a kimi-internal artifact off the
+  //     user's tree, same class as ~/.kimi-code/logs/. Does NOT touch the user
+  //     tree → no violation of "read-only commands write zero files in the repo".
+  //   - commands.ts `-C`→`-c` continue rename (+ hidden `-C` alias): off our flag
+  //     set (-p/-r/--output-format/-m/--skills-dir); run-prompt.ts/options.ts 0-byte.
+  //   - NEW RPC runShellCommand/cancelShellCommand (CoreAPI/SessionAPI): a
+  //     HOST-initiated shell exec (TUI `!command` / kimi-web) that calls
+  //     bash.resolveExecution().execute() DIRECTLY, bypassing the permission
+  //     stack + PreToolUse hook. NOT model-reachable: it is not a model tool
+  //     (absent from the tool registry) and absent from installHeadlessHandlers /
+  //     the whole apps/kimi-code/src/cli/ -p path. The plugin spawns `kimi -p`
+  //     and never opens an RPC channel → unreachable. WATCH (next audit):
+  //     re-confirm it stays RPC/TUI-only and never reaches the -p headless path
+  //     or the model tool registry — it is the first permission-bypassing
+  //     shell-exec in agent-core.
+  //   - forcePluginSessionStartReminder resume override (rpc/core-impl.ts): set
+  //     ONLY via reloadSession (the /reload RPC flow). The plugin's -p -r resume
+  //     uses plain harness.resumeSession → never set; appendPluginSessionStart
+  //     Reminder cannot fire on our path. config/ is 0-byte (the 0.19.0/#812
+  //     workspace-local additional_dir auto-load is unchanged; GitCwdWriteApprove,
+  //     its sole consumer at index 17, stays dead below auto-approve on -p).
+  //   - kimi server/web daemon stack (cli/sub/server/* — access-urls, networks,
+  //     rotate-token, daemon lifecycle): a separate transport, never invoked; the
+  //     new stdout.writes there are off the -p path.
+  // SMOKE: NOT run for this certification. `bun run smoke:real` against the
+  // operator's 0.20.0 binary went RED on a provider 403 "usage limit for this
+  // billing cycle" — records:[] on every label, the model never issued a single
+  // tool call (0 hook-bypasses observed). This is the operator-billing-state
+  // false-alarm class (cf. the auth.login_required note in
+  // docs/upstream-compat-audit.md), NOT a compat break — a true break shows the
+  // model ATTEMPTING a write and the hook NOT denying. The operator elected to
+  // certify on the source audit (manual byte-level + multi-agent re-audit) and
+  // skip the quota-blocked smoke; re-run `bun run smoke:real` once quota refreshes
+  // to earn the end-to-end proof. See
+  // .claude/kimi-code-research/reports/88-upstream-0200-surface.md.
+  // Tag: compat-verified-kimi-code-0.20.0.
+  { major: 0, minor: 20 },
 ];
 
 export interface KimiVersionProbeOk {

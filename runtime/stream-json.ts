@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.19.1. 2026-05-27 audit covered 0.4.0,
+//     verified byte-identical (by blob SHA) through 0.20.0. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -49,7 +49,15 @@
 //     additionalDirs=[] the plugin always has; #963's new `turn.ended`
 //     reason:'filtered' is a failure REASON not a new stdout record SHAPE;
 //     GREEN smoke 9/0 on the operator's 0.19.1 binary —
-//     .claude/kimi-code-research/reports/85-upstream-0191-surface.md).
+//     .claude/kimi-code-research/reports/85-upstream-0191-surface.md), and
+//     2026-06-26 covered the 0.19.1→0.20.0 minor (run-prompt.ts + options.ts +
+//     records/ all 0-byte; #1040's new `warning` agent event is swallowed on `-p`
+//     at run-prompt.ts:495 `case 'warning': return;`, so it never reaches this
+//     parser; #1062's tool-result budget adds a `truncated` flag to tool-result
+//     CONTENT, not the record SHAPE; the new runShellCommand RPC + kimi server/web
+//     stack are off the `-p` path — report 88. Smoke NOT run this cert: the 0.20.0
+//     `bun run smoke:real` was quota-blocked, 403 usage-limit, records:[] — an
+//     operator-billing false alarm, not a compat break; certified on source audit).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
