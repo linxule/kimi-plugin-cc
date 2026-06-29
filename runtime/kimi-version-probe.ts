@@ -497,10 +497,16 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // fields + provider-manager; off the -p stdout shape + permission stack), #1125
   // upgrade->update alias, #1129/#1156 compaction cap, #1128 server --allowed-host.
   // 0.20.0 runShellCommand/cancelShellCommand RPC WATCH discharged (still RPC/TUI-
-  // only, unreachable from kimi -p). SMOKE: NOT run for 0.20.x since the report-88
-  // 0.20.0 cert (provider 403 "usage limit for this billing cycle" — operator-
-  // billing-state false alarm, not a compat break); re-run `bun run smoke:real` on a
-  // 0.20.x binary once quota refreshes to earn the end-to-end proof.
+  // only, unreachable from kimi -p). SMOKE: GREEN on 0.20.2 — `bun run smoke:real`
+  // 9 pass / 0 fail (2026-06-29) on the operator's 0.20.2 binary: review/challenge/
+  // ask/review_gate forced writes hook-denied; pursue multi-turn goal wrote zero
+  // files (goal.summary parsed cleanly turnsUsed:2 tokensUsed:85770); a read-only
+  // swarm subagent's forced write hook-denied; and BOTH write-swarm assertions held
+  // (coder edits confined to the throwaway worktree, patchBytes=334,
+  // userTreeClean=true; an out-of-trusted-root absolute write hook-denied). The
+  // earlier report-88 0.20.0 quota block (provider 403 "usage limit") was the
+  // operator-billing-state false alarm, now cleared — the {0,20} line is end-to-end
+  // proven on 0.20.2. Tag: compat-verified-kimi-code-0.20.2.
   // See .claude/kimi-code-research/reports/89, 90, 91-upstream-020x-surface.md.
   { major: 0, minor: 20 },
 ];
