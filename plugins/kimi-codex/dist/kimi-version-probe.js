@@ -474,6 +474,31 @@ export const KIMI_TESTED_MINORS = [
     // to earn the end-to-end proof. See
     // .claude/kimi-code-research/reports/88-upstream-0200-surface.md.
     // Tag: compat-verified-kimi-code-0.20.0.
+    // 0.20.1 / 0.20.2 (patches, 2026-06-27 / 2026-06-29) verified COMPAT-PRESERVED
+    // within the already-listed {0,20} — no array change (membership is minor-level;
+    // H9 stays silent). 02-permission.diff 0-byte (PreToolCallHookPermissionPolicy
+    // still index 0, AutoModeApprove index 5); agent/records/ 0-byte (stream-json
+    // shape unchanged); run-prompt.ts permission/writer chain unchanged (only
+    // telemetry property renames, #1184). The hook engine DID change — #1127 "support
+    // hooks in plugins" (0.20.1): rpc/core-impl.ts create+resume now merge enabled
+    // kimi-code PLUGIN manifest hooks into the -p session hook list ([...config.hooks,
+    // ...plugins.enabledHooks()]). Compat-benign: engine aggregation is any-block-wins
+    // (session/hooks/engine.ts blockDecision = first action:'block' wins; an allow
+    // never pre-empts a block), so a plugin hook can only ADD denials, never override
+    // our managed PreToolUse deny. Our config.toml managed block is unaffected: the
+    // config HookDefSchema is .strict(), so the new per-hook cwd/env fields are
+    // programmatic/plugin-only (no config-injection vector). NEW load-bearing
+    // invariant: hook AGGREGATION semantics (we are no longer the sole -p hook) —
+    // re-verify blockDecision stays find-first-block each audit. Off-path: #1170/#1186
+    // Anthropic-protocol/betaApi transport plumbing (config protocol/betaApi alias
+    // fields + provider-manager; off the -p stdout shape + permission stack), #1125
+    // upgrade->update alias, #1129/#1156 compaction cap, #1128 server --allowed-host.
+    // 0.20.0 runShellCommand/cancelShellCommand RPC WATCH discharged (still RPC/TUI-
+    // only, unreachable from kimi -p). SMOKE: NOT run for 0.20.x since the report-88
+    // 0.20.0 cert (provider 403 "usage limit for this billing cycle" — operator-
+    // billing-state false alarm, not a compat break); re-run `bun run smoke:real` on a
+    // 0.20.x binary once quota refreshes to earn the end-to-end proof.
+    // See .claude/kimi-code-research/reports/89, 90, 91-upstream-020x-surface.md.
     { major: 0, minor: 20 },
 ];
 /**

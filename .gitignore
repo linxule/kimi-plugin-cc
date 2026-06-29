@@ -7,3 +7,9 @@ coverage/
 .tmp/
 runtime/dev-data/
 .claude/
+
+# iCloud sync-conflict copies (repo lives under ~/Documents/, which iCloud syncs).
+# iCloud renames conflicts "<name> 2.js", "<name> 3.js", "LICENSE 4", etc. — match
+# any " <digit>" suffix, with or without an extension. Pure junk, never track them.
+* [0-9].*
+* [0-9]
