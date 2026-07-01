@@ -506,6 +506,41 @@ export const KIMI_TESTED_MINORS = [
     // proven on 0.20.2. Tag: compat-verified-kimi-code-0.20.2.
     // See .claude/kimi-code-research/reports/89, 90, 91-upstream-020x-surface.md.
     { major: 0, minor: 20 },
+    // 0.21 (new minor, 2026-07-01) verified COMPAT-PRESERVED — the operator's
+    // binary auto-upgraded to 0.21.1 (PR #334 drift), crossing the 0.20→0.21
+    // minor and firing the H9 "newer than tested max" probe warning. Report 93's
+    // source audit found the two load-bearing surfaces byte-identical across the
+    // full 0.20.2→0.21.1 span: 02-permission.diff 0 bytes (hook still index 0,
+    // AutoModeApprove still index 5, every policy between is a DENY) and
+    // 03-hooks.diff 0 bytes (hook engine and any-block-wins aggregation intact).
+    // Also 0-byte: options.ts (argv), agent/records/ (stream-json shape),
+    // workspace-local.ts (additional_dir auto-load unchanged), and
+    // tools/builtin/file/{write,edit}.ts (`path` field intact). run-prompt.ts
+    // still hard-codes permission:'auto' and installHeadlessHandlers; its only
+    // scoped change is a cleanup timeout (#1233) after resume_hint/goal.summary
+    // flush, which helps process reaping.
+    // New 0.21.0 surfaces are compat-benign for a `kimi -p` wrapper:
+    //   - #1204 plugin slash commands are RPC/host-initiated, absent from the
+    //     cli/ -p path, not model tools, and macro-expand into prompt text that
+    //     still goes through the index-0 hook. They are main-agent-only; swarm
+    //     coders do not receive them. NEXT-AUDIT: re-confirm activation stays
+    //     off the -p path and never becomes a model tool.
+    //   - The thinking-effort/model-catalog refactor is provider config plumbing
+    //     the plugin does not set or consume. H5 opportunity, not a risk.
+    //   - Compaction rework and record migrations are internal replay/history
+    //     changes; the live PromptJsonWriter + agent/records/ shape is unchanged.
+    //   - The 0.20.0 runShellCommand/cancelShellCommand RPC WATCH is discharged
+    //     again: still RPC/TUI-only, absent from cli/, and unreachable from kimi -p.
+    // Backed by a GREEN `bun run smoke:real` on the operator's 0.21.1 binary
+    // (2026-07-01): 9 pass / 0 fail. review/challenge/ask/review_gate forced
+    // writes hook-denied; pursue goal mode wrote zero files and parsed
+    // goal.summary (turnsUsed:2 tokensUsed:57595); a read-only swarm subagent's
+    // forced write was hook-denied; write-swarm kept coder edits in the throwaway
+    // worktree (patchBytes=334, userTreeClean=true, worktreeCleaned=true); and an
+    // out-of-trusted-root absolute write was hook-denied. Reports:
+    // .claude/kimi-code-research/reports/93-upstream-021-surface.md and
+    // 93-upstream-021-adversarial.md. Tag: compat-verified-kimi-code-0.21.1.
+    { major: 0, minor: 21 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

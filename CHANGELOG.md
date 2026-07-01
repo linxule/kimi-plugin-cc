@@ -2,6 +2,16 @@
 
 > **Post-1.0 release history (v1.0.1 → present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.6.2 — 2026-07-01
+
+**kimi-code 0.21.1 compat: extend `KIMI_TESTED_MINORS` with `{0,21}` after a GREEN real-binary smoke.** A patch release that certifies the 0.20.x→0.21.1 minor and clears the H9 "newer than tested max" setup warning for operators whose binary auto-upgraded to 0.21.x.
+
+- **Probe extension** (`runtime/kimi-version-probe.ts`): added `{ major: 0, minor: 21 }` with the per-version audit comment.
+- **Verdict: COMPAT-PRESERVED.** Source audit report 93 found `02-permission.diff` and `03-hooks.diff` both 0 bytes across 0.20.2→0.21.1; `options.ts`, `agent/records/`, `workspace-local.ts`, and `tools/builtin/file/{write,edit}.ts` are also unchanged on the load-bearing axes. `run-prompt.ts` still hard-codes `permission:'auto'`; the only scoped `run-prompt.ts` change is a cleanup timeout after the writer flush.
+- **New 0.21.0 surfaces are off-path or benign:** plugin slash commands are RPC/host-initiated and absent from `kimi -p`; the thinking-effort/model-catalog refactor is provider plumbing the plugin does not consume; compaction and record migrations are replay/history internals, not live stdout record-shape changes. The `runShellCommand`/`cancelShellCommand` RPC watch remains discharged: still RPC/TUI-only.
+- **Smoke GREEN on `kimi --version` 0.21.1:** `bun run smoke:real` ran 9 pass / 0 fail on 2026-07-01. Read-only labels denied forced writes; pursue wrote zero files and parsed `goal.summary`; read-only swarm denied a subagent write; write-swarm kept coder edits in the throwaway worktree (`userTreeClean=true`, `patchBytes=334`) and denied an out-of-root absolute write.
+- **Docs:** `AGENTS.md` (Version line + Upstream-compat "through 0.21.1"), `ROADMAP-TO-GA.md` (audit-log entry), `runtime/stream-json.ts` (verified-through comment), and `docs/upstream-compat-audit.md` (plugin-command watch surface). Surface reports: `.claude/kimi-code-research/reports/93-upstream-021-surface.md` and `93-upstream-021-adversarial.md`. `bun run check` green. Tags: `v1.6.2` and `compat-verified-kimi-code-0.21.1`.
+
 ## 1.6.1 — 2026-06-26
 
 **kimi-code 0.20.0 compat: extend `KIMI_TESTED_MINORS` with `{0,20}` (source-audit certified; the real-binary smoke was quota-blocked).** A patch release that certifies the 0.19.x→0.20.0 minor. The only runtime change is the probe-array extension; there is no behavior change. Operators whose binary auto-upgraded past the `{0,19}` tested max (PR #334 background auto-upgrade; npm went straight 0.19.2→0.20.0, no 0.19.3) were tripping the H9 "newer than tested max" warning at `/kimi:setup`; this clears it for 0.20.x.

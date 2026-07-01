@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified byte-identical (by blob SHA) through 0.20.0. 2026-05-27 audit covered 0.4.0,
+//     verified stable through 0.21.1. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -45,9 +45,11 @@
 //     writer, the sole permission change a NON-auto-mode GoalStartReviewAsk that
 //     is dead on `-p`), and 2026-06-23 covered the 0.18.0→0.19.1 minor (the
 //     writer + records/ 0-byte; the bumping feature #812 `--add-dir` touches
-//     only an approve policy at the queue tail and is byte-equivalent with the
-//     additionalDirs=[] the plugin always has; #963's new `turn.ended`
-//     reason:'filtered' is a failure REASON not a new stdout record SHAPE;
+//     only an approve policy at the queue tail, structurally dead below the
+//     `-p` auto-mode approve and still pre-empted by our index-0 hook even when
+//     project-local `.kimi-code/local.toml` makes additionalDirs non-empty;
+//     #963's new `turn.ended` reason:'filtered' is a failure REASON not a new
+//     stdout record SHAPE;
 //     GREEN smoke 9/0 on the operator's 0.19.1 binary —
 //     .claude/kimi-code-research/reports/85-upstream-0191-surface.md), and
 //     2026-06-26 covered the 0.19.1→0.20.0 minor (run-prompt.ts + options.ts +
@@ -57,7 +59,12 @@
 //     CONTENT, not the record SHAPE; the new runShellCommand RPC + kimi server/web
 //     stack are off the `-p` path — report 88. Smoke NOT run this cert: the 0.20.0
 //     `bun run smoke:real` was quota-blocked, 403 usage-limit, records:[] — an
-//     operator-billing false alarm, not a compat break; certified on source audit).
+//     operator-billing false alarm, not a compat break; certified on source audit;
+//     the later 0.20.2 smoke ran GREEN 9/0 on 2026-06-29), and 2026-07-01
+//     covered the 0.20.3→0.21.1 minor+patch (report 93; agent/records/ 0-byte,
+//     run-prompt.ts writer/resume_hint/goal.summary unchanged, #1204 plugin
+//     slash commands off the `-p` path, #1233 cleanup timeout after the writer
+//     flush; GREEN smoke 9/0 on the operator's 0.21.1 binary).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
