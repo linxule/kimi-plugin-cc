@@ -15,6 +15,10 @@ const execFileAsync = promisify(execFile);
 // exercise announceSessionTitle explicitly can unset this in a local makeMockEnv.
 process.env.KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE ??= "1";
 
+// Keep tests that do not explicitly seed KIMI_CODE_HOME from probing the
+// developer's real ~/.kimi-code session index during best-effort title sync.
+process.env.KIMI_CODE_HOME = path.join(testRoot, "kimi-code-home");
+
 export async function createTestPluginDataRoot(prefix: string): Promise<string> {
   await mkdir(testRoot, { recursive: true });
   return mkdtemp(path.join(testRoot, `${prefix}-`));

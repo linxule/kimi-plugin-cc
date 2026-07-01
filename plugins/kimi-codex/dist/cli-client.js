@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { RuntimeError, formatError } from "./errors.js";
+import { resolveKimiHome } from "./kimi-home.js";
 import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
 import { collectDescendants } from "./process-tree.js";
 /** Bytes of stderr retained for diagnostics on completion. Rolling buffer. */
@@ -486,6 +487,7 @@ function buildArgs(opts) {
 }
 function buildEnv(opts) {
     const env = { ...opts.env };
+    env.KIMI_CODE_HOME = resolveKimiHome(opts.env, opts.cwd);
     if (opts.commandLabel !== undefined) {
         env.KIMI_PLUGIN_CC_CMD = opts.commandLabel;
     }

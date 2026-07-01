@@ -19,6 +19,7 @@ import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // v1.0 cutover note (PR 2):
 //
@@ -204,6 +205,13 @@ export async function executeAskJob(
       // the bad write. (Kimi alpha.4 challenge finding #3.)
       store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
     }
+    await syncKimiSessionTitle({
+      env: context.env,
+      cwd: job.cwd,
+      sessionId: result.sessionId ?? job.kimi_session_id,
+      title: buildKimiSessionTitle("ask", job.summary),
+      stderr: context.stderr,
+    });
     // For ask, missing session id breaks both -r (latest-resume) and
     // explicit --resume <id>. Warn loudly so the user notices before
     // they try to continue the conversation.

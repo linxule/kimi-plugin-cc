@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmod, cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -143,6 +143,29 @@ describe("installed-plugin script wrappers", () => {
     expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
     expect(combined).toContain("Probe:          ok");
     expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
+  });
+
+  test("clean installed copy resolves relative KIMI_CODE_HOME against the captured workspace cwd", async () => {
+    const workspaceRoot = path.join(cleanCopyRoot, ".tmp", "workspace-relative-home");
+    await mkdir(workspaceRoot, { recursive: true });
+    await writeFile(path.join(workspaceRoot, ".keep"), "", "utf8");
+
+    const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
+      cwd: workspaceRoot,
+      env: {
+        PATH: SANITIZED_PATH,
+        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
+        KIMI_CODE_HOME: "relative-kimi-home",
+        CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
+        CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data-relative-home"),
+      },
+      encoding: "utf8",
+    });
+
+    const combined = `${result.stdout}\n${result.stderr}`;
+    expect(result.status).toBe(0);
+    expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
+    expect(combined).toContain(path.join(workspaceRoot, "relative-kimi-home", "config.toml"));
   });
 
   test("clean installed copy accepts Codex PLUGIN_ROOT and PLUGIN_DATA aliases", () => {

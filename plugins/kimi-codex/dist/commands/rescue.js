@@ -17,6 +17,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import { startBackgroundJob } from "../background-spawn.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 export { describeMissingResult } from "../background-spawn.js";
 // v1.0 cutover note (PR 3):
 //
@@ -181,6 +182,13 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             // alpha.4 challenge finding #3.)
             store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
         }
+        await syncKimiSessionTitle({
+            env: context.env,
+            cwd: job.cwd,
+            sessionId: result.sessionId ?? job.kimi_session_id,
+            title: buildKimiSessionTitle("rescue", prompt),
+            stderr: context.stderr,
+        });
         if (job.kimi_session_id === null) {
             warnIfSessionIdMissing(result, "rescue", job.job_id, context.stderr);
         }

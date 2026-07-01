@@ -18,6 +18,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // v1.0 cutover note (PR 2):
 //
 //   Replaced the v0.4 wire client + initialize + prompt sequence with a
@@ -124,6 +125,13 @@ export async function runReview(argv, context, commandType) {
             // (Kimi alpha.4 challenge finding #3.)
             store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
         }
+        await syncKimiSessionTitle({
+            env: context.env,
+            cwd: job.cwd,
+            sessionId: result.sessionId ?? job.kimi_session_id,
+            title: buildKimiSessionTitle(commandType, parsed.focus ?? reviewContext.targetDescription),
+            stderr: context.stderr,
+        });
         // Match ask/rescue: gate on the JOB row's pre-call session id so that
         // a future --resume code path won't warn on a resumed review whose
         // prior session id remains valid even if this turn didn't re-announce.

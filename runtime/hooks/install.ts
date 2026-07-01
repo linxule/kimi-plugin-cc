@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import { evaluateInstalled } from "./managed-block.js";
 import { tryBuildExpectedHookCommand } from "./install-paths.js";
+import { resolveKimiHome } from "../kimi-home.js";
 
 /**
  * Verify that the kimi-plugin-cc PreToolUse hook is installed and
@@ -97,10 +97,7 @@ export async function verifyHookInstalled(
 }
 
 function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {
-  // KIMI_CODE_HOME mirrors kimi-code's own override (apps/kimi-code reads
-  // it before falling back to ~/.kimi-code). Tests rely on this.
-  const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
-  return path.join(home, "config.toml");
+  return path.join(resolveKimiHome(env), "config.toml");
 }
 
 /**

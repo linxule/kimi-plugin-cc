@@ -41,13 +41,13 @@ import { spawn } from "node:child_process";
 import { access, chmod, mkdir, readFile, rename, unlink, writeFile, } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import os from "node:os";
 import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { buildHookShellCommand, resolveHookScriptPath, resolveNodeBinary, } from "../hooks/install-paths.js";
 import { evaluateInstalled, parseManagedBlock, } from "../hooks/managed-block.js";
 import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
+import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
@@ -537,8 +537,7 @@ function assertHookPathTomlSafe(hookScriptPath) {
 }
 // ----- Path resolution ---------------------------------------------------
 function resolveKimiCodeConfigPath(env) {
-    const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
-    return path.join(home, "config.toml");
+    return path.join(resolveKimiHome(env), "config.toml");
 }
 async function assertHookScriptExists(hookScriptPath) {
     try {
@@ -728,7 +727,7 @@ async function collectKimiVersionWarnings(env, warnings) {
  * notice. Never blocks setup; never mutates the plugin list.
  */
 async function collectInstalledKimiPluginsNotice(env, warnings) {
-    const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
+    const home = resolveKimiHome(env);
     const installedPath = path.join(home, "plugins", "installed.json");
     let raw;
     try {

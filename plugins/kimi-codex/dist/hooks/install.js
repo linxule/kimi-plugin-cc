@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { evaluateInstalled } from "./managed-block.js";
 import { tryBuildExpectedHookCommand } from "./install-paths.js";
+import { resolveKimiHome } from "../kimi-home.js";
 export async function verifyHookInstalled(env) {
     const configPath = resolveKimiCodeConfigPath(env);
     if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
@@ -55,10 +55,7 @@ export async function verifyHookInstalled(env) {
     };
 }
 function resolveKimiCodeConfigPath(env) {
-    // KIMI_CODE_HOME mirrors kimi-code's own override (apps/kimi-code reads
-    // it before falling back to ~/.kimi-code). Tests rely on this.
-    const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
-    return path.join(home, "config.toml");
+    return path.join(resolveKimiHome(env), "config.toml");
 }
 /**
  * Format a stderr-suitable warning message for the missing-hook case.

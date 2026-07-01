@@ -22,6 +22,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { RuntimeError, formatError } from "./errors.js";
+import { resolveKimiHome } from "./kimi-home.js";
 import {
   StreamJsonParser,
   extractSessionIdFromStderr,
@@ -689,6 +690,7 @@ function buildArgs(opts: CliClientOptions): string[] {
 
 function buildEnv(opts: CliClientOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...opts.env };
+  env.KIMI_CODE_HOME = resolveKimiHome(opts.env, opts.cwd);
   if (opts.commandLabel !== undefined) {
     env.KIMI_PLUGIN_CC_CMD = opts.commandLabel;
   }

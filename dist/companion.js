@@ -11,11 +11,16 @@ import { renderSetupResult, runSetup } from "./commands/setup.js";
 import { runStatus } from "./commands/status.js";
 import { runWorker } from "./commands/worker.js";
 import { formatError, RuntimeError } from "./errors.js";
+import { resolveKimiHome } from "./kimi-home.js";
 async function main(argv) {
     const [command, ...rest] = argv;
+    const cwd = process.env.KIMI_PLUGIN_CC_WORKSPACE_CWD || process.cwd();
     const context = {
-        cwd: process.env.KIMI_PLUGIN_CC_WORKSPACE_CWD || process.cwd(),
-        env: process.env,
+        cwd,
+        env: {
+            ...process.env,
+            KIMI_CODE_HOME: resolveKimiHome(process.env, cwd),
+        },
         stdout: process.stdout,
         stderr: process.stderr,
     };

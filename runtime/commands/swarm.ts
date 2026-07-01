@@ -28,6 +28,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import type { CommandContext } from "../types.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // /kimi:swarm — READ-ONLY parallel fan-out (kimi-code 0.12.0 AgentSwarm tool).
 //
@@ -600,6 +601,13 @@ async function executeSwarmJob(
     ) {
       store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
     }
+    await syncKimiSessionTitle({
+      env: context.env,
+      cwd: job.cwd,
+      sessionId: result.sessionId ?? job.kimi_session_id,
+      title: buildKimiSessionTitle(writeMode ? "swarm-write" : "swarm", objective),
+      stderr: context.stderr,
+    });
     warnIfSessionIdMissing(result, "swarm", job.job_id, context.stderr);
 
     const prose = reassembleProseFromRecords(result.records);

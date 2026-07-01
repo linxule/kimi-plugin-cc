@@ -14,8 +14,8 @@ If you're already running v0.4.x with the Python Kimi CLI, you have a choice:
 | Backing CLI | Python [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) | [kimi-code](https://kimi.com/code/docs) (Node.js) |
 | Transport | `kimi --wire` (JSON-RPC over stdio) | `kimi -p --output-format stream-json` (subprocess + NDJSON) |
 | Per-command safety | YAML agent profiles (`exclude_tools`) shipped in the plugin | PreToolUse hook installed in `~/.kimi-code/config.toml` |
-| Session id | Client-assigned UUID, passed via `--session` | Server-minted, captured from kimi's stderr announce |
-| Web UI integration | `kimi web` + PATCH `/api/sessions/{id}` for human-readable titles | kimi-code vis-server (read-only — no PATCH support) |
+| Session id | Client-assigned UUID, passed via `--session` | Server-minted, captured from kimi's stream-json `session.resume_hint` record (stderr announce fallback) |
+| Web UI integration | `kimi web` + PATCH `/api/sessions/{id}` for pre-run human-readable titles | kimi-code session store, with deterministic post-run titles for plugin-created user-command sessions |
 | Replay log format | Wire JSON-RPC events (`{direction, message}`) | cli-client NDJSON (`{event, record}`) |
 | Marketplace name | `kimi-marketplace` (plugin: `kimi`) — unchanged | same `kimi-marketplace` / `kimi` (v1 upgrades in place) |
 | Rescue allowlist | In-band approval policy on the Wire client | Out-of-band via the PreToolUse hook (same allowlist code) |
@@ -131,7 +131,7 @@ Claude Code's marketplace tooling uses `@ref` to pin a GitHub shorthand to a bra
 - The `--wire`, `--session`, and `--agent-file` invocation shape. v1.0 uses `kimi -p` only.
 - The YAML agent profiles in `runtime/agents/`. The plugin doesn't ship Kimi-side profiles in v1.0; per-command safety is enforced exclusively by the PreToolUse hook.
 - The Wire-protocol replay path. The runtime no longer parses JSON-RPC turn events.
-- Custom `Kimi Task: ...` titles in kimi web. kimi-code's vis-server does not expose a PATCH endpoint, so we cannot set human-readable titles in v1.0. Sessions still appear in the vis-server, just under their auto-generated names.
+- The v0.4 pre-run `Kimi Task: ...` title assignment path through Kimi CLI / `kimi web`. v1 uses `kimi -p`, whose session id is minted only after the run, so the plugin cannot name the session before spawn. Instead, after Kimi announces the session id, the runtime deterministically syncs a title such as `Kimi Ask: ...`, `Kimi Review: ...`, or `Kimi Swarm Write: ...` into kimi-code's session metadata. Manually renamed/custom Kimi titles are preserved. Internal `review_gate` Stop-hook sessions are intentionally not titled.
 
 ## What's new
 

@@ -50,7 +50,6 @@ import {
 } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import os from "node:os";
 import path from "node:path";
 
 import { readPluginConfig, writePluginConfig } from "../config.js";
@@ -71,6 +70,7 @@ import {
   KIMI_TESTED_MINORS,
   probeKimiVersion,
 } from "../kimi-version-probe.js";
+import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
@@ -707,8 +707,7 @@ function assertHookPathTomlSafe(hookScriptPath: string): void {
 // ----- Path resolution ---------------------------------------------------
 
 function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {
-  const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
-  return path.join(home, "config.toml");
+  return path.join(resolveKimiHome(env), "config.toml");
 }
 
 async function assertHookScriptExists(hookScriptPath: string): Promise<void> {
@@ -945,7 +944,7 @@ async function collectInstalledKimiPluginsNotice(
   env: NodeJS.ProcessEnv,
   warnings: string[],
 ): Promise<void> {
-  const home = env.KIMI_CODE_HOME ?? path.join(os.homedir(), ".kimi-code");
+  const home = resolveKimiHome(env);
   const installedPath = path.join(home, "plugins", "installed.json");
   let raw: string;
   try {

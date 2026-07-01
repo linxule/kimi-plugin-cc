@@ -19,6 +19,7 @@ import type { CommandContext } from "../types.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 export { describeMissingResult } from "../background-spawn.js";
 
@@ -248,6 +249,13 @@ export async function executeRescueJob(
       // alpha.4 challenge finding #3.)
       store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
     }
+    await syncKimiSessionTitle({
+      env: context.env,
+      cwd: job.cwd,
+      sessionId: result.sessionId ?? job.kimi_session_id,
+      title: buildKimiSessionTitle("rescue", prompt),
+      stderr: context.stderr,
+    });
     if (job.kimi_session_id === null) {
       warnIfSessionIdMissing(result, "rescue", job.job_id, context.stderr);
     }

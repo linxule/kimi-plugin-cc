@@ -406,6 +406,33 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("canonicalizes relative KIMI_CODE_HOME against the spawned cwd", async () => {
+    const root = await createTestPluginDataRoot("cli-kimi-home-relative");
+    try {
+      const result = await runCliPrompt({
+        cwd: root,
+        env: {
+          ...process.env,
+          KIMI_CODE_HOME: "relative-kimi-home",
+          KIMI_MOCK_RECORDS: "[]",
+          KIMI_MOCK_ECHO_ENV: "KIMI_CODE_HOME",
+          KIMI_MOCK_EMIT_ANNOUNCE: "1",
+          KIMI_MOCK_EXIT_CODE: "0",
+        },
+        command: "bun",
+        prefixArgs: ["run", mockKimiStreamPath],
+        prompt: "test prompt",
+      });
+
+      expect(result.records).toContainEqual({
+        role: "assistant",
+        content: `KIMI_CODE_HOME=${path.join(root, "relative-kimi-home")}`,
+      });
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("leaves KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY unset when swarmMaxConcurrency is omitted", async () => {
     const root = await createTestPluginDataRoot("cli-client-no-swarm-concurrency");
     try {

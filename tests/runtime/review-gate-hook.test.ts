@@ -53,9 +53,12 @@ describe("review gate stop hook", () => {
 
   test("enabled gate blocks stop on BLOCK plus high confidence", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-gate-block");
+    const kimiHome = await createTestPluginDataRoot("review-gate-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "review-gate-invocation.jsonl");
+    const sessionId = "session_cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
     try {
+      const statePath = await seedKimiSession(kimiHome, sessionId);
       const paths = resolvePluginPaths({
         ...process.env,
         CLAUDE_PLUGIN_DATA: pluginDataRoot,
@@ -84,6 +87,8 @@ describe("review gate stop hook", () => {
           KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
           KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block",
           KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocationPath,
+          KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+          KIMI_CODE_HOME: kimiHome,
         },
         {
           cwd: process.cwd(),
@@ -115,6 +120,10 @@ describe("review gate stop hook", () => {
       // crashes on unknown options. (Round 2 Codex finding.)
       expect(invocation.argv).not.toContain("--no-thinking");
 
+      const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+      expect(state.title).toBe("New Session");
+      expect(state.isCustomTitle).toBe(false);
+
       const repoIdentity = await resolveRepoIdentity(process.cwd());
       const store = new JobStore(paths);
       try {
@@ -130,6 +139,7 @@ describe("review gate stop hook", () => {
       }
     } finally {
       await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(kimiHome);
     }
   });
 
@@ -334,4 +344,25 @@ async function invokeHook(
   }
 
   return JSON.parse(stdout.trim() || "{}") as Record<string, unknown>;
+}
+
+async function seedKimiSession(kimiHome: string, sessionId: string): Promise<string> {
+  const sessionDir = path.join(kimiHome, "sessions", "wd_repo_123", sessionId);
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(
+    path.join(kimiHome, "session_index.jsonl"),
+    `${JSON.stringify({
+      sessionId,
+      sessionDir,
+      workDir: process.cwd(),
+    })}\n`,
+    "utf8",
+  );
+  const statePath = path.join(sessionDir, "state.json");
+  await writeFile(
+    statePath,
+    `${JSON.stringify({ title: "New Session", isCustomTitle: false }, null, 2)}\n`,
+    "utf8",
+  );
+  return statePath;
 }

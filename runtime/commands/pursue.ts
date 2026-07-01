@@ -20,6 +20,7 @@ import type { GoalSummaryRecord } from "../stream-json.js";
 import type { CommandContext } from "../types.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // /kimi:pursue — autonomous goal mode (kimi-code 0.8.0+ headless `/goal`).
 //
@@ -280,6 +281,13 @@ async function executePursueJob(
     ) {
       store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
     }
+    await syncKimiSessionTitle({
+      env: context.env,
+      cwd: job.cwd,
+      sessionId: result.sessionId ?? job.kimi_session_id,
+      title: buildKimiSessionTitle("pursue", objective),
+      stderr: context.stderr,
+    });
     warnIfSessionIdMissing(result, "pursue", job.job_id, context.stderr);
 
     const header = renderGoalHeader(result.goalSummary, goalStatus);

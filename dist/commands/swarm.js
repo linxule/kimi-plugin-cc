@@ -17,6 +17,7 @@ import { parseSwarmArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // /kimi:swarm — READ-ONLY parallel fan-out (kimi-code 0.12.0 AgentSwarm tool).
 //
 // PROTOTYPE SCOPE (v1.2). The lowest-risk swarm shape: parallel review/analysis
@@ -486,6 +487,13 @@ writeMode) {
             result.sessionId !== job.kimi_session_id) {
             store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
         }
+        await syncKimiSessionTitle({
+            env: context.env,
+            cwd: job.cwd,
+            sessionId: result.sessionId ?? job.kimi_session_id,
+            title: buildKimiSessionTitle(writeMode ? "swarm-write" : "swarm", objective),
+            stderr: context.stderr,
+        });
         warnIfSessionIdMissing(result, "swarm", job.job_id, context.stderr);
         const prose = reassembleProseFromRecords(result.records);
         // WRITE mode: capture the worktree change set as a .patch artifact (before
