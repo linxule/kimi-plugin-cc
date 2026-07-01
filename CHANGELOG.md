@@ -2,6 +2,16 @@
 
 > **Post-1.0 release history (v1.0.1 → present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.6.3 — 2026-07-01
+
+**Deterministic post-run Kimi Code title sync for plugin-created sessions.** A patch release that restores human-readable session names in Kimi Code without reintroducing the old v0.4 Wire/web title-assignment path.
+
+- **Automatic deterministic titles.** After a successful `kimi -p` run returns or resumes a usable session id, the runtime computes titles from plugin-owned command metadata (`Kimi <Command>: <summary>`) and updates Kimi Code session state best-effort. The model never writes titles.
+- **Scoped to user-facing commands.** Title sync covers ask, review, challenge, rescue, pursue, swarm, and `swarm --write`; `review_gate` remains intentionally excluded to avoid noisy Stop-hook sessions.
+- **Manual titles preserved.** Sessions with `isCustomTitle: true` are skipped, matching Kimi Code's manual-title behavior. The sync preserves other state fields and does not update `updatedAt`.
+- **Metadata hardening.** The helper resolves `KIMI_CODE_HOME` consistently, validates `session_index.jsonl` entries under `<kimiHome>/sessions`, rejects unsafe symlink paths, caps metadata reads, skips oversized index lines, writes `state.json` atomically, preserves file mode, and logs only short best-effort warnings.
+- **Docs/tests.** README and migration docs now describe post-run title sync and the loss of v0.4 pre-run Wire/web title assignment. Tests cover helper safety cases plus ask/review command-level sync and `review_gate` exclusion. `bun run check` green. Tag: `v1.6.3`.
+
 ## 1.6.2 — 2026-07-01
 
 **kimi-code 0.21.1 compat: extend `KIMI_TESTED_MINORS` with `{0,21}` after a GREEN real-binary smoke.** A patch release that certifies the 0.20.x→0.21.1 minor and clears the H9 "newer than tested max" setup warning for operators whose binary auto-upgraded to 0.21.x.
