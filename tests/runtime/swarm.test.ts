@@ -4,12 +4,24 @@ import { parseSwarmArgs } from "../../runtime/parsing.js";
 import {
   buildSwarmPrompt,
   buildSwarmWritePrompt,
+  runSwarm,
   resolveSwarmMaxConcurrency,
   resolveSwarmWriteMaxConcurrency,
   SWARM_DEFAULT_MAX_CONCURRENCY,
   SWARM_WRITE_DEFAULT_MAX_CONCURRENCY,
 } from "../../runtime/commands/swarm.js";
 import { RuntimeError } from "../../runtime/errors.js";
+import type { CommandContext } from "../../runtime/types.js";
+import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
+
+function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
+  return {
+    cwd,
+    env,
+    stdout: process.stdout,
+    stderr: process.stderr,
+  };
+}
 
 describe("parseSwarmArgs", () => {
   test("captures the objective as trailing prose", () => {
@@ -134,6 +146,34 @@ describe("resolveSwarmWriteMaxConcurrency", () => {
 
   test("an explicit --max-concurrency overrides the write default", () => {
     expect(resolveSwarmWriteMaxConcurrency(2)).toBe(2);
+  });
+});
+
+describe("runSwarm hook gate", () => {
+  test("refuses without the hook and names Claude Code and Codex repair commands", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("swarm-hook-gate-data");
+    const workspace = await createTestPluginDataRoot("swarm-hook-gate-ws");
+    const kimiHome = await createTestPluginDataRoot("swarm-hook-gate-home");
+    try {
+      const output = await runSwarm(
+        ["review", "two", "targets"],
+        makeContext(workspace, {
+          ...process.env,
+          CLAUDE_PLUGIN_DATA: pluginDataRoot,
+          KIMI_CODE_HOME: kimiHome,
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+        }),
+      );
+
+      expect(output).toContain("SWARM_HOOK_NOT_INSTALLED");
+      expect(output).toContain("Claude Code /kimi:setup");
+      expect(output).toContain("Codex $kimi-setup");
+      expect(output).not.toContain("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(kimiHome);
+    }
   });
 });
 

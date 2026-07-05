@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified stable through 0.21.1. 2026-05-27 audit covered 0.4.0,
+//     verified stable through 0.22.3. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -64,7 +64,13 @@
 //     covered the 0.20.3→0.21.1 minor+patch (report 93; agent/records/ 0-byte,
 //     run-prompt.ts writer/resume_hint/goal.summary unchanged, #1204 plugin
 //     slash commands off the `-p` path, #1233 cleanup timeout after the writer
-//     flush; GREEN smoke 9/0 on the operator's 0.21.1 binary).
+//     flush; GREEN smoke 9/0 on the operator's 0.21.1 binary), and 2026-07-05
+//     covered the 0.21.1→0.22.3 minor+patch (reports 94/95; hook engine
+//     unchanged, policy order still hook-first, writer shape compatible; 0.22.3's
+//     prompt-mode background-drain happens after assistant-output flush and is
+//     bounded by plugin budgets; shell-output caps and session-owned
+//     media-originals do not alter the NDJSON record schema; GREEN smoke 9/0 on
+//     a temp-installed 0.22.3 binary).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal

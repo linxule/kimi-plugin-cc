@@ -23,4 +23,5 @@ Pass through: `[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <mode
 
 - Require many independent review targets plus explicit fan-out intent.
 - Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.
+- If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.
 - Return the consolidated companion report verbatim.

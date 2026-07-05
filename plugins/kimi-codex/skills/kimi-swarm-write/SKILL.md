@@ -23,4 +23,5 @@ Pass through: `[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <mode
 
 - Require both many disjoint write targets and explicit parallel fan-out intent.
 - Keep `--max-concurrency` conservative, normally 1, unless the user explicitly asks to widen it.
+- If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.
 - Return the patch path and companion output verbatim; do not apply the patch unless the user separately asks.

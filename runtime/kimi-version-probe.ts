@@ -544,6 +544,28 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // .claude/kimi-code-research/reports/93-upstream-021-surface.md and
   // 93-upstream-021-adversarial.md. Tag: compat-verified-kimi-code-0.21.1.
   { major: 0, minor: 21 },
+  // 0.22 (new minor, 2026-07-05) verified COMPAT-PRESERVED through
+  // @moonshot-ai/kimi-code@0.22.3 after report 94's source-only 0.22.0 scan and
+  // report 95's incremental 0.22.0→0.22.3 scan. Hook engine remained unchanged
+  // (03-hooks.diff 0 bytes); policy order stayed hook-first with
+  // PreToolCallHookPermissionPolicy at index 0 and AutoModeApprove at index 5;
+  // Write/Edit still use `path`, Bash still uses `command`, and AgentSwarm still
+  // uses the standard stack. New 0.22.x surfaces are compat-benign for this
+  // `kimi -p` wrapper: prompt-mode background-drain runs after assistant output
+  // flush and remains bounded by the plugin's AbortController budgets; shell
+  // output caps affect huge tool-result content only; image originals are stored
+  // under Kimi session state, not the user worktree; model/thinking/provider
+  // config changes do not touch permissions; server auth-bypass flags remain
+  // off the `-p` path. Backed by a GREEN `bun run smoke:real` against a
+  // temp-installed 0.22.3 binary (2026-07-05): 9 pass / 0 fail. Read-only labels
+  // denied forced writes; pursue wrote zero files and parsed goal.summary
+  // (turnsUsed:2 tokensUsed:93029); read-only swarm denied a spawned subagent
+  // write; write-swarm confined coder edits to the throwaway worktree
+  // (patchBytes=334, userTreeClean=true, worktreeCleaned=true); and an
+  // out-of-trusted-root absolute write was hook-denied. Reports:
+  // .claude/kimi-code-research/reports/94-upstream-0220-surface.md and
+  // 95-upstream-0223-surface.md. Tag: compat-verified-kimi-code-0.22.3.
+  { major: 0, minor: 22 },
 ];
 
 export interface KimiVersionProbeOk {

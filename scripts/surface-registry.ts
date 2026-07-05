@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "799310c5611b11c4a14bf230b65939365c0f388bd1702013d31bb262711ccb93" },
-  { path: ".claude-plugin/marketplace.json", sha256: "d037884cb870c9a490589ca95f31701d3c9bd0a5389d61942dd6e75e72d4a35b" },
+  { path: ".claude-plugin/plugin.json", sha256: "fa73886b5f2670a04addc36a58b8da028fe0f707c270bf06de0e810710eaf2af" },
+  { path: ".claude-plugin/marketplace.json", sha256: "5439cbbeaa25bae9236c4ae625aeb6347b74dbccec06fe6bff41a28578880cde" },
   { path: "commands/README.md", sha256: "f996a084f8c7762c2405c3990443cff49d96003416da8fead8fd875a0f50fd23" },
   { path: "commands/ask.md", sha256: "5ffcd405b1f905f400c00520d210afc6dbf35cae3a0b07c6189866fa639bf778" },
   { path: "commands/cancel.md", sha256: "f6fc6e474242901e2e4836956f2b67c6335ff0042a7a6e60c8baf9585cec0035" },
@@ -209,6 +209,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     guidance: [
       "Require many independent review targets plus explicit fan-out intent.",
       "Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.",
+      "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
       "Return the consolidated companion report verbatim.",
     ],
   },
@@ -226,6 +227,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     guidance: [
       "Require both many disjoint write targets and explicit parallel fan-out intent.",
       "Keep `--max-concurrency` conservative, normally 1, unless the user explicitly asks to widen it.",
+      "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
       "Return the patch path and companion output verbatim; do not apply the patch unless the user separately asks.",
     ],
   },

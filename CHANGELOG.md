@@ -1,6 +1,17 @@
 # Changelog
 
-> **Post-1.0 release history (v1.0.1 → present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
+> **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
+
+## 1.6.4 — 2026-07-05
+
+**kimi-code 0.22.3 compat: extend `KIMI_TESTED_MINORS` with `{0,22}` after a GREEN real-binary smoke.** A patch release that certifies the 0.21.1→0.22.3 minor and clears the H9 "newer than tested max" setup warning for operators on 0.22.x.
+
+- **Probe extension** (`runtime/kimi-version-probe.ts`): added `{ major: 0, minor: 22 }` with the per-version audit comment.
+- **Verdict: COMPAT-PRESERVED.** Reports 94 and 95 found the hook engine unchanged, policy order still hook-first (`PreToolCallHookPermissionPolicy` index 0, `AutoModeApprovePermissionPolicy` index 5), write-path field names intact (`path` / `command`), and plugin slash commands plus `runShellCommand` still host/RPC-only and off the `kimi -p` path.
+- **New 0.22.x surfaces are benign for this plugin:** prompt-mode background drain happens after assistant-output flush and remains bounded by the plugin's AbortController budgets; shell output caps affect huge tool-result content only; image originals are stored under Kimi session state, not the user worktree; model/thinking/provider config changes do not alter permissions; server auth-bypass flags are a separate subcommand stack.
+- **Smoke GREEN on a temp-installed `kimi --version` 0.22.3:** `bun run smoke:real` ran 9 pass / 0 fail on 2026-07-05. Read-only labels denied forced writes; pursue wrote zero files and parsed `goal.summary`; read-only swarm denied a spawned subagent write; write-swarm kept coder edits in the throwaway worktree (`userTreeClean=true`, `patchBytes=334`, `worktreeCleaned=true`) and denied an out-of-root absolute write.
+- **Hook-missing UX:** swarm still refuses without the PreToolUse hook, but the refusal now names both repair commands: Claude Code `/kimi:setup` and Codex `$kimi-setup`. Codex swarm skill guidance surfaces the same repair path and no longer suggests the skip env.
+- **Docs:** `AGENTS.md` (Version line + Upstream-compat "through 0.22.3"), `ROADMAP-TO-GA.md` (audit-log entry), and `runtime/stream-json.ts` (verified-through comment). Surface reports: `.claude/kimi-code-research/reports/94-upstream-0220-surface.md` and `95-upstream-0223-surface.md`. Tags: `v1.6.4` and `compat-verified-kimi-code-0.22.3`.
 
 ## 1.6.3 — 2026-07-01
 
