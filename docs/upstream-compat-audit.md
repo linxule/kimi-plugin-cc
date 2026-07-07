@@ -13,6 +13,38 @@ This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi
 
 > **kimi-code self-upgrades by default since 0.8.0** (PR #334, `autoInstall: true`). The installed binary is now *fluid* — a user's interactive TUI can silently move ahead of the verified range out-of-band (the plugin's own `-p` spawns never swap the binary, but they then run against whatever the TUI upgraded to). Expect this trigger to fire more often than the old "user manually updated" cadence. Don't assume `kimi --version` today is the same as last week. (Worked example of a 3-minor catch-up: the 2026-06-03 0.7→0.9 audit, reports 52-60.)
 
+### Daily monitor reports
+
+A Codex daily cron monitors `@moonshot-ai/kimi-code` upstream drift for this
+repo and writes local continuity reports under
+`.claude/kimi-code-research/daily-monitor/`. The whole `.claude/` tree is
+gitignored, so these reports are not release artifacts and should not be staged.
+
+Before starting a new upstream audit or release catch-up:
+
+1. Read `.claude/kimi-code-research/daily-monitor/LATEST.md` if present.
+2. Read the most recent 3-5 dated reports matching
+   `.claude/kimi-code-research/daily-monitor/YYYY-MM-DD-*.md`.
+3. Carry forward unresolved blockers, follow-up checks, and prior uncertainty.
+4. If today's evidence contradicts an earlier monitor judgement, state the
+   correction explicitly in the new report or release handoff.
+
+Monitor statuses are operational signals, not certifications:
+
+- `NO ACTION` means latest is already inside the tested minor and no action is
+  currently warranted.
+- `PATCH CHECKUP` means a newer patch landed inside an already-tested minor; use
+  the scoped diffs to decide whether a smoke or docs-only marker is worthwhile.
+- `CERTIFICATION NEEDED` means upstream crossed into an untested minor/major;
+  run this playbook before touching `KIMI_TESTED_MINORS`.
+- `BLOCKER` means operator state, dirty repo state, missing tags/binary, or a
+  possible safety break prevented a clean judgement.
+
+Do not extend `KIMI_TESTED_MINORS`, tag, or release from a monitor report alone.
+The release-quality gate remains: scoped source audit, real-binary smoke against
+the exact target release, post-edit review, `bun run check`, and clean diff
+checks.
+
 **Skip** for patch releases unless the changelog explicitly touches:
 - `apps/kimi-code/src/cli/run-prompt.ts` (stream-json output, session pinning)
 - `packages/agent-core/src/session/hooks/` (hook engine — input/output contract; live since 0.5.0, `agent/hooks/` is a legacy copy — diff both)
