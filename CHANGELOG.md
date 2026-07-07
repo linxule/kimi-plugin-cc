@@ -2,6 +2,17 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.6.5 — 2026-07-07
+
+**kimi-code 0.23.1 compat: extend `KIMI_TESTED_MINORS` with `{0,23}` after a GREEN real-binary smoke.** A patch release that certifies the 0.22.3→0.23.1 minor and clears the H9 "newer than tested max" setup warning for operators on 0.23.x.
+
+- **Probe extension** (`runtime/kimi-version-probe.ts`): added `{ major: 0, minor: 23 }` with the per-version audit comment.
+- **Verdict: COMPAT-PRESERVED.** Report 96 found the hook engine unchanged, policy order still hook-first (`PreToolCallHookPermissionPolicy` index 0, `AutoModeApprovePermissionPolicy` index 5), `kimi -p` still compatible with the stream-json parser, write-path field names intact (`path` / `command`), plugin hooks still any-block-wins, and `runShellCommand` plus plugin slash commands still host/RPC-only and off the `kimi -p` path.
+- **New 0.23.x surfaces are benign for this plugin:** upstream added `select_tools` as a default-approved MCP schema-disclosure tool, but the plugin hook still denies unknown tools before upstream default approval and no `READ_ONLY_TOOLS` expansion was needed; persisted observability records, session workDir/index repair, thinking-keep defaults, and workspace-skill listing do not alter the plugin hook or stdout contract.
+- **Smoke GREEN on a temp-installed `kimi --version` 0.23.1:** `bun run smoke:real` ran 9 pass / 0 fail on 2026-07-07. Read-only labels denied forced writes; pursue wrote zero files and parsed `goal.summary`; read-only swarm denied a spawned subagent write; write-swarm kept coder edits in the throwaway worktree (`userTreeClean=true`, `patchBytes=334`, `worktreeCleaned=true`) and denied an out-of-root absolute write.
+- **No safety-surface change:** no hook allowlist broadening, no permission relaxation, no swarm concurrency/default change, and no auto-setup path.
+- **Docs:** `AGENTS.md` (Version line + Upstream-compat "through 0.23.1"), `ROADMAP-TO-GA.md` (audit-log entry), and `runtime/stream-json.ts` (verified-through comment). Surface report: `.claude/kimi-code-research/reports/96-upstream-0231-surface.md`. Tags: `v1.6.5` and `compat-verified-kimi-code-0.23.1`.
+
 ## 1.6.4 — 2026-07-05
 
 **kimi-code 0.22.3 compat: extend `KIMI_TESTED_MINORS` with `{0,22}` after a GREEN real-binary smoke.** A patch release that certifies the 0.21.1→0.22.3 minor and clears the H9 "newer than tested max" setup warning for operators on 0.22.x.

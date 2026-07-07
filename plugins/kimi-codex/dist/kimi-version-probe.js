@@ -563,6 +563,22 @@ export const KIMI_TESTED_MINORS = [
     // .claude/kimi-code-research/reports/94-upstream-0220-surface.md and
     // 95-upstream-0223-surface.md. Tag: compat-verified-kimi-code-0.22.3.
     { major: 0, minor: 22 },
+    // 0.23 (new minor, 2026-07-07) verified COMPAT-PRESERVED through
+    // @moonshot-ai/kimi-code@0.23.1 in report 96 plus a GREEN temp-binary
+    // smoke (9 pass / 0 fail). Hook engine remained unchanged (03-hooks.diff
+    // 0 bytes); policy order stayed hook-first with PreToolCallHookPermissionPolicy
+    // at index 0 and AutoModeApprove at index 5; `kimi -p` still writes the same
+    // stream-json records plus session.resume_hint/goal.summary; Write/Edit still
+    // use `path`; plugin hooks remain merged any-block-wins; AgentSwarm read and
+    // write-smoke confinement both held. New 0.23.x surfaces are compat-benign:
+    // `select_tools` is an upstream default-approved MCP schema disclosure tool,
+    // but our hook still denies unknown tools before default approval and the
+    // smoke passed without broadening READ_ONLY_TOOLS; observability wire records,
+    // session workDir/index repair, thinking-keep defaults, and workspace-skill
+    // listing do not change the plugin's hook or stdout contract. Report:
+    // .claude/kimi-code-research/reports/96-upstream-0231-surface.md. Tag:
+    // compat-verified-kimi-code-0.23.1.
+    { major: 0, minor: 23 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;
