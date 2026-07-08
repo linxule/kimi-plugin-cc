@@ -578,6 +578,29 @@ export const KIMI_TESTED_MINORS = [
     // listing do not change the plugin's hook or stdout contract. Report:
     // .claude/kimi-code-research/reports/96-upstream-0231-surface.md. Tag:
     // compat-verified-kimi-code-0.23.1.
+    // 0.23.2 (patch, 2026-07-08) verified COMPAT-PRESERVED within the already-
+    // listed {0,23}: scoped 0.23.1→0.23.2 diffs changed only `run-prompt.ts`
+    // cleanup/exit behavior and `session/hooks/runner.ts` Windows spawn UX.
+    // `02-permission.diff` stayed 0 bytes (hook still index 0; first approve
+    // still index 5), `05-session-bootstrap.diff` stayed 0 bytes, and the
+    // non-empty `04-wire-records.diff` was only the same `session/hooks/runner.ts`
+    // hunk re-included by the broader `session/` scope — no
+    // session.resume_hint/goal.summary/output-shape drift. The 0.23.2
+    // `run-prompt.ts` change (#1483) keeps the cleanup timeout ref'd so a
+    // failed headless `-p` run cannot drain the event loop and exit 0 before the
+    // rejection propagates; this is exit-code correctness, not a permission or
+    // writer change. The hook-runner change (#1466) adds `windowsHide:true` to
+    // hook child-process spawn options, eliminating flashing console windows on
+    // Windows without altering stdin JSON shape, exit-2-as-deny semantics, or
+    // any-block-wins aggregation. Backed by a GREEN temp-binary `bun run
+    // smoke:real` on 0.23.2 (2026-07-08): 9 pass / 0 fail. Read-only labels
+    // denied forced writes; pursue wrote zero files and parsed goal.summary;
+    // read-only swarm denied a spawned subagent write; write-swarm confined
+    // coder edits to the throwaway worktree (patchBytes=306, userTreeClean=true,
+    // worktreeCleaned=true); and an out-of-trusted-root absolute write was
+    // hook-denied. Report:
+    // .claude/kimi-code-research/daily-monitor/2026-07-08-upstream-monitor.md.
+    // Tag: compat-verified-kimi-code-0.23.2.
     { major: 0, minor: 23 },
 ];
 /**

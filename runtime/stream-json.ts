@@ -15,7 +15,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified stable through 0.23.1. 2026-05-27 audit covered 0.4.0,
+//     verified stable through 0.23.2. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -76,7 +76,13 @@
 //     adds telemetry sessionId; `select_tools` is denied by our hook unless
 //     deliberately allowlisted; observability records are persisted agent-log
 //     records, not new stdout NDJSON shapes; GREEN smoke 9/0 on a temp-installed
-//     0.23.1 binary).
+//     0.23.1 binary), and 2026-07-08 covered the 0.23.2 patch (daily checkup;
+//     no writer/resume_hint/goal.summary drift, `02-permission.diff` and
+//     `05-session-bootstrap.diff` 0-byte; the only scoped `run-prompt.ts`
+//     change keeps the cleanup timeout ref'd so failed headless `-p` turns exit
+//     non-zero reliably, and the only hook-engine-adjacent change adds
+//     `windowsHide:true` to hook child-process spawn options on Windows; GREEN
+//     smoke 9/0 on a temp-installed 0.23.2 binary).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
