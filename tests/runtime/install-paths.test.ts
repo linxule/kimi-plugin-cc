@@ -3,7 +3,11 @@ import { describe, expect, test } from "bun:test";
 import {
   buildHookShellCommand,
   describeHookCommandDrift,
+  hostIdFromHookScript,
+  isOurApprovalHookCommand,
   parseHookShellCommand,
+  resolveHostId,
+  slugifyHostId,
 } from "../../runtime/hooks/install-paths.js";
 
 // H4 — hook-command drift parsing + classification.
@@ -106,5 +110,93 @@ describe("describeHookCommandDrift", () => {
 
   test("returns undefined when the commands are identical", () => {
     expect(describeHookCommandDrift(expected, expected, () => false)).toBeUndefined();
+  });
+});
+
+// v1.7.0 host scoping — Claude Code and Codex share one config.toml.
+
+describe("resolveHostId / hostIdFromHookScript", () => {
+  test("derives claude-code from a ~/.claude install path", () => {
+    expect(
+      hostIdFromHookScript(
+        "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js",
+      ),
+    ).toBe("claude-code");
+  });
+
+  test("derives codex from a ~/.codex install path", () => {
+    expect(
+      hostIdFromHookScript(
+        "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js",
+      ),
+    ).toBe("codex");
+  });
+
+  test("host id is version-independent (upgrade refreshes the same block)", () => {
+    const v1 = hostIdFromHookScript(
+      "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js",
+    );
+    const v2 = hostIdFromHookScript(
+      "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/9.9.9/dist/hooks/approval-hook.js",
+    );
+    expect(v1).toBe(v2);
+    expect(v1).toBe("claude-code");
+  });
+
+  test("dev checkouts fall back to a stable host-<hash>", () => {
+    const a = hostIdFromHookScript("/repo/kimi-plugin-cc/dist/hooks/approval-hook.js");
+    const b = hostIdFromHookScript("/repo/kimi-plugin-cc/dist/hooks/approval-hook.js");
+    expect(a).toBe(b);
+    expect(a).toMatch(/^host-[0-9a-f]{8}$/);
+  });
+
+  test("KIMI_PLUGIN_CC_HOST_ID override wins and is slugified", () => {
+    expect(
+      resolveHostId({
+        KIMI_PLUGIN_CC_HOST_ID: "My Host!",
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: "/a/dist/hooks/approval-hook.js",
+      }),
+    ).toBe("my-host");
+  });
+
+  test("resolveHostId derives from the passed hook script path", () => {
+    expect(
+      resolveHostId(
+        {},
+        "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/2.0.0/dist/hooks/approval-hook.js",
+      ),
+    ).toBe("codex");
+  });
+
+  test("slugifyHostId collapses junk and never returns empty", () => {
+    expect(slugifyHostId("  Claude Code  ")).toBe("claude-code");
+    expect(slugifyHostId("!!!")).toBe("host");
+  });
+});
+
+describe("isOurApprovalHookCommand", () => {
+  test("true for a canonical approval-hook command under a kimi-marketplace tree", () => {
+    expect(
+      isOurApprovalHookCommand(
+        "'/usr/bin/node' '/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js'",
+      ),
+    ).toBe(true);
+  });
+
+  test("false for a non-canonical (bare node) command — never prunes a hand-rolled hook", () => {
+    expect(isOurApprovalHookCommand("node /home/u/dist/hooks/approval-hook.js")).toBe(false);
+  });
+
+  test("false for a canonical command that is not our approval-hook", () => {
+    expect(isOurApprovalHookCommand("'/usr/bin/node' '/home/u/other/hook.js'")).toBe(false);
+  });
+
+  test("false for a look-alike substring path (segment match required, not substring)", () => {
+    // A user's own hook that merely CONTAINS the substring must not be pruned.
+    expect(
+      isOurApprovalHookCommand(
+        "'/usr/bin/node' '/opt/acme/kimi-plugin-cc-wrapper/approval-hook.js'",
+      ),
+    ).toBe(false);
   });
 });

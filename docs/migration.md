@@ -103,6 +103,24 @@ ls dist/hooks/approval-hook.js >/dev/null || bun run build
 
 Then run `/kimi:setup` in your Claude Code session. The local clone uses the same managed-block installer; no marketplace operations needed.
 
+### Using both Claude Code and Codex (v1.7.0+)
+
+Claude Code and Codex install the plugin to **different, version-stamped paths**
+but share one `~/.kimi-code/config.toml`. As of **v1.7.0** each host manages its
+**own** host-scoped PreToolUse block (`# === BEGIN kimi-plugin-cc-managed:claude-code …`
+vs `:codex`), so:
+
+- Run **`/kimi:setup` in Claude Code AND `$kimi-setup` in Codex** — once each.
+  They no longer clobber each other; both blocks coexist and each host verifies
+  its own. (Before v1.7.0 a single shared block was overwritten every time you
+  switched hosts, which is why setup seemed to "need redoing.")
+- **One-time cleanup on upgrade to v1.7.0:** update the plugin in *both* hosts,
+  then run setup in each. The first setup adopts your old un-suffixed block and
+  prunes orphaned hook entries left by earlier installs.
+- `/kimi:setup --uninstall` removes only the current host's block. Use
+  `/kimi:setup --uninstall --all` to remove *every* host's block from the shared
+  config.
+
 ## Data and session continuity
 
 - **SQLite job rows** from v0.4 remain in `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/state.db`. They're still visible to `/kimi:status` and `/kimi:result`, but `/kimi:replay` will report `REPLAY_LOG_UNREADABLE` on the v0.4 wire logs — v1.0's replay parser doesn't understand the Wire JSON-RPC shape. Archive or delete the database if you don't need v0.4 history.

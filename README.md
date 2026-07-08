@@ -127,13 +127,18 @@ codex plugin add kimi@kimi-marketplace
 
 Then run the `$kimi-setup` skill to install/check the kimi-code safety hook. The Codex skills mirror the Claude surfaces: `$kimi-review`, `$kimi-challenge`, `$kimi-ask`, `$kimi-rescue`, `$kimi-pursue`, `$kimi-swarm`, `$kimi-swarm-write`, `$kimi-status`, `$kimi-result`, `$kimi-cancel`, and `$kimi-replay`.
 
+### Using both Claude Code and Codex
+
+Both hosts share one `~/.kimi-code/config.toml`. As of **v1.7.0** each host manages its **own** host-scoped PreToolUse block, so run **`/kimi:setup` in Claude Code and `$kimi-setup` in Codex** once each — they coexist and no longer overwrite each other. (Before v1.7.0 a single shared block was clobbered whenever you switched hosts, forcing a re-setup.) See [docs/safety.md § Host scoping](./docs/safety.md#host-scoping-claude-code--codex-share-one-config).
+
 ### Removing the integration
 
 ```
-/kimi:setup --uninstall
+/kimi:setup --uninstall        # removes THIS host's block only
+/kimi:setup --uninstall --all  # removes every host's block from the shared config
 ```
 
-Removes the managed block from `~/.kimi-code/config.toml`. The plugin itself can be uninstalled via `/plugin uninstall kimi`.
+Removes the managed block(s) from `~/.kimi-code/config.toml`. The plugin itself can be uninstalled via `/plugin uninstall kimi`.
 
 ## Prerequisites
 

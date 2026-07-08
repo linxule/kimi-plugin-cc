@@ -29,6 +29,7 @@
 //   shell probe runs the exact byte string the managed block writes.
 //   These three call sites cannot drift without a compile error.
 
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -312,4 +313,102 @@ export function tryBuildExpectedHookCommand(
       ),
     };
   }
+}
+
+// ----- Host identity -----------------------------------------------------
+//
+// Claude Code and Codex install this plugin to DIFFERENT, version-stamped,
+// host-specific paths but SHARE one `~/.kimi-code/config.toml`:
+//
+//   Claude: ~/.claude/plugins/cache/kimi-marketplace/kimi/<ver>/dist/hooks/approval-hook.js
+//   Codex:  ~/.codex/plugins/cache/kimi-marketplace/kimi/<ver>/dist/hooks/approval-hook.js
+//
+// The managed block is host-scoped (marker suffix `:<host-id>`) so each host
+// owns and verifies its OWN PreToolUse block without clobbering the other's.
+// The host id must be VERSION-INDEPENDENT so a plugin upgrade REFRESHES the
+// same host's block instead of accumulating one block per version.
+
+/**
+ * Resolve a stable, version-independent host id for the managed-block marker.
+ *
+ * Order: an explicit `KIMI_PLUGIN_CC_HOST_ID` override (slugified) wins — used
+ * by tests and the live-repair path. Otherwise derive from the resolved hook
+ * script path. Pass the already-resolved `hookScriptPath` when you have it
+ * (the verifier + setup do) so we don't re-resolve and risk a second throw.
+ */
+export function resolveHostId(
+  env: NodeJS.ProcessEnv,
+  hookScriptPath?: string,
+): string {
+  const override = env.KIMI_PLUGIN_CC_HOST_ID;
+  if (override !== undefined && override.trim().length > 0) {
+    return slugifyHostId(override);
+  }
+  const resolved = hookScriptPath ?? resolveHookScriptPath(env);
+  return hostIdFromHookScript(resolved);
+}
+
+/**
+ * Derive a host id from a hook-script path. `~/.claude/...` → `claude-code`,
+ * `~/.codex/...` → `codex` (both literal + version-independent), else a stable
+ * `host-<sha1(hookDir)[:8]>` for dev checkouts / unrecognized layouts.
+ */
+export function hostIdFromHookScript(hookScriptPath: string): string {
+  const norm = hookScriptPath.split(path.sep).join("/");
+  if (norm.includes("/.claude/")) return "claude-code";
+  if (norm.includes("/.codex/")) return "codex";
+  // Dev checkouts are not version-stamped, so hashing the hook's directory is
+  // stable across runs (and across plugin upgrades, which don't move it).
+  const digest = createHash("sha1").update(path.dirname(hookScriptPath)).digest("hex");
+  return `host-${digest.slice(0, 8)}`;
+}
+
+/**
+ * Normalize an arbitrary host-id override into the `[a-z0-9-]+` slug the
+ * marker regex accepts. Empty results fall back to `host` so the marker is
+ * always well-formed.
+ */
+export function slugifyHostId(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return slug.length > 0 ? slug : "host";
+}
+
+/**
+ * True when a (decoded) hook `command` string is unambiguously THIS plugin's
+ * approval hook — a canonical two-single-quoted-token command whose script is
+ * `approval-hook.js` living under a `kimi-plugin-cc` / `kimi-marketplace`
+ * install tree. Used to prune orphaned, marker-less `[[hooks]]` entries left by
+ * older installs. Deliberately strict: a hand-rolled or non-canonical command
+ * returns false, so we never remove a user's own hook.
+ */
+/**
+ * Derive the host id that OWNS a hook command, from its script path — the
+ * host-scoped counterpart of `hostIdFromHookScript`. Returns `null` when the
+ * command isn't the canonical two-single-quoted-token shape (a stale/bare
+ * legacy command whose owner can't be determined). Callers treat `null` as
+ * "claimable by the current host." Lets a legacy (un-suffixed) block be
+ * attributed to whichever host actually wrote it, so one host's `/kimi:setup`
+ * never adopts or removes another host's block.
+ */
+export function hostIdFromHookCommand(command: string): string | null {
+  const parsed = parseHookShellCommand(command);
+  if (parsed === null) return null;
+  return hostIdFromHookScript(parsed.hookScript);
+}
+
+export function isOurApprovalHookCommand(decodedCommand: string): boolean {
+  const parsed = parseHookShellCommand(decodedCommand);
+  if (parsed === null) return false;
+  const script = parsed.hookScript.split(/[\\/]/);
+  if (script[script.length - 1] !== "approval-hook.js") return false;
+  const normalized = parsed.hookScript.replace(/\\/g, "/");
+  // Require a real path SEGMENT, not an arbitrary substring — otherwise a
+  // user hook at `/opt/acme/kimi-plugin-cc-wrapper/approval-hook.js` would be
+  // misclassified as ours and pruned. (Codex review.)
+  return normalized.includes("/kimi-plugin-cc/") || normalized.includes("/kimi-marketplace/");
 }

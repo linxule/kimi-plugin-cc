@@ -33,8 +33,10 @@ If the hook is missing or invalid, **`/kimi:rescue` refuses to run** (with `RESC
 `/kimi:setup` writes a marker-delimited block to `~/.kimi-code/config.toml`:
 
 ```toml
-# === BEGIN kimi-plugin-cc-managed (vX.Y.Z) ===
+# === BEGIN kimi-plugin-cc-managed:claude-code (vX.Y.Z) ===
 # DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.
+# Host: claude-code — Claude Code and Codex each own a separate block in this
+#   shared ~/.kimi-code/config.toml; setup in one host never touches the other's.
 # Purpose:
 #   kimi-code's `kimi -p` mode hard-codes permission='auto' and
 #   auto-approves every tool call. This hook enforces /kimi:review,
@@ -52,7 +54,7 @@ If the hook is missing or invalid, **`/kimi:rescue` refuses to run** (with `RESC
 event = "PreToolUse"
 command = "'/abs/path/to/node' '/abs/path/to/dist/hooks/approval-hook.js'"
 timeout = 15
-# === END kimi-plugin-cc-managed ===
+# === END kimi-plugin-cc-managed:claude-code ===
 ```
 
 The `vX.Y.Z` marker is replaced with the live plugin version by
@@ -67,6 +69,37 @@ Key constraints (verified by [`runtime/hooks/managed-block.ts`](../runtime/hooks
 2. **Absolute Node path.** kimi-code spawns hook commands via `/bin/sh -c "<command>"`. If we wrote bare `node`, the shell would resolve it against kimi-code's PATH at execution time. On a system where kimi-code launches from a GUI/LaunchAgent with a sanitized PATH (nvm/asdf/mise users), bare `node` would exit 127 → hook protocol treats non-{0,2} as **allow** → safety contract collapses with no user-visible signal.
 3. **TOML basic-string escaping.** The command field is a TOML basic string. Quotes, backslashes, newlines, and control characters in the resolved hook path are escaped during install; paths containing characters that cannot be safely escaped (literal `"`, raw control chars) are rejected up front with `SETUP_HOOK_PATH_UNSAFE`.
 4. **Exact marker grammar.** The verifier rejects stray comments containing the marker tag, partial references, duplicate blocks (from a setup race), and orphan markers (from a manual edit). The same parser is used by both the installer and the per-call verifier so the two cannot disagree.
+5. **Exact command equality, per host.** The verifier reconstructs the canonical command byte string from the current env and equality-checks the installed `command` (never a substring — a crafted `true # /path/to/approval-hook.js` runs only `true` and would auto-allow). This holds *per host id* (below): each host verifies its own block.
+
+### Host scoping (Claude Code ↔ Codex share one config)
+
+Claude Code and Codex install this plugin to **different, version-stamped
+paths** (`~/.claude/plugins/cache/…` vs `~/.codex/plugins/cache/…`) but read
+the **same** `~/.kimi-code/config.toml`. So the managed block is **host-scoped**:
+its marker carries a `:<host-id>` suffix, and each host owns, verifies, and
+uninstalls only its **own** block.
+
+- **Host id** (`runtime/hooks/install-paths.ts::resolveHostId`) is derived
+  version-independently from the hook path: `~/.claude/…` → `claude-code`,
+  `~/.codex/…` → `codex`, else a stable `host-<sha1>` for dev checkouts. A
+  plugin upgrade *refreshes* the same host's block rather than adding a new one.
+- **No clobbering.** `/kimi:setup` (Claude) and `$kimi-setup` (Codex) each write
+  their own block and leave the other's byte-identical. Before v1.7.0 there was
+  a single block exact-matched to the running host, so the two hosts overwrote
+  each other and the loser's write-commands refused with "hook path drift."
+- **Enforcement is redundant-safe.** kimi-code fires *every* `[[hooks]]` entry
+  and aggregates **any-block-wins** (first `block` wins). Both hosts' hooks run
+  the same allowlist logic, so the current host's live hook always enforces —
+  even if another host's path is stale (a stale path fails open, but the live
+  one still denies). A drifted *own* block is still caught at the per-command
+  verify gate, which prompts a re-setup for that host only.
+- **Migration + cleanup.** A pre-v1.7.0 un-suffixed block is adopted and
+  converted in place by the current host on its next `/kimi:setup`. Orphaned,
+  marker-less `[[hooks]]` entries that are unambiguously our approval hook
+  (canonical command, `approval-hook.js` under a kimi-marketplace/kimi-plugin-cc
+  tree) are pruned. `/kimi:setup --uninstall` removes only the current host's
+  block (plus legacy + our orphans); `/kimi:setup --uninstall --all` removes
+  every host's block.
 
 ## The hook's per-command policy
 

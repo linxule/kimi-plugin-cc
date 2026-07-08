@@ -126,6 +126,38 @@ describe("verifyHookInstalled", () => {
     }
   });
 
+  test("reports missing when the command is smuggled under a non-[[hooks]] table (Codex review)", async () => {
+    // The [[hooks]] table has only an event; the canonical command lives under
+    // a DIFFERENT table. kimi-code would run a command-less hook (no
+    // enforcement), so the verifier must NOT bless this as installed.
+    const home = await createTestPluginDataRoot("hook-install-table-smuggle");
+    try {
+      const hookPath = "/abs/path/dist/hooks/approval-hook.js";
+      const canonical = canonicalCommandFor(hookPath);
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          "[not_hooks]",
+          `command = ${JSON.stringify(canonical)}`,
+          "# === END kimi-plugin-cc-managed ===",
+        ].join("\n"),
+        "utf8",
+      );
+      const status = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      });
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain("unexpected TOML table");
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
   test("reports missing when command is a substring-match disguise (true # /path/to/approval-hook.js)", async () => {
     // Audit finding (reports 27/28 Codex C1 + Claude HIGH-2): the
     // old substring check `commandPath.includes(expectedHookPath)`
@@ -194,8 +226,13 @@ describe("verifyHookInstalled", () => {
     // path drift unconditionally.
     const home = await createTestPluginDataRoot("hook-install-stale-path");
     try {
-      const oldHookPath = "/old/dist/hooks/approval-hook.js";
-      const newHookPath = "/new/dist/hooks/approval-hook.js";
+      // Same host (both under ~/.claude → host id `claude-code`, which is
+      // version-independent), only the version-stamped path moved — the real
+      // plugin-upgrade drift the diagnosis is for.
+      const oldHookPath =
+        "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
+      const newHookPath =
+        "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/1.7.0/dist/hooks/approval-hook.js";
       const staleCommand = canonicalCommandFor(oldHookPath);
       await mkdir(home, { recursive: true });
       await writeFile(

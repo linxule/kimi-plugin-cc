@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "b92a4b33a78de03717f2b7e4a5687b44867b0774e53382cf2339d0dfb02513d8" },
-  { path: ".claude-plugin/marketplace.json", sha256: "4f8069727424e913234c56baa5ce6cf7d02a4e0a0e4aad1059e292086b8be3b6" },
+  { path: ".claude-plugin/plugin.json", sha256: "b9f9b576d83445d0c2846746943cb7f9838aaf3c473c8703b9330d622d96860a" },
+  { path: ".claude-plugin/marketplace.json", sha256: "e07c4ca55562d3e6a8e72bc7aedce7d1f577b15786082e9ac6708a60027d7fbb" },
   { path: "commands/README.md", sha256: "f996a084f8c7762c2405c3990443cff49d96003416da8fead8fd875a0f50fd23" },
   { path: "commands/ask.md", sha256: "5ffcd405b1f905f400c00520d210afc6dbf35cae3a0b07c6189866fa639bf778" },
   { path: "commands/cancel.md", sha256: "f6fc6e474242901e2e4836956f2b67c6335ff0042a7a6e60c8baf9585cec0035" },
@@ -45,7 +45,7 @@ export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
   { path: "commands/rescue.md", sha256: "7708b9d2a48a25e260d1b711472d32c5a2b772b1e7bbdbd6279f55af75abf130" },
   { path: "commands/result.md", sha256: "d5ae361ea6c95f139e4bf1d2f23cb69e14c23c9e0e2b6e8084274e8245016db5" },
   { path: "commands/review.md", sha256: "2a5103029d91bd1f204979e8a52a9726ecfb171bcdc0b273be155ec7ced7c243" },
-  { path: "commands/setup.md", sha256: "e9c0fc8d70c9e7d3106bcf5c751fccfe6ffb5cdc6f5011e6604e866475079fc3" },
+  { path: "commands/setup.md", sha256: "17e0e2c274f3cc4cb36780ea62c078bb1bbeeee81bfd1b0c8e0594f7e7f4fc8c" },
   { path: "commands/status.md", sha256: "0171276cd08b9fe62893f62523c164f35b1a4df98cb7b04f14f62fc33fbc8cbc" },
   { path: "commands/swarm.md", sha256: "e4728c31c5d7ae355759bdb497ce340c994d05a9f1a65b4fa246895ee9bcfac5" },
   { path: "agents/kimi-ask.md", sha256: "e5acf18a261c44d95ccf8c78a112e30d8bb2edcdd3a784f741f2c30f6918d732" },
@@ -239,12 +239,13 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     defaultPrompt: "Use $kimi-setup to check the local Kimi companion setup.",
     implicit: false,
     command: "setup",
-    argumentSummary: "[--check | --uninstall | --enable-review-gate | --disable-review-gate]",
+    argumentSummary:
+      "[--check | --uninstall [--all] | --enable-review-gate | --disable-review-gate]",
     description:
-      "Verify local Kimi companion readiness and manage the kimi-code PreToolUse hook plus optional review gate state. Use when explicitly requested to install, check, enable, disable, or uninstall the integration.",
+      "Verify local Kimi companion readiness and manage the kimi-code PreToolUse hook plus optional review gate state. Use when explicitly requested to install, check, enable, disable, or uninstall the integration. Codex and Claude Code share one ~/.kimi-code/config.toml but each own a host-scoped block, so $kimi-setup here does not disturb Claude Code's /kimi:setup (and vice-versa).",
     guidance: [
       "Run setup from the user's workspace so the companion records the intended workspace cwd.",
-      "Use `--check` for read-only verification and `--uninstall` only when explicitly requested.",
+      "Use `--check` for read-only verification and `--uninstall` only when explicitly requested. `--uninstall` removes only this host's block; `--uninstall --all` removes every host's block from the shared config.",
       "Report setup stdout verbatim because it contains hook and probe status.",
     ],
   },

@@ -1,6 +1,6 @@
 ---
 name: kimi-setup
-description: "Verify local Kimi companion readiness and manage the kimi-code PreToolUse hook plus optional review gate state. Use when explicitly requested to install, check, enable, disable, or uninstall the integration."
+description: "Verify local Kimi companion readiness and manage the kimi-code PreToolUse hook plus optional review gate state. Use when explicitly requested to install, check, enable, disable, or uninstall the integration. Codex and Claude Code share one ~/.kimi-code/config.toml but each own a host-scoped block, so $kimi-setup here does not disturb Claude Code's /kimi:setup (and vice-versa)."
 ---
 
 # Kimi Setup
@@ -17,10 +17,10 @@ Forward this request to the local kimi-code companion runtime by shell. Do not u
 
 ## Arguments
 
-Pass through: `[--check | --uninstall | --enable-review-gate | --disable-review-gate]`
+Pass through: `[--check | --uninstall [--all] | --enable-review-gate | --disable-review-gate]`
 
 ## Handling
 
 - Run setup from the user's workspace so the companion records the intended workspace cwd.
-- Use `--check` for read-only verification and `--uninstall` only when explicitly requested.
+- Use `--check` for read-only verification and `--uninstall` only when explicitly requested. `--uninstall` removes only this host's block; `--uninstall --all` removes every host's block from the shared config.
 - Report setup stdout verbatim because it contains hook and probe status.

@@ -56,12 +56,18 @@ import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import {
   buildHookShellCommand,
+  hostIdFromHookCommand,
   resolveHookScriptPath,
+  resolveHostId,
   resolveNodeBinary,
   shellSingleQuote,
 } from "../hooks/install-paths.js";
 import {
+  decodeManagedCommandLine,
+  effectiveHost,
   evaluateInstalled,
+  findUnmanagedApprovalHookBlocks,
+  MARKERS,
   parseManagedBlock,
   type ManagedBlockState,
 } from "../hooks/managed-block.js";
@@ -76,7 +82,6 @@ import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
-const END_MARKER = "# === END kimi-plugin-cc-managed ===";
 
 const DEFAULT_HOOK_TIMEOUT_S = 15;
 
@@ -123,6 +128,8 @@ interface ParsedArgs {
   mode: SetupAction;
   enableReviewGate: boolean;
   disableReviewGate: boolean;
+  /** `--uninstall --all`: remove EVERY host's managed block + orphan cruft. */
+  removeAllHosts: boolean;
 }
 
 export async function runSetup(argv: string[], context: CommandContext): Promise<SetupResult> {
@@ -147,16 +154,26 @@ export async function runSetup(argv: string[], context: CommandContext): Promise
   const configPath = resolveKimiCodeConfigPath(context.env);
   const hookScriptPath = resolveHookScriptPath(context.env);
   assertHookPathTomlSafe(hookScriptPath);
+  // Host id keys the managed block so Claude Code and Codex share one
+  // ~/.kimi-code/config.toml without clobbering each other (v1.7.0).
+  const hostId = resolveHostId(context.env, hookScriptPath);
 
   const warnings: string[] = [];
 
   switch (parsed.mode) {
     case "uninstall":
-      return await runUninstall(configPath, hookScriptPath, reviewGateEnabled, warnings);
+      return await runUninstall(
+        configPath,
+        hookScriptPath,
+        hostId,
+        parsed.removeAllHosts,
+        reviewGateEnabled,
+        warnings,
+      );
     case "check":
-      return await runCheck(configPath, hookScriptPath, reviewGateEnabled, warnings, context);
+      return await runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context);
     case "install":
-      return await runInstall(configPath, hookScriptPath, reviewGateEnabled, warnings, context);
+      return await runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context);
   }
 }
 
@@ -164,6 +181,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let mode: SetupAction = "install";
   let enableReviewGate = false;
   let disableReviewGate = false;
+  let removeAllHosts = false;
 
   for (const token of argv) {
     switch (token) {
@@ -187,6 +205,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         }
         mode = "uninstall";
         break;
+      case "--all":
+        removeAllHosts = true;
+        break;
       case "--enable-review-gate":
         enableReviewGate = true;
         break;
@@ -196,7 +217,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       default:
         throw new RuntimeError(
           "INVALID_ARGS",
-          `Unknown setup flag ${token}. Supported flags: --check, --uninstall, --enable-review-gate, --disable-review-gate.`,
+          `Unknown setup flag ${token}. Supported flags: --check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate.`,
           "setup.parse",
         );
     }
@@ -210,20 +231,42 @@ function parseArgs(argv: string[]): ParsedArgs {
     );
   }
 
-  return { mode, enableReviewGate, disableReviewGate };
+  if (removeAllHosts && mode !== "uninstall") {
+    throw new RuntimeError(
+      "INVALID_ARGS",
+      "--all is only valid with --uninstall (it removes EVERY host's managed block).",
+      "setup.parse",
+    );
+  }
+
+  return { mode, enableReviewGate, disableReviewGate, removeAllHosts };
 }
 
 async function runInstall(
   configPath: string,
   hookScriptPath: string,
+  hostId: string,
   reviewGateEnabled: boolean,
   warnings: string[],
   context: CommandContext,
 ): Promise<SetupResult> {
   await assertHookScriptExists(hookScriptPath);
 
-  const existing = await readConfigSafe(configPath);
-  const { state } = parseManagedBlock(existing);
+  const original = await readConfigSafe(configPath);
+  const lineEnding = detectLineEnding(original);
+
+  // Prune orphaned, marker-less approval-hook [[hooks]] entries left by
+  // pre-v1.7.0 installs (host/path churn) BEFORE resolving the managed block,
+  // so line numbers used for splicing are computed against the cleaned text.
+  const { pruned, count: prunedCount } = pruneOrphanApprovalHooks(original, lineEnding);
+  const existing = pruned;
+  if (prunedCount > 0) {
+    warnings.push(
+      `Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) left by earlier installs (no managed marker). This is a cleanup — your active hook is unaffected.`,
+    );
+  }
+
+  const { state, blocks } = parseManagedBlock(existing, hostId);
 
   if (state.kind === "orphan") {
     throw new RuntimeError(
@@ -240,7 +283,7 @@ async function runInstall(
     throw new RuntimeError(
       "SETUP_DUPLICATE_BLOCKS",
       [
-        `kimi-code config at ${configPath} contains ${state.beginLines.length} kimi-plugin-cc managed blocks (lines ${state.beginLines
+        `kimi-code config at ${configPath} contains ${state.beginLines.length} kimi-plugin-cc managed blocks for host ${hostId} (lines ${state.beginLines
           .map((line) => line + 1)
           .join(", ")}).`,
         "This usually means two /kimi:setup runs raced. Run `/kimi:setup --uninstall` to clear them, then `/kimi:setup` again.",
@@ -250,13 +293,24 @@ async function runInstall(
     );
   }
 
-  const lineEnding = detectLineEnding(existing);
-  const block = buildManagedBlock(hookScriptPath, context.env, lineEnding);
+  // Non-blocking note: other hosts (e.g. Codex) manage their own block in the
+  // same shared config — surface so an operator understands the coexistence.
+  const otherHosts = [
+    ...new Set(blocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
+  ];
+  if (otherHosts.length > 0) {
+    warnings.push(
+      `Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")}. ` +
+        `They are left untouched — each host owns its own PreToolUse block.`,
+    );
+  }
+
+  const block = buildManagedBlock(hookScriptPath, context.env, lineEnding, hostId);
   const next = state.kind === "found"
     ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
     : appendBlock(existing, block, lineEnding);
 
-  let blockWritten = next !== existing;
+  let blockWritten = next !== original;
   if (blockWritten) {
     await writeConfigAtomic(configPath, next);
   }
@@ -292,6 +346,7 @@ async function runInstall(
       reviewGateEnabled,
       probe,
       warnings,
+      hostId,
     }),
   };
 }
@@ -299,6 +354,7 @@ async function runInstall(
 async function runCheck(
   configPath: string,
   hookScriptPath: string,
+  hostId: string,
   reviewGateEnabled: boolean,
   warnings: string[],
   context: CommandContext,
@@ -307,9 +363,29 @@ async function runCheck(
   const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
   // nodeExists → a command mismatch is reported as a classified H4 drift
   // diagnosis (Node upgrade / version-manager switch vs. plugin path move).
+  // hostId → check THIS host's block in the shared config (v1.7.0 scoping).
   const installedCheck = evaluateInstalled(existing, expectedCommand, {
+    hostId,
     nodeExists: (binPath) => existsSync(binPath),
   });
+
+  // Non-blocking coexistence + cruft notices.
+  const { blocks: allBlocks } = parseManagedBlock(existing, hostId);
+  const otherHosts = [
+    ...new Set(allBlocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
+  ];
+  if (otherHosts.length > 0) {
+    warnings.push(
+      `Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")} (coexisting, untouched).`,
+    );
+  }
+  const orphanHooks = findUnmanagedApprovalHookBlocks(existing).length;
+  if (orphanHooks > 0) {
+    warnings.push(
+      `Found ${orphanHooks} orphaned kimi-plugin-cc hook block(s) with no managed marker. ` +
+        `Run /kimi:setup to prune them, or /kimi:setup --uninstall --all to clear everything.`,
+    );
+  }
 
   if (!installedCheck.installed) {
     return {
@@ -397,6 +473,7 @@ async function runCheck(
       reviewGateEnabled,
       probe,
       warnings,
+      hostId,
     }),
   };
 }
@@ -404,6 +481,8 @@ async function runCheck(
 async function runUninstall(
   configPath: string,
   hookScriptPath: string,
+  hostId: string,
+  removeAllHosts: boolean,
   reviewGateEnabled: boolean,
   warnings: string[],
 ): Promise<SetupResult> {
@@ -430,7 +509,20 @@ async function runUninstall(
     };
   }
 
-  const { stripped, removedBlocks, orphansLeft } = stripManagedBlocks(existing);
+  // Default: remove THIS host's block(s) — its own suffixed block plus any
+  // legacy block whose command path derives to this host — and our orphaned
+  // marker-less hook entries, leaving OTHER hosts' blocks intact. `--all`:
+  // remove EVERY host's managed block (the full nuke).
+  const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(
+    existing,
+    hostId,
+    removeAllHosts,
+  );
+  const lineEnding = detectLineEnding(existing);
+  const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(
+    strippedMarkers,
+    lineEnding,
+  );
   const changed = stripped !== existing;
   if (changed) {
     await writeConfigAtomic(configPath, stripped);
@@ -443,11 +535,26 @@ async function runUninstall(
         .join(", ")}. Removed the marker line(s) but preserved surrounding user content — verify the config visually.`,
     );
   }
+  if (prunedCount > 0) {
+    warnings.push(
+      `Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) with no managed marker.`,
+    );
+  }
+  const { blocks: remainingBlocks } = parseManagedBlock(stripped, hostId);
+  const remainingHosts = [
+    ...new Set(remainingBlocks.map((b) => effectiveHost(b, hostId))),
+  ];
+  if (!removeAllHosts && remainingHosts.length > 0) {
+    warnings.push(
+      `Left ${remainingHosts.length} other host block(s) in place: ${remainingHosts.join(", ")}. ` +
+        `Use \`/kimi:setup --uninstall --all\` to remove every host's block.`,
+    );
+  }
 
   return {
     action: "uninstall",
     summary: changed
-      ? `Removed ${removedBlocks} managed block(s) from ${configPath}.`
+      ? `Removed ${removedBlocks} managed block(s)${prunedCount > 0 ? ` + ${prunedCount} orphan hook block(s)` : ""} from ${configPath}.`
       : `No kimi-plugin-cc managed block to remove from ${configPath}.`,
     configPath,
     hookScriptPath,
@@ -559,11 +666,19 @@ function splitPreservingEnding(contents: string): string[] {
 }
 
 /**
- * Remove every BEGIN/END marker pair we find. Orphan marker lines are
- * removed individually (no destructive sweep of trailing content) so
- * `--uninstall` on a corrupted config doesn't take user data with it.
+ * Remove managed BEGIN/END marker pairs that belong to `currentHost` (or every
+ * host when `removeAll`). A block's host is its marker suffix, or — for a legacy
+ * un-suffixed block — the host derived from its command path (so a Claude
+ * uninstall never removes a `~/.codex/…` legacy block another host still relies
+ * on; Kimi review). Orphan marker lines are removed individually (no
+ * destructive sweep of trailing content) so `--uninstall` on a corrupted config
+ * doesn't take user data with it.
  */
-function stripManagedBlocks(contents: string): {
+function stripManagedBlocks(
+  contents: string,
+  currentHost: string,
+  removeAll: boolean,
+): {
   stripped: string;
   removedBlocks: number;
   orphansLeft: number[];
@@ -574,38 +689,72 @@ function stripManagedBlocks(contents: string): {
   const orphansLeft: number[] = [];
   let removedBlocks = 0;
 
+  // A block's effective host: its marker suffix, else the host derived from its
+  // command, else the current host (an un-attributable legacy block is ours).
+  const shouldRemove = (markerHost: string | null, commandPath: string | null): boolean => {
+    if (removeAll) return true;
+    const eff =
+      markerHost ??
+      (commandPath !== null ? hostIdFromHookCommand(commandPath) : null) ??
+      currentHost;
+    return eff === currentHost;
+  };
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
     const trimmed = line.trim();
-    if (isBeginMarker(trimmed)) {
-      // Look ahead for the matching END.
+    const begin = MARKERS.BEGIN_LINE_RE.exec(trimmed);
+    if (begin !== null) {
+      const beginHost = begin[1]?.toLowerCase() ?? null;
+      // Look ahead for the matching END, capturing the block's command en route.
       let endIdx = -1;
+      let blockCommand: string | null = null;
       for (let j = i + 1; j < lines.length; j += 1) {
         const nextTrimmed = lines[j]!.trim();
-        if (isBeginMarker(nextTrimmed)) {
+        if (MARKERS.BEGIN_LINE_RE.test(nextTrimmed)) {
           // Two BEGINs in a row — the outer one is an orphan.
           break;
         }
-        if (isEndMarker(nextTrimmed)) {
+        if (MARKERS.END_LINE_RE.test(nextTrimmed)) {
           endIdx = j;
           break;
         }
+        const decoded = decodeManagedCommandLine(nextTrimmed);
+        if (decoded !== null) blockCommand = decoded;
       }
       if (endIdx === -1) {
-        // Orphan BEGIN: drop only this line.
+        // Orphan BEGIN: drop only this line (if it's ours to remove).
+        if (shouldRemove(beginHost, null)) {
+          orphansLeft.push(i);
+          i += 1;
+          continue;
+        }
+        result.push(line);
+        i += 1;
+        continue;
+      }
+      if (shouldRemove(beginHost, blockCommand)) {
+        // Complete pair we're removing — drop BEGIN..END inclusive.
+        removedBlocks += 1;
+        i = endIdx + 1;
+        continue;
+      }
+      // Another host's block — keep it verbatim.
+      for (let k = i; k <= endIdx; k += 1) result.push(lines[k]!);
+      i = endIdx + 1;
+      continue;
+    }
+    const end = MARKERS.END_LINE_RE.exec(trimmed);
+    if (end !== null) {
+      const endHost = end[1]?.toLowerCase() ?? null;
+      // Orphan END with no preceding BEGIN: drop only this line (if ours).
+      if (shouldRemove(endHost, null)) {
         orphansLeft.push(i);
         i += 1;
         continue;
       }
-      // Found a complete pair — drop everything from BEGIN to END inclusive.
-      removedBlocks += 1;
-      i = endIdx + 1;
-      continue;
-    }
-    if (isEndMarker(trimmed)) {
-      // Orphan END with no preceding BEGIN: drop only this line.
-      orphansLeft.push(i);
+      result.push(line);
       i += 1;
       continue;
     }
@@ -628,12 +777,39 @@ function stripManagedBlocks(contents: string): {
   return { stripped: collapsed.join(lineEnding), removedBlocks, orphansLeft };
 }
 
-function isBeginMarker(trimmedLine: string): boolean {
-  return /^#\s*===\s*BEGIN\s+kimi-plugin-cc-managed(?:\s+\([^)]+\))?\s*===\s*$/.test(trimmedLine);
-}
+/**
+ * Remove orphaned, marker-less `[[hooks]]` tables that are unambiguously this
+ * plugin's approval hook (see `findUnmanagedApprovalHookBlocks`). Returns the
+ * cleaned text and the count removed. A no-op (returns the input unchanged)
+ * when there is nothing to prune, so callers can compare identity cheaply.
+ */
+function pruneOrphanApprovalHooks(
+  contents: string,
+  lineEnding: "\n" | "\r\n",
+): { pruned: string; count: number } {
+  const ranges = findUnmanagedApprovalHookBlocks(contents);
+  if (ranges.length === 0) return { pruned: contents, count: 0 };
 
-function isEndMarker(trimmedLine: string): boolean {
-  return /^#\s*===\s*END\s+kimi-plugin-cc-managed\s*===\s*$/.test(trimmedLine);
+  const remove = new Set<number>();
+  for (const { start, end } of ranges) {
+    for (let i = start; i < end; i += 1) remove.add(i);
+  }
+  const lines = splitPreservingEnding(contents);
+  const kept = lines.filter((_, idx) => !remove.has(idx));
+
+  // Collapse runs of >= 3 blank lines created by removal back to 2.
+  const collapsed: string[] = [];
+  let blankRun = 0;
+  for (const line of kept) {
+    if (line.length === 0) {
+      blankRun += 1;
+      if (blankRun <= 2) collapsed.push(line);
+    } else {
+      blankRun = 0;
+      collapsed.push(line);
+    }
+  }
+  return { pruned: collapsed.join(lineEnding), count: ranges.length };
 }
 
 // ----- Block content -----------------------------------------------------
@@ -642,12 +818,17 @@ function buildManagedBlock(
   hookScriptPath: string,
   env: NodeJS.ProcessEnv,
   lineEnding: "\n" | "\r\n" = "\n",
+  hostId = "",
 ): string {
   const shellCommand = buildHookShellCommand(hookScriptPath, env);
   const commandLine = `command = ${tomlBasicString(shellCommand)}`;
+  const suffix = hostId.length > 0 ? `:${hostId}` : "";
   return [
-    `${BEGIN_MARKER_PREFIX} (v${KIMI_PLUGIN_CC_VERSION}) ===`,
+    `${BEGIN_MARKER_PREFIX}${suffix} (v${KIMI_PLUGIN_CC_VERSION}) ===`,
     `# DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.`,
+    `# Host: ${hostId.length > 0 ? hostId : "(legacy)"} — Claude Code and Codex each own a`,
+    `#   separate block in this shared ~/.kimi-code/config.toml; setup in one host`,
+    `#   never touches the other's.`,
     `# Purpose:`,
     `#   kimi-code's \`kimi -p\` mode hard-codes permission='auto' and`,
     `#   auto-approves every tool call. This hook enforces /kimi:review,`,
@@ -665,7 +846,7 @@ function buildManagedBlock(
     `event = "PreToolUse"`,
     commandLine,
     `timeout = ${DEFAULT_HOOK_TIMEOUT_S}`,
-    END_MARKER,
+    `# === END kimi-plugin-cc-managed${suffix} ===`,
   ].join(lineEnding);
 }
 
@@ -1053,10 +1234,12 @@ function buildDetails(args: {
   reviewGateEnabled: boolean;
   probe: ProbeOutcome;
   warnings: string[];
+  hostId?: string;
 }): string[] {
   const details = [
     `Companion runtime: Node ${process.version}`,
     `Plugin version:   ${KIMI_PLUGIN_CC_VERSION}`,
+    ...(args.hostId ? [`Host id:          ${args.hostId}`] : []),
     `Config file:      ${args.configPath}`,
     `Hook script:      ${args.hookScriptPath}`,
     `Review gate:      ${args.reviewGateEnabled ? "enabled" : "disabled"}`,

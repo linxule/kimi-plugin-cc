@@ -473,3 +473,219 @@ describe("setup managed-block installer", () => {
     expect(contents).toContain(overridePath);
   });
 });
+
+// v1.7.0 — Claude Code and Codex share one ~/.kimi-code/config.toml and each
+// own a host-scoped managed block, so setup in one host never clobbers the other.
+
+function extractBlock(contents: string, host: string): string {
+  const lines = contents.split("\n");
+  const begin = lines.findIndex((l) =>
+    new RegExp(`BEGIN kimi-plugin-cc-managed:${host}\\b`).test(l),
+  );
+  const end = lines.findIndex(
+    (l, i) => i > begin && new RegExp(`END kimi-plugin-cc-managed:${host}\\b`).test(l),
+  );
+  return lines.slice(begin, end + 1).join("\n");
+}
+
+describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
+  test("two hosts coexist — setup in one host never clobbers the other's block", async () => {
+    const { env, configPath } = await makeCase("dual-host-coexist");
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+
+    await runSetup([], makeContext(claudeEnv));
+    const afterClaude = await readFile(configPath, "utf8");
+    expect(afterClaude).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    const claudeBlock = extractBlock(afterClaude, "claude-code");
+
+    const codexResult = await runSetup([], makeContext(codexEnv));
+    expect(codexResult.blockWritten).toBe(true);
+    const afterCodex = await readFile(configPath, "utf8");
+    expect(afterCodex).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    expect(afterCodex).toContain("BEGIN kimi-plugin-cc-managed:codex");
+    // Claude's block is byte-identical after the Codex install.
+    expect(extractBlock(afterCodex, "claude-code")).toBe(claudeBlock);
+
+    // Each host's --check passes for its OWN block.
+    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
+    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+
+    // Re-running Claude setup is idempotent and does not touch Codex's block.
+    const codexBlock = extractBlock(afterCodex, "codex");
+    await runSetup([], makeContext(claudeEnv));
+    expect(extractBlock(await readFile(configPath, "utf8"), "codex")).toBe(codexBlock);
+  });
+
+  test("install migrates a legacy un-suffixed block to a host-scoped marker in place", async () => {
+    const { env, configPath } = await makeCase("legacy-migrate");
+    const legacy = [
+      "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===",
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      'command = "node /stale/approval-hook.js"',
+      "timeout = 15",
+      "# === END kimi-plugin-cc-managed ===",
+      "",
+    ].join("\n");
+    await writeFile(configPath, legacy, "utf8");
+
+    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
+    const after = await readFile(configPath, "utf8");
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    // Converted in place — exactly one block, not duplicated.
+    expect(after.match(/BEGIN kimi-plugin-cc-managed/g)?.length).toBe(1);
+    expect(after).not.toContain("/stale/approval-hook.js");
+  });
+
+  test("install prunes orphaned marker-less approval-hook [[hooks]] entries", async () => {
+    const { env, configPath } = await makeCase("prune-orphans");
+    const orphanHook =
+      "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
+    const seeded = [
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${orphanHook}'"`,
+      "timeout = 15",
+      "",
+      "user_setting = true",
+      "",
+    ].join("\n");
+    await writeFile(configPath, seeded, "utf8");
+
+    const result = await runSetup([], makeContext(env));
+    const after = await readFile(configPath, "utf8");
+    // Orphan removed, user content preserved, our fresh block installed.
+    expect(after).not.toContain(orphanHook);
+    expect(after).toContain("user_setting = true");
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed");
+    expect(result.warnings.join("\n")).toContain("Pruned");
+  });
+
+  test("prune stops at a table header with a trailing comment (never eats the next table)", async () => {
+    const { env, configPath } = await makeCase("prune-boundary-comment");
+    const orphanHook =
+      "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
+    // No blank line between the orphan hook and the user's permission rule, and
+    // the table header carries an inline comment (Codex review scenario).
+    const seeded = [
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${orphanHook}'"`,
+      "timeout = 15",
+      "[[permission.rules]] # user security rule",
+      'decision = "deny"',
+      'pattern = "Bash(rm *)"',
+      "",
+    ].join("\n");
+    await writeFile(configPath, seeded, "utf8");
+
+    await runSetup([], makeContext(env));
+    const after = await readFile(configPath, "utf8");
+    // Orphan hook removed…
+    expect(after).not.toContain(orphanHook);
+    // …but the user's permission rule (and its inline-comment header) survive.
+    expect(after).toContain("[[permission.rules]] # user security rule");
+    expect(after).toContain('pattern = "Bash(rm *)"');
+  });
+
+  test("uninstall is host-scoped by default; --all removes every host", async () => {
+    const { env, configPath } = await makeCase("uninstall-hosts");
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+    await runSetup([], makeContext(claudeEnv));
+    await runSetup([], makeContext(codexEnv));
+
+    // Default uninstall as Claude removes ONLY Claude's block.
+    const scoped = await runSetup(["--uninstall"], makeContext(claudeEnv));
+    expect(scoped.blockRemoved).toBe(true);
+    let after = await readFile(configPath, "utf8");
+    expect(after).not.toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed:codex");
+
+    // Reinstall Claude, then --all clears everything.
+    await runSetup([], makeContext(claudeEnv));
+    const all = await runSetup(["--uninstall", "--all"], makeContext(codexEnv));
+    expect(all.blockRemoved).toBe(true);
+    after = await readFile(configPath, "utf8");
+    expect(after).not.toContain("kimi-plugin-cc-managed");
+  });
+
+  test("install does NOT adopt or clobber another host's legacy block", async () => {
+    const { env, configPath } = await makeCase("no-clobber-foreign-legacy");
+    // A pre-1.7.0 legacy (un-suffixed) block whose command path is Codex's.
+    const codexHook =
+      "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js";
+    const legacy = [
+      "# === BEGIN kimi-plugin-cc-managed (v1.6.5) ===",
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${codexHook}'"`,
+      "timeout = 15",
+      "# === END kimi-plugin-cc-managed ===",
+      "",
+    ].join("\n");
+    await writeFile(configPath, legacy, "utf8");
+
+    // Claude installs: it must APPEND its own block and leave Codex's intact —
+    // NOT convert the Codex-owned legacy block to a Claude block (the migration
+    // clobber the whole change exists to prevent).
+    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
+    const after = await readFile(configPath, "utf8");
+    expect(after).toContain(codexHook);
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+  });
+
+  test("default uninstall leaves another host's legacy block intact", async () => {
+    const { env, configPath } = await makeCase("uninstall-keeps-foreign-legacy");
+    const codexHook =
+      "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js";
+    const legacy = [
+      "# === BEGIN kimi-plugin-cc-managed (v1.6.5) ===",
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${codexHook}'"`,
+      "timeout = 15",
+      "# === END kimi-plugin-cc-managed ===",
+      "",
+    ].join("\n");
+    await writeFile(configPath, legacy, "utf8");
+    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
+
+    // Claude's default uninstall removes only Claude's block — Codex's legacy
+    // block (host-neutral marker, but Codex-owned command path) survives.
+    await runSetup(["--uninstall"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
+    const after = await readFile(configPath, "utf8");
+    expect(after).toContain(codexHook);
+    expect(after).not.toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+  });
+
+  test("prune leaves an unmanaged hook that carries a matcher (not our grammar)", async () => {
+    const { env, configPath } = await makeCase("prune-skips-matcher");
+    const ourScript =
+      "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
+    // Reuses approval-hook.js but with a matcher — a deliberate user hook, not
+    // an orphan of ours. Must survive the prune.
+    const seeded = [
+      "[[hooks]]",
+      'matcher = "Write"',
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${ourScript}'"`,
+      "timeout = 15",
+      "",
+    ].join("\n");
+    await writeFile(configPath, seeded, "utf8");
+    const result = await runSetup([], makeContext(env));
+    const after = await readFile(configPath, "utf8");
+    expect(after).toContain(ourScript);
+    expect(result.warnings.join("\n")).not.toContain("Pruned");
+  });
+
+  test("--all is rejected without --uninstall", async () => {
+    const { env } = await makeCase("all-requires-uninstall");
+    await expect(runSetup(["--all"], makeContext(env))).rejects.toMatchObject({
+      code: "INVALID_ARGS",
+      stage: "setup.parse",
+    });
+  });
+});

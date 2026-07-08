@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { evaluateInstalled } from "./managed-block.js";
-import { tryBuildExpectedHookCommand } from "./install-paths.js";
+import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
 import { resolveKimiHome } from "../kimi-home.js";
 export async function verifyHookInstalled(env) {
     const configPath = resolveKimiCodeConfigPath(env);
@@ -45,7 +45,11 @@ export async function verifyHookInstalled(env) {
     // H4 diagnosis (Node upgrade / version-manager switch vs. plugin path drift)
     // instead of a raw expected-vs-got dump. Classification only refines the
     // reason; it never changes the installed=false decision.
+    //
+    // `hostId` selects THIS host's block in the shared config so Claude Code and
+    // Codex verify their own managed block independently (v1.7.0 host scoping).
     const check = evaluateInstalled(raw, expected.command, {
+        hostId: resolveHostId(env, expected.hookScriptPath),
         nodeExists: (binPath) => existsSync(binPath),
     });
     return {
