@@ -2,6 +2,13 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.7.2 — 2026-07-08
+
+**Silence the `MODULE_TYPELESS_PACKAGE_JSON` warning in the Codex bundle.** Cosmetic packaging fix; no runtime behavior change.
+
+- The root `package.json` declares `"type": "module"`, which covers root `dist/` on the Claude side (Claude Code copies the repo root, package.json included, into its cache). But the self-contained Codex bundle `plugins/kimi-codex/` carried no `package.json`, so when Codex ran the bundled `dist/companion.js` from its cache Node walked up to `~/package.json` (no `type`), emitted `MODULE_TYPELESS_PACKAGE_JSON`, and reparsed as ESM (perf overhead; the warning also leaked into the setup probe's captured deny-reason preview).
+- Fix: `bun run build` now emits `dist/package.json` (`{"type":"module"}`), which the existing runtime mirror copies into `plugins/kimi-codex/dist/`, so the bundled companion resolves its module type locally. Verified in an isolated `$HOME` location: **1 → 0** warnings. `bun run check` green.
+
 ## 1.7.1 — 2026-07-08
 
 **Post-release hardening of the v1.7.0 host-scoping edges, from a second Codex + Kimi review.** All three were rare-input edge cases on the config-mutating path; no behavior change on the normal path.
