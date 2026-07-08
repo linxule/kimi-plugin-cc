@@ -681,6 +681,60 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     expect(result.warnings.join("\n")).not.toContain("Pruned");
   });
 
+  test("prune leaves (does not corrupt) an unmanaged hook table with a multi-line array", async () => {
+    const { env, configPath } = await makeCase("prune-multiline-array");
+    const ourScript =
+      "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
+    // A marker-less table that reuses approval-hook.js but also has a multi-line
+    // array key — NOT our grammar. Must be left fully intact (no partial cut).
+    const seeded = [
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${ourScript}'"`,
+      "metadata = [",
+      '  "a",',
+      '  "b",',
+      "]",
+      "timeout = 15",
+      "",
+      "user_setting = true",
+      "",
+    ].join("\n");
+    await writeFile(configPath, seeded, "utf8");
+    const result = await runSetup([], makeContext(env));
+    const after = await readFile(configPath, "utf8");
+    // The whole table survives (including the array), and no dangling `]`.
+    expect(after).toContain("metadata = [");
+    expect(after).toContain('  "a",');
+    expect(after).toContain("user_setting = true");
+    expect(result.warnings.join("\n")).not.toContain("Pruned");
+  });
+
+  test("scoped uninstall keeps a legacy block it cannot attribute; --all removes it", async () => {
+    const { env, configPath } = await makeCase("uninstall-ambiguous-legacy");
+    // Legacy block with a NON-canonical (bare-node) command — un-attributable.
+    const legacy = [
+      "# === BEGIN kimi-plugin-cc-managed (v1.6.5) ===",
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      'command = "node /somewhere/dist/hooks/approval-hook.js"',
+      "timeout = 15",
+      "# === END kimi-plugin-cc-managed ===",
+      "",
+    ].join("\n");
+    await writeFile(configPath, legacy, "utf8");
+
+    // Scoped uninstall (some other host) must NOT remove the ambiguous block.
+    await runSetup(["--uninstall"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }));
+    let after = await readFile(configPath, "utf8");
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed");
+
+    // --all clears it.
+    await runSetup(["--uninstall", "--all"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }));
+    after = await readFile(configPath, "utf8");
+    expect(after).not.toContain("kimi-plugin-cc-managed");
+  });
+
   test("--all is rejected without --uninstall", async () => {
     const { env } = await makeCase("all-requires-uninstall");
     await expect(runSetup(["--all"], makeContext(env))).rejects.toMatchObject({

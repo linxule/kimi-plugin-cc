@@ -71,6 +71,8 @@ const COMMAND_LITERAL_LINE_RE = /^command\s*=\s*'([^']*)'\s*$/;
 const EVENT_LINE_RE = /^event\s*=\s*"PreToolUse"\s*$/;
 /** Anything matcher-shaped is a critical safety failure — block disabled. */
 const MATCHER_LINE_RE = /^matcher\s*=/;
+/** `timeout = <int>` — the only other key our managed [[hooks]] table emits. */
+const TIMEOUT_LINE_RE = /^timeout\s*=\s*\d+\s*$/;
 const HOOKS_TABLE_RE = /^\[\[hooks\]\]\s*$/;
 /** Locate every BEGIN/END marker line, in order, with its parsed host id. */
 function findMarkers(lines) {
@@ -353,33 +355,53 @@ export function findUnmanagedApprovalHookBlocks(contents) {
         let commandDecoded = "";
         let hasPreToolUseEvent = false;
         let hasMatcher = false;
+        // A table we wrote contains ONLY event/command/timeout (+ comments). If any
+        // OTHER key appears — e.g. a multi-line `metadata = [ … ]` array, whose
+        // continuation lines would otherwise fool the `[`-boundary check and leave
+        // dangling TOML after a partial prune — treat the table as NOT ours and
+        // skip it. Conservative by design (Codex review): never partially cut a
+        // structure we don't fully recognize.
+        let simpleGrammar = true;
         while (j < lines.length) {
             const trimmed = lines[j].trim();
             if (trimmed.length === 0)
                 break;
             // Any TOML table header bounds the table — including one with a trailing
-            // comment (`[[permission.rules]] # note`), which ANY_TABLE_RE would miss.
-            // A bare leading `[` is unambiguously a table header in TOML (value
-            // arrays are `key = [...]`), so stop there and never swallow the next
-            // table. (Codex review — prevents pruning a following user table.)
+            // comment (`[[permission.rules]] # note`). A bare leading `[` is a table
+            // header in TOML (value arrays are `key = [...]`), so stop there and
+            // never swallow the next table. (Codex review.)
             if (trimmed.startsWith("["))
                 break;
             if (BEGIN_LINE_RE.test(trimmed) || END_LINE_RE.test(trimmed))
                 break;
-            if (EVENT_LINE_RE.test(trimmed))
+            if (trimmed.startsWith("#")) {
+                j += 1;
+                continue;
+            }
+            if (EVENT_LINE_RE.test(trimmed)) {
                 hasPreToolUseEvent = true;
-            if (MATCHER_LINE_RE.test(trimmed))
+            }
+            else if (MATCHER_LINE_RE.test(trimmed)) {
                 hasMatcher = true;
-            const decoded = decodeManagedCommandLine(trimmed);
-            if (decoded !== null)
-                commandDecoded = decoded;
+            }
+            else {
+                const decoded = decodeManagedCommandLine(trimmed);
+                if (decoded !== null) {
+                    commandDecoded = decoded;
+                }
+                else if (!TIMEOUT_LINE_RE.test(trimmed)) {
+                    // Some key other than event/command/timeout/matcher — not our shape.
+                    simpleGrammar = false;
+                }
+            }
             j += 1;
         }
-        // Only prune a table that matches our managed-block grammar exactly: our
-        // approval-hook command, `event = "PreToolUse"`, and NO matcher. A user who
-        // deliberately reuses approval-hook.js with a different event or a matcher
-        // is not us — leave it (Kimi review, reduces false positives).
-        if (commandDecoded.length > 0 &&
+        // Only prune a table that matches our managed-block grammar EXACTLY: our
+        // approval-hook command, `event = "PreToolUse"`, no matcher, and no keys
+        // beyond event/command/timeout. (Codex + Kimi review — reduces false
+        // positives and avoids corrupting a multi-line-array table.)
+        if (simpleGrammar &&
+            commandDecoded.length > 0 &&
             hasPreToolUseEvent &&
             !hasMatcher &&
             isOurApprovalHookCommand(commandDecoded)) {

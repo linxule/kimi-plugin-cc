@@ -312,9 +312,12 @@ export function hostIdFromHookScript(hookScriptPath) {
     if (norm.includes("/.codex/"))
         return "codex";
     // Dev checkouts are not version-stamped, so hashing the hook's directory is
-    // stable across runs (and across plugin upgrades, which don't move it).
+    // stable across runs (and across plugin upgrades, which don't move it). Use
+    // 16 hex chars (64 bits): an 8-char prefix is only 32 bits, where two
+    // distinct dev roots can collide (Codex review found a concrete pair) and the
+    // second setup would treat the first host's block as its own and clobber it.
     const digest = createHash("sha1").update(path.dirname(hookScriptPath)).digest("hex");
-    return `host-${digest.slice(0, 8)}`;
+    return `host-${digest.slice(0, 16)}`;
 }
 /**
  * Normalize an arbitrary host-id override into the `[a-z0-9-]+` slug the

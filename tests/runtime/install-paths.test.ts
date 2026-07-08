@@ -143,11 +143,14 @@ describe("resolveHostId / hostIdFromHookScript", () => {
     expect(v1).toBe("claude-code");
   });
 
-  test("dev checkouts fall back to a stable host-<hash>", () => {
+  test("dev checkouts fall back to a stable 64-bit host-<hash>", () => {
     const a = hostIdFromHookScript("/repo/kimi-plugin-cc/dist/hooks/approval-hook.js");
     const b = hostIdFromHookScript("/repo/kimi-plugin-cc/dist/hooks/approval-hook.js");
     expect(a).toBe(b);
-    expect(a).toMatch(/^host-[0-9a-f]{8}$/);
+    // 16 hex chars (64 bits) — an 8-char prefix collided in review.
+    expect(a).toMatch(/^host-[0-9a-f]{16}$/);
+    // Distinct roots derive distinct ids.
+    expect(hostIdFromHookScript("/other/root/dist/hooks/approval-hook.js")).not.toBe(a);
   });
 
   test("KIMI_PLUGIN_CC_HOST_ID override wins and is slugified", () => {

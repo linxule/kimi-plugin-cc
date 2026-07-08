@@ -2,6 +2,16 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.7.1 — 2026-07-08
+
+**Post-release hardening of the v1.7.0 host-scoping edges, from a second Codex + Kimi review.** All three were rare-input edge cases on the config-mutating path; no behavior change on the normal path.
+
+- **Conservative prune (Codex, Medium).** `findUnmanagedApprovalHookBlocks` now prunes a marker-less table ONLY when its body is exactly our grammar (`event`/`command`/`timeout` + comments). A table that reuses `approval-hook.js` but carries any other key — notably a multi-line `metadata = [ … ]` array whose continuation lines fooled the `[`-boundary check — is left fully intact instead of being partially cut (which had left dangling TOML).
+- **Ambiguous legacy blocks are not clobbered on scoped uninstall (Codex, Medium).** A legacy un-suffixed block whose command isn't the canonical two-single-quoted-token shape can't be attributed to a host, so `hostIdFromHookCommand` returns null. `/kimi:setup --uninstall` now LEAVES such a block (only `--uninstall --all` removes it), so a scoped uninstall can't destroy another host's non-canonical block. Install still adopts/refreshes it (it's being replaced anyway).
+- **64-bit fallback host id (Codex, Low).** The dev-checkout fallback id widened from `host-<sha1[:8]>` (32 bits, a concrete collision was demonstrated) to `host-<sha1[:16]>` (64 bits), so two unrecognized install roots no longer collide and clobber.
+- **Transitional-window guidance (Kimi).** `docs/migration.md` now carries a loud caution: upgrade BOTH hosts to v1.7.0+ before re-running setup (running the old ≤1.6.5 installer after one host migrated can re-clobber), with `/kimi:setup --uninstall --all` as the clean-slate escape hatch.
+- New tests cover the multi-line-array prune, the ambiguous-legacy uninstall/`--all` split, and the widened host id. `bun run check` green.
+
 ## 1.7.0 — 2026-07-08
 
 **Host-scoped managed blocks: Claude Code and Codex stop clobbering each other's PreToolUse hook in the shared `~/.kimi-code/config.toml`.** A behavior release fixing the cross-host setup collision.

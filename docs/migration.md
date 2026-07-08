@@ -119,7 +119,16 @@ vs `:codex`), so:
   prunes orphaned hook entries left by earlier installs.
 - `/kimi:setup --uninstall` removes only the current host's block. Use
   `/kimi:setup --uninstall --all` to remove *every* host's block from the shared
-  config.
+  config (a deliberate full nuke — it clears blocks for **all** hosts, not just
+  this one).
+
+> **⚠️ Upgrade both hosts before re-running setup.** During the window where one
+> host is on v1.7.0+ and the other is still on ≤1.6.5, running setup on the OLD
+> host writes an un-suffixed block that can overwrite the block the new host just
+> migrated, re-creating the clobber (or leaving a duplicate the new host rejects
+> with `SETUP_DUPLICATE_BLOCKS`). Update **both** Claude Code and Codex to v1.7.0+
+> first, then run setup in each. If the config ever looks tangled, the clean-slate
+> escape hatch is `/kimi:setup --uninstall --all` followed by setup in each host.
 
 ## Data and session continuity
 

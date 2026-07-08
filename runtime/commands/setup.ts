@@ -689,15 +689,24 @@ function stripManagedBlocks(
   const orphansLeft: number[] = [];
   let removedBlocks = 0;
 
-  // A block's effective host: its marker suffix, else the host derived from its
-  // command, else the current host (an un-attributable legacy block is ours).
-  const shouldRemove = (markerHost: string | null, commandPath: string | null): boolean => {
+  // Decide whether a managed block/marker belongs to the host we're uninstalling
+  // for. Suffixed blocks: only the matching host. Legacy (un-suffixed) COMPLETE
+  // blocks: the host derived from the command path — but if the command can't be
+  // attributed (not the canonical two-token shape), leave it (ambiguous
+  // ownership; only `--all` removes it), so a scoped uninstall never destroys
+  // another host's non-canonical block (Codex review). A bare/orphan marker line
+  // has no command and is broken cruft, so a scoped uninstall does sweep it.
+  const shouldRemove = (
+    markerHost: string | null,
+    commandPath: string | null,
+    isOrphanMarker: boolean,
+  ): boolean => {
     if (removeAll) return true;
-    const eff =
-      markerHost ??
-      (commandPath !== null ? hostIdFromHookCommand(commandPath) : null) ??
-      currentHost;
-    return eff === currentHost;
+    if (markerHost !== null) return markerHost === currentHost;
+    if (isOrphanMarker) return true;
+    const derived = commandPath !== null ? hostIdFromHookCommand(commandPath) : null;
+    if (derived === null) return false;
+    return derived === currentHost;
   };
 
   let i = 0;
@@ -725,7 +734,7 @@ function stripManagedBlocks(
       }
       if (endIdx === -1) {
         // Orphan BEGIN: drop only this line (if it's ours to remove).
-        if (shouldRemove(beginHost, null)) {
+        if (shouldRemove(beginHost, null, true)) {
           orphansLeft.push(i);
           i += 1;
           continue;
@@ -734,7 +743,7 @@ function stripManagedBlocks(
         i += 1;
         continue;
       }
-      if (shouldRemove(beginHost, blockCommand)) {
+      if (shouldRemove(beginHost, blockCommand, false)) {
         // Complete pair we're removing — drop BEGIN..END inclusive.
         removedBlocks += 1;
         i = endIdx + 1;
@@ -749,7 +758,7 @@ function stripManagedBlocks(
     if (end !== null) {
       const endHost = end[1]?.toLowerCase() ?? null;
       // Orphan END with no preceding BEGIN: drop only this line (if ours).
-      if (shouldRemove(endHost, null)) {
+      if (shouldRemove(endHost, null, true)) {
         orphansLeft.push(i);
         i += 1;
         continue;
