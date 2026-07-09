@@ -601,6 +601,32 @@ export const KIMI_TESTED_MINORS = [
     // hook-denied. Report:
     // .claude/kimi-code-research/daily-monitor/2026-07-08-upstream-monitor.md.
     // Tag: compat-verified-kimi-code-0.23.2.
+    // 0.23.3/0.23.4 (patches, 2026-07-09) verified COMPAT-PRESERVED within the
+    // already-listed {0,23}: scoped 0.23.2→0.23.4 diffs left permission and both
+    // hook trees byte-identical (`02-permission.diff` and `03-hooks.diff` both 0
+    // bytes). Hook ordering remains PreToolCallHookPermissionPolicy index 0 and
+    // AutoModeApprove index 5; aggregation remains any-block-wins; Bash still
+    // uses `command`, Write/Edit still use `path`, and AgentSwarm subagents still
+    // use the standard permission stack. The load-bearing `run-prompt.ts` change
+    // (#1516) makes `kimi -p "/goal ..."` wait across continuation turns until
+    // the goal is terminal instead of resolving after the first completed turn.
+    // `permission:'auto'`, `installHeadlessHandlers`, PromptJsonWriter,
+    // session.resume_hint, and goal.summary shapes remain intact. The non-empty
+    // `04-wire-records.diff` is internal provider-auth/media projection/session
+    // plumbing, not new stdout NDJSON; the non-empty `05-session-bootstrap.diff`
+    // adds owner-scoped `[image]` limits without changing additionalDirs, hook
+    // merging, or permission construction. The 0.23.3 provider-auth patch now
+    // surfaces the upstream 401 reason as PROVIDER_AUTH_ERROR instead of falsely
+    // demanding relogin; it does not affect tool or hook execution. Backed by a
+    // GREEN temp-binary `bun run smoke:real` on exact 0.23.4 (2026-07-09):
+    // 9 pass / 0 fail. Read-only labels denied forced writes; pursue ran to its
+    // two-minute budget across continuation turns with no file written;
+    // read-only swarm denied a spawned subagent write; write-swarm confined coder
+    // edits to the throwaway worktree (patchBytes=278, userTreeClean=true,
+    // worktreeCleaned=true); and an out-of-trusted-root absolute write was
+    // hook-denied. Report:
+    // .claude/kimi-code-research/daily-monitor/2026-07-09-upstream-monitor.md.
+    // Tag: compat-verified-kimi-code-0.23.4.
     { major: 0, minor: 23 },
 ];
 /**
