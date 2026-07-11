@@ -67,18 +67,15 @@ export async function runReview(
     );
   }
 
+  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
+    await requireReadOnlyHookInstalled(context, commandType);
+  }
+
   const reviewContext = await collectReviewContext(context.cwd, parsed.base);
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
   const store = new JobStore(paths);
-
-  // Hook installation warning surfaces BEFORE any kimi spawn so the
-  // user notices it on every command, not just on a successful run.
-  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
-    const installStatus = await verifyHookInstalled(context.env);
-    maybeWarnHookMissing(installStatus, commandType, context.stderr);
-  }
 
   const jobId = randomUUID();
   // kimi-code mints the actual session id and announces it on stderr;
@@ -203,6 +200,33 @@ export async function runReview(
     handlers.dispose();
     store.close();
   }
+}
+
+async function requireReadOnlyHookInstalled(
+  context: CommandContext,
+  commandType: "review" | "challenge",
+): Promise<void> {
+  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
+    return;
+  }
+
+  const installStatus = await verifyHookInstalled(context.env);
+  if (installStatus.installed) {
+    return;
+  }
+
+  maybeWarnHookMissing(installStatus, commandType, context.stderr);
+  throw new RuntimeError(
+    `${commandType.toUpperCase()}_HOOK_NOT_INSTALLED`,
+    [
+      `${commandType} refuses to run without the canonical kimi-plugin-cc PreToolUse hook.`,
+      `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
+      "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
+      "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
+    ].join(" "),
+    `${commandType}.hook-check`,
+    { details: { config_path: installStatus.configPath } },
+  );
 }
 
 function buildReviewPrompt(

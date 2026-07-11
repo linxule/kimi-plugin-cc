@@ -23,4 +23,5 @@ Pass through: `[--base <ref>] [-m <model>] [extra prose]`
 
 - Forward `--base <ref>`, `-m`/`--model <name>`, and any trailing focus text only.
 - Do not invent file/path flags; review's payload is the git diff plus optional focus text.
+- If the companion reports REVIEW_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.
 - Return companion stdout verbatim and leave any fixes to a separate user request.

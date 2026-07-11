@@ -92,7 +92,16 @@ export async function runReviewGateStopHook(
 
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
     const installStatus = await verifyHookInstalled(context.env);
-    maybeWarnHookMissing(installStatus, "review_gate", context.stderr);
+    if (!installStatus.installed) {
+      maybeWarnHookMissing(installStatus, "review_gate", context.stderr);
+      return reviewGateSkipped(
+        [
+          "canonical PreToolUse hook is missing or invalid",
+          `(${installStatus.reason ?? "unknown"})`,
+          "allowing stop without invoking Kimi",
+        ].join(" "),
+      );
+    }
   }
 
   try {

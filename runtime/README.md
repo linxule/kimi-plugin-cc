@@ -22,7 +22,8 @@ Core modules:
 - `kimi-timeouts.ts` — per-command response budgets (ASK / REVIEW / REVIEW_GATE)
 - `hooks/approval-policy.ts` — pure decision function for the PreToolUse hook (per-command allow/deny posture)
 - `hooks/approval-hook.ts` — entry script (`dist/hooks/approval-hook.js`) installed in `~/.kimi-code/config.toml`
-- `hooks/install.ts` — verifier that confirms the managed block is present in `~/.kimi-code/config.toml`
+- `hooks/install.ts` — verifier that confirms the managed block is present and the complete TOML/hook set is loadable in `~/.kimi-code/config.toml`
+- `hooks/config-safety.ts` — serialized config lock plus full TOML parse and strict whole-hook-array validation
 - `rescue-approval.ts` — workspace-bound allowlist (file-edit symlink and containment checks, shell command allowlist, find/sed/ruff/package-manager tightening). Called by the hook via `evaluateRescueHookRequest`.
 - `job-store.ts` — SQLite job state in WAL mode with `busy_timeout`, terminal-state enforcement, and a partial unique index preventing concurrent rescue resume on the same session id
 - `jobs.ts` — job lifecycle helpers, stale-worker sweep, `waitForTerminalJob`
@@ -30,9 +31,9 @@ Core modules:
 
 Behavior notes:
 
-- Read-only commands (review/challenge/review_gate/ask) are enforced by the PreToolUse hook — kimi-code's `-p` mode auto-approves every tool call without it. The hook is installed by `/kimi:setup`.
-- Rescue refuses to run when the hook is not installed (REFUSE_HOOK_NOT_INSTALLED). Bypass with `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` is reserved for tests and setup probes.
-- Long-running commands (ask, review, challenge, rescue) wrap their subprocess in `runCliPromptWithBudget` so cancellation aborts the kimi child; SIGKILL escalation matches v0.4's 1500ms default.
+- Read-only commands (review/challenge/review_gate/ask) are enforced by the PreToolUse hook — kimi-code's `-p` mode auto-approves every tool call without it. Review/challenge/ask refuse before spawning Kimi when verification fails; the review gate skips. The hook is installed by `/kimi:setup` or `$kimi-setup`.
+- Every write-capable command also refuses when the hook is not installed. `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` bypasses all refusal gates and is reserved for tests and diagnostics.
+- Long-running commands wrap their subprocess in `runCliPromptWithBudget`; cancellation does not settle until identity-checked descendants receive SIGTERM/SIGKILL and a bounded post-kill quiescence check completes.
 - The Stop hook is disabled by default and reads `reviewGateEnabled` from plugin config; enable via `/kimi:setup --enable-review-gate`.
 - `review`/`challenge`/`ask`/`rescue` are prose pass-through — Kimi's raw final output is stored verbatim and rendered as-is; only empty output is a hard failure. `review_gate` is the lone command that still parses Kimi output (JSON allow/block decision) and is warn-allow on parse failure.
 - Stream-json output and diagnostic events are logged to `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/logs/<command>-<job-id>.jsonl` for replay and debugging.

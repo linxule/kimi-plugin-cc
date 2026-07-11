@@ -23,4 +23,5 @@ Pass through: `[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model
 
 - Preserve the user's question and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested.
 - Choose `--background` for broad or long-running questions and return the job id that the companion prints.
+- If the companion reports ASK_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.
 - Return companion stdout verbatim; do not summarize or re-voice Kimi's prose.

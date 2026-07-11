@@ -79,7 +79,7 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 
 **Subprocess-first transport.** v1.0 drives `kimi -p --output-format stream-json` as a one-process-per-job subprocess. kimi-code mints the session id and announces it via a `role:"meta", type:"session.resume_hint"` record on stdout (kimi-code 0.2.0+) — earlier 0.1.x announced on stderr instead. The runtime consumes both channels (first-announce-wins) and round-trips the captured token verbatim via `--resume`. The v0.4 Wire JSON-RPC client is gone (kimi-code dropped it); the v0.4-maintenance branch keeps the Wire path alive for Kimi CLI users.
 
-**Safety via PreToolUse hook.** kimi-code's `kimi -p` mode hard-codes `permission: auto` and auto-approves every tool call. The plugin's safety contract therefore lives in a [PreToolUse hook](./docs/safety.md) that `/kimi:setup` installs as a managed block in `~/.kimi-code/config.toml`. The hook reads `KIMI_PLUGIN_CC_CMD` from the env block we set per spawn and applies the right policy — read-only for review/challenge/review_gate/ask, workspace allowlist for rescue. Without the hook, rescue refuses to run.
+**Safety via PreToolUse hook.** kimi-code's `kimi -p` mode hard-codes `permission: auto` and auto-approves every tool call. The plugin's safety contract therefore lives in a [PreToolUse hook](./docs/safety.md) that `/kimi:setup` or `$kimi-setup` installs as a host-scoped managed block in `~/.kimi-code/config.toml`. The hook reads `KIMI_PLUGIN_CC_CMD` from the env block we set per spawn and applies the right policy — read-only for review/challenge/review_gate/ask, workspace allowlist for rescue. Without a verified hook, every model-spawning command refuses before Kimi starts; the review gate skips rather than running un-enforced.
 
 **Workspace allowlist.** Rescue's allowlist ([`runtime/rescue-approval.ts`](./runtime/rescue-approval.ts)) is the security boundary — not the prompt. Symlink-aware path containment, `.git/` exclusion, a curated set of read-only check tools, mutating-flag detection on `git`/`find`/`sed`, and explicit rejection of `package-manager run <script>` (opaque scripts are a supply-chain risk). The hook calls `evaluateRescueHookRequest` for every rescue tool call.
 
@@ -105,7 +105,7 @@ The architecture is modeled after OpenAI's [codex-plugin-cc](https://github.com/
 /kimi:setup
 ```
 
-`/kimi:setup` writes the PreToolUse hook to `~/.kimi-code/config.toml` and probes it both directly and through `/bin/sh -c` so launch-from-GUI/LaunchAgent setups (where `node` may not be on the shell's PATH) get caught up front rather than silently auto-approving every tool call.
+`/kimi:setup` writes the PreToolUse hook to `~/.kimi-code/config.toml` and probes it both directly and through `/bin/sh -c` so launch-from-GUI/LaunchAgent setups (where `node` may not be on the shell's PATH) get caught up front rather than silently auto-approving every tool call. As of v1.8, setup also parses the complete TOML, validates every configured hook, and serializes the read-modify-write transaction with a private adjacent lock; malformed foreign config or simultaneous Claude/Codex setup fails safely instead of silently dropping or overwriting enforcement.
 
 ### From a local clone
 

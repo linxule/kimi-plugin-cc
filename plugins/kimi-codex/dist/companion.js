@@ -28,6 +28,9 @@ async function main(argv) {
         case "setup": {
             const result = await runSetup(rest, context);
             context.stdout.write(`${renderSetupResult(result)}\n`);
+            if (result.action === "check" && result.probe === "failed") {
+                process.exitCode = 1;
+            }
             return;
         }
         case "review": {

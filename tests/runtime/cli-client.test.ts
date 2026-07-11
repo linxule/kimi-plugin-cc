@@ -1,8 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runCliPrompt, runCliPromptWithBudget, requireSessionId } from "../../runtime/cli-client.js";
+import {
+  collectDescendantIdentities,
+  collectDescendants,
+  readProcessIdentity,
+  type ProcessIdentity,
+  type ProcessIdentityReader,
+} from "../../runtime/process-tree.js";
 import type {
   AssistantRecord,
   StreamJsonRecord,
@@ -16,6 +24,10 @@ import {
 const mockKimiStreamPath = path.join(
   process.cwd(),
   "tests/helpers/mock-kimi-stream.ts",
+);
+const termIgnoringWriterPath = path.join(
+  process.cwd(),
+  "tests/helpers/term-ignoring-writer.mjs",
 );
 
 function mockOptions(overrides: {
@@ -40,6 +52,10 @@ function mockOptions(overrides: {
     prompt?: string;
     signal?: AbortSignal;
     delayMs?: number;
+    descendantIdentityCollector?: (pid: number) => Promise<ProcessIdentity[]>;
+    processIdentityReader?: ProcessIdentityReader;
+    cancellationTeardownHook?: () => Promise<void>;
+    escalationMs?: number;
   onRecord?: (r: StreamJsonRecord) => void;
 }) {
   const env: NodeJS.ProcessEnv = {
@@ -69,6 +85,10 @@ function mockOptions(overrides: {
     swarmMaxConcurrency: overrides.swarmMaxConcurrency,
     logPath: overrides.logPath,
     signal: overrides.signal,
+    descendantIdentityCollector: overrides.descendantIdentityCollector,
+    processIdentityReader: overrides.processIdentityReader,
+    cancellationTeardownHook: overrides.cancellationTeardownHook,
+    escalationMs: overrides.escalationMs,
     onRecord: overrides.onRecord,
   };
 }
@@ -105,6 +125,51 @@ async function waitForPidFile(pidFile: string, timeoutMs: number): Promise<numbe
     await sleepMs(25);
   }
   throw new Error(`grandchild pid file not readable after ${timeoutMs}ms: ${String(lastError)}`);
+}
+
+async function waitForReadableFile(filePath: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      return await readFile(filePath, "utf8");
+    } catch (err) {
+      lastError = err;
+    }
+    await sleepMs(10);
+  }
+  throw new Error(`file not readable after ${timeoutMs}ms: ${filePath}: ${String(lastError)}`);
+}
+
+async function requiredProcessIdentity(pid: number): Promise<ProcessIdentity> {
+  const identity = await readProcessIdentity(pid);
+  if (identity === undefined) throw new Error(`process identity unavailable for pid ${pid}`);
+  return identity;
+}
+
+function killPidAndGroup(pid: number): void {
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Already gone or not a process-group leader.
+    }
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
+
+async function stopDetachedTestProcess(child: ChildProcess | undefined): Promise<void> {
+  if (child?.pid === undefined) return;
+  const exited =
+    child.exitCode !== null || child.signalCode !== null
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  killPidAndGroup(child.pid);
+  await Promise.race([exited, sleepMs(1_000)]);
 }
 
 describe("runCliPrompt", () => {
@@ -219,6 +284,44 @@ describe("runCliPrompt", () => {
       for (const r of seen) {
         expect(r.role).toBe("assistant");
       }
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("filters the kimi 0.23.5 retry meta record without malformed diagnostics or resume-hint drift", async () => {
+    const root = await createTestPluginDataRoot("cli-client-retrying-meta");
+    try {
+      const seen: StreamJsonRecord[] = [];
+      const sessionId = "session_12345678-1234-1234-1234-123456789abc";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [
+            {
+              // Exact PromptJsonRetryMetaMessage fixture from upstream's
+              // @moonshot-ai/kimi-code@0.23.5 run-prompt test.
+              role: "meta",
+              type: "turn.step.retrying",
+              failed_attempt: 1,
+              next_attempt: 2,
+              max_attempts: 3,
+              delay_ms: 300,
+              error_name: "APIProviderRateLimitError",
+              error_message: "llmproxy/openai/responses/resp_abc.json status_code=429",
+              status_code: 429,
+            },
+            { role: "assistant", content: "final answer" },
+          ],
+          sessionId,
+          announceVia: "stdout-meta",
+          onRecord: (record) => seen.push(record),
+        }),
+      );
+      expect(result.malformed).toEqual([]);
+      expect(result.records).toEqual([{ role: "assistant", content: "final answer" }]);
+      expect(seen).toEqual([{ role: "assistant", content: "final answer" }]);
+      expect(result.sessionId).toBe(sessionId);
     } finally {
       await cleanupTestPath(root);
     }
@@ -548,6 +651,88 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("does not settle while abort teardown is still collecting descendants", async () => {
+    const root = await createTestPluginDataRoot("cli-client-abort-collector-gate");
+    let releaseCollector = () => {};
+    let runPromise: Promise<Awaited<ReturnType<typeof runCliPrompt>>> | undefined;
+    try {
+      const controller = new AbortController();
+      let markCollectorStarted!: () => void;
+      const collectorStarted = new Promise<void>((resolve) => {
+        markCollectorStarted = resolve;
+      });
+      const collectorGate = new Promise<void>((resolve) => {
+        releaseCollector = resolve;
+      });
+
+      runPromise = runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "abort now" }],
+          signal: controller.signal,
+          onRecord: () => controller.abort(),
+          descendantIdentityCollector: async () => {
+            markCollectorStarted();
+            await collectorGate;
+            return [];
+          },
+          escalationMs: 25,
+        }),
+      );
+      let settled = false;
+      void runPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await collectorStarted;
+      // The mock exits immediately after its record. Old behavior resolved on
+      // close while the async collector was still blocked here.
+      await sleepMs(100);
+      expect(settled).toBe(false);
+
+      releaseCollector();
+      const result = await runPromise;
+      expect(result.aborted).toBe(true);
+    } finally {
+      releaseCollector();
+      await runPromise?.catch(() => undefined);
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("rejects promptly if cancellation teardown unexpectedly rejects", async () => {
+    const root = await createTestPluginDataRoot("cli-client-teardown-rejection");
+    try {
+      const controller = new AbortController();
+      const startedAt = Date.now();
+      await expect(
+        runCliPrompt(
+          mockOptions({
+            cwd: root,
+            records: [{ role: "assistant", content: "abort now" }],
+            delayMs: 5_000,
+            signal: controller.signal,
+            onRecord: () => controller.abort(),
+            cancellationTeardownHook: async () => {
+              throw new Error("forced teardown rejection");
+            },
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: "CLI_CANCELLATION_TEARDOWN_FAILED",
+        stage: "cli-client.cancellation",
+      });
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("aborts the child if abort fires during the pre-spawn mkdir window (Codex H1 race)", async () => {
     // Audit finding (report 28 Codex H1): `await mkdir` is a yield
     // point between the pre-spawn aborted check and the
@@ -819,6 +1004,61 @@ describe("SIGKILL escalation", () => {
     }
   });
 
+  test("starts the escalation grace after descendant collection and SIGTERM dispatch", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-sigkill-post-term-grace");
+    const readyPath = path.join(root, "writer.ready");
+    const writesPath = path.join(root, "writer.log");
+    const termSignalPath = path.join(root, "writer.term");
+    let writerPid: number | undefined;
+    try {
+      const controller = new AbortController();
+      let collectorFinishedAt = 0;
+      const runPromise = runCliPrompt({
+        cwd: root,
+        env: {
+          ...process.env,
+          KIMI_MOCK_GRANDCHILD_READY_FILE: readyPath,
+          KIMI_MOCK_GRANDCHILD_WRITE_FILE: writesPath,
+          KIMI_MOCK_TERM_SIGNAL_FILE: termSignalPath,
+        },
+        command: process.execPath,
+        prefixArgs: [termIgnoringWriterPath],
+        prompt: "x",
+        signal: controller.signal,
+        descendantIdentityCollector: async () => {
+          await sleepMs(125);
+          collectorFinishedAt = Date.now();
+          return [];
+        },
+        escalationMs: 100,
+      });
+
+      const ready = await waitForReadableFile(readyPath, 1_000);
+      writerPid = Number.parseInt(ready.match(/READY_PID=(\d+)/)![1]!, 10);
+      controller.abort();
+      const result = await runPromise;
+      const termAt = Number.parseInt(
+        (await readFile(termSignalPath, "utf8")).trim().split("\n")[0]!,
+        10,
+      );
+      const returnedAt = Date.now();
+
+      expect(result.aborted).toBe(true);
+      expect(result.signal).toBe("SIGKILL");
+      expect(termAt).toBeGreaterThanOrEqual(collectorFinishedAt);
+      // The old deadline started before the 125ms collector delay, leaving no
+      // grace after TERM. The TERM-observing child must now receive ~100ms.
+      expect(returnedAt - termAt).toBeGreaterThanOrEqual(75);
+    } finally {
+      if (writerPid !== undefined) killPidAndGroup(writerPid);
+      await cleanupTestPath(root);
+    }
+  });
+
   test("escalationMs: Infinity opts out of SIGKILL", async () => {
     const root = await createTestPluginDataRoot("cli-sigkill-optout");
     try {
@@ -872,6 +1112,43 @@ describe("descendant reaping", () => {
     "tests/helpers/process-group-grandchild.ts",
   );
 
+  test("captures descendant ancestry with identity while preserving the PID collector export", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-process-identity-snapshot");
+    const grandchildPidFile = path.join(root, "grandchild.pid");
+    let parent: ChildProcess | undefined;
+    let grandchildPid: number | undefined;
+    try {
+      parent = spawn("bun", ["run", processGroupGrandchildPath], {
+        cwd: root,
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
+        },
+      });
+      const parentPid = parent.pid!;
+      grandchildPid = await waitForPidFile(grandchildPidFile, 1_000);
+
+      const identities = await collectDescendantIdentities(parentPid);
+      const captured = identities.find((identity) => identity.pid === grandchildPid);
+      expect(captured).toBeDefined();
+      expect(captured?.startToken.length).toBeGreaterThan(0);
+      expect(captured?.processGroupId).toBe(grandchildPid);
+
+      const numericPids = await collectDescendants(parentPid);
+      expect(numericPids).toContain(grandchildPid);
+    } finally {
+      if (grandchildPid !== undefined) killPidAndGroup(grandchildPid);
+      await stopDetachedTestProcess(parent);
+      await cleanupTestPath(root);
+    }
+  });
+
   test("kills a live grandchild in a separate pgrp on abort", async () => {
     if (process.platform === "win32") {
       return;
@@ -894,7 +1171,10 @@ describe("descendant reaping", () => {
         prefixArgs: ["run", processGroupGrandchildPath],
         prompt: "x",
         signal: controller.signal,
-        descendantCollector: async () => [await waitForPidFile(grandchildPidFile, 1_000)],
+        descendantIdentityCollector: async () => {
+          const pid = await waitForPidFile(grandchildPidFile, 1_000);
+          return [await requiredProcessIdentity(pid)];
+        },
       });
 
       const malformedStdout = result.malformed.map((entry) => entry.line).join("\n");
@@ -912,6 +1192,246 @@ describe("descendant reaping", () => {
           // Already gone.
         }
       }
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("does not signal a descendant pid or PGID after its identity changes", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-process-identity-reuse");
+    const readyPath = path.join(root, "replacement.ready");
+    const writesPath = path.join(root, "replacement.log");
+    const termSignalPath = path.join(root, "replacement.term");
+    let replacement: ChildProcess | undefined;
+    try {
+      replacement = spawn(process.execPath, [termIgnoringWriterPath], {
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          KIMI_MOCK_GRANDCHILD_READY_FILE: readyPath,
+          KIMI_MOCK_GRANDCHILD_WRITE_FILE: writesPath,
+          KIMI_MOCK_TERM_SIGNAL_FILE: termSignalPath,
+        },
+      });
+      const replacementPid = replacement.pid!;
+      await waitForReadableFile(readyPath, 1_000);
+
+      const captured: ProcessIdentity = {
+        pid: replacementPid,
+        processGroupId: replacementPid,
+        startToken: "test:original",
+        state: "S",
+      };
+      let reads = 0;
+      const controller = new AbortController();
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "abort" }],
+          delayMs: 5_000,
+          signal: controller.signal,
+          onRecord: () => controller.abort(),
+          descendantIdentityCollector: async () => [captured],
+          processIdentityReader: async (pid) => {
+            if (pid !== replacementPid) return undefined;
+            reads += 1;
+            if (reads === 1) {
+              return { ...captured, startToken: "test:reused" };
+            }
+            return { ...captured, processGroupId: replacementPid + 1 };
+          },
+          escalationMs: 50,
+        }),
+      );
+
+      expect(result.aborted).toBe(true);
+      expect(reads).toBeGreaterThanOrEqual(2);
+      await sleepMs(50);
+      // Raw-pid signaling would deliver TERM to this unrelated replacement.
+      await expect(readFile(termSignalPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      process.kill(replacementPid, 0);
+    } finally {
+      await stopDetachedTestProcess(replacement);
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("revalidates the maximum descendant set concurrently under a fixed bound", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-process-identity-batch-bound");
+    try {
+      const identities = Array.from({ length: 512 }, (_, index): ProcessIdentity => ({
+        pid: 10_000_000 + index,
+        processGroupId: 20_000_000 + index,
+        startToken: `test:captured:${index}`,
+        state: "S",
+      }));
+      const byPid = new Map(identities.map((identity) => [identity.pid, identity]));
+      let activeReaders = 0;
+      let maxActiveReaders = 0;
+      let totalReads = 0;
+      const controller = new AbortController();
+      const startedAt = Date.now();
+
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "abort" }],
+          delayMs: 5_000,
+          signal: controller.signal,
+          onRecord: () => controller.abort(),
+          descendantIdentityCollector: async () => identities,
+          processIdentityReader: async (pid) => {
+            const captured = byPid.get(pid);
+            if (captured === undefined) return undefined;
+            totalReads += 1;
+            activeReaders += 1;
+            maxActiveReaders = Math.max(maxActiveReaders, activeReaders);
+            await sleepMs(25);
+            activeReaders -= 1;
+            return { ...captured, startToken: `${captured.startToken}:reused` };
+          },
+          escalationMs: 50,
+        }),
+      );
+
+      expect(result.aborted).toBe(true);
+      expect(totalReads).toBeGreaterThanOrEqual(1_024);
+      expect(maxActiveReaders).toBe(512);
+      // Serial 250ms ps fallbacks could consume ~128s before TERM/KILL. Two
+      // full validation passes here remain bounded by probe latency, not N.
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("waits for escalation after the direct child exits before a SIGTERM-ignoring descendant", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-process-tree-quiescence");
+    const grandchildPidFile = path.join(root, "grandchild.pid");
+    const grandchildReadyFile = path.join(root, "grandchild.ready");
+    const grandchildWrites = path.join(root, "grandchild-writes.log");
+    let grandchildPid: number | undefined;
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100).unref();
+
+      const result = await runCliPrompt({
+        cwd: root,
+        env: {
+          ...process.env,
+          KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
+          KIMI_MOCK_GRANDCHILD_READY_FILE: grandchildReadyFile,
+          KIMI_MOCK_GRANDCHILD_WRITE_FILE: grandchildWrites,
+        },
+        command: "bun",
+        prefixArgs: ["run", processGroupGrandchildPath],
+        prompt: "x",
+        signal: controller.signal,
+        descendantIdentityCollector: async () => {
+          grandchildPid = await waitForPidFile(grandchildPidFile, 1_000);
+          await waitForReadableFile(grandchildReadyFile, 1_000);
+          return [await requiredProcessIdentity(grandchildPid)];
+        },
+        escalationMs: 75,
+      });
+
+      expect(result.aborted).toBe(true);
+      expect(grandchildPid).toBeDefined();
+      const writesAtReturn = await readFile(grandchildWrites, "utf8");
+      await sleepMs(100);
+      // Old behavior cleared escalation on the direct child's close, returned,
+      // and let this detached writer continue mutating after caller resumption.
+      expect(await readFile(grandchildWrites, "utf8")).toBe(writesAtReturn);
+      expectPidMissing(grandchildPid!);
+    } finally {
+      if (grandchildPid !== undefined) {
+        try {
+          process.kill(-grandchildPid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+        try {
+          process.kill(grandchildPid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("bounds post-SIGKILL exit confirmation before settling", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const root = await createTestPluginDataRoot("cli-post-kill-quiescence-bound");
+    const grandchildPidFile = path.join(root, "grandchild.pid");
+    const grandchildReadyFile = path.join(root, "grandchild.ready");
+    const grandchildWrites = path.join(root, "grandchild-writes.log");
+    let grandchildPid: number | undefined;
+    let reportedIdentity: ProcessIdentity | undefined;
+    let reportAliveUntil = 0;
+    try {
+      const controller = new AbortController();
+      const runPromise = runCliPrompt({
+        cwd: root,
+        env: {
+          ...process.env,
+          KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
+          KIMI_MOCK_GRANDCHILD_READY_FILE: grandchildReadyFile,
+          KIMI_MOCK_GRANDCHILD_WRITE_FILE: grandchildWrites,
+        },
+        command: "bun",
+        prefixArgs: ["run", processGroupGrandchildPath],
+        prompt: "x",
+        signal: controller.signal,
+        descendantIdentityCollector: async () => {
+          grandchildPid = await waitForPidFile(grandchildPidFile, 1_000);
+          await waitForReadableFile(grandchildReadyFile, 1_000);
+          if (reportedIdentity === undefined) throw new Error("missing reported identity");
+          return [reportedIdentity];
+        },
+        processIdentityReader: async (pid) => {
+          if (reportedIdentity?.pid !== pid || Date.now() >= reportAliveUntil) return undefined;
+          return reportedIdentity;
+        },
+        escalationMs: 50,
+      });
+
+      grandchildPid = await waitForPidFile(grandchildPidFile, 1_000);
+      await waitForReadableFile(grandchildReadyFile, 1_000);
+      reportedIdentity = {
+        pid: grandchildPid,
+        processGroupId: grandchildPid,
+        startToken: "test:sticky-after-kill",
+        state: "S",
+      };
+      reportAliveUntil = Date.now() + 3_000;
+      const abortedAt = Date.now();
+      controller.abort();
+      const result = await runPromise;
+      const elapsed = Date.now() - abortedAt;
+
+      expect(result.aborted).toBe(true);
+      // The caller still waits through the 50ms grace + 500ms observation,
+      // but cannot be held until the fake reader clears at 3 seconds.
+      expect(elapsed).toBeGreaterThanOrEqual(450);
+      expect(elapsed).toBeLessThan(2_000);
+    } finally {
+      if (grandchildPid !== undefined) killPidAndGroup(grandchildPid);
       await cleanupTestPath(root);
     }
   });
@@ -964,6 +1484,63 @@ describe("runCliPromptWithBudget", () => {
       // kill the child surfaces obviously.
       expect(elapsed).toBeLessThan(2_500);
     } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("does not surface RESPONSE_TIMEOUT until abort teardown is quiescent", async () => {
+    const root = await createTestPluginDataRoot("cli-budget-quiescence-gate");
+    let releaseCollector = () => {};
+    let timedRun: ReturnType<typeof runCliPromptWithBudget> | undefined;
+    try {
+      let markCollectorStarted!: () => void;
+      const collectorStarted = new Promise<void>((resolve) => {
+        markCollectorStarted = resolve;
+      });
+      const collectorGate = new Promise<void>((resolve) => {
+        releaseCollector = resolve;
+      });
+
+      timedRun = runCliPromptWithBudget(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "late" }],
+          delayMs: 5_000,
+          descendantIdentityCollector: async () => {
+            markCollectorStarted();
+            await collectorGate;
+            return [];
+          },
+          escalationMs: 25,
+        }),
+        25,
+        "test.budget-quiescence",
+      );
+      let callerResumed = false;
+      void timedRun.then(
+        () => {
+          callerResumed = true;
+        },
+        () => {
+          callerResumed = true;
+        },
+      );
+
+      await collectorStarted;
+      await sleepMs(75);
+      // This is the write-swarm boundary: its catch/patch capture must not run
+      // while descendant collection or escalation is still outstanding.
+      expect(callerResumed).toBe(false);
+
+      releaseCollector();
+      await expect(timedRun).rejects.toMatchObject({
+        code: "RESPONSE_TIMEOUT",
+        stage: "test.budget-quiescence",
+      });
+      expect(callerResumed).toBe(true);
+    } finally {
+      releaseCollector();
+      await timedRun?.catch(() => undefined);
       await cleanupTestPath(root);
     }
   });

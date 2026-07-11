@@ -44,6 +44,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
+import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKimiConfigLock, } from "../hooks/config-safety.js";
 import { buildHookShellCommand, hostIdFromHookCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
 import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, MARKERS, parseManagedBlock, } from "../hooks/managed-block.js";
 import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
@@ -138,48 +139,62 @@ function parseArgs(argv) {
 }
 async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context) {
     await assertHookScriptExists(hookScriptPath);
-    const original = await readConfigSafe(configPath);
-    const lineEnding = detectLineEnding(original);
-    // Prune orphaned, marker-less approval-hook [[hooks]] entries left by
-    // pre-v1.7.0 installs (host/path churn) BEFORE resolving the managed block,
-    // so line numbers used for splicing are computed against the cleaned text.
-    const { pruned, count: prunedCount } = pruneOrphanApprovalHooks(original, lineEnding);
-    const existing = pruned;
-    if (prunedCount > 0) {
-        warnings.push(`Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) left by earlier installs (no managed marker). This is a cleanup — your active hook is unaffected.`);
-    }
-    const { state, blocks } = parseManagedBlock(existing, hostId);
-    if (state.kind === "orphan") {
-        throw new RuntimeError("SETUP_ORPHAN_MARKERS", [
-            `kimi-code config at ${configPath} contains an orphaned ${state.detail} marker.`,
-            "Run `/kimi:setup --uninstall` to clean up, then re-run `/kimi:setup`.",
-        ].join(" "), "setup.install", { details: { configPath, orphan: state.detail } });
-    }
-    if (state.kind === "duplicate") {
-        throw new RuntimeError("SETUP_DUPLICATE_BLOCKS", [
-            `kimi-code config at ${configPath} contains ${state.beginLines.length} kimi-plugin-cc managed blocks for host ${hostId} (lines ${state.beginLines
-                .map((line) => line + 1)
-                .join(", ")}).`,
-            "This usually means two /kimi:setup runs raced. Run `/kimi:setup --uninstall` to clear them, then `/kimi:setup` again.",
-        ].join(" "), "setup.install", { details: { configPath, beginLines: state.beginLines } });
-    }
-    // Non-blocking note: other hosts (e.g. Codex) manage their own block in the
-    // same shared config — surface so an operator understands the coexistence.
-    const otherHosts = [
-        ...new Set(blocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
-    ];
-    if (otherHosts.length > 0) {
-        warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")}. ` +
-            `They are left untouched — each host owns its own PreToolUse block.`);
-    }
-    const block = buildManagedBlock(hookScriptPath, context.env, lineEnding, hostId);
-    const next = state.kind === "found"
-        ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
-        : appendBlock(existing, block, lineEnding);
-    let blockWritten = next !== original;
-    if (blockWritten) {
-        await writeConfigAtomic(configPath, next);
-    }
+    const mutation = await withKimiConfigLock(configPath, async () => {
+        const original = await readConfigSafe(configPath);
+        const lineEnding = detectLineEnding(original);
+        const inlineHooks = normalizeTopLevelInlineHooks(original, lineEnding);
+        if (inlineHooks.found) {
+            // Validate before normalizing so an invalid inline entry is reported
+            // against the user's original bytes and the config remains untouched.
+            await assertKimiHookSetValid(original, configPath, "setup.install", context.env);
+            if (!inlineHooks.converted) {
+                throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `Could not safely convert the top-level inline hooks assignment in ${configPath}; the existing config was left unchanged.`, "setup.install", { details: { configPath } });
+            }
+            warnings.push(`Converted the top-level inline hooks array (${inlineHooks.entryCount} entr${inlineHooks.entryCount === 1 ? "y" : "ies"}) to canonical [[hooks]] tables before installing. Surrounding config bytes were preserved; formatting and comments inside that hooks assignment were normalized.`);
+        }
+        // Prune orphaned, marker-less approval-hook [[hooks]] entries left by
+        // pre-v1.7.0 installs (host/path churn) BEFORE resolving the managed block,
+        // so line numbers used for splicing are computed against the cleaned text.
+        const { pruned, count: prunedCount } = pruneOrphanApprovalHooks(inlineHooks.contents, lineEnding);
+        const existing = pruned;
+        if (prunedCount > 0) {
+            warnings.push(`Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) left by earlier installs (no managed marker). This is a cleanup — your active hook is unaffected.`);
+        }
+        const { state, blocks } = parseManagedBlock(existing, hostId);
+        if (state.kind === "orphan") {
+            throw new RuntimeError("SETUP_ORPHAN_MARKERS", [
+                `kimi-code config at ${configPath} contains an orphaned ${state.detail} marker.`,
+                "Run `/kimi:setup --uninstall` to clean up, then re-run `/kimi:setup`.",
+            ].join(" "), "setup.install", { details: { configPath, orphan: state.detail } });
+        }
+        if (state.kind === "duplicate") {
+            throw new RuntimeError("SETUP_DUPLICATE_BLOCKS", [
+                `kimi-code config at ${configPath} contains ${state.beginLines.length} kimi-plugin-cc managed blocks for host ${hostId} (lines ${state.beginLines
+                    .map((line) => line + 1)
+                    .join(", ")}).`,
+                "This usually means two /kimi:setup runs raced. Run `/kimi:setup --uninstall` to clear them, then `/kimi:setup` again.",
+            ].join(" "), "setup.install", { details: { configPath, beginLines: state.beginLines } });
+        }
+        // Non-blocking note: other hosts (e.g. Codex) manage their own block in the
+        // same shared config — surface so an operator understands the coexistence.
+        const otherHosts = [
+            ...new Set(blocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
+        ];
+        if (otherHosts.length > 0) {
+            warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")}. ` +
+                `They are left untouched — each host owns its own PreToolUse block.`);
+        }
+        const block = buildManagedBlock(hookScriptPath, context.env, lineEnding, hostId);
+        const next = state.kind === "found"
+            ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
+            : appendBlock(existing, block, lineEnding);
+        await assertKimiHookSetValid(next, configPath, "setup.install", context.env);
+        const blockWritten = next !== original;
+        if (blockWritten)
+            await writeConfigAtomic(configPath, next);
+        return { blockWritten, next };
+    });
+    const { blockWritten, next } = mutation;
     collectPermissionRuleWarnings(next, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
     await collectInstalledKimiPluginsNotice(context.env, warnings);
@@ -201,7 +216,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         warnings,
         reviewGateEnabled,
         nextStep: probe.ok
-            ? "Run /kimi:review, /kimi:challenge, /kimi:ask, or /kimi:rescue. Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 to silence the per-call install warning."
+            ? "Run /kimi:review, /kimi:challenge, /kimi:ask, or /kimi:rescue. Codex users can invoke the matching $kimi-* skills."
             : "Re-run /kimi:setup after installing kimi-code and Node. If the probe keeps failing, run /kimi:setup --uninstall and inspect ~/.kimi-code/config.toml manually.",
         details: buildDetails({
             configPath,
@@ -215,6 +230,31 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
 }
 async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context) {
     const existing = await readConfigSafe(configPath);
+    const hookSet = await validateKimiHookSetForEnvironment(existing, context.env);
+    if (!hookSet.valid) {
+        const reason = hookSet.reason ?? "configured hooks failed validation";
+        return {
+            action: "check",
+            summary: `kimi-code hook configuration is invalid; the configured hooks array will not load.`,
+            configPath,
+            hookScriptPath,
+            blockWritten: false,
+            blockRemoved: false,
+            probe: "failed",
+            probeError: reason,
+            warnings,
+            reviewGateEnabled,
+            nextStep: "Repair or remove the invalid [[hooks]] entry named above, then run /kimi:setup --check again. No model call is required.",
+            details: buildDetails({
+                configPath,
+                hookScriptPath,
+                reviewGateEnabled,
+                probe: { ok: false, reason },
+                warnings,
+                hostId,
+            }),
+        };
+    }
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
     // nodeExists → a command mismatch is reported as a classified H4 drift
     // diagnosis (Node upgrade / version-manager switch vs. plugin path move).
@@ -321,6 +361,9 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
     };
 }
 async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings) {
+    return await withKimiConfigLock(configPath, () => runUninstallLocked(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings));
+}
+async function runUninstallLocked(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings) {
     const existing = await readConfigSafe(configPath);
     if (existing.length === 0) {
         return {
@@ -439,6 +482,18 @@ async function writeConfigAtomic(configPath, contents) {
         }
         throw err;
     }
+}
+async function assertKimiHookSetValid(contents, configPath, stage, env) {
+    const validation = await validateKimiHookSetForEnvironment(contents, env);
+    if (validation.valid)
+        return;
+    throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `${validation.reason ?? "Configured hooks failed validation"} Repair or remove that [[hooks]] entry before rerunning /kimi:setup; the existing config was left unchanged.`, stage, {
+        details: {
+            configPath,
+            hookEntry: validation.entry,
+            line: validation.line,
+        },
+    });
 }
 // ----- Line endings -----------------------------------------------------
 function detectLineEnding(contents) {
@@ -842,7 +897,10 @@ function truncate(value, max) {
 async function collectKimiVersionWarnings(env, warnings) {
     if (env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1")
         return;
-    const probe = await probeKimiVersion({ env });
+    const probe = await probeKimiVersion({
+        kimiBin: env.KIMI_PLUGIN_CC_KIMI_BIN || undefined,
+        env,
+    });
     if (probe.kind === "failed") {
         // Don't warn about probe failure here — if kimi is genuinely
         // missing/broken, the hook probe path will catch it with a much

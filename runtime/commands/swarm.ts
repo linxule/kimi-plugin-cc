@@ -52,12 +52,11 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 //     rescue lineage with its own label. Promoting swarm to a first-class
 //     command_type is a follow-up.
 //
-// SAFETY — why swarm REFUSES without the hook (unlike single-turn review):
-//   review/challenge/ask only WARN if the hook is missing (degraded enforcement
-//   on ONE agent). A swarm fans out up to `cap` subagents, each capable of
-//   attempting writes; without the index-0 hook there is ZERO enforcement on
-//   ALL of them — an N-fold blast radius. So swarm fail-CLOSES (refuses) like
-//   rescue/pursue. The KIMI_PLUGIN_CC_SKIP_HOOK_CHECK escape hatch remains.
+// SAFETY — swarm REFUSES without the hook, like every model-spawning command.
+//   A swarm fans out up to `cap` subagents, each capable of attempting writes;
+//   without the index-0 hook there is ZERO enforcement on ALL of them — an
+//   N-fold blast radius. KIMI_PLUGIN_CC_SKIP_HOOK_CHECK remains an explicit,
+//   tests/diagnostics-only bypass of that refusal.
 
 /** kimi-code minor that introduced the AgentSwarm tool (#424, 0.12.0). */
 const SWARM_MIN_MINOR = 12;
@@ -523,8 +522,8 @@ async function executeSwarmJob(
   }
 
   // Swarm is read-only BY POLICY, but it fans out N subagents — without the
-  // PreToolUse hook there is no enforcement on ANY of them. Unlike single-turn
-  // review (which only warns), swarm fail-CLOSES: refuse without the hook.
+  // PreToolUse hook there is no enforcement on ANY of them. Fail closed before
+  // spawning, matching the single-turn read-only commands.
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
     const installStatus = await verifyHookInstalled(context.env);
     if (!installStatus.installed) {

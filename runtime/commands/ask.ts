@@ -26,7 +26,7 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 //   The v0.4 wire client/initialize/prompt sequence is replaced with a
 //   single `runCliPrompt` against `kimi -p --output-format stream-json`.
 //   The PreToolUse hook reads `KIMI_PLUGIN_CC_CMD=ask` and applies the
-//   "allow everything" policy (conversational, user-watched).
+//   same read-only tool policy as review/challenge/review_gate.
 //
 // Session id handling differs from v0.4:
 //
@@ -49,6 +49,10 @@ interface AskSessionResolution {
 
 export async function runAsk(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseAskArgs(argv);
+  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
+    await requireAskHookInstalled(context);
+  }
+
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
@@ -151,15 +155,17 @@ export async function executeAskJob(
 
   const askConfig = getManagedCommandConfig("ask");
   const cancel = askConfig.cancellation;
-  const handlers = createCliCancellationHandlers();
-  const kimi = resolveKimiCliCommand(context.env);
-
-  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
-    const installStatus = await verifyHookInstalled(context.env);
-    maybeWarnHookMissing(installStatus, "ask", context.stderr);
-  }
+  let handlers: ReturnType<typeof createCliCancellationHandlers> | undefined;
 
   try {
+    // Re-verify in the worker so a background job cannot outlive or bypass
+    // enforcement drift between the user invocation and the actual Kimi spawn.
+    if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
+      await requireAskHookInstalled(context);
+    }
+    handlers = createCliCancellationHandlers();
+    const kimi = resolveKimiCliCommand(context.env);
+
     if (options?.workerPid) {
       store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
     }
@@ -238,7 +244,7 @@ export async function executeAskJob(
       }) ?? job
     );
   } catch (error) {
-    if (handlers.cancelling) {
+    if (handlers?.cancelling) {
       const cancelledError = new RuntimeError(
         cancel.errorCodes.cancelled,
         cancel.cancelMessages.default,
@@ -254,13 +260,45 @@ export async function executeAskJob(
         { phase: "cancelled" },
       );
     }
+    // Hook preflight errors are already fully classified. Running them through
+    // the generic availability classifier can mistake words in the verifier's
+    // reason (for example "timed out") for a Kimi runtime timeout and erase the
+    // load-bearing hook-check code/stage from the persisted background job.
+    if (error instanceof RuntimeError && error.stage === "ask.hook-check") {
+      await markJobFailed(store, paths, job, error, cancel.failedSummary, { phase: "failed" });
+      throw error;
+    }
     const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
     await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
     throw classified;
   } finally {
-    handlers.dispose();
+    handlers?.dispose();
     store.close();
   }
+}
+
+async function requireAskHookInstalled(context: CommandContext): Promise<void> {
+  if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
+    return;
+  }
+
+  const installStatus = await verifyHookInstalled(context.env);
+  if (installStatus.installed) {
+    return;
+  }
+
+  maybeWarnHookMissing(installStatus, "ask", context.stderr);
+  throw new RuntimeError(
+    "ASK_HOOK_NOT_INSTALLED",
+    [
+      "ask refuses to run without the canonical kimi-plugin-cc PreToolUse hook.",
+      `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
+      "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
+      "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
+    ].join(" "),
+    "ask.hook-check",
+    { details: { config_path: installStatus.configPath } },
+  );
 }
 
 function resolveAskSession(

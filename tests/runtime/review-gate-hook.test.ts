@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -51,7 +52,7 @@ describe("review gate stop hook", () => {
     }
   });
 
-  test("enabled gate blocks stop on BLOCK plus high confidence", async () => {
+  test("enabled gate with explicit hook-check opt-out blocks stop on BLOCK plus high confidence", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-gate-block");
     const kimiHome = await createTestPluginDataRoot("review-gate-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "review-gate-invocation.jsonl");
@@ -88,6 +89,7 @@ describe("review gate stop hook", () => {
           KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block",
           KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocationPath,
           KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
           KIMI_CODE_HOME: kimiHome,
         },
         {
@@ -143,6 +145,51 @@ describe("review gate stop hook", () => {
     }
   });
 
+  test("enabled gate skips without spawning Kimi when hook enforcement is absent", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("review-gate-missing-hook");
+    const kimiHome = await createTestPluginDataRoot("review-gate-missing-hook-kimi-home");
+    const invocationPath = path.join(pluginDataRoot, "review-gate-missing-hook-invocation.jsonl");
+
+    try {
+      const paths = resolvePluginPaths({
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      });
+      await mkdir(paths.pluginRoot, { recursive: true });
+      await writeFile(paths.configPath, `${JSON.stringify({ reviewGateEnabled: true }, null, 2)}\n`, "utf8");
+
+      const output = await invokeHook(
+        {
+          ...process.env,
+          CLAUDE_PLUGIN_DATA: pluginDataRoot,
+          KIMI_CODE_HOME: kimiHome,
+          KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+          KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+          KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block",
+          KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocationPath,
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "",
+        },
+        {
+          cwd: process.cwd(),
+          hook_event_name: "Stop",
+          stop_hook_active: false,
+          last_user_message: "Fix the failing path.",
+          last_assistant_message: "I fixed the issue and everything is complete.",
+        },
+      );
+
+      expect(output.decision).toBeUndefined();
+      expect(output.systemMessage).toContain(
+        "review-gate skipped: canonical PreToolUse hook is missing or invalid",
+      );
+      expect(output.systemMessage).toContain("allowing stop without invoking Kimi");
+      expect(existsSync(invocationPath)).toBe(false);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(kimiHome);
+    }
+  });
+
   test("enabled gate accepts Codex-style inline last assistant message", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-gate-codex-inline");
 
@@ -161,6 +208,7 @@ describe("review gate stop hook", () => {
           KIMI_PLUGIN_CC_KIMI_BIN: "bun",
           KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
           KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block",
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         },
         {
           cwd: process.cwd(),
@@ -210,6 +258,7 @@ describe("review gate stop hook", () => {
           KIMI_PLUGIN_CC_KIMI_BIN: "bun",
           KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
           KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-block-medium",
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         },
         {
           cwd: process.cwd(),
@@ -254,6 +303,7 @@ describe("review gate stop hook", () => {
           KIMI_PLUGIN_CC_KIMI_BIN: "bun",
           KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
           KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-malformed",
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         },
         {
           cwd: process.cwd(),

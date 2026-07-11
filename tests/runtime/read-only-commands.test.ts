@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -38,7 +39,70 @@ function makeMockEnv(
   };
 }
 
+function withoutHookCheckBypass(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const guardedEnv = { ...env };
+  delete guardedEnv.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK;
+  return guardedEnv;
+}
+
 describe("read-only command handlers", () => {
+  test.each(["review", "challenge"] as const)(
+    "%s refuses before spawning Kimi when hook enforcement is absent",
+    async (commandType) => {
+      const pluginDataRoot = await createTestPluginDataRoot(`${commandType}-missing-hook`);
+      const kimiHome = await createTestPluginDataRoot(`${commandType}-missing-hook-kimi-home`);
+      const repoRoot = await createGitRepoFixture(`${commandType}-missing-hook-repo`);
+      const invocationPath = path.join(pluginDataRoot, `${commandType}-missing-hook-invocation.jsonl`);
+      const env = {
+        ...withoutHookCheckBypass(
+          makeMockEnv(pluginDataRoot, `${commandType}-success`, invocationPath),
+        ),
+        KIMI_CODE_HOME: kimiHome,
+      };
+
+      try {
+        await expect(runReview([], makeContext(repoRoot, env), commandType)).rejects.toMatchObject({
+          code: `${commandType.toUpperCase()}_HOOK_NOT_INSTALLED`,
+          stage: `${commandType}.hook-check`,
+        });
+        expect(existsSync(invocationPath)).toBe(false);
+      } finally {
+        await cleanupTestPath(pluginDataRoot);
+        await cleanupTestPath(kimiHome);
+        await cleanupTestPath(repoRoot);
+      }
+    },
+  );
+
+  test.each([
+    ["foreground", ["What", "changed?"]],
+    ["background", ["--background", "What", "changed?"]],
+  ] as const)(
+    "runAsk %s refuses before spawning Kimi when hook enforcement is absent",
+    async (mode, argv) => {
+      const pluginDataRoot = await createTestPluginDataRoot(`ask-${mode}-missing-hook`);
+      const kimiHome = await createTestPluginDataRoot(`ask-${mode}-missing-hook-kimi-home`);
+      const invocationPath = path.join(pluginDataRoot, `ask-${mode}-missing-hook-invocation.jsonl`);
+      const env = {
+        ...withoutHookCheckBypass(
+          makeMockEnv(pluginDataRoot, "ask-success", invocationPath),
+        ),
+        KIMI_CODE_HOME: kimiHome,
+      };
+
+      try {
+        await expect(runAsk([...argv], makeContext(process.cwd(), env))).rejects.toMatchObject({
+          code: "ASK_HOOK_NOT_INSTALLED",
+          stage: "ask.hook-check",
+        });
+        expect(existsSync(invocationPath)).toBe(false);
+      } finally {
+        await cleanupTestPath(pluginDataRoot);
+        await cleanupTestPath(kimiHome);
+      }
+    },
+  );
+
   test("runAsk returns prose and forwards the v1 cli flags + command label", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("ask-command");
     const kimiHome = await createTestPluginDataRoot("ask-command-kimi-home");
@@ -109,6 +173,27 @@ describe("read-only command handlers", () => {
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(kimiHome);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("runChallenge honors the explicit hook-check opt-out and invokes Kimi", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("challenge-command");
+    const repoRoot = await createGitRepoFixture("challenge-git");
+    const invocationPath = path.join(pluginDataRoot, "challenge-invocation.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "challenge-success", invocationPath);
+
+    try {
+      expect(env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK).toBe("1");
+      const result = await runReview([], makeContext(repoRoot, env), "challenge");
+      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
+        env: { KIMI_PLUGIN_CC_CMD: string | null };
+      };
+
+      expect(result).toContain("Mock Kimi challenge");
+      expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("challenge");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
     }
   });

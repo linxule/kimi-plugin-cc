@@ -9,13 +9,14 @@
 //   {"role":"assistant","tool_calls":[...]}
 //   {"role":"tool","tool_call_id":"...","content":"..."}
 //   {"role":"meta","type":"session.resume_hint","session_id":"session_<uuid>","command":"kimi -r session_<uuid>","content":"To resume this session: kimi -r session_<uuid>"}
+//   {"role":"meta","type":"turn.step.retrying","failed_attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":300,"error_name":"APIProviderRateLimitError","error_message":"...","status_code":429}
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified stable through 0.23.4. 2026-05-27 audit covered 0.4.0,
+//     verified stable through 0.23.5. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -90,7 +91,14 @@
 //     and media-projection plumbing, while the bootstrap delta adds `[image]`
 //     limits without changing hook or permission construction; GREEN smoke 9/0
 //     on a temp-installed 0.23.4 binary, including two-minute multi-turn goal
-//     confinement and both write-swarm worktree-boundary assertions).
+//     confinement and both write-swarm worktree-boundary assertions), and
+//     2026-07-11 covered the 0.23.5 patch at tag commit `352a4492`
+//     (permission, both hook trees, and session bootstrap all 0-byte; the wire
+//     diff only adds the internal `media-stripped` projection type). The one
+//     live stdout change is this file's `turn.step.retrying` meta record: it is
+//     modeled exactly and filtered from consumer records while malformed shapes
+//     remain diagnostic. The post-change exact-binary smoke was GREEN 9/0 in
+//     229.56s, including the full goal budget and both write-swarm boundaries.
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
@@ -275,6 +283,44 @@ function validateMeta(parsed, line) {
             role: "meta",
             type: "session.resume_hint",
             sessionId,
+        };
+        return { record };
+    }
+    if (type === "turn.step.retrying") {
+        const failedAttempt = parsed["failed_attempt"];
+        const nextAttempt = parsed["next_attempt"];
+        const maxAttempts = parsed["max_attempts"];
+        const delayMs = parsed["delay_ms"];
+        const errorName = parsed["error_name"];
+        const errorMessage = parsed["error_message"];
+        const statusCode = parsed["status_code"];
+        if (typeof failedAttempt !== "number" ||
+            !Number.isFinite(failedAttempt) ||
+            typeof nextAttempt !== "number" ||
+            !Number.isFinite(nextAttempt) ||
+            typeof maxAttempts !== "number" ||
+            !Number.isFinite(maxAttempts) ||
+            typeof delayMs !== "number" ||
+            !Number.isFinite(delayMs) ||
+            typeof errorName !== "string" ||
+            typeof errorMessage !== "string" ||
+            (statusCode !== undefined &&
+                (typeof statusCode !== "number" || !Number.isFinite(statusCode)))) {
+            return {
+                malformedLine: line,
+                malformedReason: "meta.turn.step.retrying field has unexpected type",
+            };
+        }
+        const record = {
+            role: "meta",
+            type: "turn.step.retrying",
+            failedAttempt,
+            nextAttempt,
+            maxAttempts,
+            delayMs,
+            errorName,
+            errorMessage,
+            ...(typeof statusCode === "number" && { statusCode }),
         };
         return { record };
     }

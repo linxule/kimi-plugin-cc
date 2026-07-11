@@ -1,9 +1,32 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { renderSetupResult, runSetup } from "../../runtime/commands/setup.js";
+import {
+  KIMI_CONFIG_LOCK_METADATA_MAX_BYTES,
+  kimiConfigLockPath,
+  validateKimiHookSet,
+  validateKimiHookSetForEnvironment,
+  withKimiConfigLock,
+} from "../../runtime/hooks/config-safety.js";
 import type { CommandContext } from "../../runtime/types.js";
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..");
@@ -153,7 +176,7 @@ describe("setup managed-block installer", () => {
     const { env, configPath } = await makeCase("uninstall-orphan-sweep");
     await writeFile(
       configPath,
-      "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===\nstuff\n",
+      "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===\nuser_setting = true\n",
       "utf8",
     );
 
@@ -161,6 +184,7 @@ describe("setup managed-block installer", () => {
     expect(uninstall.blockRemoved).toBe(true);
     const sweptContents = await readFile(configPath, "utf8");
     expect(sweptContents).not.toContain("kimi-plugin-cc-managed");
+    expect(sweptContents).toContain("user_setting = true");
 
     // Now a fresh install should succeed.
     const install = await runSetup([], makeContext(env));
@@ -454,6 +478,364 @@ describe("setup managed-block installer", () => {
     expect(stats.mode & 0o777).toBe(0o600);
   });
 
+  test("config lock is adjacent, private, bounded, and released", async () => {
+    const { configPath } = await makeCase("lock-private-bounded");
+    const lockPath = kimiConfigLockPath(configPath);
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holder = withKimiConfigLock(configPath, async () => {
+      const lockStats = await stat(lockPath);
+      if (process.platform !== "win32") expect(lockStats.mode & 0o777).toBe(0o600);
+      entered();
+      await releasePromise;
+    });
+    await enteredPromise;
+
+    await expect(
+      withKimiConfigLock(configPath, async () => undefined, {
+        waitMs: 75,
+        staleMs: 10,
+        retryMs: 10,
+      }),
+    ).rejects.toMatchObject({ code: "SETUP_CONFIG_LOCK_TIMEOUT" });
+
+    release();
+    await holder;
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("config lock creates a missing KIMI_CODE_HOME with mode 0o700", async () => {
+    if (process.platform === "win32") return;
+    const kimiHome = path.join(scratch, "lock-private-parent", "new-kimi-home");
+    const configPath = path.join(kimiHome, "config.toml");
+
+    await withKimiConfigLock(configPath, async () => {
+      expect((await stat(kimiHome)).mode & 0o777).toBe(0o700);
+      expect((await stat(kimiConfigLockPath(configPath))).mode & 0o777).toBe(0o600);
+    });
+    expect((await stat(kimiHome)).mode & 0o777).toBe(0o700);
+  });
+
+  test("config lock publishes complete metadata and rechecks inode/token before entry", async () => {
+    const { configPath } = await makeCase("lock-atomic-publication");
+    const lockPath = kimiConfigLockPath(configPath);
+    const displacedPath = `${lockPath}.displaced`;
+    const replacement = {
+      pid: process.pid,
+      token: "f".repeat(32),
+      createdAt: new Date().toISOString(),
+    };
+    let operationEntered = false;
+
+    await expect(
+      withKimiConfigLock(
+        configPath,
+        async () => {
+          operationEntered = true;
+        },
+        {
+          testHooks: {
+            afterPublish: async (publishedPath) => {
+              const raw = await readFile(publishedPath, "utf8");
+              const owner = JSON.parse(raw) as { pid: number; token: string; createdAt: string };
+              expect(owner.pid).toBe(process.pid);
+              expect(owner.token).toMatch(/^[a-f0-9]{32}$/);
+              expect(owner.createdAt.length).toBeGreaterThan(0);
+
+              await rename(publishedPath, displacedPath);
+              await writeFile(publishedPath, `${JSON.stringify(replacement)}\n`, {
+                flag: "wx",
+                mode: 0o600,
+              });
+            },
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "SETUP_CONFIG_LOCK_OWNERSHIP_LOST" });
+
+    expect(operationEntered).toBe(false);
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(replacement);
+    await unlink(lockPath);
+    await unlink(displacedPath);
+  });
+
+  test("stale recovery never removes a replacement lock after an ABA", async () => {
+    const { configPath } = await makeCase("lock-stale-aba");
+    const lockPath = kimiConfigLockPath(configPath);
+    const displacedPath = `${lockPath}.old`;
+    await writeFile(lockPath, "crashed owner\n", { mode: 0o600 });
+    const old = new Date(Date.now() - 10_000);
+    await utimes(lockPath, old, old);
+    const replacement = {
+      pid: process.pid,
+      token: "a".repeat(32),
+      createdAt: new Date().toISOString(),
+    };
+    let replaced = false;
+
+    await expect(
+      withKimiConfigLock(configPath, async () => undefined, {
+        waitMs: 80,
+        staleMs: 1,
+        retryMs: 10,
+        testHooks: {
+          beforeStaleRecovery: async (observedPath) => {
+            if (replaced) return;
+            replaced = true;
+            await rename(observedPath, displacedPath);
+            await writeFile(observedPath, `${JSON.stringify(replacement)}\n`, {
+              flag: "wx",
+              mode: 0o600,
+            });
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "SETUP_CONFIG_LOCK_TIMEOUT" });
+
+    expect(JSON.parse(await readFile(lockPath, "utf8"))).toEqual(replacement);
+    expect(await readFile(displacedPath, "utf8")).toBe("crashed owner\n");
+    await unlink(lockPath);
+    await unlink(displacedPath);
+  });
+
+  test("config lock refuses a symlink without following its device target", async () => {
+    if (process.platform === "win32") return;
+    const { configPath } = await makeCase("lock-symlink");
+    const lockPath = kimiConfigLockPath(configPath);
+    await symlink("/dev/null", lockPath);
+
+    await expect(
+      withKimiConfigLock(configPath, async () => undefined, { waitMs: 50 }),
+    ).rejects.toMatchObject({ code: "SETUP_CONFIG_LOCK_UNSAFE" });
+    expect((await stat("/dev/null")).isCharacterDevice()).toBe(true);
+    await unlink(lockPath);
+  });
+
+  test("config lock refuses a FIFO without blocking", async () => {
+    if (process.platform === "win32") return;
+    const { configPath } = await makeCase("lock-fifo");
+    const lockPath = kimiConfigLockPath(configPath);
+    const made = spawnSync("mkfifo", [lockPath], { encoding: "utf8" });
+    expect(made.status, made.stderr || made.error?.message).toBe(0);
+
+    const outcome = await Promise.race([
+      withKimiConfigLock(configPath, async () => "entered", { waitMs: 50 })
+        .then(() => "entered")
+        .catch((error: unknown) => (error as { code?: string }).code),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 500)),
+    ]);
+    expect(outcome).toBe("SETUP_CONFIG_LOCK_UNSAFE");
+    await unlink(lockPath);
+  });
+
+  test("config lock caps oversized metadata and still recovers an old regular file", async () => {
+    const { configPath } = await makeCase("lock-capped-metadata");
+    const lockPath = kimiConfigLockPath(configPath);
+    await writeFile(lockPath, "x".repeat(KIMI_CONFIG_LOCK_METADATA_MAX_BYTES + 1), {
+      mode: 0o600,
+    });
+    const old = new Date(Date.now() - 10_000);
+    await utimes(lockPath, old, old);
+
+    const result = await withKimiConfigLock(configPath, async () => "recovered", {
+      staleMs: 1,
+      waitMs: 200,
+    });
+    expect(result).toBe("recovered");
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("stale recovery also reclaims a dead recovery lease after a second crash", async () => {
+    const { configPath } = await makeCase("lock-stale-recovery-lease");
+    const lockPath = kimiConfigLockPath(configPath);
+    await writeFile(lockPath, "first crashed owner\n", { mode: 0o600 });
+    const lockStats = await stat(lockPath, { bigint: true });
+    const identity = `${lockStats.dev.toString()}:${lockStats.ino.toString()}`;
+    const identityHash = createHash("sha256").update(identity).digest("hex").slice(0, 16);
+    const recoveryPath = `${lockPath}.recover.${identityHash}`;
+    await writeFile(
+      recoveryPath,
+      `${JSON.stringify({
+        pid: 2_147_483_647,
+        token: "b".repeat(32),
+        createdAt: new Date(Date.now() - 20_000).toISOString(),
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const old = new Date(Date.now() - 10_000);
+    await utimes(lockPath, old, old);
+    await utimes(recoveryPath, old, old);
+
+    const result = await withKimiConfigLock(configPath, async () => "recovered twice", {
+      staleMs: 1,
+      waitMs: 500,
+      retryMs: 5,
+    });
+    expect(result).toBe("recovered twice");
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(recoveryPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (await readdir(path.dirname(configPath))).filter((name) => name.includes(".recover.")),
+    ).toEqual([]);
+  });
+
+  test("install recovers an old malformed lock left by a crashed setup", async () => {
+    const { env, configPath } = await makeCase("lock-stale-recovery");
+    const lockPath = kimiConfigLockPath(configPath);
+    await writeFile(lockPath, "incomplete crashed-owner metadata\n", { mode: 0o600 });
+    const old = new Date(Date.now() - 10_000);
+    await utimes(lockPath, old, old);
+
+    const result = await runSetup([], makeContext(env));
+    expect(result.probe).toBe("ok");
+    expect((await readFile(configPath, "utf8"))).toContain("kimi-plugin-cc-managed");
+    await expect(access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("install refuses an invalid foreign hook without changing config", async () => {
+    const { env, configPath } = await makeCase("invalid-foreign-install");
+    const invalidForeign = [
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      'command = "foreign-hook"',
+      'cwd = "/tmp"',
+      "",
+    ].join("\n");
+    await writeFile(configPath, invalidForeign, "utf8");
+
+    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({
+      code: "SETUP_INVALID_HOOKS_CONFIG",
+      stage: "setup.install",
+      message: expect.stringContaining('unknown field "cwd"'),
+    });
+    expect(await readFile(configPath, "utf8")).toBe(invalidForeign);
+  });
+
+  test("install converts hooks=[] and preserves every surrounding byte", async () => {
+    const { env, configPath } = await makeCase("inline-hooks-empty");
+    const prefix = "# exact prefix\ndefault_model = \"kimi-code/kimi-for-coding\"\n";
+    const suffix = "\n[ui]\ntheme = \"light\"\n";
+    await writeFile(configPath, `${prefix}hooks = [] # normalized by setup\n${suffix}`, "utf8");
+
+    const result = await runSetup([], makeContext(env));
+    const after = await readFile(configPath, "utf8");
+    expect(result.probe).toBe("ok");
+    expect(after.startsWith(prefix)).toBe(true);
+    expect(after).toContain(suffix);
+    expect(after).not.toMatch(/^hooks\s*=/m);
+    expect(after.match(/^\[\[hooks\]\]$/gm)).toHaveLength(1);
+    expect(result.warnings.join("\n")).toContain("formatting and comments inside that hooks assignment were normalized");
+  });
+
+  test("install converts a validated multiline inline hook to canonical [[hooks]] tables", async () => {
+    const { env, configPath } = await makeCase("inline-hooks-nonempty");
+    const prefix = "# untouched before\ndefault_model = \"kimi-code/kimi-for-coding\"\n";
+    const inline = [
+      "hooks = [",
+      "  # this assignment-local comment is intentionally normalized",
+      '  { event = "Stop", command = "foreign-hook", timeout = 9 },',
+      "]",
+      "",
+    ].join("\n");
+    const suffix = "[ui]\nshow_usage = true\n# untouched after\n";
+    await writeFile(configPath, `${prefix}${inline}${suffix}`, "utf8");
+
+    const result = await runSetup([], makeContext(env));
+    const after = await readFile(configPath, "utf8");
+    expect(result.probe).toBe("ok");
+    expect(after.startsWith(prefix)).toBe(true);
+    expect(after).toContain(`${suffix}\n# === BEGIN kimi-plugin-cc-managed`);
+    expect(after).not.toMatch(/^hooks\s*=/m);
+    expect(after.match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
+    expect(after).toContain('event = "Stop"\ncommand = "foreign-hook"\ntimeout = 9');
+    expect(result.warnings.join("\n")).toContain("inline hooks array (1 entry)");
+  });
+
+  test("future 0.x minors validate additive events by minimum and warn separately", async () => {
+    if (process.platform === "win32") return;
+    const { env, configPath } = await makeCase("future-minor-event");
+    const kimiBin = path.join(path.dirname(configPath), "future-kimi");
+    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '0.99.0'\n", "utf8");
+    await chmod(kimiBin, 0o700);
+    await writeFile(
+      configPath,
+      '[[hooks]]\nevent = "Interrupt"\ncommand = "foreign-hook"\n',
+      "utf8",
+    );
+
+    const result = await runSetup([], makeContext({
+      ...env,
+      KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
+    }));
+    expect(result.probe).toBe("ok");
+    expect(result.warnings.join("\n")).toContain("kimi-code version 0.99.0 is outside the range");
+    expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
+  });
+
+  test("KIMI_PLUGIN_CC_SKIP_VERSION_PROBE does not bypass hook-schema version verification", async () => {
+    if (process.platform === "win32") return;
+    const { configPath } = await makeCase("skip-version-does-not-skip-schema");
+    const kimiBin = path.join(path.dirname(configPath), "old-kimi");
+    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '0.2.0'\n", "utf8");
+    await chmod(kimiBin, 0o700);
+    const contents = '[[hooks]]\nevent = "Interrupt"\ncommand = "foreign-hook"\n';
+    const result = await validateKimiHookSetForEnvironment(contents, {
+      ...process.env,
+      KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
+      KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('event "Interrupt" requires kimi-code >= 0.14');
+    expect(result.reason).toContain("installed version is 0.2");
+  });
+
+  test("install refuses nested hooks table shapes without changing config", async () => {
+    const { env, configPath } = await makeCase("invalid-nested-hooks-install");
+    const invalidNested = "[hooks.foo]\ncommand = \"foreign-hook\"\n";
+    await writeFile(configPath, invalidNested, "utf8");
+
+    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({
+      code: "SETUP_INVALID_HOOKS_CONFIG",
+      message: expect.stringContaining("no configured PreToolUse hook"),
+    });
+    expect(await readFile(configPath, "utf8")).toBe(invalidNested);
+  });
+
+  test.each([
+    ["malformed table header", '[[hooks] ]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n'],
+    ["repeated timeout underscore", '[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\ntimeout = 1__0\n'],
+    ["leading-zero timeout", '[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\ntimeout = 01\n'],
+    ["malformed unrelated array", 'bad = [1,,2]\n[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n'],
+    ["duplicate unrelated key", 'bad = 1\nbad = 2\n[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n'],
+  ])("rejects TOML-invalid config syntax: %s", (_name, contents) => {
+    const validation = validateKimiHookSet(contents, { major: 0, minor: 23 });
+    expect(validation.valid).toBe(false);
+    expect(validation.reason).toContain("no configured PreToolUse hook");
+  });
+
+  test("--check fails when a foreign hook invalidates the whole hooks array", async () => {
+    const { env, configPath } = await makeCase("invalid-foreign-check");
+    await runSetup([], makeContext(env));
+    const installed = await readFile(configPath, "utf8");
+    await writeFile(
+      configPath,
+      `${installed}\n[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\ntimeout = 0\n`,
+      "utf8",
+    );
+
+    const result = await runSetup(["--check"], makeContext(env));
+    expect(result.probe).toBe("failed");
+    expect(result.probeError).toContain("drops the entire hooks array");
+    expect(result.probeError).toContain("timeout");
+    expect(result.nextStep).toContain("invalid [[hooks]] entry");
+  });
+
   test("KIMI_PLUGIN_CC_HOOK_SCRIPT override is honored end-to-end", async () => {
     const { env, configPath } = await makeCase("hook-script-override");
     const overridePath = path.join(scratch, "hook-script-override", "fake-hook.js");
@@ -489,6 +871,25 @@ function extractBlock(contents: string, host: string): string {
 }
 
 describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
+  test("simultaneous dual-host setup serializes without lost updates", async () => {
+    const { env, configPath } = await makeCase("dual-host-concurrent");
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+
+    const [claude, codex] = await Promise.all([
+      runSetup([], makeContext(claudeEnv)),
+      runSetup([], makeContext(codexEnv)),
+    ]);
+    expect(claude.probe).toBe("ok");
+    expect(codex.probe).toBe("ok");
+
+    const contents = await readFile(configPath, "utf8");
+    expect(contents.match(/BEGIN kimi-plugin-cc-managed:claude-code/g)).toHaveLength(1);
+    expect(contents.match(/BEGIN kimi-plugin-cc-managed:codex/g)).toHaveLength(1);
+    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
+    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+  });
+
   test("two hosts coexist — setup in one host never clobbers the other's block", async () => {
     const { env, configPath } = await makeCase("dual-host-coexist");
     const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
@@ -681,7 +1082,7 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     expect(result.warnings.join("\n")).not.toContain("Pruned");
   });
 
-  test("prune leaves (does not corrupt) an unmanaged hook table with a multi-line array", async () => {
+  test("install preserves but refuses an invalid unmanaged hook with a multi-line array", async () => {
     const { env, configPath } = await makeCase("prune-multiline-array");
     const ourScript =
       "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
@@ -701,13 +1102,17 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
       "",
     ].join("\n");
     await writeFile(configPath, seeded, "utf8");
-    const result = await runSetup([], makeContext(env));
+    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({
+      code: "SETUP_INVALID_HOOKS_CONFIG",
+      message: expect.stringContaining('unknown field "metadata"'),
+    });
     const after = await readFile(configPath, "utf8");
-    // The whole table survives (including the array), and no dangling `]`.
+    // The whole table survives byte-for-byte; setup neither partially prunes
+    // it nor appends a block that kimi-code would silently discard with it.
+    expect(after).toBe(seeded);
     expect(after).toContain("metadata = [");
     expect(after).toContain('  "a",');
     expect(after).toContain("user_setting = true");
-    expect(result.warnings.join("\n")).not.toContain("Pruned");
   });
 
   test("scoped uninstall keeps a legacy block it cannot attribute; --all removes it", async () => {

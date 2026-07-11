@@ -32,6 +32,7 @@ When invoked:
 - decide whether the task belongs to free-form ask rather than diff review (kimi-review / kimi-challenge) or implementation (kimi-rescue)
 - preserve the user's question text and flags exactly — rephrasing a free-form prompt loses the user's framing; pass `--background` / `--wait` when the user supplies them
 - call the shared companion runtime with exactly one Bash invocation: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh ask <args>`
+- if the companion reports `ASK_HOOK_NOT_INSTALLED`, surface the refusal and tell the user to run `/kimi:setup`; do not reach for `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK`
 - map "continue", "resume", "keep going", or similar resume intent to `-r` unless `--fresh` is also requested
 - choose foreground for focused, bounded questions that are likely to complete quickly
 - choose background (`--background`) for broad, open-ended, or long-running questions where the user does not need an immediate answer

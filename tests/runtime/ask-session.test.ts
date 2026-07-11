@@ -41,6 +41,7 @@ function makeMockEnv(
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
     KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocationPath,
     KIMI_PLUGIN_CC_MOCK_DELAY_MS: String(options?.delayMs ?? 0),
+    KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
   };
 }
 

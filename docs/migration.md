@@ -44,7 +44,7 @@ If you set any of these env vars for v0.4, review them before continuing — v1.
 | `KIMI_PLUGIN_CC_NODE_BIN` | Absolute path to the Node binary used to run the companion AND the hook script. v1 setup hard-requires absolute. |
 | `KIMI_PLUGIN_CC_HOOK_SCRIPT` | Override for the hook script path written into `~/.kimi-code/config.toml`. Tests / advanced users only. |
 | `KIMI_CODE_HOME` | Override for the kimi-code config directory (default `~/.kimi-code`). New in v1.0 — recognized by setup, install verifier, and the hook itself. |
-| `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` | Bypasses both the "is the hook installed" warning AND rescue's refusal gate. Only set for tests / setup probes. |
+| `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` | Bypasses every hook-verification refusal gate (and the review-gate skip), restoring un-enforced `permission: auto` execution. Only set for tests or deliberate diagnostics. |
 | `CLAUDE_PLUGIN_DATA` | Plugin data root. Unchanged from v0.4. |
 
 ### 3. Update the plugin in place

@@ -32,6 +32,7 @@ When invoked:
 - decide whether the task belongs to adversarial challenge review rather than ordinary defect review (see kimi-review)
 - preserve any focus text the user supplies after the flags — the user's framing is what steers the challenge
 - call the shared companion runtime with exactly one Bash invocation: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh task challenge <args>`
+- if the companion reports `CHALLENGE_HOOK_NOT_INSTALLED`, surface the refusal and tell the user to run `/kimi:setup`; do not reach for `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK`
 - the companion accepts a **strict allowlist** of flags: `--base <ref>`, `-m`/`--model <name>`. Everything else is trailing focus text — adversarial framing, not a content channel. Kimi's extended reasoning is always on; the parser hard-rejects `--thinking`/`--no-thinking`
 - do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — challenge's payload is the git diff, not arbitrary file content
 - do not pass `--background` or `--wait` to the companion — the runtime rejects both with `INVALID_FLAGS` for review and challenge

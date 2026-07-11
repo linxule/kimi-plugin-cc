@@ -70,6 +70,7 @@ describe("command output mode enforcement", () => {
         KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
         KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-success",
         KIMI_PLUGIN_CC_WORKSPACE_CWD: repoRoot,
+        KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       });
 
       expect(result.exitCode).toBe(0);
@@ -92,6 +93,7 @@ describe("command output mode enforcement", () => {
         KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
         KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-success",
         KIMI_PLUGIN_CC_WORKSPACE_CWD: repoRoot,
+        KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       });
 
       expect(result.exitCode).toBe(0);

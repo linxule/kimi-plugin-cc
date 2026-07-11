@@ -218,8 +218,8 @@ async function executePursueJob(
         [
           "/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook.",
           `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
-          "Run /kimi:setup, or set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 if you've intentionally",
-          "configured an alternative safety mechanism.",
+          "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+          "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
         ].join(" "),
         "pursue.hook-check",
         { details: { config_path: installStatus.configPath } },

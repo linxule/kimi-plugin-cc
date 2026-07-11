@@ -5,11 +5,28 @@
 
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const grandchild = spawn("sleep", ["60"], {
-  detached: true,
-  stdio: "ignore",
-});
+const writerPath = process.env["KIMI_MOCK_GRANDCHILD_WRITE_FILE"];
+const grandchild = spawn(
+  writerPath === undefined ? "sleep" : process.execPath,
+  writerPath === undefined
+    ? ["60"]
+    : [fileURLToPath(new URL("./term-ignoring-writer.mjs", import.meta.url))],
+  {
+    detached: true,
+    stdio: "ignore",
+    env:
+      writerPath === undefined
+        ? process.env
+        : {
+            ...process.env,
+            KIMI_MOCK_GRANDCHILD_WRITE_FILE: writerPath,
+            KIMI_MOCK_GRANDCHILD_READY_FILE:
+              process.env["KIMI_MOCK_GRANDCHILD_READY_FILE"],
+          },
+  },
+);
 
 const pidLine = `GRANDCHILD_PID=${grandchild.pid ?? ""}\n`;
 process.stdout.write(pidLine);

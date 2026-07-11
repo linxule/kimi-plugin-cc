@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "54d215b6560f57724715c9bc3e813f8feda291835b21692bdf398fb964508b86" },
-  { path: ".claude-plugin/marketplace.json", sha256: "4d2ed159f60067d99c124f8cd4fe0333c2acfcbc15395cb74487fa835753c5d7" },
+  { path: ".claude-plugin/plugin.json", sha256: "98df0cc5987710aa0be28abc58aa68c7fd224fa2d34cb098fb191ac2fe4ee3f6" },
+  { path: ".claude-plugin/marketplace.json", sha256: "34cc1f52152279127f079842c7f764a74c7d05c84ed06eaec2d4d04928f01885" },
   { path: "commands/README.md", sha256: "f996a084f8c7762c2405c3990443cff49d96003416da8fead8fd875a0f50fd23" },
   { path: "commands/ask.md", sha256: "5ffcd405b1f905f400c00520d210afc6dbf35cae3a0b07c6189866fa639bf778" },
   { path: "commands/cancel.md", sha256: "f6fc6e474242901e2e4836956f2b67c6335ff0042a7a6e60c8baf9585cec0035" },
@@ -48,13 +48,13 @@ export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
   { path: "commands/setup.md", sha256: "17e0e2c274f3cc4cb36780ea62c078bb1bbeeee81bfd1b0c8e0594f7e7f4fc8c" },
   { path: "commands/status.md", sha256: "0171276cd08b9fe62893f62523c164f35b1a4df98cb7b04f14f62fc33fbc8cbc" },
   { path: "commands/swarm.md", sha256: "e4728c31c5d7ae355759bdb497ce340c994d05a9f1a65b4fa246895ee9bcfac5" },
-  { path: "agents/kimi-ask.md", sha256: "e5acf18a261c44d95ccf8c78a112e30d8bb2edcdd3a784f741f2c30f6918d732" },
-  { path: "agents/kimi-challenge.md", sha256: "afe252ee9bb67a2faa36df0f048ee91dbfbee7688b3fede4a427fd9033f8c062" },
+  { path: "agents/kimi-ask.md", sha256: "8961924c8e844b225926f53180f9275e6775d002caef74711c7c827615bcc2f6" },
+  { path: "agents/kimi-challenge.md", sha256: "7403d916493794e25ee6bf2fe816de33cd1bab0a4a2f6de4224f7eb754c77439" },
   { path: "agents/kimi-pursue.md", sha256: "aa9646824ed8cebd306a21a0a0ba3b73508a4aa4c3fbe7424a2ac9af33c84c17" },
   { path: "agents/kimi-rescue.md", sha256: "0844c0e40cd3301c9325b6ed406a2ca4c8de2d151bddbc1e30bb1e37a4fdd2e3" },
-  { path: "agents/kimi-review.md", sha256: "a7db8c7d821d64cda88aac44df04f5b3cd6f3026f19098dae037097239daddb7" },
+  { path: "agents/kimi-review.md", sha256: "d5af811ea429ff0eac134dda0b78a074d1c646d41a7d6836b0de9081240ad9ec" },
   { path: "agents/kimi-swarm-write.md", sha256: "d789393d499ab44aed9f62c69782cda1a61637b85e9e195fdfc9eeff9f22a530" },
-  { path: "agents/kimi-swarm.md", sha256: "415f628e68aae2a23ade0628eb231d0aff9b9677c1d746fe3eaab876f8f116d6" },
+  { path: "agents/kimi-swarm.md", sha256: "d12237243437c7544b29b9e96a26856c92928a10668ae09f49cfab82bef7b797" },
 ];
 
 export const CODEX_PLUGIN_MANIFEST = {
@@ -124,6 +124,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     guidance: [
       "Preserve the user's question and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested.",
       "Choose `--background` for broad or long-running questions and return the job id that the companion prints.",
+      "If the companion reports ASK_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
       "Return companion stdout verbatim; do not summarize or re-voice Kimi's prose.",
     ],
   },
@@ -141,6 +142,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     guidance: [
       "Forward `--base <ref>`, `-m`/`--model <name>`, and any trailing focus text only.",
       "Do not invent file/path flags; review's payload is the git diff plus optional focus text.",
+      "If the companion reports REVIEW_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
       "Return companion stdout verbatim and leave any fixes to a separate user request.",
     ],
   },
@@ -158,6 +160,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     guidance: [
       "Preserve the user's adversarial framing as trailing focus text.",
       "Do not pass background/wait flags; the runtime rejects them for challenge.",
+      "If the companion reports CHALLENGE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
       "Return companion stdout verbatim without softening the challenge framing.",
     ],
   },
@@ -246,6 +249,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     guidance: [
       "Run setup from the user's workspace so the companion records the intended workspace cwd.",
       "Use `--check` for read-only verification and `--uninstall` only when explicitly requested. `--uninstall` removes only this host's block; `--uninstall --all` removes every host's block from the shared config.",
+      "Setup validates the complete shared TOML and every configured hook under a serialized lock. If it reports invalid foreign config, surface that failure; do not bypass it or claim the managed block is safe in isolation.",
       "Report setup stdout verbatim because it contains hook and probe status.",
     ],
   },

@@ -161,13 +161,9 @@ export async function executeRescueJob(
   const rescueConfig = getManagedCommandConfig("rescue");
   const cancel = rescueConfig.cancellation;
 
-  // Rescue is the only write-capable command. Without the PreToolUse
-  // hook, kimi-code's `-p` mode auto-approves every Bash/Write/Edit —
-  // including destructive ones. ask/review/challenge are loud-warn
-  // because their failure mode is silent broadening of a documented
-  // read-only contract. Rescue's failure mode is the model executing
-  // an `rm -rf` because the user happens not to have run
-  // `/kimi:setup` yet. Refuse rather than warn.
+  // Rescue writes directly to the workspace. Without the PreToolUse hook,
+  // kimi-code's `-p` mode auto-approves every Bash/Write/Edit, including
+  // destructive ones. Refuse before the worker can spawn Kimi.
   //
   // The hook check happens BEFORE `createCliCancellationHandlers()` so
   // an early return doesn't leak SIGTERM/SIGINT listeners. Tests /
@@ -181,8 +177,8 @@ export async function executeRescueJob(
         [
           "rescue refuses to run without the kimi-plugin-cc PreToolUse hook.",
           `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
-          "Run /kimi:setup (PR 4 owns the installer) or set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1",
-          "if you've intentionally configured an alternative safety mechanism.",
+          "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+          "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
         ].join(" "),
         "rescue.hook-check",
         { details: { config_path: installStatus.configPath } },

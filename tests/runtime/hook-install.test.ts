@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -118,11 +118,138 @@ describe("verifyHookInstalled", () => {
       const status = await verifyHookInstalled({
         KIMI_CODE_HOME: home,
         KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+        KIMI_PLUGIN_CC_KIMI_BIN: "/definitely/not-needed-for-baseline-events",
       });
       expect(status.installed).toBe(true);
       expect(status.reason).toBeUndefined();
     } finally {
       await cleanupTestPath(home);
+    }
+  });
+
+  test("reports missing when an invalid foreign hook makes upstream drop every hook", async () => {
+    const home = await createTestPluginDataRoot("hook-install-invalid-foreign");
+    try {
+      const hookPath = "/abs/path/dist/hooks/approval-hook.js";
+      const canonical = canonicalCommandFor(hookPath);
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v1.7.2) ===",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          `command = ${JSON.stringify(canonical)}`,
+          "timeout = 15",
+          "# === END kimi-plugin-cc-managed ===",
+          "",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          'command = "foreign-hook"',
+          'env = { TOKEN = "value" }',
+        ].join("\n"),
+        "utf8",
+      );
+      const status = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      });
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain('unknown field "env"');
+      expect(status.reason).toContain("drops the entire hooks array");
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
+  test("rejects [hooks.foo] and [[hooks.foo]] section shapes", async () => {
+    for (const [name, header] of [
+      ["table", "[hooks.foo]"],
+      ["array-table", "[[hooks.foo]]"],
+    ] as const) {
+      const home = await createTestPluginDataRoot(`hook-install-nested-${name}`);
+      try {
+        const hookPath = "/abs/path/dist/hooks/approval-hook.js";
+        const canonical = canonicalCommandFor(hookPath);
+        await mkdir(home, { recursive: true });
+        await writeFile(
+          path.join(home, "config.toml"),
+          [
+            "# === BEGIN kimi-plugin-cc-managed (v1.7.2) ===",
+            "[[hooks]]",
+            'event = "PreToolUse"',
+            `command = ${JSON.stringify(canonical)}`,
+            "timeout = 15",
+            "# === END kimi-plugin-cc-managed ===",
+            "",
+            header,
+            'command = "foreign-hook"',
+          ].join("\n"),
+          "utf8",
+        );
+        const status = await verifyHookInstalled({
+          KIMI_CODE_HOME: home,
+          KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+        });
+        expect(status.installed).toBe(false);
+        expect(status.reason).toContain("no configured PreToolUse hook");
+      } finally {
+        await cleanupTestPath(home);
+      }
+    }
+  });
+
+  test("checks additive hook events against the installed kimi-code minor", async () => {
+    if (process.platform === "win32") return;
+    for (const testCase of [
+      { event: "PermissionRequest", version: "0.7.0", minimum: "0.8", installed: false },
+      { event: "PermissionRequest", version: "0.8.0", minimum: "0.8", installed: true },
+      { event: "Interrupt", version: "0.13.0", minimum: "0.14", installed: false },
+      { event: "Interrupt", version: "0.14.0", minimum: "0.14", installed: true },
+    ] as const) {
+      const suffix = `${testCase.event.toLowerCase()}-${testCase.version.replaceAll(".", "-")}`;
+      const home = await createTestPluginDataRoot(`hook-install-version-${suffix}`);
+      try {
+        const hookPath = "/abs/path/dist/hooks/approval-hook.js";
+        const canonical = canonicalCommandFor(hookPath);
+        const kimiBin = path.join(home, "fake-kimi-version.js");
+        await mkdir(home, { recursive: true });
+        await writeFile(
+          kimiBin,
+          `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(testCase.version)}\n`,
+          "utf8",
+        );
+        await chmod(kimiBin, 0o700);
+        await writeFile(
+          path.join(home, "config.toml"),
+          [
+            "# === BEGIN kimi-plugin-cc-managed (v1.7.2) ===",
+            "[[hooks]]",
+            'event = "PreToolUse"',
+            `command = ${JSON.stringify(canonical)}`,
+            "timeout = 15",
+            "# === END kimi-plugin-cc-managed ===",
+            "",
+            "[[hooks]]",
+            `event = ${JSON.stringify(testCase.event)}`,
+            'command = "foreign-hook"',
+          ].join("\n"),
+          "utf8",
+        );
+
+        const status = await verifyHookInstalled({
+          KIMI_CODE_HOME: home,
+          KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+          KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
+        });
+        expect(status.installed).toBe(testCase.installed);
+        if (!testCase.installed) {
+          expect(status.reason).toContain(`requires kimi-code >= ${testCase.minimum}`);
+          expect(status.reason).toContain(`installed version is ${testCase.version.slice(0, -2)}`);
+        }
+      } finally {
+        await cleanupTestPath(home);
+      }
     }
   });
 
@@ -152,7 +279,7 @@ describe("verifyHookInstalled", () => {
         KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
       });
       expect(status.installed).toBe(false);
-      expect(status.reason).toContain("unexpected TOML table");
+      expect(status.reason).toContain("missing required field `command`");
     } finally {
       await cleanupTestPath(home);
     }

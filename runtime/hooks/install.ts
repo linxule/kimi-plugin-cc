@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import { evaluateInstalled } from "./managed-block.js";
 import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
 import { resolveKimiHome } from "../kimi-home.js";
@@ -30,8 +31,9 @@ import { resolveKimiHome } from "../kimi-home.js";
  *      full canonical shell command closes this.
  *
  * Tests / setup probes can opt out via
- * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` — that bypass also disables
- * rescue's refusal gate (documented in `docs/safety.md`).
+ * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` — that bypass disables every command's
+ * refusal gate and the review gate's enforcement check (documented in
+ * `docs/safety.md`).
  */
 export interface HookInstallStatus {
   installed: boolean;
@@ -82,6 +84,15 @@ export async function verifyHookInstalled(
     };
   }
 
+  const hookSet = await validateKimiHookSetForEnvironment(raw, env);
+  if (!hookSet.valid) {
+    return {
+      installed: false,
+      reason: hookSet.reason ?? "configured hooks failed whole-array validation",
+      configPath,
+    };
+  }
+
   // Pass `nodeExists` so a command MISMATCH is classified into an actionable
   // H4 diagnosis (Node upgrade / version-manager switch vs. plugin path drift)
   // instead of a raw expected-vs-got dump. Classification only refines the
@@ -124,14 +135,19 @@ export function formatHookMissingWarning(
     "  every tool call — including Bash, Write, Edit — even from commands",
     "  documented as read-only.",
     "",
-    "  Fix: run `/kimi:setup` to install or repair the managed block in",
+    "  This command will not start a Kimi model run until enforcement is",
+    "  repaired (the review gate skips instead of blocking stop).",
+    "",
+    "  Fix: run Claude Code `/kimi:setup` or Codex `$kimi-setup` to install",
+    "  or repair this host's managed block in",
     "  ~/.kimi-code/config.toml. If you use nvm, asdf, mise, or fnm, you",
     "  must re-run `/kimi:setup` after any Node version switch — the",
     "  verifier pins the absolute Node binary path and a switch invalidates",
     "  the previously-installed block by design. See docs/safety.md.",
     "",
-    "  Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 to silence this warning",
-    "  intentionally (also disables rescue's refusal gate).",
+    "  KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 explicitly bypasses every refusal",
+    "  gate and restores un-enforced `permission: auto` execution. Reserve",
+    "  it for tests or diagnostics where that risk is intentional.",
     "",
   ].join("\n");
 }

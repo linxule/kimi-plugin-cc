@@ -23,4 +23,5 @@ Pass through: `[--check | --uninstall [--all] | --enable-review-gate | --disable
 
 - Run setup from the user's workspace so the companion records the intended workspace cwd.
 - Use `--check` for read-only verification and `--uninstall` only when explicitly requested. `--uninstall` removes only this host's block; `--uninstall --all` removes every host's block from the shared config.
+- Setup validates the complete shared TOML and every configured hook under a serialized lock. If it reports invalid foreign config, surface that failure; do not bypass it or claim the managed block is safe in isolation.
 - Report setup stdout verbatim because it contains hook and probe status.

@@ -630,6 +630,24 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // hook-denied. Report:
   // .claude/kimi-code-research/daily-monitor/2026-07-09-upstream-monitor.md.
   // Tag: compat-verified-kimi-code-0.23.4.
+  // 0.23.5 (patch, 2026-07-11) verified COMPAT-PRESERVED within the already-
+  // listed {0,23} at released tag commit 352a4492. Permission, both hook trees,
+  // and session bootstrap stayed byte-identical (`02-permission.diff`,
+  // `03-hooks.diff`, and `05-session-bootstrap.diff` all 0 bytes), so hook-first
+  // ordering, any-block-wins aggregation, field names, and create/resume config
+  // loading remain intact. `04-wire-records.diff` only adds the internal
+  // `media-stripped` projection type. The load-bearing change is additive
+  // `PromptJsonWriter` metadata: `role:"meta", type:"turn.step.retrying"` on
+  // provider retry events. v1.8.0 models its exact shape, normalizes it, and
+  // filters it from consumer records while retaining malformed-shape diagnostics.
+  // The post-change exact-0.23.5 `bun run smoke:real` was GREEN (2026-07-11):
+  // 9 pass / 0 fail in 229.56s. Read-only labels denied forced writes; pursue
+  // ran to its full two-minute budget with no file written; read-only swarm
+  // spawned coder subagents whose writes were denied; write-swarm confined edits
+  // to the throwaway worktree (patchBytes=334, userTreeClean=true,
+  // worktreeCleaned=true); and an out-of-trusted-root absolute write was denied.
+  // Report: .claude/kimi-code-research/daily-monitor/2026-07-11-upstream-monitor.md.
+  // Tag: compat-verified-kimi-code-0.23.5.
   { major: 0, minor: 23 },
 ];
 

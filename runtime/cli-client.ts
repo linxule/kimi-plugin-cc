@@ -30,7 +30,13 @@ import {
   type StreamJsonOutcome,
   type StreamJsonRecord,
 } from "./stream-json.js";
-import { collectDescendants } from "./process-tree.js";
+import {
+  collectDescendantIdentities,
+  revalidateProcessIdentities,
+  waitForProcessTreeExit,
+  type ProcessIdentity,
+  type ProcessIdentityReader,
+} from "./process-tree.js";
 
 /** Bytes of stderr retained for diagnostics on completion. Rolling buffer. */
 const STDERR_TAIL_BYTES = 8192;
@@ -43,6 +49,13 @@ const LOG_DRAIN_TIMEOUT_MS = 250;
  * after the v1.0 cutover.
  */
 const DEFAULT_ESCALATION_MS = 1_500;
+/** Maximum time spent confirming POSIX tree exit after SIGKILL dispatch. */
+const POST_KILL_QUIESCENCE_MS = 500;
+/** Hard bound for the one-shot descendant identity snapshot. */
+const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 1_000;
+/** Hard bound for each batched identity revalidation pass. */
+const IDENTITY_REVALIDATION_TIMEOUT_MS = 250;
+const DESCENDANT_SNAPSHOT_TIMEOUT = Symbol("descendant-snapshot-timeout");
 
 export interface CliClientOptions {
   /** Working directory for the kimi subprocess. */
@@ -121,7 +134,11 @@ export interface CliClientOptions {
    * Production callers should leave this unset so cancellation uses the
    * platform process-tree collector.
    */
-  descendantCollector?: (pid: number) => Promise<number[]>;
+  descendantIdentityCollector?: (pid: number) => Promise<ProcessIdentity[]>;
+  /** Internal test seam; production uses start-time/PGID identity reads. */
+  processIdentityReader?: ProcessIdentityReader;
+  /** Internal test seam for proving teardown rejection cannot strand settlement. */
+  cancellationTeardownHook?: () => Promise<void>;
   /**
    * Optional callback fired as each stream-json record is parsed. Useful for
    * callers that need to update SQLite phase / status mid-run without waiting
@@ -292,14 +309,12 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         continue;
       }
       if (outcome.record !== undefined) {
-        // session.resume_hint is out-of-band metadata for our wrapper, not
-        // a consumer-facing record. Capture the session id (first-announce
-        // wins, mirroring the stderr capture below for kimi 0.1.x), then
-        // skip it: companion commands iterate records[] expecting only
-        // assistant/tool roles, and invokeOnRecord callbacks were never
-        // designed to receive meta. kimi 0.2.0 (PR #47) moved this from
-        // stderr to stdout stream-json, so this is the primary source of
-        // truth for session capture under 0.2.0+.
+        // Meta records are out-of-band wrapper metadata, never consumer-facing
+        // assistant/tool records. Capture session.resume_hint (first-announce
+        // wins, mirroring the stderr capture below for kimi 0.1.x), and skip
+        // every recognized meta type, including 0.23.5's turn.step.retrying.
+        // This keeps records[] and onRecord stable while preserving the resume
+        // hint as the primary session-id source under kimi 0.2.0+.
         if (outcome.record.role === "meta") {
           if (
             outcome.record.type === "session.resume_hint" &&
@@ -335,93 +350,232 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   });
 
   return await new Promise<CliClientResult>((resolve, reject) => {
-    let settled = false;
     let aborted = false;
+    type TeardownOutcome = { ok: true } | { ok: false; error: unknown };
+    let cancellationTeardown: Promise<TeardownOutcome> | undefined;
+    let settlementStarted = false;
     const settle = (
       kind: "resolve" | "reject",
       payload: CliClientResult | RuntimeError,
     ) => {
-      if (settled) return;
-      settled = true;
+      if (settlementStarted) return;
+      settlementStarted = true;
       opts.signal?.removeEventListener("abort", onAbort);
-      if (kind === "resolve") resolve(payload as CliClientResult);
-      else reject(payload as RuntimeError);
+      // Abort teardown can outlive the direct child's close event while a
+      // detached descendant is still being enumerated or escalated. Never
+      // expose a result/error until that one owned teardown path completes.
+      void (cancellationTeardown ?? Promise.resolve<TeardownOutcome>({ ok: true })).then(
+        (teardown) => {
+          if (!teardown.ok) {
+            appendLogLine({
+              event: "cancellation_teardown_error",
+              message: formatError(teardown.error),
+            });
+            reject(
+              new RuntimeError(
+                "CLI_CANCELLATION_TEARDOWN_FAILED",
+                `kimi cancellation teardown failed: ${formatError(teardown.error)}`,
+                "cli-client.cancellation",
+                teardown.error instanceof Error
+                  ? { cause: teardown.error, details: errorDetails() }
+                  : { details: errorDetails() },
+              ),
+            );
+            return;
+          }
+          if (kind === "resolve") resolve(payload as CliClientResult);
+          else reject(payload as RuntimeError);
+        },
+      );
     };
 
     const escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
-    let escalationTimer: ReturnType<typeof setTimeout> | undefined;
-    // Separate flag from `settled` because the close handler clears the
-    // timer BEFORE awaiting the log drain and only calls settle()
-    // afterward. Without `processClosed`, a timer callback already
-    // queued at close time could observe `settled === false` and fire
-    // a redundant SIGKILL during the drain window.
-    let processClosed = false;
-    // Descendants captured at SIGTERM time, reused for SIGKILL. Critical:
-    // by the time SIGKILL fires (1500ms later), kimi may have died from
-    // SIGTERM while bash grandchildren ignored it. Bash reparents to
-    // launchd (PPID=1), so a fresh PPID-walk from kimi's pid returns
-    // empty and the SIGKILL escalation would miss the surviving
-    // grandchildren entirely. Snapshot once, signal twice.
-    let descendantSnapshot: number[] | undefined;
-    const signalChildTree = async (signal: NodeJS.Signals) => {
-      if (child.pid === undefined) return;
+    const identityReader = opts.processIdentityReader;
+    let processExited = false;
+    child.once("exit", () => {
+      processExited = true;
+    });
 
-      if (process.platform === "win32") {
-        // Descendant reaping is not implemented on win32; cancel may leave grandchildren alive.
+    const captureDescendantIdentities = async (childPid: number): Promise<ProcessIdentity[]> => {
+      let snapshot: ProcessIdentity[];
+      try {
+        const collected = await raceWithValueTimeout(
+          (opts.descendantIdentityCollector ?? collectDescendantIdentities)(childPid),
+          DESCENDANT_SNAPSHOT_TIMEOUT_MS,
+          DESCENDANT_SNAPSHOT_TIMEOUT,
+        );
+        if (collected === DESCENDANT_SNAPSHOT_TIMEOUT) {
+          appendLogLine({
+            event: "descendant_collection_timeout",
+            timeout_ms: DESCENDANT_SNAPSHOT_TIMEOUT_MS,
+          });
+          return [];
+        }
+        snapshot = collected;
+      } catch (err) {
+        appendLogLine({
+          event: "descendant_collection_error",
+          message: formatError(err),
+        });
+        return [];
+      }
+
+      const identities: ProcessIdentity[] = [];
+      const seen = new Set<string>();
+      for (const identity of snapshot) {
+        const key = `${identity.pid}:${identity.startToken}:${identity.processGroupId}`;
+        if (
+          Number.isInteger(identity.pid) &&
+          identity.pid > 0 &&
+          identity.pid !== childPid &&
+          Number.isInteger(identity.processGroupId) &&
+          identity.processGroupId > 0 &&
+          identity.startToken.length > 0 &&
+          !seen.has(key)
+        ) {
+          seen.add(key);
+          identities.push({ ...identity });
+        }
+      }
+      return identities;
+    };
+
+    const trySignalPid = (pid: number, signal: NodeJS.Signals) => {
+      try {
+        process.kill(pid, signal);
+      } catch (err) {
+        const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
+        void ignored;
+      }
+    };
+
+    const signalCapturedTree = async (
+      childPid: number,
+      identities: readonly ProcessIdentity[],
+      signal: NodeJS.Signals,
+    ) => {
+      // The live ChildProcess anchors its detached group. Signal the group
+      // before the direct child can exit and make that numeric PGID stale.
+      if (!processExited) {
+        trySignalPid(-childPid, signal);
         try {
           child.kill(signal);
         } catch {
+          // Best-effort direct-child signaling; ChildProcess owns this pid.
+        }
+      }
+
+      // One bounded pass replaces up to 512 sequential ps calls. A pid whose
+      // start token or PGID changed belongs to another process and is skipped.
+      const pidValidation = await revalidateProcessIdentities(identities, {
+        identityReader,
+        timeoutMs: IDENTITY_REVALIDATION_TIMEOUT_MS,
+      });
+      for (const current of pidValidation.identities) {
+        trySignalPid(current.pid, signal);
+      }
+
+      // Revalidate again immediately before signaling non-root groups. Never
+      // send to an unanchored numeric PGID left over from collection.
+      const groupValidation = await revalidateProcessIdentities(identities, {
+        identityReader,
+        timeoutMs: IDENTITY_REVALIDATION_TIMEOUT_MS,
+      });
+      const activeGroupIds = new Set(
+        groupValidation.identities.map((identity) => identity.processGroupId),
+      );
+      activeGroupIds.delete(childPid);
+      for (const processGroupId of activeGroupIds) {
+        trySignalPid(-processGroupId, signal);
+      }
+    };
+
+    const teardownChildTree = async () => {
+      await opts.cancellationTeardownHook?.();
+      const childPid = child.pid;
+      if (childPid === undefined || processExited) return;
+
+      const finiteEscalation = Number.isFinite(escalationMs);
+
+      if (process.platform === "win32") {
+        // Preserve the documented win32 behavior: only the direct child is
+        // managed; descendant enumeration/reaping remains unsupported.
+        try {
+          child.kill("SIGTERM");
+        } catch {
           // Best-effort.
+        }
+        const exited = await waitForProcessTreeExit([], escalationMs, {
+          isRootAlive: () => !processExited,
+        });
+        if (!exited && finiteEscalation) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Best-effort.
+          }
         }
         return;
       }
 
-      // First call (SIGTERM) populates the snapshot before kimi dies.
-      // Second call (SIGKILL) reuses it so a reparented bash subprocess
-      // still gets the kill signal.
-      if (descendantSnapshot === undefined) {
-        descendantSnapshot = await (opts.descendantCollector ?? collectDescendants)(child.pid);
-      }
-      const pids = [child.pid, ...descendantSnapshot];
-      for (const pid of pids) {
-        try {
-          process.kill(pid, signal);
-        } catch (err) {
-          const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
-          void ignored;
-        }
-      }
+      const identities = await captureDescendantIdentities(childPid);
+      await signalCapturedTree(childPid, identities, "SIGTERM");
 
-      // Group-kill each pid as defense-in-depth. Each kimi-code Bash tool
-      // subprocess spawns with `detached: true` (per kimi-code 0.1.1
-      // LocalKaos), so every descendant is itself a session leader with
-      // its own pgrp. A pgrp kill on each catches *its* unenumerated
-      // children (e.g. a bash command's own pipeline kids that spawned
-      // after our enumeration). ESRCH/EPERM are silently skipped.
-      for (const pid of pids) {
-        try {
-          process.kill(-pid, signal);
-        } catch (err) {
-          const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
-          void ignored;
+      // The grace interval starts only after SIGTERM has reached every
+      // revalidated target. Slow process enumeration never consumes the grace.
+      const exited = await waitForProcessTreeExit(identities, escalationMs, {
+        identityReader,
+        isRootAlive: () => !processExited,
+      });
+      if (!exited && finiteEscalation) {
+        await signalCapturedTree(childPid, identities, "SIGKILL");
+        const quiescent = await waitForProcessTreeExit(
+          identities,
+          POST_KILL_QUIESCENCE_MS,
+          {
+            identityReader,
+            isRootAlive: () => !processExited,
+          },
+        );
+        if (!quiescent) {
+          appendLogLine({
+            event: "post_kill_quiescence_timeout",
+            timeout_ms: POST_KILL_QUIESCENCE_MS,
+            descendant_count: identities.length,
+          });
         }
       }
     };
+
     const onAbort = () => {
+      if (aborted) return;
       aborted = true;
-      void signalChildTree("SIGTERM");
-      // Escalate to SIGKILL if the process doesn't exit promptly.
-      // v0.4 had this on the wire-client side; v1 inherits the same
-      // 1500ms default so a stuck-kimi rescue/ask/review feels
-      // identical post-cutover. Skipped when escalationMs is
-      // non-finite (Infinity) so tests can opt out.
-      if (Number.isFinite(escalationMs)) {
-        escalationTimer = setTimeout(() => {
-          if (processClosed || settled) return;
-          void signalChildTree("SIGKILL");
-        }, escalationMs);
-        escalationTimer.unref();
-      }
+      cancellationTeardown = teardownChildTree().then<TeardownOutcome, TeardownOutcome>(
+        () => ({ ok: true }),
+        (error: unknown) => ({ ok: false, error }),
+      );
+      void cancellationTeardown.then((outcome) => {
+        if (outcome.ok) return;
+        // A bug in teardown must neither strand the outer promise nor leave the
+        // owned root running. The controlled child anchors this emergency kill.
+        const childPid = child.pid;
+        if (childPid !== undefined && !processExited) {
+          if (process.platform !== "win32") trySignalPid(-childPid, "SIGKILL");
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Best-effort; settlement still surfaces the teardown failure.
+          }
+        }
+        settle(
+          "reject",
+          new RuntimeError(
+            "CLI_CANCELLATION_TEARDOWN_FAILED",
+            "kimi cancellation teardown failed",
+            "cli-client.cancellation",
+          ),
+        );
+      });
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
     // Re-check `aborted` AFTER attaching the listener. `await mkdir` above
@@ -477,16 +631,6 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     }
 
     child.on("close", async (exitCode, signal) => {
-      // Mark closed BEFORE clearing the timer so a callback already
-      // queued in the same tick observes `processClosed === true`
-      // and short-circuits. Without this, the log-drain await below
-      // opens a window where the timer can fire a redundant SIGKILL
-      // on an already-dead pid (which may have been recycled by the OS).
-      processClosed = true;
-      if (escalationTimer !== undefined) {
-        clearTimeout(escalationTimer);
-        escalationTimer = undefined;
-      }
       consumeOutcomes(parser.flush());
       const sessionId = announcedSessionId ?? extractSessionIdFromStderr(stderrTail);
       appendLogLine({
@@ -600,9 +744,10 @@ export function requireSessionId(
  *   - Owns an internal AbortController. If the caller passes
  *     `opts.signal`, both signals are linked — abort on either side
  *     aborts the internal controller.
- *   - When the budget expires, abort the internal controller and
- *     reject with `RuntimeError("RESPONSE_TIMEOUT", …)` matching the
- *     legacy `withTimeout` code shape.
+ *   - When the budget expires, abort the internal controller, await the
+ *     subprocess/tree teardown, then reject with
+ *     `RuntimeError("RESPONSE_TIMEOUT", …)` matching the legacy
+ *     `withTimeout` code shape.
  *   - Result success path is unchanged from `runCliPrompt`.
  */
 export async function runCliPromptWithBudget(
@@ -619,40 +764,40 @@ export async function runCliPromptWithBudget(
 
   let timeoutFired = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      timeoutFired = true;
-      controller.abort();
-      reject(
-        new RuntimeError(
-          "RESPONSE_TIMEOUT",
-          `${stage} timed out after ${budgetMs}ms.`,
-          stage,
-          {
-            details: {
-              budget_ms: budgetMs,
-              command_label: opts.commandLabel ?? null,
-            },
-          },
-        ),
-      );
-    }, budgetMs);
-    timer.unref();
-  });
+  timer = setTimeout(() => {
+    timeoutFired = true;
+    controller.abort();
+  }, budgetMs);
+  timer.unref();
+
+  const timeoutError = (raceDetected = false) =>
+    new RuntimeError(
+      "RESPONSE_TIMEOUT",
+      `${stage} timed out after ${budgetMs}ms${raceDetected ? " (race detected post-result)" : ""}.`,
+      stage,
+      {
+        details: {
+          budget_ms: budgetMs,
+          command_label: opts.commandLabel ?? null,
+        },
+      },
+    );
 
   try {
-    const runPromise = runCliPrompt({ ...opts, signal: controller.signal });
-    const result = await Promise.race([runPromise, timeoutPromise]);
+    let result: CliClientResult;
+    try {
+      // Deliberately do not race this promise against an early timeout
+      // rejection. The timer aborts it, and runCliPrompt owns the complete
+      // child/descendant teardown before it can settle.
+      result = await runCliPrompt({ ...opts, signal: controller.signal });
+    } catch (error) {
+      if (timeoutFired) throw timeoutError();
+      throw error;
+    }
     if (timeoutFired) {
-      // Defensive — Promise.race might have observed the result first
-      // even though the timer fired in the same microtask tick. The
-      // controller was already aborted, so the subprocess is on its
-      // way down; surface the timeout to the caller.
-      throw new RuntimeError(
-        "RESPONSE_TIMEOUT",
-        `${stage} timed out after ${budgetMs}ms (race detected post-result).`,
-        stage,
-      );
+      // The timer and close can become runnable in the same event-loop turn.
+      // Teardown has still completed because runCliPrompt settled first.
+      throw timeoutError(true);
     }
     return result;
   } finally {
@@ -732,4 +877,22 @@ function raceWithTimeout(promise: Promise<unknown>, timeoutMs: number): Promise<
   ]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
   });
+}
+
+async function raceWithValueTimeout<T, TTimeout>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutValue: TTimeout,
+): Promise<T | TTimeout> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<TTimeout>((resolve) => {
+        timer = setTimeout(() => resolve(timeoutValue), Math.max(0, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }

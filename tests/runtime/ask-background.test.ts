@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
-import { runAsk } from "../../runtime/commands/ask.js";
+import { access } from "node:fs/promises";
+
+import { executeAskJob, runAsk } from "../../runtime/commands/ask.js";
 import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { waitForTerminalJob } from "../../runtime/jobs.js";
-import { resolvePluginPaths } from "../../runtime/paths.js";
+import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -42,6 +44,7 @@ function makeMockEnv(
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
     KIMI_PLUGIN_CC_MOCK_DELAY_MS: String(options?.delayMs ?? 0),
     KIMI_PLUGIN_CC_NODE_BIN: "node",
+    KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
   };
 }
 
@@ -76,6 +79,69 @@ async function waitForJobState(
 }
 
 describe("ask background", () => {
+  test("worker re-verifies the hook and persists the exact refusal without invoking Kimi", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-background-worker-hook");
+    const repoRoot = await createGitRepoFixture("ask-background-worker-hook-repo");
+    const invocationPath = path.join(pluginDataRoot, "kimi-invocation.json");
+    const env = makeMockEnv(pluginDataRoot, "ask-success");
+    delete env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK;
+    env.KIMI_CODE_HOME = path.join(pluginDataRoot, "missing-kimi-home");
+    env.KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH = invocationPath;
+    const paths = resolvePluginPaths(env);
+    const jobId = randomUUID();
+
+    try {
+      await ensurePluginPaths(paths);
+      const store = new JobStore(paths);
+      try {
+        store.createJob({
+          job_id: jobId,
+          repo_id: "ask-background-worker-hook-repo",
+          command_type: "ask",
+          cwd: repoRoot,
+          model: null,
+          thinking: null,
+          background: true,
+          pid: null,
+          kimi_pid: null,
+          status: "running",
+          kimi_session_id: null,
+          agent_profile: "<cli-client>",
+          prompt_digest: "worker-hook-preflight",
+          summary: "worker hook preflight",
+          phase: "worker-spawned",
+          final_output_path: null,
+          stream_log_path: path.join(paths.logsDir, `ask-${jobId}.jsonl`),
+          error: null,
+        });
+      } finally {
+        store.close();
+      }
+
+      await expect(
+        executeAskJob(jobId, "Question that must not reach Kimi", makeContext(repoRoot, env)),
+      ).rejects.toMatchObject({
+        code: "ASK_HOOK_NOT_INSTALLED",
+        stage: "ask.hook-check",
+      });
+
+      const reopened = new JobStore(paths);
+      try {
+        const failed = reopened.getJob(jobId);
+        expect(failed?.status).toBe("failed");
+        expect(failed?.phase).toBe("failed");
+        expect(failed?.error?.code).toBe("ASK_HOOK_NOT_INSTALLED");
+        expect(failed?.error?.stage).toBe("ask.hook-check");
+      } finally {
+        reopened.close();
+      }
+      await expect(access(invocationPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
   test("ask --background creates a job with background=true and returns {job_id, command_type}", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("ask-background-basic");
     const repoRoot = await createGitRepoFixture("ask-background-basic-repo");
@@ -271,6 +337,7 @@ describe("ask background", () => {
       // Actually set it to a broken value so spawn fails after phase check.
       KIMI_PLUGIN_CC_KIMI_BIN: `/tmp/missing-kimi-bin-${randomUUID()}`,
       KIMI_PLUGIN_CC_NODE_BIN: "node",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
     } as NodeJS.ProcessEnv;
 
     try {

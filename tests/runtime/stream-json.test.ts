@@ -110,6 +110,63 @@ describe("StreamJsonParser", () => {
     expect(outcome!.malformedReason).toContain("unknown role");
   });
 
+  test("parses the kimi 0.23.5 turn.step.retrying meta record", () => {
+    // Exact PromptJsonRetryMetaMessage fixture from upstream's 0.23.5
+    // apps/kimi-code/test/cli/run-prompt.test.ts coverage.
+    const parser = new StreamJsonParser();
+    const line = JSON.stringify({
+      role: "meta",
+      type: "turn.step.retrying",
+      failed_attempt: 1,
+      next_attempt: 2,
+      max_attempts: 3,
+      delay_ms: 300,
+      error_name: "APIProviderRateLimitError",
+      error_message: "llmproxy/openai/responses/resp_abc.json status_code=429",
+      status_code: 429,
+    });
+    const [outcome] = parser.push(`${line}\n`);
+    expect(outcome!.malformedLine).toBeUndefined();
+    expect(outcome!.record).toEqual({
+      role: "meta",
+      type: "turn.step.retrying",
+      failedAttempt: 1,
+      nextAttempt: 2,
+      maxAttempts: 3,
+      delayMs: 300,
+      errorName: "APIProviderRateLimitError",
+      errorMessage: "llmproxy/openai/responses/resp_abc.json status_code=429",
+      statusCode: 429,
+    });
+  });
+
+  test.each([
+    ["failed_attempt", "1"],
+    ["next_attempt", null],
+    ["max_attempts", undefined],
+    ["delay_ms", Number.POSITIVE_INFINITY],
+    ["error_name", 429],
+    ["error_message", false],
+    ["status_code", "429"],
+  ] as const)("rejects malformed retry metadata field %s", (field, value) => {
+    const retry: Record<string, unknown> = {
+      role: "meta",
+      type: "turn.step.retrying",
+      failed_attempt: 1,
+      next_attempt: 2,
+      max_attempts: 3,
+      delay_ms: 300,
+      error_name: "APIProviderRateLimitError",
+      error_message: "rate limited",
+      status_code: 429,
+    };
+    retry[field] = value;
+
+    const [outcome] = new StreamJsonParser().push(`${JSON.stringify(retry)}\n`);
+    expect(outcome?.record).toBeUndefined();
+    expect(outcome?.malformedReason).toBe("meta.turn.step.retrying field has unexpected type");
+  });
+
   test("parses the kimi 0.2.0 session.resume_hint meta record", () => {
     // PR #47 (07ed2cf) moved the resume hint from stderr to a stream-json
     // meta record on stdout. The session_id token uses kimi 0.2.0's

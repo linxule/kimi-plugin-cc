@@ -23,4 +23,5 @@ Pass through: `[--base <ref>] [-m <model>] [extra prose]`
 
 - Preserve the user's adversarial framing as trailing focus text.
 - Do not pass background/wait flags; the runtime rejects them for challenge.
+- If the companion reports CHALLENGE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.
 - Return companion stdout verbatim without softening the challenge framing.
