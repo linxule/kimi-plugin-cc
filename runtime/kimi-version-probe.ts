@@ -648,6 +648,27 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // worktreeCleaned=true); and an out-of-trusted-root absolute write was denied.
   // Report: .claude/kimi-code-research/daily-monitor/2026-07-11-upstream-monitor.md.
   // Tag: compat-verified-kimi-code-0.23.5.
+  // 0.23.6 (patch, 2026-07-12) verified COMPAT-PRESERVED within the already-
+  // listed {0,23} at released tag commit b5c236d0. Permission and both hook
+  // trees stayed byte-identical (`02-permission.diff` and `03-hooks.diff` were
+  // 0 bytes): hook-first order, any-block-wins aggregation, Bash.command,
+  // Write.path, and Edit.path remain intact. `run-prompt.ts` now keeps `-p`
+  // alive while a goal is active or cron work is pending and optionally across
+  // background-task steering; the plugin does not enable steer mode and its
+  // mandatory AbortController budgets remain the outer bound. Upstream also
+  // makes subagent timeout configurable and raises its default to two hours,
+  // without changing AgentSwarm's standard permission stack; plugin budgets
+  // and hard concurrency caps still bound every swarm run. The provider
+  // capability rename from select_tools to dynamically_loaded_tools is
+  // internal tool-disclosure plumbing, not a permission or stdout-shape change.
+  // Exact-0.23.6 `bun run smoke:real` was GREEN (2026-07-12): 9 pass / 0 fail
+  // in 274.55s. Read-only labels denied forced writes; pursue ran to its full
+  // two-minute budget with no file written; read-only swarm denied a spawned
+  // subagent write; write-swarm stayed confined (patchBytes=306,
+  // userTreeClean=true, worktreeCleaned=true); and an out-of-root absolute
+  // write was hook-denied after a real AgentSwarm dispatch. Report:
+  // .claude/kimi-code-research/daily-monitor/2026-07-12-upstream-monitor.md.
+  // Tag: compat-verified-kimi-code-0.23.6.
   { major: 0, minor: 23 },
 ];
 

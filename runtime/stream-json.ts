@@ -16,7 +16,7 @@
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified stable through 0.23.5. 2026-05-27 audit covered 0.4.0,
+//     verified stable through 0.23.6. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -98,7 +98,15 @@
 //     live stdout change is this file's `turn.step.retrying` meta record: it is
 //     modeled exactly and filtered from consumer records while malformed shapes
 //     remain diagnostic. The post-change exact-binary smoke was GREEN 9/0 in
-//     229.56s, including the full goal budget and both write-swarm boundaries.
+//     229.56s, including the full goal budget and both write-swarm boundaries),
+//     and 2026-07-12 covered the 0.23.6 patch at tag commit `b5c236d0`
+//     (permission and both hook trees 0-byte; no new PromptJsonWriter record;
+//     `run-prompt.ts` now keeps print mode alive across active goals, pending
+//     cron fires, and opt-in background steering, all still bounded externally
+//     by plugin budgets; subagent timeout config and the capability rename to
+//     dynamically_loaded_tools do not alter stdout shape). Exact-binary smoke
+//     was GREEN 9/0 in 274.55s, including the full goal budget and both
+//     write-swarm boundaries.
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal
