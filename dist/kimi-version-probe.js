@@ -667,6 +667,31 @@ export const KIMI_TESTED_MINORS = [
     // .claude/kimi-code-research/daily-monitor/2026-07-12-upstream-monitor.md.
     // Tag: compat-verified-kimi-code-0.23.6.
     { major: 0, minor: 23 },
+    // 0.24.2 (minor, 2026-07-15) verified COMPAT-PRESERVED across the cumulative
+    // 0.23.6→0.24.2 release delta. The default v1 permission and live
+    // session/hooks surfaces are 0-byte diffs: PreToolCallHook remains index 0,
+    // AutoModeApprove remains the first approve at index 5, aggregation remains
+    // any-block-wins, and Bash.command / Write.path / Edit.path are unchanged.
+    // The large prompt-mode refactor keeps the explicit argv and v1 auto-mode
+    // contract intact. A truthy ambient KIMI_CODE_EXPERIMENTAL_FLAG now selects
+    // native agent-core-v2; source tracing confirmed its strict configured-hook
+    // schema, configured+plugin hook merge, snake_case tool payload, awaited
+    // pre-execution deny, and per-agent hook service. A targeted exact-v2 review
+    // smoke denied a forced write. V2 also emits role:"meta",
+    // type:"system.version" before normal output; the parser tolerates it as one
+    // non-fatal diagnostic, keeps it out of records/onRecord, and still pins the
+    // terminal session.resume_hint, so explicit modeling is optional polish.
+    // Upstream print mode now defaults background completion to steering and its
+    // own task timeouts can be unbounded, but the plugin's finite budgets,
+    // concurrency caps, and identity-safe cancellation teardown remain outer
+    // bounds. The complete exact-0.24.2 v1 `bun run smoke:real` was GREEN:
+    // 9 pass / 0 fail, 39 assertions in 261.33s. Read-only labels denied writes;
+    // pursue wrote no file through its full two-minute budget; read swarm denied
+    // a subagent write; write-swarm stayed confined (patchBytes=278,
+    // userTreeClean=true, worktreeCleaned=true); and the out-of-root write was
+    // denied. Phase-1 reports: 97-100; synthesis: 101. Tag:
+    // compat-verified-kimi-code-0.24.2.
+    { major: 0, minor: 24 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

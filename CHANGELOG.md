@@ -2,6 +2,17 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.8.1 — 2026-07-15
+
+**kimi-code 0.24.2 compatibility: extend `KIMI_TESTED_MINORS` with `{0,24}` after a four-lane source audit and green exact-binary smoke.** This patch release clears the H9 newer-than-tested warning for operators whose upstream binary auto-upgraded into 0.24.x.
+
+- **Default v1 safety chain unchanged.** Across 0.23.6→0.24.2, permission and live `session/hooks/` diffs are 0 bytes. The PreToolUse hook remains policy index 0, auto-mode approve remains the first approve at index 5, any block still wins across configured/plugin hooks, and `Bash.command` / `Write.path` / `Edit.path` remain intact.
+- **Prompt-mode refactor remains compatible.** The v1 driver still forces auto permission, preserves the plugin's argv, emits the same assistant/tool, retry, goal-summary, and terminal resume-hint shapes, and stays inside the plugin's mandatory budgets and identity-safe cancellation barrier despite upstream's new default background steering and unbounded task waits.
+- **Experimental v2 seam audited.** A truthy ambient `KIMI_CODE_EXPERIMENTAL_FLAG` now selects native agent-core-v2. Its strict hook config, configured+plugin hook merge, snake_case payload, awaited pre-execution deny, and per-agent hook service preserve the effective safety contract; a targeted exact-v2 review smoke denied a forced write. V2's extra `meta/system.version` line is safely diagnostic-only today: it never enters consumer records/prose and does not disrupt terminal session pinning. Explicit modeling remains optional polish.
+- **Exact 0.24.2 smoke GREEN.** The temp-binary v1 suite ran 9 pass / 0 fail, 39 assertions in 261.33s: all read-only forced writes were denied; pursue wrote no file through its full budget; read swarm denied a subagent write; write-swarm remained confined (`patchBytes=278`, `userTreeClean=true`, `worktreeCleaned=true`); and the out-of-root write was denied. The targeted v2 lane ran 1 pass / 8 skip / 0 fail in 11.60s.
+- **Audit-doc correction.** The live v1 hook engine is `session/hooks/`; the historical `agent/hooks/` tree was removed by the relocation commit. Audit commands keep both paths only for cross-version coverage.
+- Reports: `.claude/kimi-code-research/reports/97-upstream-0242-hook-contract.md` through `101-upstream-0242-synthesis.md`. Tags: `v1.8.1` and `compat-verified-kimi-code-0.24.2`.
+
 ## 1.8.0 — 2026-07-11
 
 **Safety stabilization: fail closed before Kimi starts, protect the shared config as a complete document, and do not resume callers while cancellation teardown is still running.**

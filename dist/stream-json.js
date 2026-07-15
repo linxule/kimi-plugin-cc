@@ -10,13 +10,14 @@
 //   {"role":"tool","tool_call_id":"...","content":"..."}
 //   {"role":"meta","type":"session.resume_hint","session_id":"session_<uuid>","command":"kimi -r session_<uuid>","content":"To resume this session: kimi -r session_<uuid>"}
 //   {"role":"meta","type":"turn.step.retrying","failed_attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":300,"error_name":"APIProviderRateLimitError","error_message":"...","status_code":429}
+//   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; diagnostic-tolerated, not modeled
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
 //     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
 //     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified stable through 0.23.6. 2026-05-27 audit covered 0.4.0,
+//     verified compatible through 0.24.2. 2026-05-27 audit covered 0.4.0,
 //     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
 //     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
 //     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
@@ -106,7 +107,16 @@
 //     by plugin budgets; subagent timeout config and the capability rename to
 //     dynamically_loaded_tools do not alter stdout shape). Exact-binary smoke
 //     was GREEN 9/0 in 274.55s, including the full goal budget and both
-//     write-swarm boundaries.
+//     write-swarm boundaries), and 2026-07-15 covered the 0.23.6→0.24.2
+//     minor (Phase-1 reports 97-100; permission and the live session/hooks
+//     surfaces 0-byte; default-v1 writer/resume/retry/goal shapes compatible;
+//     GREEN exact-binary v1 smoke 9/0, 39 assertions in 261.33s). A truthy
+//     ambient KIMI_CODE_EXPERIMENTAL_FLAG selects native v2, which shares the
+//     writer shapes and terminal session.resume_hint but prepends one new
+//     role:"meta", type:"system.version" record. Unknown meta is intentionally
+//     non-fatal: it becomes diagnostic-only, never enters records[]/onRecord,
+//     and cannot affect prose or session pinning. A targeted exact-v2 review
+//     smoke denied the forced write (1 pass / 8 skip / 0 fail).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal

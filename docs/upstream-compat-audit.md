@@ -2,7 +2,7 @@
 
 How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
 
-This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands. (Most recent worked examples: the 2026-06-12 0.12.0→0.14.1 multi-minor catch-up, reports 72-76 → v1.2.3; and the 2026-06-16 0.15.0 new-minor checkup, report 78 → v1.2.4.)
+This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands. The most recent worked example is the 2026-07-15 0.23.6→0.24.2 certification (reports 97-101 → v1.8.1).
 
 ## When to run
 
@@ -47,7 +47,7 @@ checks.
 
 **Skip** for patch releases unless the changelog explicitly touches:
 - `apps/kimi-code/src/cli/run-prompt.ts` (stream-json output, session pinning)
-- `packages/agent-core/src/session/hooks/` (hook engine — input/output contract; live since 0.5.0, `agent/hooks/` is a legacy copy — diff both)
+- `packages/agent-core/src/session/hooks/` (live v1 hook engine since 0.5.0; retain the removed `agent/hooks/` path in cross-version diffs)
 - `packages/agent-core/src/agent/permission/` (policy queue ordering)
 - `apps/kimi-code/src/cli/commands.ts` / `options.ts` (argv surface)
 
@@ -70,7 +70,7 @@ These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our
 | Surface | Where in kimi-code | What we depend on | Where in kimi-plugin-cc |
 |---|---|---|---|
 | `kimi -p` permission mode | `apps/kimi-code/src/cli/run-prompt.ts` | hard-coded `permission: 'auto'`; `installHeadlessHandlers` auto-approves; resumed sessions force-overridden to `'auto'` | `runtime/cli-client.ts` invokes `-p`; safety relies on the hook firing |
-| PreToolUse hook engine | `packages/agent-core/src/session/hooks/` (live since kimi-code 0.5.0; `agent/hooks/` is a legacy copy — diff both) | stdin JSON shape (`{tool_name, tool_input, session_id, cwd, ...}`), exit-2-as-deny semantics, empty matcher means all tools, fail-open on internal error | `runtime/hooks/approval-hook.ts`, `runtime/hooks/approval-policy.ts` |
+| PreToolUse hook engine | `packages/agent-core/src/session/hooks/` (live since kimi-code 0.5.0; keep the removed `agent/hooks/` path in cross-version diffs) | stdin JSON shape (`{tool_name, tool_input, session_id, cwd, ...}`), exit-2-as-deny semantics, empty matcher means all tools, fail-open on internal error | `runtime/hooks/approval-hook.ts`, `runtime/hooks/approval-policy.ts` |
 | Hook **aggregation** across multiple hooks | `packages/agent-core/src/session/hooks/engine.ts` (`aggregateResults`/`blockDecision`) | **any-block-wins**: any result with `action:'block'` denies regardless of other hooks; an allow never pre-empts a block. Load-bearing since kimi-code 0.20.1 (#1127) — enabled kimi-code *plugins* can now contribute PreToolUse hooks merged into the `-p` session (`rpc/core-impl.ts` create+resume), so we are no longer the sole hook on the channel | implicit — this guarantees a plugin hook can't override our managed PreToolUse deny |
 | Plugin slash commands / command activation | `packages/agent-core/src/rpc/core-impl.ts`, `packages/agent-core/src/session/rpc.ts`, `packages/agent-core/src/session/prompt-metadata.ts`, `packages/agent-core/src/agent/index.ts` | Since kimi-code 0.21.0 (#1204), enabled kimi-code plugins can contribute slash commands activated by RPC/host UI. Re-confirm activation stays **host-initiated**, absent from the `apps/kimi-code/src/cli/` `-p` path, not registered as a model tool, and only macro-expands into prompt text whose later tool calls still pass through the index-0 hook | implicit — plugin-contributed slash commands must not become a model-reachable tool or a permission bypass |
 | Permission policy queue order | `packages/agent-core/src/agent/permission/policies/index.ts` | `PreToolCallHookPermissionPolicy` runs **before** `auto-mode-approve` / `yolo-mode-approve` | implicit — entire safety model assumes hook fires first |
@@ -110,11 +110,10 @@ git diff "$PREV".."$NEW" -- \
   packages/agent-core/src/session/permission/ \
   > /tmp/kimi-<NEW>-diff/02-permission.diff
 
-# Scope BOTH agent/hooks AND session/hooks. The LIVE hook engine relocated
-# to session/hooks/ in kimi-code 0.5.0 (agent/hooks/ is now a byte-identical
-# legacy copy). Diffing only agent/ would MISS a change to the engine that
-# actually runs in -p mode — the 0-byte signal would be a false negative.
-# (If a copy no longer exists in a given release, its diff is simply empty.)
+# Scope BOTH historical agent/hooks AND live session/hooks. The engine relocated
+# to session/hooks/ in kimi-code 0.5.0 and the old tree was removed in the same
+# commit. Retaining both paths makes cross-version audits cover either layout;
+# a path absent from both compared releases contributes an empty diff.
 git diff "$PREV".."$NEW" -- \
   packages/agent-core/src/agent/hooks/ \
   packages/agent-core/src/session/hooks/ \
@@ -142,7 +141,7 @@ git diff "$PREV".."$NEW" -- \
   > /tmp/kimi-<NEW>-diff/05-session-bootstrap.diff
 ```
 
-A 0-byte `03-hooks.diff` (now covering **both** `agent/hooks/` and the live `session/hooks/`) is the canonical "hook engine unchanged" signal. The other **four** need real reading. (Note: `04-wire-records.diff` scopes the whole `session/` dir, so it re-includes `session/hooks/`+`session/permission/` — that overlap is intentional belt-and-suspenders, not a bug.) `05-session-bootstrap.diff` scopes the RPC harness impl + the whole `config/` dir, because a non-empty `05` means session construction or on-disk config-load behavior moved — exactly the surface that determines what the permission context (e.g. `additionalDirs`) holds before any policy runs. A non-empty `05` requires reading even when `01`–`04` are clean.
+A 0-byte `03-hooks.diff` (historical `agent/hooks/` plus live `session/hooks/`) is the canonical "hook engine unchanged" signal. The other **four** need real reading. (Note: `04-wire-records.diff` scopes the whole `session/` dir, so it re-includes `session/hooks/`+`session/permission/` — that overlap is intentional belt-and-suspenders, not a bug.) `05-session-bootstrap.diff` scopes the RPC harness impl + the whole `config/` dir, because a non-empty `05` means session construction or on-disk config-load behavior moved — exactly the surface that determines what the permission context (e.g. `additionalDirs`) holds before any policy runs. A non-empty `05` requires reading even when `01`–`04` are clean.
 
 ### Phase 1 — Multi-agent compat review (4 parallel agents)
 

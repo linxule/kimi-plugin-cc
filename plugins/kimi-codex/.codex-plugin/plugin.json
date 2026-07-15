@@ -1,6 +1,6 @@
 {
   "name": "kimi",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Codex plugin that delegates review, challenge, ask, rescue, pursue, and swarm workflows to the local kimi-code CLI through the kimi-plugin-cc companion runtime.",
   "author": {
     "name": "linxule"
