@@ -727,6 +727,41 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // denial also passed (1 pass). Daily monitor: 2026-07-16. Tag:
   // compat-verified-kimi-code-0.25.0.
   { major: 0, minor: 25 },
+  // 0.26.0 (minor, 2026-07-16) verified COMPAT-PRESERVED across the
+  // 0.25.0→0.26.0 release delta. All THREE primary safety surfaces are 0-byte
+  // diffs: 01-cli-prompt-mode, 02-permission, AND 03-hooks are byte-identical,
+  // so argv, default-v1 routing, auto permission, headless handlers, the whole
+  // policy queue (PreToolCallHook index 0), the hook engine, exit-2 denial,
+  // matcher behavior, and any-block-wins aggregation are unchanged from the
+  // certified 0.25.0. The two non-empty scoped surfaces are compat-benign:
+  // 04-wire-records (32 KB) is session-store workDir normalization (Windows
+  // case-insensitive drive paths), session forking (a persisted `forked`
+  // AgentRecord + a new internal `context.update_token_count` record — neither
+  // is a `-p` stdout record the parser consumes, and an unknown type fails safe
+  // to the diagnostic channel), provider-manager thinking plumbing, and a
+  // subagent-host `drainChildBackgroundTasks` addition that holds a subagent
+  // open until its background tasks settle and suppresses their terminal
+  // notifications (a lifecycle/settlement change, NOT a permission-stack change;
+  // drained tasks still fire the index-0 hook — it aligns with the plugin's own
+  // settlement-barrier cancellation). 05-session-bootstrap (16 KB) is
+  // config/model.ts thinking-profile plumbing, an optional `auth:'oauth'` field
+  // added to the MCP HTTP/SSE schemas (NOT HookDefSchema, which stays
+  // `.strict()`), and additive rpc/core-impl.ts Global-MCP management + OAuth
+  // flows + deleteSession/importContext (all RPC/host methods off the `-p`
+  // path) plus a setAdditionalDirs→setBaseAdditionalDirs rename and an
+  // `includeSubagents` resume flag the plugin never passes; the create/resume
+  // hook merge is unchanged. Direct checks on the 0.26.0 tag: tools/builtin/file
+  // is a 0-byte diff (Write.path/Edit.path byte-identical), the deny-all unshift
+  // is still startBtw()-only (subagent-host.ts, inside startBtw(), never the
+  // swarm spawn path), and installHeadlessHandlers + the v1 default persist. The
+  // complete exact-0.26.0 v1 `bun run smoke:real` (temp-installed 0.26.0 binary
+  // via the KIMI_PLUGIN_CC_KIMI_BIN override) was GREEN: 9 pass / 0 fail, 39
+  // assertions in 376.06s. Read-only labels denied writes; pursue wrote no file
+  // through its full budget (aborted at the ceiling); read swarm denied a
+  // subagent write; write-swarm stayed confined (patchBytes=278,
+  // userTreeClean=true, worktreeCleaned=true); and the out-of-root write was
+  // denied. Tag: compat-verified-kimi-code-0.26.0.
+  { major: 0, minor: 26 },
 ];
 
 export interface KimiVersionProbeOk {
