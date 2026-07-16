@@ -90,7 +90,7 @@ export async function runSetup(argv, context) {
     const warnings = [];
     switch (parsed.mode) {
         case "uninstall":
-            return await runUninstall(configPath, hookScriptPath, hostId, parsed.removeAllHosts, reviewGateEnabled, warnings);
+            return await runUninstall(configPath, hookScriptPath, hostId, parsed.removeAllHosts, reviewGateEnabled, warnings, context);
         case "check":
             return await runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context);
         case "install":
@@ -152,13 +152,20 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
             }
             warnings.push(`Converted the top-level inline hooks array (${inlineHooks.entryCount} entr${inlineHooks.entryCount === 1 ? "y" : "ies"}) to canonical [[hooks]] tables before installing. Surrounding config bytes were preserved; formatting and comments inside that hooks assignment were normalized.`);
         }
-        // Prune orphaned, marker-less approval-hook [[hooks]] entries left by
-        // pre-v1.7.0 installs (host/path churn) BEFORE resolving the managed block,
-        // so line numbers used for splicing are computed against the cleaned text.
-        const { pruned, count: prunedCount } = pruneOrphanApprovalHooks(inlineHooks.contents, lineEnding);
+        // Prune THIS HOST's orphaned, marker-less approval-hook [[hooks]] entries
+        // BEFORE resolving the managed block, so line numbers used for splicing are
+        // computed against the cleaned text. Host-scoped (v1.8.2): after a
+        // kimi-code config rewrite strips marker comments, ANOTHER host's
+        // marker-less table is that host's LIVE hook — pruning it here was the
+        // pre-v1.8.2 seesaw where each host's setup disarmed the other.
+        const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
+        const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, lineEnding, hostId, expectedCommand);
         const existing = pruned;
         if (prunedCount > 0) {
-            warnings.push(`Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) left by earlier installs (no managed marker). This is a cleanup — your active hook is unaffected.`);
+            const readorned = prunedCommands.includes(expectedCommand);
+            warnings.push(readorned
+                ? `Re-adorned this host's managed-block markers: kimi-code rewrites its config on login/settings changes and strips all comments (markers included), leaving the hook enforcing but unmarked. Replaced the bare hook table with a freshly marked block (${prunedCount} table(s) refreshed). Enforcement was never interrupted.`
+                : `Pruned ${prunedCount} stale marker-less kimi-plugin-cc hook block(s) left by this host's earlier installs. This is a cleanup — your active hook is unaffected.`);
         }
         const { state, blocks } = parseManagedBlock(existing, hostId);
         if (state.kind === "orphan") {
@@ -271,10 +278,34 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
     if (otherHosts.length > 0) {
         warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")} (coexisting, untouched).`);
     }
-    const orphanHooks = findUnmanagedApprovalHookBlocks(existing).length;
-    if (orphanHooks > 0) {
-        warnings.push(`Found ${orphanHooks} orphaned kimi-plugin-cc hook block(s) with no managed marker. ` +
-            `Run /kimi:setup to prune them, or /kimi:setup --uninstall --all to clear everything.`);
+    // Marker-less table triage (v1.8.2): after a kimi-code config rewrite strips
+    // all comments, each host's [[hooks]] table survives unmarked and KEEPS
+    // ENFORCING. Ours-with-the-exact-current-command is the live hook (covered
+    // by the installedCheck note below, not "cruft"); ours-with-a-stale-command
+    // is prunable by this host's setup; another host's is THEIR live hook —
+    // report it informationally and leave it strictly alone.
+    const bareTables = findUnmanagedApprovalHookBlocks(existing);
+    const ownStale = bareTables.filter((t) => hostIdFromHookCommand(t.command) === hostId && t.command !== expectedCommand);
+    const foreignHosts = [
+        ...new Set(bareTables
+            // Exclude any table whose command byte-equals what THIS host writes —
+            // it is unambiguously ours even if a `KIMI_PLUGIN_CC_HOST_ID` override
+            // makes its path-derived host differ from `hostId` (Opus review NIT:
+            // otherwise runCheck would mislabel the host's own table as foreign).
+            .filter((t) => t.command !== expectedCommand)
+            .map((t) => hostIdFromHookCommand(t.command))
+            .filter((h) => h !== null && h !== hostId)),
+    ];
+    if (ownStale.length > 0) {
+        warnings.push(`Found ${ownStale.length} stale marker-less kimi-plugin-cc hook block(s) from this host's earlier installs. ` +
+            `Run /kimi:setup to refresh, or /kimi:setup --uninstall --all to clear everything.`);
+    }
+    for (const host of foreignHosts) {
+        warnings.push(`Host "${host}" has a marker-less kimi-plugin-cc hook block (kimi-code config rewrites strip comments). ` +
+            `It still enforces and is left untouched; run that host's setup to re-adorn its markers.`);
+    }
+    if (installedCheck.installed && installedCheck.note !== undefined) {
+        warnings.push(`Note: ${installedCheck.note}`);
     }
     if (!installedCheck.installed) {
         return {
@@ -347,9 +378,15 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         probeError: probe.ok ? undefined : probe.reason,
         warnings,
         reviewGateEnabled,
-        nextStep: probe.ok
-            ? "No action needed."
-            : "Run /kimi:setup to repair the managed block, or /kimi:setup --uninstall if you want to remove the integration.",
+        nextStep: !probe.ok
+            ? "Run /kimi:setup to repair the managed block, or /kimi:setup --uninstall if you want to remove the integration."
+            : installedCheck.via === "bare-table"
+                // Enforcement is active via the marker-less table, but the markers are
+                // gone (kimi-code stripped them). Don't say "No action needed" while a
+                // warning tells the user to re-adorn — that contradiction confused
+                // operators (Kimi review F3). Recommend the harmless re-adorn.
+                ? "Enforcement is active. Run /kimi:setup to re-adorn this host's managed-block markers — kimi-code stripped them on its last config write (comments are not preserved). Your hook keeps working meanwhile."
+                : "No action needed.",
         details: buildDetails({
             configPath,
             hookScriptPath,
@@ -360,10 +397,10 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         }),
     };
 }
-async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings) {
-    return await withKimiConfigLock(configPath, () => runUninstallLocked(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings));
+async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings, context) {
+    return await withKimiConfigLock(configPath, () => runUninstallLocked(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings, context));
 }
-async function runUninstallLocked(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings) {
+async function runUninstallLocked(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings, context) {
     const existing = await readConfigSafe(configPath);
     if (existing.length === 0) {
         return {
@@ -387,12 +424,22 @@ async function runUninstallLocked(configPath, hookScriptPath, hostId, removeAllH
         };
     }
     // Default: remove THIS host's block(s) — its own suffixed block plus any
-    // legacy block whose command path derives to this host — and our orphaned
-    // marker-less hook entries, leaving OTHER hosts' blocks intact. `--all`:
-    // remove EVERY host's managed block (the full nuke).
+    // legacy block whose command path derives to this host — and THIS HOST's
+    // orphaned marker-less hook entries, leaving OTHER hosts' blocks AND their
+    // marker-less tables intact (a marker-less table is likely that host's LIVE
+    // hook after a kimi-code comment strip — v1.8.2 host scoping). `--all`:
+    // remove EVERY host's managed block and every one of our hook tables (the
+    // full nuke).
     const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(existing, hostId, removeAllHosts);
     const lineEnding = detectLineEnding(existing);
-    const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, lineEnding);
+    // Pass `expectedCommand` as `alsoMatchCommand` (both scoped and --all) so
+    // uninstall removes THIS host's own current hook table by byte-exact command
+    // even when a `KIMI_PLUGIN_CC_HOST_ID` override disagrees with the command's
+    // path-derived host, or when the hook lives under a non-standard (dev) path
+    // that `isOurApprovalHookCommand` wouldn't recognize — the install path
+    // already does this; uninstall now matches it (Codex P2 / Opus A / Kimi F4).
+    const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
+    const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, lineEnding, removeAllHosts ? undefined : hostId, expectedCommand);
     const changed = stripped !== existing;
     if (changed) {
         await writeConfigAtomic(configPath, stripped);
@@ -639,13 +686,20 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
 /**
  * Remove orphaned, marker-less `[[hooks]]` tables that are unambiguously this
  * plugin's approval hook (see `findUnmanagedApprovalHookBlocks`). Returns the
- * cleaned text and the count removed. A no-op (returns the input unchanged)
- * when there is nothing to prune, so callers can compare identity cheaply.
+ * cleaned text, the count removed, and the decoded commands of the removed
+ * tables (so install can distinguish "re-adorning this host's live hook after
+ * a kimi-code comment strip" from "sweeping stale cruft"). A no-op (returns
+ * the input unchanged) when there is nothing to prune, so callers can compare
+ * identity cheaply.
+ *
+ * `ownedBy` restricts the prune to tables whose command path derives to that
+ * host — REQUIRED for scoped install/uninstall so one host never disarms the
+ * other's live (marker-stripped) hook. Omit only for `--uninstall --all`.
  */
-function pruneOrphanApprovalHooks(contents, lineEnding) {
-    const ranges = findUnmanagedApprovalHookBlocks(contents);
+function pruneOrphanApprovalHooks(contents, lineEnding, ownedBy, alsoMatchCommand) {
+    const ranges = findUnmanagedApprovalHookBlocks(contents, ownedBy, alsoMatchCommand);
     if (ranges.length === 0)
-        return { pruned: contents, count: 0 };
+        return { pruned: contents, count: 0, commands: [] };
     const remove = new Set();
     for (const { start, end } of ranges) {
         for (let i = start; i < end; i += 1)
@@ -667,7 +721,11 @@ function pruneOrphanApprovalHooks(contents, lineEnding) {
             collapsed.push(line);
         }
     }
-    return { pruned: collapsed.join(lineEnding), count: ranges.length };
+    return {
+        pruned: collapsed.join(lineEnding),
+        count: ranges.length,
+        commands: ranges.map((range) => range.command),
+    };
 }
 // ----- Block content -----------------------------------------------------
 function buildManagedBlock(hookScriptPath, env, lineEnding = "\n", hostId = "") {

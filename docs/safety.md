@@ -100,9 +100,24 @@ uninstalls only its **own** block.
   converted in place by the current host on its next `/kimi:setup`. Orphaned,
   marker-less `[[hooks]]` entries that are unambiguously our approval hook
   (canonical command, `approval-hook.js` under a kimi-marketplace/kimi-plugin-cc
-  tree) are pruned. `/kimi:setup --uninstall` removes only the current host's
-  block (plus legacy + our orphans); `/kimi:setup --uninstall --all` removes
-  every host's block.
+  tree) are pruned **host-scoped** (v1.8.2): install and scoped uninstall touch
+  only tables whose command path derives to the *current* host. `/kimi:setup
+  --uninstall` removes only the current host's block (plus legacy + this host's
+  orphans); `/kimi:setup --uninstall --all` removes every host's block and every
+  plugin-owned table. Hand-rolled user hooks are never touched.
+- **Markers are not durable — verification does not depend on them (v1.8.2).**
+  kimi-code persists its config via smol-toml `stringify(parse(...))` on every
+  login/settings write, which deletes ALL comments — the managed-block BEGIN/END
+  markers included — while the `[[hooks]]` table (data) survives and keeps
+  enforcing. When this host's marked block is absent, the verifier falls back to
+  a marker-less table whose decoded `command` is **byte-identical** to the
+  canonical expected command, under the same strict grammar (PreToolUse event,
+  no matcher, no keys beyond event/command/timeout). Anything weaker — drifted
+  path, matcher-bearing table, foreign keys — still refuses. The fallback never
+  applies over duplicate/orphan/invalid marked states. The next `/kimi:setup`
+  re-adorns the markers; the other host's marker-less table is that host's LIVE
+  hook and is left byte-untouched (pre-v1.8.2, the host-blind prune here caused
+  each host's setup to disarm the other after any kimi login — the "seesaw").
 
 ## The hook's per-command policy
 

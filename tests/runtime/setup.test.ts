@@ -954,7 +954,13 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     ].join("\n");
     await writeFile(configPath, seeded, "utf8");
 
-    const result = await runSetup([], makeContext(env));
+    // v1.8.2: the prune is host-scoped — run as the host that OWNS the orphan
+    // (`~/.claude/…` → claude-code). Another host's install must leave it be
+    // (covered by the marker-strip suite).
+    const result = await runSetup(
+      [],
+      makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }),
+    );
     const after = await readFile(configPath, "utf8");
     // Orphan removed, user content preserved, our fresh block installed.
     expect(after).not.toContain(orphanHook);
@@ -981,7 +987,8 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     ].join("\n");
     await writeFile(configPath, seeded, "utf8");
 
-    await runSetup([], makeContext(env));
+    // Host-scoped prune (v1.8.2): run as the orphan's owning host.
+    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
     const after = await readFile(configPath, "utf8");
     // Orphan hook removed…
     expect(after).not.toContain(orphanHook);
