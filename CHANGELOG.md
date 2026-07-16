@@ -2,6 +2,15 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.8.5 — 2026-07-16
+
+**agent-core-v2 readiness hardening.** Explicitly models kimi-code's experimental-v2 `system.version` stream-json record and adds a persistent real-binary v2 smoke lane, so an eventual v2 default-flip is a non-event instead of a scramble. No behavior change on the default v1 path; v2 remains opt-in.
+
+- **`system.version` is now a modeled `SystemVersionRecord`.** agent-core-v2 (selected by a truthy ambient `KIMI_CODE_EXPERIMENTAL_FLAG`, which the plugin inherits) emits `{"role":"meta","type":"system.version","version":"<semver>"}` once before the assistant/tool stream; v1 emits none. Previously this routed to the malformed/diagnostic channel as an unknown meta type (non-fatal — `records[]` and the terminal `session.resume_hint` were never affected). It is now parsed into the `StreamJsonRecord` union, validated (non-empty string `version`), and filtered from consumer `records[]`/`onRecord` exactly like `session.resume_hint` and `turn.step.retrying`. This keeps a benign, expected v2 line out of diagnostics.
+- **Observable out-of-band on `CliClientResult.systemVersion`.** Captured first-announce-wins and surfaced on the result (mirroring `goalSummary`/`sessionId`), so a caller can tell which engine served a run — `undefined` on v1, the kimi-code semver on v2. Diagnostic/observability only; not load-bearing.
+- **New opt-in v2 smoke lane** (`tests/runtime/real-binary-smoke.test.ts`). Runs the forced-write denial under `KIMI_CODE_EXPERIMENTAL_FLAG=1` and asserts (1) no file written + the hook deny marker (the index-0 hook still denies under the native engine) and (2) `result.systemVersion` is defined — proving the flag actually engaged v2 rather than silently falling back to v1. Verified GREEN against the installed 0.25.0 binary (1 pass / 0 fail). Skipped under `bun run check` like the rest of the smoke.
+- Regression: 4 new `stream-json` unit tests (valid parse, resume-hint-not-pre-empted, malformed-version rejection cases). Edits: `runtime/stream-json.ts` (`SystemVersionRecord` + parse), `runtime/cli-client.ts` (`systemVersion` field + capture), the two test files, 4-file version bump 1.8.4 → 1.8.5 + re-pinned surface hashes.
+
 ## 1.8.4 — 2026-07-16
 
 **Certifies kimi-code 0.26.0.** Extends `KIMI_TESTED_MINORS` to include `{0,26}` after a scoped source audit (COMPAT-PRESERVED) backed by a GREEN exact-`0.26.0` real-binary smoke. Tags `compat-verified-kimi-code-0.26.0`. No runtime behavior change. (Shipped the same day as v1.8.3's 0.25.0 certification — npm `latest` had moved to 0.26.0 mid-audit.)

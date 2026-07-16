@@ -167,6 +167,63 @@ describe("StreamJsonParser", () => {
     expect(outcome?.malformedReason).toBe("meta.turn.step.retrying field has unexpected type");
   });
 
+  test("parses the agent-core-v2 system.version meta record", () => {
+    // Emitted once, before the assistant/tool stream, when a truthy ambient
+    // KIMI_CODE_EXPERIMENTAL_FLAG selects agent-core-v2. Modeled since v1.8.5
+    // (previously routed to the malformed/diagnostic channel as unknown meta).
+    const parser = new StreamJsonParser();
+    const line = JSON.stringify({ role: "meta", type: "system.version", version: "0.26.0" });
+    const [outcome] = parser.push(`${line}\n`);
+    expect(outcome!.malformedLine).toBeUndefined();
+    expect(outcome!.malformedReason).toBeUndefined();
+    expect(outcome!.record).toEqual({
+      role: "meta",
+      type: "system.version",
+      version: "0.26.0",
+    });
+  });
+
+  test("system.version does not pre-empt the terminal session.resume_hint", () => {
+    // A full v2 run: the version banner leads, prose follows, resume hint ends.
+    // The version banner must be recognized (not malformed) and must not shadow
+    // the resume hint the cli-client pins for `kimi -r`.
+    const parser = new StreamJsonParser();
+    const lines = [
+      JSON.stringify({ role: "meta", type: "system.version", version: "0.26.0" }),
+      JSON.stringify({ role: "assistant", content: "done" }),
+      JSON.stringify({
+        role: "meta",
+        type: "session.resume_hint",
+        session_id: "session_11111111-1111-1111-1111-111111111111",
+      }),
+    ];
+    const outcomes = parser.push(`${lines.join("\n")}\n`);
+    expect(outcomes.every((o) => o.malformedLine === undefined)).toBe(true);
+    expect(outcomes[0]!.record).toEqual({ role: "meta", type: "system.version", version: "0.26.0" });
+    const hint = outcomes.find(
+      (o) => o.record?.role === "meta" && o.record.type === "session.resume_hint",
+    );
+    expect(hint?.record).toEqual({
+      role: "meta",
+      type: "session.resume_hint",
+      sessionId: "session_11111111-1111-1111-1111-111111111111",
+    });
+  });
+
+  test.each([
+    ["", "empty version string"],
+    [undefined, "missing version"],
+    [42, "non-string version"],
+    [null, "null version"],
+  ] as const)("rejects malformed system.version (%s)", (value) => {
+    const rec: Record<string, unknown> = { role: "meta", type: "system.version", version: "0.26.0" };
+    if (value === undefined) delete rec.version;
+    else rec.version = value;
+    const [outcome] = new StreamJsonParser().push(`${JSON.stringify(rec)}\n`);
+    expect(outcome?.record).toBeUndefined();
+    expect(outcome?.malformedReason).toBe("meta.system.version.version not non-empty string");
+  });
+
   test("parses the kimi 0.2.0 session.resume_hint meta record", () => {
     // PR #47 (07ed2cf) moved the resume hint from stderr to a stream-json
     // meta record on stdout. The session_id token uses kimi 0.2.0's

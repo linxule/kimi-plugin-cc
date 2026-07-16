@@ -94,6 +94,7 @@ export async function runCliPrompt(opts) {
     let stderrTail = "";
     let announcedSessionId;
     let announcedGoalSummary;
+    let announcedSystemVersion;
     let logChain = Promise.resolve();
     const appendLogLine = (payload) => {
         if (opts.logPath === undefined)
@@ -155,9 +156,10 @@ export async function runCliPrompt(opts) {
                 // Meta records are out-of-band wrapper metadata, never consumer-facing
                 // assistant/tool records. Capture session.resume_hint (first-announce
                 // wins, mirroring the stderr capture below for kimi 0.1.x), and skip
-                // every recognized meta type, including 0.23.5's turn.step.retrying.
-                // This keeps records[] and onRecord stable while preserving the resume
-                // hint as the primary session-id source under kimi 0.2.0+.
+                // every recognized meta type, including 0.23.5's turn.step.retrying and
+                // agent-core-v2's system.version. This keeps records[] and onRecord
+                // stable while preserving the resume hint as the primary session-id
+                // source under kimi 0.2.0+.
                 if (outcome.record.role === "meta") {
                     if (outcome.record.type === "session.resume_hint" &&
                         announcedSessionId === undefined) {
@@ -166,6 +168,15 @@ export async function runCliPrompt(opts) {
                             event: "session_announce",
                             source: "stream-json.meta",
                             session_id: outcome.record.sessionId,
+                        });
+                    }
+                    else if (outcome.record.type === "system.version" &&
+                        announcedSystemVersion === undefined) {
+                        announcedSystemVersion = outcome.record.version;
+                        appendLogLine({
+                            event: "system_version",
+                            source: "stream-json.meta",
+                            version: outcome.record.version,
                         });
                     }
                     continue;
@@ -431,6 +442,7 @@ export async function runCliPrompt(opts) {
             settle("resolve", {
                 sessionId,
                 goalSummary: announcedGoalSummary,
+                systemVersion: announcedSystemVersion,
                 records,
                 malformed,
                 stderrTail,

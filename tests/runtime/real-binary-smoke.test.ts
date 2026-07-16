@@ -278,6 +278,92 @@ suite("real-binary smoke: read-only commands cannot write (H7)", () => {
   }
 });
 
+// v2 lane (v1.8.5): the SAME forced-write denial, but served by agent-core-v2
+// (a truthy ambient KIMI_CODE_EXPERIMENTAL_FLAG, which the plugin inherits). v2
+// is opt-in today; this lane proves the index-0 PreToolUse hook still denies
+// writes when the native engine serves the run — so an eventual v2 default-flip
+// is a non-event rather than a scramble. It also asserts the run was ACTUALLY
+// served by v2 (result.systemVersion is defined — only v2 emits the
+// system.version banner; v1 does not), so the flag can't silently no-op and
+// give false confidence.
+suite("real-binary smoke: agent-core-v2 still denies writes (KIMI_CODE_EXPERIMENTAL_FLAG)", () => {
+  test(
+    "[review/v2] a forced write is denied AND the run is served by agent-core-v2",
+    async () => {
+      const kimiHome = await createTestPluginDataRoot("smoke-home-v2-review");
+      const workspace = await createTestPluginDataRoot("smoke-ws-v2-review");
+      const pluginData = await createTestPluginDataRoot("smoke-data-v2-review");
+      try {
+        await seedKimiHome(SEED_HOME, kimiHome);
+        const setupEnv: NodeJS.ProcessEnv = {
+          ...process.env,
+          KIMI_CODE_HOME: kimiHome,
+          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+        };
+        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        expect(
+          setupResult.probe,
+          `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
+        ).toBe("ok");
+
+        const { command, prefixArgs } = resolveKimiCliCommand(process.env);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), PER_RUN_BUDGET_MS);
+        timer.unref?.();
+        let result;
+        try {
+          result = await runCliPrompt({
+            cwd: workspace,
+            env: {
+              ...process.env,
+              KIMI_CODE_HOME: kimiHome,
+              KIMI_CODE_EXPERIMENTAL_FLAG: "1",
+            },
+            command,
+            prefixArgs,
+            commandLabel: "review",
+            prompt: WRITE_PROMPT,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+
+        // PRIMARY safety invariant holds under v2: nothing was written.
+        const wrote = await fileExists(path.join(workspace, TARGET_FILENAME));
+        expect(
+          wrote,
+          `read-only "review" under agent-core-v2 must NOT create ${TARGET_FILENAME}`,
+        ).toBe(false);
+
+        // EVIDENCE the hook fired on a write attempt under v2.
+        const haystack = `${JSON.stringify(result.records)}\n${result.stderrTail}`;
+        expect(
+          haystack,
+          `expected the hook deny marker "${DENY_MARKER}" under v2 ` +
+            `(exit=${result.exitCode}, aborted=${result.aborted})`,
+        ).toContain(DENY_MARKER);
+
+        // ENGAGEMENT proof: the run was actually served by agent-core-v2, which
+        // emits a system.version meta record (captured out-of-band on the
+        // result). v1 emits none, so a defined systemVersion means the flag took
+        // effect and we exercised the native engine — not a silent v1 fallback.
+        expect(
+          result.systemVersion,
+          "expected a system.version banner proving agent-core-v2 served the run " +
+            "under KIMI_CODE_EXPERIMENTAL_FLAG=1 (none captured → flag no-op or v2 output changed)",
+        ).toBeDefined();
+      } finally {
+        await cleanupTestPath(kimiHome);
+        await cleanupTestPath(workspace);
+        await cleanupTestPath(pluginData);
+      }
+    },
+    PER_RUN_BUDGET_MS + 30_000,
+  );
+});
+
 // The LOAD-BEARING safety test for /kimi:pursue (autonomous goal mode): the
 // PreToolUse hook must fire on EVERY continuation turn, not just turn 1. We run
 // real headless goal mode (KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND=1 + a /goal

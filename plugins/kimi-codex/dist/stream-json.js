@@ -10,7 +10,7 @@
 //   {"role":"tool","tool_call_id":"...","content":"..."}
 //   {"role":"meta","type":"session.resume_hint","session_id":"session_<uuid>","command":"kimi -r session_<uuid>","content":"To resume this session: kimi -r session_<uuid>"}
 //   {"role":"meta","type":"turn.step.retrying","failed_attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":300,"error_name":"APIProviderRateLimitError","error_message":"...","status_code":429}
-//   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; diagnostic-tolerated, not modeled
+//   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; modeled since v1.8.5 (SystemVersionRecord), filtered like other meta
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
@@ -339,6 +339,21 @@ function validateMeta(parsed, line) {
             errorName,
             errorMessage,
             ...(typeof statusCode === "number" && { statusCode }),
+        };
+        return { record };
+    }
+    if (type === "system.version") {
+        const version = parsed["version"];
+        if (typeof version !== "string" || version.length === 0) {
+            return {
+                malformedLine: line,
+                malformedReason: "meta.system.version.version not non-empty string",
+            };
+        }
+        const record = {
+            role: "meta",
+            type: "system.version",
+            version,
         };
         return { record };
     }

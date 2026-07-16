@@ -10,7 +10,7 @@
 //   {"role":"tool","tool_call_id":"...","content":"..."}
 //   {"role":"meta","type":"session.resume_hint","session_id":"session_<uuid>","command":"kimi -r session_<uuid>","content":"To resume this session: kimi -r session_<uuid>"}
 //   {"role":"meta","type":"turn.step.retrying","failed_attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":300,"error_name":"APIProviderRateLimitError","error_message":"...","status_code":429}
-//   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; diagnostic-tolerated, not modeled
+//   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; modeled since v1.8.5 (SystemVersionRecord), filtered like other meta
 //
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
@@ -211,11 +211,33 @@ export interface TurnStepRetryingRecord {
   readonly statusCode?: number;
 }
 
+/**
+ * Version banner emitted by kimi-code's experimental agent-core-v2 print driver
+ * (selected by a truthy ambient `KIMI_CODE_EXPERIMENTAL_FLAG`, which the plugin
+ * inherits) once per `-p` run, before the assistant/tool stream. The default v1
+ * driver does not emit it. Like the other meta records it is wrapper metadata,
+ * not consumer prose, so cli-client filters it through the same meta-record
+ * boundary as session.resume_hint (role === "meta" → skipped from records[]).
+ *
+ * Modeled explicitly since v1.8.5: previously an unknown meta.type routed to the
+ * malformed/diagnostic channel (non-fatal, records[] and the terminal
+ * session.resume_hint were never affected). Recognizing it keeps a benign,
+ * expected v2 line out of the diagnostics log and makes an eventual v2
+ * default-flip a non-event rather than a diagnostic-noise surprise. Observed at
+ * @moonshot-ai/kimi-code 0.24.x → 0.26.0; `version` is the kimi-code semver.
+ */
+export interface SystemVersionRecord {
+  readonly role: "meta";
+  readonly type: "system.version";
+  readonly version: string;
+}
+
 export type StreamJsonRecord =
   | AssistantRecord
   | ToolResultRecord
   | SessionResumeHintRecord
-  | TurnStepRetryingRecord;
+  | TurnStepRetryingRecord
+  | SystemVersionRecord;
 
 /**
  * Goal-summary record emitted by kimi-code 0.8.0+ headless goal mode
@@ -481,6 +503,21 @@ function validateMeta(parsed: Record<string, unknown>, line: string): StreamJson
       errorName,
       errorMessage,
       ...(typeof statusCode === "number" && { statusCode }),
+    };
+    return { record };
+  }
+  if (type === "system.version") {
+    const version = parsed["version"];
+    if (typeof version !== "string" || version.length === 0) {
+      return {
+        malformedLine: line,
+        malformedReason: "meta.system.version.version not non-empty string",
+      };
+    }
+    const record: SystemVersionRecord = {
+      role: "meta",
+      type: "system.version",
+      version,
     };
     return { record };
   }
