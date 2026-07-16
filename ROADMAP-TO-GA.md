@@ -145,6 +145,11 @@ Comment block at the start of the cancellation section should explain WHY we hav
 
 **Decision:** Documentation polish; can ship any time.
 
+### L4 — Plugin-manifest hook as an additive, comment-strip-immune enforcement layer (spike done 2026-07-16, DEFERRED)
+kimi-code's own plugin system can carry our PreToolUse hook via `kimi.plugin.json`'s `hooks` field (the same `HookDefSchema`, merged into create+resume on the `-p` path since **0.20.1**, same stdin-JSON/exit-2-deny/any-block-wins contract), registered in the versioned JSON `~/.kimi-code/plugins/installed.json` — structurally immune to the config.toml comment-strip that drove v1.8.2. It would be **strictly additive** (invisible < 0.20.1; `KIMI_TESTED_MINORS` covers from 0.2.0, so config.toml stays the floor) and, only if config.toml were ever retired, could delete `managed-block.ts` (~787 lines) + most host-scoping forensics (host-scoping comes free as two `installed.json` entries keyed by `id`). **Blocker:** no *supported* headless enable path — no `kimi plugin` CLI verb, only the TUI `/plugins` trust flow. A direct-file-write route works today but rests on undocumented internals (the same "unlisted contract" risk class as the comment-strip incident); the node-sdk is unpublished (404) and the `kimi server` RPC is disproportionate.
+
+**Decision (2026-07-16):** DEFER. v1.8.2 already fixed the practical seesaw pain, so this is non-urgent defense-in-depth, and building a safety-critical path on undocumented internals is the risk we just got burned by. Full spike + a drafted (unfiled) upstream feature-request for scriptable enablement live at `.claude/kimi-code-research/plugin-manifest-hook-feasibility-2026-07-16.md`. Revisit if upstream ships a `kimi plugin install/enable` verb or documents `installed.json`/`kimi.plugin.json` as a stable directly-writable contract.
+
 ## Anti-roadmap (deliberately out of scope)
 
 - **Windows process-group reaping.** kimi-code 0.1.1 effectively doesn't support Windows with the same robustness; targeting POSIX-first is correct.
