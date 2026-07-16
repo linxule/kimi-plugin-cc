@@ -692,6 +692,38 @@ export const KIMI_TESTED_MINORS = [
     // denied. Phase-1 reports: 97-100; synthesis: 101. Tag:
     // compat-verified-kimi-code-0.24.2.
     { major: 0, minor: 24 },
+    // 0.25.0 (minor, 2026-07-16) verified COMPAT-PRESERVED across the
+    // 0.24.2→0.25.0 release delta. The two primary safety surfaces are 0-byte
+    // diffs: 01-cli-prompt-mode and 03-hooks are byte-identical, so argv,
+    // default-v1 routing, auto permission, headless handlers, the hook payload,
+    // exit-2 denial, matcher behavior, and any-block-wins aggregation are
+    // unchanged. The remaining scoped deltas are compat-benign: 02-permission
+    // (943 B) only adds `trace_id` to two permission telemetry events (no policy
+    // construction, queue order, or resolution change); 04-wire-records (2 KB)
+    // touches only session/provider-manager.ts to forward Anthropic
+    // supportEfforts/adaptive-thinking capability data (no new PromptJsonWriter
+    // record, role/meta type, session-id field, or goal-summary shape);
+    // 05-session-bootstrap (3.9 KB) derives thinking efforts from the resolved
+    // provider profile while still loading workspace dirs, building the
+    // permission context, and merging configured + plugin hooks on create AND
+    // resume. Direct invariant checks on the released 0.25.0 tag confirmed
+    // PreToolCallHook index 0, AgentSwarmExclusiveDeny index 1, AutoModeApprove
+    // the first approve at index 5 (every intervening policy a deny), any-block-
+    // wins, empty matcher = all tools, exit 2 blocks, Bash.command /
+    // Write.path / Edit.path, `kimi -p` default v1 unless a truthy ambient
+    // KIMI_CODE_EXPERIMENTAL_FLAG selects agent-core-v2 (still opt-in, still
+    // safety-preserving), AgentSwarm subagents on the standard permission stack
+    // (deny-all remains startBtw()-only), and KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
+    // as the hard concurrent-subagent ceiling. The complete exact-0.25.0 v1
+    // `bun run smoke:real` was GREEN on the clean v1.8.2 tree: 9 pass / 0 fail,
+    // 39 assertions in 419.12s. Read-only labels denied writes; pursue wrote no
+    // file through its full budget (aborted at the wall-clock ceiling); read
+    // swarm denied a subagent write; write-swarm stayed confined (patchBytes=278,
+    // userTreeClean=true, worktreeCleaned=true); and the out-of-root write was
+    // denied. A supplementary KIMI_CODE_EXPERIMENTAL_FLAG=1 targeted v2 review
+    // denial also passed (1 pass). Daily monitor: 2026-07-16. Tag:
+    // compat-verified-kimi-code-0.25.0.
+    { major: 0, minor: 25 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;
