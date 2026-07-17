@@ -75,6 +75,12 @@ const EXEC_DELEGATING_FLAGS_EXACT = new Set([
   "--toolexec",
   "-exec",
   "-execdir",
+  // `rg --pre <CMD>` runs CMD as a per-file preprocessor (RCE); `rg --hostname-bin
+  // <CMD>` runs CMD to resolve the hostname; `sort --compress-program <CMD>` execs
+  // CMD to (de)compress spill files (RCE on GNU sort). Verified 2026-07-17.
+  "--pre",
+  "--hostname-bin",
+  "--compress-program",
 ]);
 const EXEC_DELEGATING_FLAG_PREFIXES = [
   "--open-files-in-pager=",
@@ -82,21 +88,19 @@ const EXEC_DELEGATING_FLAG_PREFIXES = [
   "--vettool=",
   "-toolexec=",
   "--toolexec=",
+  "--pre=",
+  "--hostname-bin=",
+  "--compress-program=",
 ];
 // Pytest/python -m pytest report flags write to arbitrary paths. Test
 // runners execute repo code by design (documented trust boundary, report 43
-// F4); this only stops them writing OUTSIDE the workspace.
-const PYTEST_REPORT_FLAGS_EXACT = new Set([
+// F4); this only stops them writing OUTSIDE the workspace. pytest parses argv
+// with argparse (allow_abbrev), so match these as abbreviation-aware prefixes.
+const PYTEST_REPORT_FLAGS = [
   "--junitxml",
   "--junit-xml",
   "--result-log",
   "--report-log",
-]);
-const PYTEST_REPORT_FLAG_PREFIXES = [
-  "--junitxml=",
-  "--junit-xml=",
-  "--result-log=",
-  "--report-log=",
 ];
 const PIPELINE_PLUMBING = new Set(["head", "tail", "wc", "sort", "uniq"]);
 const GIT_READONLY_SUBCOMMANDS = new Set(["status", "diff", "show", "log", "grep", "blame"]);
@@ -113,6 +117,98 @@ const BANNED_FIND_ACTIONS = new Set([
   "-fprint0",
   "-fls",
 ]);
+
+// Per-tool flags that write to an arbitrary path even in the tool's read/check
+// mode (verified 2026-07-17). Each takes a path value (space- or =-separated);
+// `hasFlagFromSet` matches both spellings.
+const GO_WRITE_FLAGS = new Set([
+  "-coverprofile",
+  "-cpuprofile",
+  "-memprofile",
+  "-blockprofile",
+  "-mutexprofile",
+  "-trace",
+  "-outputdir",
+]);
+const CARGO_WRITE_FLAGS = new Set(["--target-dir", "--out-dir"]);
+// tsc matches option names case-INSENSITIVELY (the compiler lowercases them via
+// optionsNameMap), so `--outdir` == `--outDir`. Stored lowercase; matched
+// against lowercased arg names (Opus review 2026-07-17).
+const TSC_WRITE_FLAGS_LC = new Set([
+  "--generatecpuprofile",
+  "--generatetrace",
+  "--tsbuildinfofile",
+  "--outfile",
+  "--outdir",
+  "--out",
+  "--declarationdir",
+]);
+// ruff --config accepts an inline `key=value` override (`--config 'fix=true'`
+// flips ruff into file-rewriting mode) or an arbitrary config path — reject it
+// alongside the direct write flags (Fable review 2026-07-17).
+const RUFF_WRITE_FLAGS = new Set(["--add-noqa", "--fix-only", "--cache-dir", "--output-file", "--config"]);
+const ESLINT_WRITE_FLAGS = new Set(["--cache-location", "--output-file"]);
+// eslint LOADS AND EXECUTES the module these point at (a custom parser, a rules
+// directory, or the plugin-resolution root) — an arbitrary path is a code-exec
+// escape from the "linters run repo code" boundary. A reviewer uses the
+// project's eslintrc, not these CLI flags (Fable review 2026-07-17).
+const ESLINT_CODELOAD_FLAGS = new Set(["--parser", "--rulesdir", "--resolve-plugins-relative-to"]);
+
+// mypy runs no repo code, but writes reports/cache to arbitrary paths and can
+// pip-install. mypy uses argparse (allow_abbrev), so ANY unambiguous prefix of
+// these resolves (`--jun`→--junit-xml, `--html-rep`→--html-report,
+// `--cache-di`→--cache-dir); matched abbreviation-aware, not exact.
+const MYPY_WRITE_FLAGS_ABBREV = [
+  "--junit-xml",
+  "--cache-dir",
+  "--install-types",
+  // A mypy config file can set `plugins = /path/to/plugin.py`, which mypy
+  // IMPORTS (executes) — an arbitrary `--config-file` is a code-exec escape
+  // (Fable review 2026-07-17). A reviewer uses the workspace mypy.ini.
+  "--config-file",
+  "--any-exprs-report",
+  "--cobertura-xml-report",
+  "--html-report",
+  "--linecount-report",
+  "--linecoverage-report",
+  "--lineprecision-report",
+  "--memory-xml-report",
+  "--txt-report",
+  "--xml-report",
+  "--xslt-html-report",
+  "--xslt-txt-report",
+];
+
+/**
+ * True if any arg is exactly a flag in `flags` or its `--flag=value` form.
+ * Handles both `--flag value` (arg === "--flag") and `--flag=value`.
+ */
+function hasFlagFromSet(args: string[], flags: ReadonlySet<string>): boolean {
+  return args.some((arg) => {
+    const eq = arg.indexOf("=");
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    return flags.has(name);
+  });
+}
+
+/**
+ * True if `arg` matches any flag in `flags` accounting for argparse-style prefix
+ * ABBREVIATION (`allow_abbrev`, the default for mypy/pytest): argparse accepts
+ * any unambiguous prefix of a registered option, so `--jun` resolves to
+ * `--junit-xml`. Matches when the arg name (before any `=`) is a prefix of a
+ * dangerous flag (abbreviation) OR a dangerous flag is a prefix of the name
+ * (exact + trailing). This is a SUPERSET of the argparse-acceptable forms —
+ * genuinely ambiguous prefixes that argparse would reject are harmlessly denied
+ * too. Min length 3 (`--` + 1 char) avoids matching a bare `--`.
+ */
+function matchesAbbreviatedFlag(args: string[], flags: readonly string[]): boolean {
+  return args.some((arg) => {
+    const eq = arg.indexOf("=");
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    if (name.length < 3) return false;
+    return flags.some((flag) => flag.startsWith(name) || name.startsWith(flag));
+  });
+}
 
 /**
  * Read-only tools that bypass the rescue allowlist entirely. Mirrors
@@ -427,15 +523,41 @@ export function validateShellStage(
   }
 
   if (command === "tsc") {
-    return args.includes("--noEmit")
-      ? { ok: true }
-      : { ok: false, reason: "Rescue allows tsc only with --noEmit." };
+    // tsc option names are case-INSENSITIVE (compiler lowercases them), so match
+    // lowercased. `--noemit`/`--noEmit` both suppress JS emit; `--outdir` is the
+    // same write flag as `--outDir` (Opus review 2026-07-17).
+    const tscLowerNames = args.map((arg) => {
+      const eq = arg.indexOf("=");
+      return (eq === -1 ? arg : arg.slice(0, eq)).toLowerCase();
+    });
+    if (!tscLowerNames.includes("--noemit")) {
+      return { ok: false, reason: "Rescue allows tsc only with --noEmit." };
+    }
+    // --noEmit suppresses JS emit but NOT the profile/trace/buildinfo/declaration
+    // writers, which write to arbitrary paths (verified 2026-07-17).
+    if (tscLowerNames.some((name) => TSC_WRITE_FLAGS_LC.has(name))) {
+      return {
+        ok: false,
+        reason: `Rescue rejects tsc write flags (--generateCpuProfile, --generateTrace, --tsBuildInfoFile, --outFile, --outDir, --out, --declarationDir — case-insensitive): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
   }
 
   if (command === "biome") {
-    return args[0] === "check"
-      ? { ok: true }
-      : { ok: false, reason: "Rescue allows biome only in check mode." };
+    if (args[0] !== "check") {
+      return { ok: false, reason: "Rescue allows biome only in check mode." };
+    }
+    // biome check applies fixes with any --apply/--write/--fix variant, incl. the
+    // -unsafe/-only suffixes that dodge the global exact/prefix mutating-flag set
+    // (--apply is caught globally, --apply-unsafe is not). Verified 2026-07-17.
+    if (args.some((arg) => /^--(apply|write|fix)/.test(arg))) {
+      return {
+        ok: false,
+        reason: `Rescue rejects biome check write flags (--apply, --apply-unsafe, --write, --fix, and -unsafe/-only variants): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
   }
 
   if (command === "ruff") {
@@ -444,6 +566,14 @@ export function validateShellStage(
         return {
           ok: false,
           reason: `Rescue rejects ruff -o (writes the report to a file): ${tokens.join(" ")}.`,
+        };
+      }
+      // --add-noqa/--fix-only rewrite source; --cache-dir/--output-file write
+      // outside the workspace (--fix-only dodges the global --fix check).
+      if (hasFlagFromSet(args, RUFF_WRITE_FLAGS)) {
+        return {
+          ok: false,
+          reason: `Rescue rejects ruff write flags (--add-noqa, --fix-only, --cache-dir, --output-file): ${tokens.join(" ")}.`,
         };
       }
       return { ok: true };
@@ -463,9 +593,18 @@ export function validateShellStage(
         : { ok: false, reason: "Rescue allows cargo fmt only with --check." };
     }
 
-    return CARGO_SUBCOMMANDS.has(args[0] ?? "")
-      ? { ok: true }
-      : { ok: false, reason: `Rescue rejects cargo subcommand: ${tokens.join(" ")}` };
+    if (!CARGO_SUBCOMMANDS.has(args[0] ?? "")) {
+      return { ok: false, reason: `Rescue rejects cargo subcommand: ${tokens.join(" ")}` };
+    }
+    // --target-dir/--out-dir redirect the whole artifact tree to an arbitrary
+    // path outside the workspace (verified 2026-07-17).
+    if (hasFlagFromSet(args, CARGO_WRITE_FLAGS)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects cargo --target-dir/--out-dir (writes artifacts to an arbitrary path): ${tokens.join(" ")}.`,
+      };
+    }
+    return { ok: true };
   }
 
   if (command === "go") {
@@ -479,6 +618,14 @@ export function validateShellStage(
       return {
         ok: false,
         reason: `Rescue rejects go -o (writes a binary to an arbitrary path): ${tokens.join(" ")}.`,
+      };
+    }
+    // Profile/trace/output-dir flags on `go test`/`go build` write to arbitrary
+    // paths without `-o` (verified 2026-07-17).
+    if (hasFlagFromSet(args, GO_WRITE_FLAGS)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects go profile/output flags (-coverprofile, -cpuprofile, -memprofile, -blockprofile, -mutexprofile, -trace, -outputdir write to arbitrary paths): ${tokens.join(" ")}.`,
       };
     }
     return { ok: true };
@@ -510,30 +657,41 @@ export function validateShellStage(
     // (report 34 Codex HIGH) found this gap. `--fix` is also already
     // in MUTATING_FLAGS_EXACT, so the eslint command surface is now
     // read-only by construction.
-    if (args.includes("-o")) {
+    // Match `-o` and the joined `-o<path>` spelling (eslint accepts both).
+    if (args.some((arg) => arg === "-o" || /^-o./.test(arg))) {
       return {
         ok: false,
         reason: `Rescue rejects eslint -o (writes report to a file): ${tokens.join(" ")}. Drop the flag or use a path-checked Write tool call.`,
+      };
+    }
+    // --output-file (long form) is caught globally; --cache-location writes the
+    // cache tree to an arbitrary path (verified 2026-07-17).
+    if (hasFlagFromSet(args, ESLINT_WRITE_FLAGS)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects eslint --cache-location/--output-file (writes to an arbitrary path): ${tokens.join(" ")}.`,
+      };
+    }
+    // --parser/--rulesdir/--resolve-plugins-relative-to LOAD AND EXECUTE a module
+    // from the given path (Fable review 2026-07-17) — a code-exec escape.
+    if (hasFlagFromSet(args, ESLINT_CODELOAD_FLAGS)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects eslint --parser/--rulesdir/--resolve-plugins-relative-to (loads and executes a module from the given path): ${tokens.join(" ")}.`,
       };
     }
     return { ok: true };
   }
 
   if (command === "mypy") {
-    // mypy runs no repo code, but its report flags write to arbitrary paths:
-    // `--junit-xml FILE`, `--<fmt>-report DIR` (report 43 F5). Reject those;
-    // everything else is read-only.
-    if (
-      args.some(
-        (arg) =>
-          arg === "--junit-xml" ||
-          arg.startsWith("--junit-xml=") ||
-          /^--[a-z][a-z-]*-report$/.test(arg),
-      )
-    ) {
+    // mypy runs no repo code, but writes reports/cache to arbitrary paths and can
+    // pip-install. Matched abbreviation-aware because argparse allow_abbrev lets
+    // `--jun`→--junit-xml, `--html-rep`→--html-report, `--cache-di`→--cache-dir
+    // (verified 2026-07-17).
+    if (matchesAbbreviatedFlag(args, MYPY_WRITE_FLAGS_ABBREV)) {
       return {
         ok: false,
-        reason: `Rescue rejects mypy report-writing flags (--junit-xml, --*-report write to arbitrary paths): ${tokens.join(" ")}.`,
+        reason: `Rescue rejects mypy report/cache/install flags (--junit-xml, --*-report, --cache-dir, --install-types — incl. argparse abbreviations — write outside the workspace or run pip): ${tokens.join(" ")}.`,
       };
     }
     return { ok: true };
@@ -565,6 +723,22 @@ export function validateShellStage(
         reason: `Rescue rejects ${command} -o/--output (writes to an arbitrary file): ${tokens.join(" ")}.`,
       };
     }
+    // `sort -o FILE` / `-T DIR` write to an arbitrary path — including BUNDLED
+    // short-flag clusters (`sort -rT /tmp`, `-ro file`) that the generic `-o`
+    // check above misses because the cluster starts with `-r` (Opus review
+    // 2026-07-17). `sortShortClusterWrites` scans the cluster with getopt
+    // semantics; the long `--temporary-directory` form is matched separately.
+    if (
+      command === "sort" &&
+      (args.some((arg) => sortShortClusterWrites(arg)) ||
+        args.includes("--temporary-directory") ||
+        args.some((arg) => arg.startsWith("--temporary-directory=")))
+    ) {
+      return {
+        ok: false,
+        reason: `Rescue rejects sort -o/-T (incl. bundled short clusters like -rT) and --temporary-directory (write to an arbitrary path): ${tokens.join(" ")}.`,
+      };
+    }
     // `uniq IN OUT` writes OUT; `-` (stdin) counts as an operand, so
     // `uniq - /tmp/out` is a write. Two+ operands ⇒ an output file is present.
     if (
@@ -582,8 +756,141 @@ export function validateShellStage(
   return { ok: false, reason: `Rescue rejects shell command: ${tokens.join(" ")}` };
 }
 
+/** Thrown by `throwingExpansionEnv` when the parser resolves a real variable. */
+class ShellExpansionError extends Error {}
+
+/**
+ * Env callback for `parse(command, env)`. shell-quote invokes it ONLY for a
+ * `$VAR`/`${…}` expansion that bash would actually perform — i.e. OUTSIDE single
+ * quotes (single-quoted `$` is literal). Throwing on any non-empty key rejects
+ * every real reference — including `$IFS`, `$HOME`, and double-quoted `"$PAT"` —
+ * quote-aware and for free. An EMPTY key is a trailing/literal `$` (`grep 'end$'`,
+ * `awk '{print $}'`), which bash does not expand, so it returns a literal `$`.
+ */
+function throwingExpansionEnv(key: string): string {
+  if (key !== "") throw new ShellExpansionError(key);
+  return "$";
+}
+
+/**
+ * True if the command performs any `$VAR`/`${…}` parameter expansion. Uses the
+ * vendored parser's own quote tracking (via the throwing env), so it is immune
+ * to the two ways the default empty-env parse DIVERGES from bash and hides a
+ * smuggled flag from every per-flag check:
+ *   - `${VAR:-flag}` collapsed to an empty token (no `:-`-default modelling), and
+ *   - `$IFS`-gluing (`rg x$IFS--pre$IFS'sh'` → one token here, but bash splits it
+ *     into `rg x --pre sh` — an RCE). The word-boundary regex this replaced
+ *     missed the glued form because `$` was preceded by a letter, not whitespace.
+ * A malformed substitution (`${}`, unterminated) throws a plain parser Error;
+ * that is itself unsafe to pass through, so any throw ⇒ unsafe (fail closed).
+ */
+function hasShellExpansion(command: string): boolean {
+  try {
+    parse(command, throwingExpansionEnv);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * True if `s[open]` opens a bash BRACE EXPANSION (`{a,b}` / `{a..b}`): a matching
+ * `}` with a top-level `,` or `..` between. bash expands it into multiple words
+ * BEFORE the allowlist sees them (`find . {-delete,}` → `find . -delete`), while
+ * shell-quote keeps it as one literal token — so a smuggled flag/action hides in
+ * the group. `${…}` (param expansion, handled by `hasShellExpansion`) and a
+ * quoted group are not brace expansion.
+ */
+function isBraceExpansion(s: string, open: number): boolean {
+  if (open > 0 && s[open - 1] === "$") return false;
+  let depth = 0;
+  let sawSeparator = false;
+  for (let j = open; j < s.length; j += 1) {
+    const ch = s[j]!;
+    if (ch === "\\") {
+      j += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"') return false;
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return sawSeparator;
+    } else if (depth === 1 && (ch === "," || (ch === "." && s[j + 1] === "."))) {
+      sawSeparator = true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Quote-aware scan for dangerous constructs the vendored parser does NOT surface
+ * as a `$VAR` expansion (so `hasShellExpansion` can't see them): backticks,
+ * command/process substitution, the `$'…'`/`$"…"` quoting openers (bash decodes
+ * `\xNN` etc. into bytes that can form a flag — shell-quote does not), and brace
+ * expansion. SINGLE-quoted spans are fully inert (bash suppresses everything), so
+ * a `` ` ``/`$`/`{` inside them is never flagged — that removes the blind-regex
+ * false positives (`grep 'foo $'`, `grep '$(x)'`, `find -name '*.{a,b}'`). DOUBLE
+ * quotes are NOT inert: `$(…)` and backticks stay ACTIVE inside them (only `$VAR`
+ * detection is delegated to `hasShellExpansion`), so the double-quote span is
+ * scanned for those two. A backslash escapes the next char in either context.
+ */
+function scanUnsafeUnquoted(command: string): boolean {
+  const n = command.length;
+  let i = 0;
+  while (i < n) {
+    const c = command[i]!;
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end === -1) return true; // unterminated quote → unsafe
+      i = end + 1;
+      continue;
+    }
+    if (c === '"') {
+      // Double quotes keep command substitution active (`"$(id)"` runs `id`;
+      // `` "`id`" `` too), so scan the span for them. `"\$(x)"` / `` "\`x`" `` are
+      // escaped → literal → allowed. `$VAR`/`${…}` are caught by hasShellExpansion.
+      i += 1;
+      while (i < n && command[i] !== '"') {
+        if (command[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (command[i] === "`") return true; // backtick cmd-sub (active in "…")
+        if (command[i] === "$" && command[i + 1] === "(") return true; // $(…) cmd-sub (active in "…")
+        i += 1;
+      }
+      if (i >= n) return true; // unterminated quote → unsafe
+      i += 1;
+      continue;
+    }
+    if (c === "`") return true; // backtick command substitution
+    if (c === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) return true; // $'…' / $"…"
+    if (c === "$" && command[i + 1] === "(") return true; // $(…) command substitution
+    if ((c === "<" || c === ">") && command[i + 1] === "(") return true; // <(…) / >(…)
+    if (c === "{" && isBraceExpansion(command, i)) return true;
+    i += 1;
+  }
+  return false;
+}
+
+/**
+ * Keystone syntax gate — runs BEFORE the per-flag allowlist in
+ * `validateShellCommand`. Rejects any shell construct that bash would expand,
+ * substitute, or split in a way the vendored shell-quote parser does NOT model,
+ * because such a divergence smuggles a flag/command past every downstream check.
+ * Two complementary, quote-aware passes: `scanUnsafeUnquoted` (backticks,
+ * command/process substitution, `$'…'`/`$"…"` openers, brace expansion) and
+ * `hasShellExpansion` (`$VAR`/`${…}` parameter expansion, incl. `$IFS`-gluing and
+ * `${VAR:-flag}`). Verified against a bypass + false-positive battery 2026-07-17.
+ */
 export function hasUnsafeShellSyntax(command: string): boolean {
-  return /[`]/.test(command) || /\$\(/.test(command) || /<\(/.test(command) || />\(/.test(command);
+  return scanUnsafeUnquoted(command) || hasShellExpansion(command);
 }
 
 export function hasMutatingFlag(args: string[]): boolean {
@@ -627,19 +934,40 @@ export function hasWriteShortFlag(args: string[]): boolean {
   return args.some((arg) => arg === "-o" || /^-o./.test(arg));
 }
 
+/**
+ * True if a GNU `sort` short-flag token writes a file — including a BUNDLED
+ * cluster (`-rT DIR`, `-ro FILE`) the plain `-o` check misses. getopt consumes a
+ * cluster left to right; the first argument-taking option grabs the rest as its
+ * value, so an `o`/`T` AFTER a `-t`/`-k`/`-S` (sort's other arg-taking options)
+ * is that option's value, not a write flag. (Opus review 2026-07-17.)
+ */
+function sortShortClusterWrites(token: string): boolean {
+  if (token.length < 2 || token[0] !== "-" || token[1] === "-") return false;
+  for (let i = 1; i < token.length; i += 1) {
+    const ch = token[i]!;
+    if (ch === "o" || ch === "T") return true; // -o output / -T temp dir → write
+    if (ch === "t" || ch === "k" || ch === "S") return false; // arg-taking: rest is its value
+  }
+  return false;
+}
+
 function hasPytestReportFlag(args: string[]): boolean {
-  return args.some(
-    (arg) =>
-      PYTEST_REPORT_FLAGS_EXACT.has(arg) ||
-      PYTEST_REPORT_FLAG_PREFIXES.some((prefix) => arg.startsWith(prefix)),
-  );
+  return matchesAbbreviatedFlag(args, PYTEST_REPORT_FLAGS);
 }
 
 export function validatePackageManagerCommand(
   command: string,
   args: string[],
 ): { ok: true } | { ok: false; reason: string } {
-  // Direct `<pm> test` is the test-runner shorthand.
+  // Direct `<pm> test` is the test-runner shorthand. Like `pytest`/`go test`/
+  // `cargo test`, it EXECUTES repo code by design (the package.json "test"
+  // script) — the SAME documented trust boundary (docs/safety.md): a test runner
+  // in a write-capable rescue/pursue run can already run arbitrary repo code, so
+  // rejecting `test` would only cripple the expected surface without adding
+  // safety. `run <arbitrary-script>` below is different: it is a fully general
+  // script executor (dev/deploy/publish), not a test entry point, so it stays
+  // rejected. (Fable review 2026-07-17 flagged the `test`/`run` asymmetry — this
+  // is the deliberate resolution, not an oversight.)
   if (args[0] === "test") {
     return { ok: true };
   }

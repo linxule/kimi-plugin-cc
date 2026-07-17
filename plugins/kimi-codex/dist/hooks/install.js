@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { constants as fsConstants, existsSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import { evaluateInstalled } from "./managed-block.js";
@@ -61,11 +61,27 @@ export async function verifyHookInstalled(env) {
         hostId: resolveHostId(env, expected.hookScriptPath),
         nodeExists: (binPath) => existsSync(binPath),
     });
-    return {
-        installed: check.installed,
-        reason: check.reason,
-        configPath,
-    };
+    if (!check.installed) {
+        return {
+            installed: false,
+            reason: check.reason,
+            configPath,
+        };
+    }
+    // The command matched byte-for-byte, but that alone doesn't prove the
+    // hook can run — confirm the script it points at still exists and is
+    // readable (see point 3 above). Fail closed on any stat/access error.
+    try {
+        await access(expected.hookScriptPath, fsConstants.R_OK);
+    }
+    catch {
+        return {
+            installed: false,
+            reason: `hook script ${expected.hookScriptPath} is missing or unreadable — run /kimi:setup to reinstall`,
+            configPath,
+        };
+    }
+    return { installed: true, configPath };
 }
 function resolveKimiCodeConfigPath(env) {
     return path.join(resolveKimiHome(env), "config.toml");

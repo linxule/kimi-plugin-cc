@@ -461,9 +461,14 @@ export async function runCliPrompt(opts) {
                 consumeOutcomes(parser.push(chunk));
             });
             child.stderr.on("data", (chunk) => {
-                const nextSessionId = extractSessionIdFromStderr(stderrTail + chunk);
-                if (nextSessionId !== undefined) {
-                    announcedSessionId = nextSessionId;
+                // First-announce-wins across both channels: once a session id is
+                // pinned (from the stdout meta record or an earlier stderr line),
+                // never let a later stderr line overwrite it.
+                if (announcedSessionId === undefined) {
+                    const nextSessionId = extractSessionIdFromStderr(stderrTail + chunk);
+                    if (nextSessionId !== undefined) {
+                        announcedSessionId = nextSessionId;
+                    }
                 }
                 stderrTail = appendToTail(stderrTail, chunk, STDERR_TAIL_BYTES);
             });

@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { constants as fsConstants, existsSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
@@ -29,6 +29,16 @@ import { resolveKimiHome } from "../kimi-home.js";
  *      passed: `/bin/sh -c "true # ..."` runs only `true` (exit 0),
  *      which kimi-code's hook runner treats as ALLOW. Equality on the
  *      full canonical shell command closes this.
+ *
+ *   3. A byte-exact `command` match does not prove the hook can actually
+ *      run: if the versioned dist directory (or the whole plugin cache
+ *      entry) is pruned after install, the managed block still matches
+ *      while kimi-code's `/bin/sh -c '<node>' '<script>'` fails to spawn.
+ *      kimi-code's hook runner only treats exit code 2 as a deny — any
+ *      other exit (including a spawn/MODULE_NOT_FOUND failure) is ALLOW,
+ *      so a missing script silently degrades every refusal gate to full
+ *      auto-approve. The verifier now also confirms the hook script file
+ *      exists and is readable before blessing a command match as installed.
  *
  * Tests / setup probes can opt out via
  * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` — that bypass disables every command's
@@ -104,11 +114,28 @@ export async function verifyHookInstalled(
     hostId: resolveHostId(env, expected.hookScriptPath),
     nodeExists: (binPath) => existsSync(binPath),
   });
-  return {
-    installed: check.installed,
-    reason: check.reason,
-    configPath,
-  };
+  if (!check.installed) {
+    return {
+      installed: false,
+      reason: check.reason,
+      configPath,
+    };
+  }
+
+  // The command matched byte-for-byte, but that alone doesn't prove the
+  // hook can run — confirm the script it points at still exists and is
+  // readable (see point 3 above). Fail closed on any stat/access error.
+  try {
+    await access(expected.hookScriptPath, fsConstants.R_OK);
+  } catch {
+    return {
+      installed: false,
+      reason: `hook script ${expected.hookScriptPath} is missing or unreadable — run /kimi:setup to reinstall`,
+      configPath,
+    };
+  }
+
+  return { installed: true, configPath };
 }
 
 function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {

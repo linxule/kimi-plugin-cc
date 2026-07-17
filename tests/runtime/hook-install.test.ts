@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from "bun:test";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -100,9 +100,11 @@ describe("verifyHookInstalled", () => {
   test("reports installed when a complete valid managed block is present", async () => {
     const home = await createTestPluginDataRoot("hook-install-ok");
     try {
-      const hookPath = "/abs/path/dist/hooks/approval-hook.js";
+      const hookPath = path.join(home, "dist", "hooks", "approval-hook.js");
       const canonical = canonicalCommandFor(hookPath);
       await mkdir(home, { recursive: true });
+      await mkdir(path.dirname(hookPath), { recursive: true });
+      await writeFile(hookPath, "// fake hook script for tests\n", "utf8");
       await writeFile(
         path.join(home, "config.toml"),
         [
@@ -122,6 +124,60 @@ describe("verifyHookInstalled", () => {
       });
       expect(status.installed).toBe(true);
       expect(status.reason).toBeUndefined();
+    } finally {
+      await cleanupTestPath(home);
+    }
+  });
+
+  test("reports missing when the command matches byte-for-byte but the hook script was deleted", async () => {
+    // Security fix: a byte-exact `command` match alone doesn't prove the
+    // hook can run. If dist/hooks/approval-hook.js (or the whole versioned
+    // plugin cache dir) is deleted after install, the managed block still
+    // matches the canonical command while kimi-code's `/bin/sh -c '<node>'
+    // '<script>'` fails to spawn. kimi-code's hook runner only treats exit
+    // code 2 as a deny — any other exit (including a spawn failure) is
+    // ALLOW — so a missing script previously left `verifyHookInstalled`
+    // reporting `installed: true` and every refusal gate silently
+    // auto-approved. The verifier now also confirms the script file exists
+    // and is readable before blessing a command match as installed.
+    const home = await createTestPluginDataRoot("hook-install-script-deleted");
+    try {
+      const hookPath = path.join(home, "dist", "hooks", "approval-hook.js");
+      const canonical = canonicalCommandFor(hookPath);
+      await mkdir(home, { recursive: true });
+      await mkdir(path.dirname(hookPath), { recursive: true });
+      await writeFile(hookPath, "// fake hook script for tests\n", "utf8");
+      await writeFile(
+        path.join(home, "config.toml"),
+        [
+          "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===",
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          `command = ${JSON.stringify(canonical)}`,
+          "timeout = 15",
+          "# === END kimi-plugin-cc-managed ===",
+        ].join("\n"),
+        "utf8",
+      );
+
+      // Sanity: the same setup passes as installed while the script exists.
+      const beforeDelete = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      });
+      expect(beforeDelete.installed).toBe(true);
+
+      // Simulate the versioned dist dir being pruned after install.
+      await rm(hookPath, { force: true });
+
+      const status = await verifyHookInstalled({
+        KIMI_CODE_HOME: home,
+        KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      });
+      expect(status.installed).toBe(false);
+      expect(status.reason).toContain(hookPath);
+      expect(status.reason).toContain("missing or unreadable");
+      expect(status.reason).toContain("/kimi:setup");
     } finally {
       await cleanupTestPath(home);
     }
@@ -210,10 +266,12 @@ describe("verifyHookInstalled", () => {
       const suffix = `${testCase.event.toLowerCase()}-${testCase.version.replaceAll(".", "-")}`;
       const home = await createTestPluginDataRoot(`hook-install-version-${suffix}`);
       try {
-        const hookPath = "/abs/path/dist/hooks/approval-hook.js";
+        const hookPath = path.join(home, "dist", "hooks", "approval-hook.js");
         const canonical = canonicalCommandFor(hookPath);
         const kimiBin = path.join(home, "fake-kimi-version.js");
         await mkdir(home, { recursive: true });
+        await mkdir(path.dirname(hookPath), { recursive: true });
+        await writeFile(hookPath, "// fake hook script for tests\n", "utf8");
         await writeFile(
           kimiBin,
           `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(testCase.version)}\n`,
@@ -470,11 +528,13 @@ describe("verifyHookInstalled", () => {
     // an apostrophe path false-fails the verifier.
     const home = await createTestPluginDataRoot("hook-install-apostrophe-path");
     try {
-      const hookPath = "/home/o'reilly/dist/hooks/approval-hook.js";
+      const hookPath = path.join(home, "o'reilly", "dist", "hooks", "approval-hook.js");
       const canonical = canonicalCommandFor(hookPath);
       // tomlBasicString equivalent: escape \ to \\ and " to \"
       const tomlEscaped = canonical.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
       await mkdir(home, { recursive: true });
+      await mkdir(path.dirname(hookPath), { recursive: true });
+      await writeFile(hookPath, "// fake hook script for tests\n", "utf8");
       await writeFile(
         path.join(home, "config.toml"),
         [
