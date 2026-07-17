@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import {
   access,
   chmod,
@@ -475,6 +476,61 @@ describe("setup managed-block installer", () => {
     const stats = await stat(configPath);
     // Lower 9 bits are the permission triplet; mask off the file-type bits.
     // Expect 0o600 — owner read/write only, no group or other access.
+    expect(stats.mode & 0o777).toBe(0o600);
+  });
+
+  test("config temp file is created via O_EXCL + mode 0o600 at open() time (zero-window fix)", async () => {
+    // Regression test for the writeFile()-then-chmod() gap: the temp file
+    // must never exist at a wider mode than 0o600, even momentarily. That
+    // can only be proven by asserting the *creation* call itself passes
+    // O_CREAT|O_EXCL|O_NOFOLLOW and mode 0o600 to open() — mirroring
+    // createPrivateLockFile in hooks/config-safety.ts — rather than by
+    // inspecting the (unobservably fast) window between two syscalls.
+    //
+    // spyOn(fsPromises, "open") does not reliably intercept this call (the
+    // module graph binds the real function before the spy patches the
+    // exported property), so this uses mock.module to replace the module
+    // in the resolver itself, and explicitly restores the real module
+    // afterward so later tests in this file are unaffected.
+    if (process.platform === "win32") return;
+    const { env, configPath } = await makeCase("install-open-flags");
+
+    const real = await import("node:fs/promises");
+    const realOpen = real.open;
+    const calls: unknown[][] = [];
+    mock.module("node:fs/promises", () => ({
+      ...real,
+      open: (...args: unknown[]) => {
+        calls.push(args);
+        return (realOpen as (...a: unknown[]) => unknown)(...args);
+      },
+    }));
+    try {
+      await runSetup([], makeContext(env));
+    } finally {
+      mock.module("node:fs/promises", () => real);
+    }
+
+    const expectedFlags =
+      fsConstants.O_WRONLY |
+      fsConstants.O_CREAT |
+      fsConstants.O_EXCL |
+      (fsConstants.O_NOFOLLOW ?? 0);
+    // The lock file (config.toml.kimi-plugin-cc.lock*) shares the same
+    // prefix as the config temp file, so also require the ".tmp" suffix
+    // to isolate the call we care about.
+    const configTmpCall = calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].startsWith(`${configPath}.kimi-plugin-cc.`) &&
+        call[0].endsWith(".tmp"),
+    );
+    expect(configTmpCall).toBeDefined();
+    expect(configTmpCall?.[1]).toBe(expectedFlags);
+    expect(configTmpCall?.[2]).toBe(0o600);
+
+    // The final config file mode is unaffected by the switch.
+    const stats = await stat(configPath);
     expect(stats.mode & 0o777).toBe(0o600);
   });
 

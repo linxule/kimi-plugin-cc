@@ -473,3 +473,84 @@ describe("parser-based installed check (Codex/Opus/kimi convergence — TOML, no
     expect(inst(`[[hooks]] # user note\nevent = "PreToolUse"\n${cmdLine}\ntimeout = 15\n`)).toBe(true);
   });
 });
+
+// The quoted-`"matcher"` immunity above is tested only on the BARE-TABLE
+// (absent-state) fallback. The PRIMARY marked-block path — a matcher hidden
+// INSIDE a `# === BEGIN … ===` / `# === END … ===` block — validated the body
+// with a line scanner (`/^matcher\s*=/`) that a quoted/literal matcher key
+// slips past, blessing a hook-DISABLED block as installed:true (fail-open
+// auto-approve). `validateBlockBody` now also parses the body with smol-toml.
+// (kimi whole-repo audit 2026-07-17.)
+describe("marked-block matcher rejection (parser-based body check)", () => {
+  const NODE = process.execPath;
+  const HOOK = "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/1.8.5/dist/hooks/approval-hook.js";
+  const expected = `'${NODE}' '${HOOK}'`;
+  const cmdLine = `command = "'${NODE}' '${HOOK}'"`;
+  const hostId = "claude-code";
+  const marked = (bodyExtra: string) =>
+    `# === BEGIN kimi-plugin-cc-managed:claude-code (v1.8.5) ===\n` +
+    `[[hooks]]\nevent = "PreToolUse"\n${cmdLine}\ntimeout = 15\n${bodyExtra}` +
+    `# === END kimi-plugin-cc-managed:claude-code ===\n`;
+  const inst = (cfg: string) => evaluateInstalled(cfg, expected, { hostId });
+
+  test("a CLEAN marked block still counts as installed (no false positive)", () => {
+    const r = inst(marked(""));
+    expect(r.installed).toBe(true);
+    expect(r.via).toBe("managed-block");
+  });
+
+  test('quoted `"matcher"` inside the marked block does NOT count as installed', () => {
+    const r = inst(marked('"matcher" = "*"\n'));
+    expect(r.installed).toBe(false);
+    expect(r.reason).toContain("matcher");
+  });
+
+  test('quoted `"matcher"` after a blank line inside the marked block does NOT count', () => {
+    expect(inst(marked('\n"matcher" = "*"\n')).installed).toBe(false);
+  });
+
+  test("literal-string `'matcher'` key inside the marked block does NOT count", () => {
+    expect(inst(marked("'matcher' = \".*\"\n")).installed).toBe(false);
+  });
+
+  test("bare `matcher` inside the marked block is still caught (regression)", () => {
+    expect(inst(marked('matcher = "*"\n')).installed).toBe(false);
+  });
+
+  // Fable review of the fix 2026-07-17: `validateBlockBody` only inspects lines
+  // BETWEEN the markers, but a `matcher`/stray key AFTER the END comment is still
+  // part of the same `[[hooks]]` TOML table (comments don't terminate a table),
+  // so kimi-code loads it and disables the hook while the marked body looks
+  // clean. The whole-file `foundHookEntryIsClean` parse closes this.
+  test("`matcher` AFTER the END marker does NOT count as installed", () => {
+    const cfg =
+      `# === BEGIN kimi-plugin-cc-managed:claude-code (v1.8.6) ===\n` +
+      `[[hooks]]\nevent = "PreToolUse"\n${cmdLine}\ntimeout = 15\n` +
+      `# === END kimi-plugin-cc-managed:claude-code ===\n` +
+      `matcher = "*"\n`;
+    const r = inst(cfg);
+    expect(r.installed).toBe(false);
+  });
+
+  test("a stray key AFTER the END marker does NOT count as installed", () => {
+    const cfg =
+      `# === BEGIN kimi-plugin-cc-managed:claude-code (v1.8.6) ===\n` +
+      `[[hooks]]\nevent = "PreToolUse"\n${cmdLine}\ntimeout = 15\n` +
+      `# === END kimi-plugin-cc-managed:claude-code ===\n` +
+      `user_ok = true\n`;
+    expect(inst(cfg).installed).toBe(false);
+  });
+
+  test("a clean block followed by a SEPARATE table after END still counts", () => {
+    // A new `[table]`/`[[hooks]]` header after END terminates our table, so a
+    // matcher there belongs to the other table, not ours — must stay installed.
+    const cfg =
+      `# === BEGIN kimi-plugin-cc-managed:claude-code (v1.8.6) ===\n` +
+      `[[hooks]]\nevent = "PreToolUse"\n${cmdLine}\ntimeout = 15\n` +
+      `# === END kimi-plugin-cc-managed:claude-code ===\n` +
+      `[[hooks]]\nevent = "Stop"\nmatcher = "*"\ncommand = "'${NODE}' '/other.js'"\n`;
+    const r = inst(cfg);
+    expect(r.installed).toBe(true);
+    expect(r.via).toBe("managed-block");
+  });
+});

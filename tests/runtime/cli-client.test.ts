@@ -263,6 +263,32 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("keeps the stdout-pinned session id when a later stderr line announces a different one", async () => {
+    // Regression for a last-announce-wins bug: once announceVia="stdout-meta"
+    // pins a session id from the stream-json meta record, a SECOND, DIFFERENT
+    // stderr line matching "To resume this session: ..." (e.g. a mixed-version
+    // double-emit, or a nested `kimi -r` leaking into shared stderr) must NOT
+    // overwrite it. First-announce-wins has to hold across BOTH channels, not
+    // just within stdout.
+    const root = await createTestPluginDataRoot("cli-client-meta-then-stderr-diff");
+    try {
+      const pinnedSessionId = "session_11111111-1111-1111-1111-111111111111";
+      const laterStderrSessionId = "22222222-2222-2222-2222-222222222222";
+      const result = await runCliPrompt(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "Hi." }],
+          sessionId: pinnedSessionId,
+          announceVia: "stdout-meta",
+          stderrSuffix: `To resume this session: kimi -r ${laterStderrSessionId}`,
+        }),
+      );
+      expect(result.sessionId).toBe(pinnedSessionId);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("invokes onRecord for assistant/tool records but NOT for the meta record", async () => {
     // The meta record is wrapper plumbing — callers wiring up record
     // streaming (e.g., for live UI updates) should never see it.

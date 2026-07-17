@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseSwarmArgs } from "../../runtime/parsing.js";
+import { MAX_DURATION_MS, parseSwarmArgs } from "../../runtime/parsing.js";
 import {
   buildSwarmPrompt,
   buildSwarmWritePrompt,
@@ -9,6 +9,7 @@ import {
   resolveSwarmWriteMaxConcurrency,
   SWARM_DEFAULT_MAX_CONCURRENCY,
   SWARM_WRITE_DEFAULT_MAX_CONCURRENCY,
+  WORKTREE_ORPHAN_TTL_MS,
 } from "../../runtime/commands/swarm.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import type { CommandContext } from "../../runtime/types.js";
@@ -177,33 +178,118 @@ describe("runSwarm hook gate", () => {
   });
 });
 
-describe("buildSwarmPrompt", () => {
-  test("instructs the model to use AgentSwarm and stay read-only", () => {
-    const prompt = buildSwarmPrompt("review the parser");
-    expect(prompt).toContain("AgentSwarm");
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("review the parser");
-    // No write surface: subagents are told read tools only.
-    expect(prompt).toContain("Read, Grep, Glob");
+describe("runSwarm version gate (write fails CLOSED, read fails OPEN on an unconfirmable probe)", () => {
+  // A nonexistent absolute path makes `kimi --version` fail with ENOENT, so the
+  // probe returns {kind:"failed"} fast — the real "flaky probe" the gate must
+  // resolve by mode. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is neutralized ("") so the
+  // probe genuinely runs (some dev/CI envs export it as "1").
+  const BROKEN_KIMI = "/definitely/does/not/exist/kimi-binary-xyz";
+
+  test("--write REFUSES when the probe can't confirm >= 0.18.0 (the hard concurrency cap)", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("swarm-vgate-w-data");
+    const workspace = await createTestPluginDataRoot("swarm-vgate-w-ws");
+    const kimiHome = await createTestPluginDataRoot("swarm-vgate-w-home");
+    try {
+      let caught: unknown;
+      try {
+        await runSwarm(
+          ["--write", "edit", "every", "handler"],
+          makeContext(workspace, {
+            ...process.env,
+            CLAUDE_PLUGIN_DATA: pluginDataRoot,
+            KIMI_CODE_HOME: kimiHome,
+            KIMI_PLUGIN_CC_KIMI_BIN: BROKEN_KIMI,
+            KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
+          }),
+        );
+      } catch (error) {
+        caught = error;
+      }
+      // Fail CLOSED: without a confirmed >= 0.18.0 the env-based concurrency cap
+      // can't be guaranteed, so a concurrent write fan-out must not launch.
+      expect(caught).toBeInstanceOf(RuntimeError);
+      expect((caught as RuntimeError).code).toBe("SWARM_UNSUPPORTED");
+      expect((caught as RuntimeError).message).toContain("CONFIRMED kimi-code >= 0.18.0");
+      expect((caught as RuntimeError).message).toContain("version probe failed");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(kimiHome);
+    }
   });
 
-  test("steers to the read-only explore subagent profile (defense-in-depth)", () => {
+  test("read-only swarm still runs past the gate (fail-open) — a broken probe surfaces the hook refusal, not the version gate", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("swarm-vgate-r-data");
+    const workspace = await createTestPluginDataRoot("swarm-vgate-r-ws");
+    const kimiHome = await createTestPluginDataRoot("swarm-vgate-r-home");
+    try {
+      const output = await runSwarm(
+        ["review", "two", "targets"],
+        makeContext(workspace, {
+          ...process.env,
+          CLAUDE_PLUGIN_DATA: pluginDataRoot,
+          KIMI_CODE_HOME: kimiHome,
+          KIMI_PLUGIN_CC_KIMI_BIN: BROKEN_KIMI,
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
+        }),
+      );
+      // Fail OPEN: a too-old read-only binary is only degraded (the read-only hook
+      // still holds), so the gate lets the run reach the hook check.
+      expect(output).toContain("SWARM_HOOK_NOT_INSTALLED");
+      expect(output).not.toContain("SWARM_UNSUPPORTED");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(kimiHome);
+    }
+  });
+
+  test("the orphan-sweep TTL exceeds the max --budget, so a live worktree is never reaped mid-run", () => {
+    // The sweep's liveness signal is worktree-dir mtime, frozen at creation for a
+    // run that edits only existing files. A live run lasts at most MAX_DURATION_MS
+    // (the --budget hard cap), so the TTL must exceed it or a concurrent run's
+    // sweep could force-remove a still-live worktree.
+    expect(WORKTREE_ORPHAN_TTL_MS).toBeGreaterThan(MAX_DURATION_MS);
+  });
+});
+
+describe("buildSwarmPrompt", () => {
+  // v1.8.6: the prompt was slimmed after the kimi-code 0.26.0 (k3) coordinator
+  // hung when over-prescribed. It now states the read-only goal + report shape
+  // and trusts the model to fan out with its own subagent capability, while
+  // still naming the tool constraint (Read/Grep/Glob only, Bash denied) so k3
+  // doesn't stall on a denied preliminary shell call. Safety is unchanged — the
+  // PreToolUse hook (swarm label) enforces read-only regardless of this prose.
+  test("states the read-only goal and the objective", () => {
     const prompt = buildSwarmPrompt("review the parser");
-    expect(prompt).toContain("explore");
-    // The explore profile has no file-editing tools — a second layer beneath the hook.
-    expect(prompt).toContain("file-editing tools");
+    expect(prompt.toLowerCase()).toContain("read-only");
+    expect(prompt).toContain("review the parser");
+    // Names the available read tools so the model doesn't reach for shell.
+    expect(prompt).toContain("Read");
+    expect(prompt).toContain("Grep");
+    expect(prompt).toContain("Glob");
+  });
+
+  test("names the Bash denial and steers the fan-out to be the first action (k3 anti-hang)", () => {
+    const prompt = buildSwarmPrompt("review the parser");
+    expect(prompt).toContain("Bash");
+    expect(prompt).toContain("FIRST action");
+    // Deliberately does NOT prescribe the internal AgentSwarm mechanics that
+    // confused k3 — no subagent_type / prompt_template scaffolding.
+    expect(prompt).not.toContain("subagent_type");
+    expect(prompt).not.toContain("prompt_template");
   });
 
   test("includes a soft cap clause when --cap is set", () => {
     const prompt = buildSwarmPrompt("audit the routes", 4);
-    expect(prompt).toContain("at most 4 subagents");
-    expect(prompt).toContain("soft cap");
+    expect(prompt).toContain("at most 4");
   });
 
   test("omits the cap number when --cap is unset", () => {
     const prompt = buildSwarmPrompt("audit the routes");
     expect(prompt).not.toContain("at most");
-    expect(prompt).toContain("one subagent per distinct target");
+    // Still tells the model to fan the work out in parallel.
+    expect(prompt.toLowerCase()).toContain("parallel");
   });
 });
 

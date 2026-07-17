@@ -262,6 +262,42 @@ function validateBlockBody(rawBody: string[]): {
     }
   }
 
+  // Parser-based matcher rejection — defense in depth over the line-based
+  // MATCHER_LINE_RE above. smol-toml normalizes a quoted `"matcher"`, a literal
+  // `'matcher'`, or a dotted key to the `matcher` key that the bare-line regex
+  // (`/^matcher\s*=/`) MISSES, while kimi-code's real parser honors it and
+  // DISABLES the hook (`new RegExp("*")` throws → fire-for-nothing → auto-
+  // approve). The absent-state fallback (`hasCleanEnforcingHookEntry`) already
+  // parses and is immune; the primary marked-block path must be too, or a
+  // quoted matcher slips a disabled hook past the verifier as `installed:true`.
+  // Fail closed on any parse error — a body that won't parse in isolation is
+  // anomalous and kimi-code would reject the whole config anyway. (kimi
+  // whole-repo audit 2026-07-17.)
+  if (invalidReason === undefined) {
+    try {
+      const parsed = parseToml(rawBody.join("\n"));
+      const hooks =
+        parsed !== null && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>).hooks
+          : undefined;
+      const hasMatcher =
+        Array.isArray(hooks) &&
+        hooks.some(
+          (entry) =>
+            entry !== null &&
+            typeof entry === "object" &&
+            Object.prototype.hasOwnProperty.call(entry, "matcher"),
+        );
+      if (hasMatcher) {
+        invalidReason =
+          "block contains a `matcher` key (in a quoted or dotted spelling the line scanner misses) — kimi-code compiles matchers as JS regex and disables the hook. Reinstall with /kimi:setup to repair.";
+      }
+    } catch {
+      invalidReason =
+        "block body is not valid TOML in isolation — cannot confirm it carries no hook-disabling matcher. Reinstall with /kimi:setup to repair.";
+    }
+  }
+
   return { valid: invalidReason === undefined, invalidReason, commandPath };
 }
 
@@ -446,6 +482,29 @@ function stripManagedBlockLines(contents: string): string {
   return lines.filter((_, i) => !inBlock.has(i)).join("\n");
 }
 
+/**
+ * True if a parsed `hooks[]` array contains a clean enforcing entry for
+ * `expectedCommand`: `event="PreToolUse"`, byte-exact `command`, NO `matcher`
+ * (any spelling the parser normalized to the `matcher` key can disable/narrow
+ * the hook), and no keys beyond {event,command,timeout} (a stray key is fatal to
+ * kimi-code's strict schema). Each host's hook path is distinct, so the command
+ * uniquely identifies this host's entry.
+ */
+function hooksArrayHasCleanEntry(hooks: unknown, expectedCommand: string): boolean {
+  if (!Array.isArray(hooks)) return false;
+  const allowedKeys = new Set(["event", "command", "timeout"]);
+  for (const entry of hooks) {
+    if (entry === null || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    if (rec.event !== "PreToolUse") continue;
+    if (rec.command !== expectedCommand) continue;
+    if (Object.prototype.hasOwnProperty.call(rec, "matcher")) continue;
+    if (!Object.keys(rec).every((k) => allowedKeys.has(k))) continue;
+    return true;
+  }
+  return false;
+}
+
 export function hasCleanEnforcingHookEntry(
   contents: string,
   expectedCommand: string,
@@ -464,21 +523,28 @@ export function hasCleanEnforcingHookEntry(
     return false;
   }
   if (parsed === null || typeof parsed !== "object") return false;
-  const hooks = (parsed as Record<string, unknown>).hooks;
-  if (!Array.isArray(hooks)) return false;
-  const allowedKeys = new Set(["event", "command", "timeout"]);
-  for (const entry of hooks) {
-    if (entry === null || typeof entry !== "object") continue;
-    const rec = entry as Record<string, unknown>;
-    if (rec.event !== "PreToolUse") continue;
-    if (rec.command !== expectedCommand) continue;
-    // ANY matcher (any spelling the parser normalized to the `matcher` key)
-    // can disable or narrow the hook → not a clean enforcing install.
-    if (Object.prototype.hasOwnProperty.call(rec, "matcher")) continue;
-    if (!Object.keys(rec).every((k) => allowedKeys.has(k))) continue;
-    return true;
+  return hooksArrayHasCleanEntry((parsed as Record<string, unknown>).hooks, expectedCommand);
+}
+
+/**
+ * Whole-file parser check for the FOUND (marked-block present) path. The line
+ * grammar in `validateBlockBody` only inspects the lines BETWEEN the BEGIN/END
+ * markers — but a `matcher = "*"` (or a stray key) placed AFTER the END comment
+ * is still part of the SAME `[[hooks]]` TOML table (comments don't terminate a
+ * table), so kimi-code loads it and DISABLES the hook (`new RegExp("*")` throws)
+ * while the marked body looks clean → a fail-open `installed:true`. Parsing the
+ * whole file exactly as kimi-code does attributes that trailing key to our entry
+ * and rejects it. Fail-closed on any parse error. (Fable/kimi audit 2026-07-17.)
+ */
+function foundHookEntryIsClean(contents: string, expectedCommand: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = parseToml(contents);
+  } catch {
+    return false;
   }
-  return false;
+  if (parsed === null || typeof parsed !== "object") return false;
+  return hooksArrayHasCleanEntry((parsed as Record<string, unknown>).hooks, expectedCommand);
 }
 
 export function evaluateInstalled(
@@ -546,6 +612,19 @@ export function evaluateInstalled(
       reason:
         classified ??
         `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
+      state,
+    };
+  }
+  // The marked body (lines between BEGIN/END) passed the line grammar and the
+  // command matches — but confirm with the REAL whole-file parse that no matcher
+  // or stray key rides our `[[hooks]]` table from OUTSIDE the markers (e.g. after
+  // the END comment, which does not terminate the TOML table). Such a key would
+  // load in kimi-code and disable/reject the hook while the body looks clean.
+  if (!foundHookEntryIsClean(contents, expectedCommand)) {
+    return {
+      installed: false,
+      reason:
+        "the managed block's hook table carries a matcher or an unexpected key OUTSIDE the marked body (e.g. after the END marker) — kimi-code would load it and disable the hook. Run /kimi:setup --uninstall, then /kimi:setup to repair.",
       state,
     };
   }

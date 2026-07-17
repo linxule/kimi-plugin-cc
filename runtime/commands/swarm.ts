@@ -23,7 +23,7 @@ import { KIMI_SWARM_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
 import { probeKimiVersion } from "../kimi-version-probe.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
-import { parseSwarmArgs, type SwarmArgs } from "../parsing.js";
+import { MAX_DURATION_MS, parseSwarmArgs, type SwarmArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
@@ -74,10 +74,19 @@ const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
 /**
  * Orphaned write-swarm worktrees older than this are reaped by the startup sweep.
  * Every normal run removes its own worktree in a finally; an orphan only survives
- * a hard kill (SIGKILL of the plugin process). Generous vs the default 30m budget
- * so the sweep never races a live concurrent run.
+ * a hard kill (SIGKILL of the plugin process).
+ *
+ * The sweep's only liveness signal is the worktree dir's mtime, which is frozen
+ * at `git worktree add` time when a run edits only EXISTING files (in-place edits
+ * never bump the containing dir's mtime). A live run can therefore look "idle" for
+ * its entire wall-clock life. So the TTL MUST exceed the longest a run can live —
+ * the hard `--budget` ceiling, `MAX_DURATION_MS` (24h) — or a concurrent run's
+ * sweep could `git worktree remove --force` a still-live worktree out from under
+ * its owner (ENOENT writes, lost patch). The +2h margin covers budget-expiry
+ * teardown (AbortController fires → the finally removes the worktree well within
+ * it). Orphans are still reaped, just after this longer, provably-safe delay.
  */
-const WORKTREE_ORPHAN_TTL_MS = 6 * 60 * 60 * 1000;
+export const WORKTREE_ORPHAN_TTL_MS = MAX_DURATION_MS + 2 * 60 * 60 * 1000;
 
 /**
  * Default HARD concurrency ceiling applied when the user passes no
@@ -119,38 +128,40 @@ export function resolveSwarmWriteMaxConcurrency(requested: number | undefined): 
 }
 
 /**
- * Build the swarm coordination prompt. Instructs Kimi to use the AgentSwarm
- * tool to fan READ-ONLY review work over the targets implied by the objective,
- * then consolidate. The optional `cap` is a SOFT subagent-count hint (the hook
- * cannot enforce a count, so the model may exceed it). The HARD concurrency
- * ceiling is separate: --max-concurrency → KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
- * (see executeSwarmJob / cli-client buildEnv). The --budget wall-clock ceiling
- * is the always-on hard bound on the whole run regardless of kimi-code version.
+ * Build the swarm coordination prompt. States the READ-ONLY review GOAL and the
+ * desired report shape, then trusts the model to fan the work out with its own
+ * subagent capability — we deliberately do NOT prescribe the AgentSwarm tool call,
+ * subagent_type, or prompt_template/items mechanics. Over-prescribing those made
+ * the kimi-code 0.26.0 (k3) coordinator emit a non-sole-tool-call response that
+ * failed to launch (0 records, hang to budget); a goal-only prompt lets it launch.
+ * Read-only is NOT enforced by this prose — the PreToolUse hook (swarm label) at
+ * policy index 0 denies every write/edit/shell for the coordinator AND every
+ * subagent, so slimming this text does not move the safety boundary. The optional
+ * `cap` is a SOFT subagent-count hint (the hook cannot enforce a count). The HARD
+ * concurrency ceiling is separate: --max-concurrency →
+ * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (see executeSwarmJob / cli-client buildEnv).
+ * The --budget wall-clock ceiling is the always-on hard bound on the whole run.
  */
 export function buildSwarmPrompt(objective: string, cap?: number): string {
   const trimmed = objective.trim();
   const capClause =
-    cap !== undefined
-      ? `Launch at most ${cap} subagents (soft cap — split or group targets to stay within it).`
-      : "Launch one subagent per distinct target; group related targets if there are many.";
+    cap !== undefined ? `Use at most ${cap} parallel subagents.` : undefined;
   return [
-    "Coordinate a READ-ONLY parallel review using the AgentSwarm tool.",
+    "Review the following read-only: inspect and report; do not modify anything.",
     "",
     `Objective: ${trimmed}`,
     "",
-    "Use the AgentSwarm tool to fan the work out across subagents (it requires at least 2",
-    'items). Set subagent_type to "explore" — a read-only exploration profile that has no',
-    "file-editing tools at all (defense-in-depth on top of the safety hook). Give each subagent",
-    "a distinct target (a file, module, directory, or question) via the prompt_template + items.",
-    capClause,
-    "Each subagent must inspect the workspace using read tools only (Read, Grep, Glob) and",
-    "must NOT write, edit, run shell commands, or mutate anything. This is a read-only command,",
-    "so the safety hook denies any write/edit/shell/web tool call — instruct subagents to report",
-    "findings rather than attempt fixes, and to rely on Read/Grep/Glob.",
+    "Only Read, Grep, and Glob are available in this mode — shell/Bash and every write/edit tool",
+    "are denied. Launch the parallel fan-out as your FIRST action; do NOT run preliminary shell",
+    "commands to size or list files first (the subagents inspect the workspace directly with",
+    "Read/Grep/Glob).",
+    "Fan the work out across the relevant targets in parallel using your own subagent capability,",
+    "as you judge best — split or group the work however fits the objective.",
+    ...(capClause ? [capClause] : []),
     "",
-    "After the subagents return, consolidate their findings into a single markdown report:",
-    "a short verdict line, a brief summary, then one section per target with file:line references.",
-    "Return plain markdown — no JSON wrapper, no outer code fences.",
+    "Consolidate everything into a single markdown report: a short verdict line, a brief summary,",
+    "then findings as `file:line — issue — severity`. Return plain markdown — no JSON wrapper, no",
+    "outer code fences.",
   ].join("\n");
 }
 
@@ -689,17 +700,36 @@ async function executeSwarmJob(
 }
 
 /**
- * Soft version gate. The AgentSwarm tool shipped in kimi-code 0.12.0; on an
- * older binary the tool does not exist and the coordinator's AgentSwarm call
- * fails inside kimi (degraded, not dangerous — the read-only hook still holds).
- * Refuse on a confirmed-too-old version; a failed probe (flaky spawn) does not
- * block. Honors KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1 (the smoke harness sets it).
+ * Version gate. The AgentSwarm tool shipped in kimi-code 0.12.0; on an older
+ * binary the tool does not exist and the coordinator's AgentSwarm call fails
+ * inside kimi (degraded, not dangerous — the read-only hook still holds).
+ *
+ * A failed probe (flaky spawn) resolves by MODE:
+ *  - Read mode (minMinor < WRITE_SWARM_MIN_MINOR): fail OPEN. A too-old binary is
+ *    only degraded, so an unconfirmable version does not block.
+ *  - Write mode (minMinor >= WRITE_SWARM_MIN_MINOR): fail CLOSED. Safe concurrent
+ *    writes depend on the hard KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY cap, which
+ *    ONLY exists on >= 0.18.0 (PR #888). Below it, older binaries ignore the env
+ *    var, the default serialization (--max-concurrency 1) is enforced NOWHERE,
+ *    and racing `coder` subagents can corrupt the shared-worktree patch. Without
+ *    a CONFIRMED >= 0.18.0 we cannot guarantee the cap, so we must refuse.
+ *
+ * Honors KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1 (the smoke harness sets it).
  */
 async function assertSwarmSupported(context: CommandContext, minMinor: number): Promise<void> {
   if (context.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1") return;
   const kimi = resolveKimiCliCommand(context.env);
   const probe = await probeKimiVersion({ kimiBin: kimi.command, env: context.env });
-  if (probe.kind !== "ok") return;
+  if (probe.kind !== "ok") {
+    if (minMinor >= WRITE_SWARM_MIN_MINOR) {
+      throw new RuntimeError(
+        "SWARM_UNSUPPORTED",
+        `/kimi:swarm --write needs a CONFIRMED kimi-code >= 0.${WRITE_SWARM_MIN_MINOR}.0 (the hard AgentSwarm concurrency cap required for safe concurrent writes), but the version probe failed: ${probe.reason}. Ensure kimi-code is on PATH and retry.`,
+        "swarm.version-gate",
+      );
+    }
+    return;
+  }
   const supported = probe.major > 0 || (probe.major === 0 && probe.minor >= minMinor);
   if (!supported) {
     const reason =

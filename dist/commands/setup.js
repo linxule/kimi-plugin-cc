@@ -38,7 +38,7 @@
 // TOML manipulation is line-based, not via a TOML parser. The marker
 // block is owned by us; the rest of the file is the user's, untouched.
 import { spawn } from "node:child_process";
-import { access, chmod, mkdir, readFile, rename, unlink, writeFile, } from "node:fs/promises";
+import { access, mkdir, open, readFile, rename, unlink, } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
@@ -501,21 +501,37 @@ async function writeConfigAtomic(configPath, contents) {
     // can race without clobbering each other's intermediate file (PR 4
     // reviewer finding — fixed-path tmp file was a race surface).
     //
-    // Mode: tighten to 0o600 (owner-only read/write) BEFORE rename. The
-    // kimi-code config file holds API keys and tokens; the user's existing
-    // file is typically 0o600, and umask-only would silently downgrade it
-    // to 0o644 after our rewrite. Audit report 28 (Codex M1) tracked this.
-    // chmod the temp file before rename so the final inode never exists at
-    // a wider mode.
+    // Mode: the temp file is created at 0o600 (owner-only read/write) via
+    // O_CREAT|O_EXCL with the mode passed directly to open(), mirroring
+    // createPrivateLockFile in hooks/config-safety.ts. The kimi-code config
+    // file holds API keys and tokens; a writeFile()-then-chmod() sequence
+    // would let the temp file sit briefly at the default umask mode
+    // (typically 0o644, group/world-readable) in between — audit report 28
+    // (Codex M1) tracked the chmod-after-write half of this, but a second
+    // pass found the create-then-tighten window itself. Passing the mode to
+    // open() means the file never exists on disk at anything wider than
+    // 0o600.
     await mkdir(path.dirname(configPath), { recursive: true });
     const suffix = randomBytes(8).toString("hex");
     const tmpPath = `${configPath}.kimi-plugin-cc.${process.pid}.${suffix}.tmp`;
+    const openFlags = fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        (fsConstants.O_NOFOLLOW ?? 0);
     try {
-        await writeFile(tmpPath, contents, "utf8");
-        if (process.platform !== "win32") {
-            // Windows file modes are emulated; skip the chmod to avoid
-            // platform-specific noise. The threat model excludes Windows.
-            await chmod(tmpPath, 0o600);
+        const handle = await open(tmpPath, openFlags, 0o600);
+        try {
+            if (process.platform !== "win32") {
+                // Windows file modes are emulated; skip the chmod to avoid
+                // platform-specific noise. The threat model excludes Windows.
+                // Belt-and-suspenders alongside the create-time mode above,
+                // matching createPrivateLockFile's pattern.
+                await handle.chmod(0o600);
+            }
+            await handle.writeFile(contents, "utf8");
+        }
+        finally {
+            await handle.close();
         }
         await rename(tmpPath, configPath);
     }
