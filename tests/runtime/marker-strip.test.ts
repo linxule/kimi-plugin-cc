@@ -192,6 +192,45 @@ describe("marker-strip survival: real smol-toml round-trip", () => {
     expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
     expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
   });
+
+  test("a 0.28.1-style thinking-effort migration (strict parse + reserialize) leaves the markerless enforcing hook verifier-clean", async () => {
+    // kimi-code 0.28.x ships a one-shot `thinking.effort = "max" -> "high"`
+    // migration that strictly parses and reserializes config.toml via
+    // configToTomlData/setHooks: validated hooks[] entries are preserved as
+    // DATA but ALL comments — including our managed-block markers — are
+    // dropped. This simulates that exact parse→mutate→stringify shape and
+    // asserts the v1.8.2 markerless fallback keeps the host verifier-clean.
+    const caseName = "thinking-effort-migration";
+    const { env, configPath } = await makeCase(caseName);
+    const caseDir = path.join(scratch, caseName);
+    const hookScript = await seedHostHookScript(caseDir, ".claude");
+    const hostEnv = { ...env, KIMI_PLUGIN_CC_HOOK_SCRIPT: hookScript };
+
+    // Pre-seed the pre-migration upstream setting, then install our block.
+    await writeFile(configPath, '[thinking]\neffort = "max"\n', "utf8");
+    const install = await runSetup([], makeContext(hostEnv));
+    expect(install.probe).toBe("ok");
+    const beforeMigration = await readFile(configPath, "utf8");
+    expect(beforeMigration).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    expect(beforeMigration).toContain('effort = "max"');
+
+    // --- The 0.28.1-style migration: parse, flip the value, reserialize. ---
+    const migrated = parse(beforeMigration);
+    (migrated.thinking as Record<string, unknown>).effort = "high";
+    const reserialized = stringify(migrated);
+    await writeFile(configPath, reserialized, "utf8");
+
+    // Sanity: value migrated, markers gone, hook table survived as data.
+    expect(reserialized).toContain('effort = "high"');
+    expect(reserialized).not.toContain("kimi-plugin-cc-managed");
+    expect(reserialized).toContain(hookScript);
+    expect(reserialized).toContain("[[hooks]]");
+
+    // --- The host still verifies installed via the bare-table fallback. ---
+    const check = await runSetup(["--check"], makeContext(hostEnv));
+    expect(check.probe).toBe("ok");
+    expect(check.warnings.join("\n")).toMatch(/markers are missing/i);
+  });
 });
 
 describe("evaluateInstalled bare-table fallback strictness", () => {

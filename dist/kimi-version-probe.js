@@ -759,6 +759,75 @@ export const KIMI_TESTED_MINORS = [
     // userTreeClean=true, worktreeCleaned=true); and the out-of-root write was
     // denied. Tag: compat-verified-kimi-code-0.26.0.
     { major: 0, minor: 26 },
+    // 0.27.0 (minor, 2026-07-17) verified COMPAT-PRESERVED across the
+    // 0.26.0→0.27.0 release delta. All THREE primary safety surfaces are 0-byte
+    // diffs: 01-cli-prompt-mode, 02-permission, AND 03-hooks are byte-identical,
+    // so argv, default-v1 routing, auto permission, headless handlers, the whole
+    // policy queue, the hook engine, exit-2 denial, matcher behavior, and
+    // any-block-wins aggregation are unchanged from the certified 0.26.0. The two
+    // non-empty scoped surfaces are compat-benign: 04-wire-records (12.3 KB) is
+    // session-storage identity + debug-export naming work (timestamped export
+    // filenames instead of repeatedly overwriting `<session-id>.zip`; an optional
+    // workspace-id registry reuse for the same physical root with Windows-shaped
+    // case/slash folding and safe-id validation + legacy-hash fallback — session
+    // directory bookkeeping, NOT PromptJsonWriter NDJSON records, session.resume_
+    // hint, hook execution, permission ordering, or workspace-write policy), and
+    // 05-session-bootstrap (1.7 KB) only wires the optional `resolveWorkspaceId`
+    // callback through KimiCoreOptions into SessionStore (no config schema,
+    // workspace-local additional_dir, hook merge, or permission-context change;
+    // HookDefSchema stays `.strict()`). The release notes' new `/copy` slash
+    // command is off the monitored `-p` path (scoped CLI delta 0 bytes; not a
+    // model tool). Direct invariant checks on the released 0.27.0 tag confirmed
+    // PreToolCallHook index 0, AgentSwarmExclusiveDeny index 1, AutoModeApprove
+    // the first approve at index 5 (every intervening policy a deny), any-block-
+    // wins via the first action:'block' result, empty matcher = all tools, exit 2
+    // blocks, Bash.command / Write.path / Edit.path, `kimi -p` fresh sessions at
+    // permission:'auto' with resumed sessions force-overridden, AgentSwarm
+    // subagents on the standard permission stack (deny-all unshift remains
+    // startBtw()-only), and KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY as the hard
+    // concurrent-subagent ceiling. The complete exact-0.27.0 `bun run smoke:real`
+    // (temp-installed 0.27.0 binary via KIMI_PLUGIN_CC_KIMI_BIN) was GREEN: 10
+    // pass / 0 fail, 43 assertions in 587.74s — read-only labels denied writes,
+    // the v2 lane (KIMI_CODE_EXPERIMENTAL_FLAG=1) denied AND emitted the modeled
+    // system-version signal, pursue wrote no file through its full budget, read
+    // swarm denied a subagent write, write-swarm stayed confined (patchBytes=278,
+    // userTreeClean=true, worktreeCleaned=true), and the out-of-root write was
+    // denied. Daily monitor: 2026-07-18. Tag: compat-verified-kimi-code-0.27.0.
+    { major: 0, minor: 27 },
+    // 0.28.1 (0.28.0 + patch 0.28.1, 2026-07-20) verified COMPAT-PRESERVED across
+    // the 0.27.0→0.28.1 release delta (chained on the 0.27.0 audit above, so the
+    // full 0.26.0→0.28.1 span is covered). The two load-bearing safety surfaces
+    // are 0-byte diffs: 02-permission AND 03-hooks byte-identical; 04-wire-records
+    // is also 0 bytes incrementally (the 12.3 KB 0.26.0→0.28.1 total is entirely
+    // the previously audited 0.27.0 storage work). 01-cli-prompt-mode (1.7 KB) is
+    // commands.ts ONLY: the top-level `server` registration is replaced by `web`
+    // and the YOLO-vs-Auto help text is corrected — run-prompt.ts and options.ts
+    // are byte-identical, and the plugin passes its prompt as the VALUE of `-p`,
+    // so neither change alters consumed argv or `-p` routing. 05-session-bootstrap
+    // (4.8 KB incremental) adds a one-shot `thinking.effort = "max" -> "high"`
+    // config migration that strictly parses and reserializes config.toml via
+    // configToTomlData/setHooks: validated hooks[] entries are preserved but ALL
+    // comments are stripped — exactly the markerless-hook condition the plugin has
+    // handled since v1.8.2 (`hasCleanEnforcingHookEntry`, the real-smol-toml
+    // parser-based, byte-exact, matcher-rejecting absent-state fallback), so a
+    // post-migration config still verifies installed. The 0.28.1 v2 change
+    // broadcasting session-level permission-mode switches to already-running
+    // subagents is a propagation fix, not a hook bypass — the v2 external-hook
+    // runner and tool-executor hook slots are byte-identical across the delta.
+    // Direct checks on the released 0.28.1 tag reconfirmed the full invariant set
+    // (PreToolCallHook index 0, AgentSwarmExclusiveDeny index 1, AutoModeApprove
+    // first approve at index 5 with only denies between, any-block-wins, empty
+    // matcher = all tools, exit 2 blocks, Bash.command / Write.path / Edit.path,
+    // `-p` auto + headless handlers + resume-hint emission, plugin slash-command
+    // activation still RPC/host-initiated and absent from the `-p` path). The
+    // complete exact-0.28.1 `bun run smoke:real` (temp-installed 0.28.1 binary via
+    // KIMI_PLUGIN_CC_KIMI_BIN) was GREEN: 10 pass / 0 fail, 43 assertions in
+    // 626.72s — same full matrix as 0.27.0 including the v2 denial lane, pursue
+    // budget abort, read-swarm subagent denial, write-swarm confinement
+    // (patchBytes=278, userTreeClean=true, worktreeCleaned=true), and the
+    // out-of-root absolute write denial. Daily monitor: 2026-07-21. Tag:
+    // compat-verified-kimi-code-0.28.1.
+    { major: 0, minor: 28 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

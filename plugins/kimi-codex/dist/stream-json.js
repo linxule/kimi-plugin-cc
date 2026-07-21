@@ -117,6 +117,13 @@
 //     non-fatal: it becomes diagnostic-only, never enters records[]/onRecord,
 //     and cannot affect prose or session pinning. A targeted exact-v2 review
 //     smoke denied the forced write (1 pass / 8 skip / 0 fail).
+//     2026-07-16 covered 0.25.0 + 0.26.0 (the 0.25.0 step added only 943 B
+//     of permission telemetry; all three primary safety surfaces were 0-byte
+//     on the 0.26.0 step; no new PromptJsonWriter record on either),
+//     2026-07-18 covered 0.27.0, and 2026-07-21 covered 0.28.1
+//     (permission/hooks 0-byte on both steps; wire 0-byte past the audited
+//     0.27.0 session-storage work; GREEN exact-binary smoke 10/0, 43
+//     assertions, on each of exact 0.27.0 and 0.28.1).
 //     NB: from 0.6.0 run-prompt.ts
 //     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
 //     resume-session workDir guard, and at 0.8.0 it gained headless goal

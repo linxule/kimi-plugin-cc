@@ -51,12 +51,27 @@ describe("setup command parsing", () => {
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toContain("managed block is NOT installed");
       expect(result.stdout).toContain("Next step: Run /kimi:setup");
-      expect(result.stderr).toBe("");
+      // The tsx loader may emit Node deprecation warnings (e.g. DEP0205
+      // module.register() on Node >= 25) that are environment noise, not
+      // companion output — strip them before asserting a clean stderr.
+      expect(stripNodeDeprecationWarnings(result.stderr)).toBe("");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 });
+
+function stripNodeDeprecationWarnings(stderr: string): string {
+  return stderr
+    .split("\n")
+    .filter(
+      (line) =>
+        !/^\(node:\d+\) \[DEP\d+\] DeprecationWarning:/.test(line) &&
+        !/^\(Use `node --trace-deprecation /.test(line),
+    )
+    .join("\n")
+    .trim();
+}
 
 async function runCompanion(
   argv: string[],
