@@ -1092,6 +1092,26 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // writes; forced-write labels, pursue, read-swarm, write-swarm confinement,
   // and out-of-root denial all passed. Daily monitor: 2026-08-12.
   { major: 0, minor: 35 },
+  // 0.36 added in v1.9.9 (2026-08-13) after the scoped source audit and
+  // exact-binary smoke against immutable upstream commit
+  // b6144f94ea6b22455a4e750d1750d220987e7bc2. The canonical CLI, v1
+  // permission, and hook surfaces were 0-byte diffs. The wire/session diff
+  // adds MCP OAuth credential coordination; bootstrap/config adds MCP OAuth
+  // inspection plus v2 secondary-model pool config round-tripping. Neither
+  // changes the supported -p stream, hook merge, permission context, cwd, or
+  // workspace-local config loading.
+  //
+  // Native v2 remains fail-closed: 0.36.0 still allows the plan listener to
+  // final-allow exact plan-file writes before external hooks, so accepted
+  // children stay pinned to legacy v1 and truthy experimental selectors still
+  // refuse before spawn. The added secondary-model pool keys are excluded
+  // from the v1 derived-model patch recipe and do not widen write capability.
+  //
+  // Exact-0.36.0 temp-binary smoke was GREEN: 12 pass / 0 fail, 55 assertions
+  // in 534.57s. Fresh/resumed default-plan runs stayed on v1 with hook-denied
+  // writes; forced-write labels, v2 refusal, pursue, read-swarm, write-swarm
+  // confinement, and out-of-root denial all passed. Daily monitor: 2026-08-13.
+  { major: 0, minor: 36 },
 ];
 
 export interface KimiVersionProbeOk {

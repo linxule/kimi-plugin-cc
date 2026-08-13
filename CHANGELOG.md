@@ -2,6 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.9.9 — 2026-08-13
+
+**Certifies kimi-code 0.36.0 on the forced legacy-v1 path.** Native agent-core-v2 remains fail-closed disabled; no hook, permission, concurrency, budget, confinement, or allowlist policy changed.
+
+- **Scoped source audit preserved the supported contract.** The immutable 0.35.0→0.36.0 diffs for CLI prompt mode, v1 permission policies, and v1 hooks were all 0 bytes. The 5,056-byte wire/session diff adds MCP OAuth credential coordination; the 22,703-byte bootstrap/config diff adds MCP OAuth inspection/coordinator APIs and v2 secondary-model pool config round-tripping. Neither changes the `-p` stream, create/resume hook merge, permission context, cwd, or workspace-local config loading.
+- **Native-v2 containment remains load-bearing.** Exact 0.36.0 still permits the plan listener to final-allow exact plan-file writes before later external hooks. Accepted children therefore overwrite `KIMI_CODE_LEGACY_FLAG=1`, while truthy `KIMI_CODE_EXPERIMENTAL_FLAG` values still refuse before spawn. The new v2 secondary-model keys are excluded from the v1 derived-model patch recipe.
+- **Certification evidence is green.** The exact-0.36.0 temporary binary passed `bun run smoke:real` with **12 pass / 0 fail / 55 assertions in 534.57s**, including forced-write denials, v2 pre-spawn refusal, fresh/resumed default-plan v1 pinning, pursue's every-turn hook gate, real read-swarm child denial, write-swarm confinement/cleanup, and out-of-root denial. `KIMI_TESTED_MINORS` gains `{0,36}`. Tags: `v1.9.9` and `compat-verified-kimi-code-0.36.0`.
+
 ## 1.9.8 — 2026-08-12
 
 **Certifies kimi-code 0.35.0 on the forced legacy-v1 path.** Native agent-core-v2 remains fail-closed disabled; no hook, permission, concurrency, budget, confinement, or allowlist policy changed.
