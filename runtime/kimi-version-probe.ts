@@ -1112,6 +1112,30 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // writes; forced-write labels, v2 refusal, pursue, read-swarm, write-swarm
   // confinement, and out-of-root denial all passed. Daily monitor: 2026-08-13.
   { major: 0, minor: 36 },
+  // 0.37–0.38 added in the 2026-08-24 compatibility catch-up after the
+  // cumulative audit through immutable upstream commit
+  // 0999454bdcb5ddd98f39bffee434dcf0a810f394 (tag @moonshot-ai/kimi-code@0.38.0).
+  // Intermediate 0.37.0→0.37.1 and 0.37.1→0.37.2 scoped diffs were 0 bytes
+  // across CLI prompt mode, permission, hooks, wire/session, and
+  // session-bootstrap/config. The cumulative 0.36.1→0.38.0 audit likewise
+  // found 0-byte CLI (except the off-path hidden __update_download command),
+  // permission, and hook surfaces; 8,525 bytes of wire/session MCP OAuth and
+  // background-write-drain plumbing; and 47,360 bytes of bootstrap/config
+  // MCP registry/OAuth plus create/resume wiring with hook merge/cwd unchanged.
+  // The 0.38.0 WaitFor tool is v2-only and remains outside the read-only
+  // allowlist. Native v2 remains fail-closed: accepted children force
+  // KIMI_CODE_LEGACY_FLAG=1, while truthy KIMI_CODE_EXPERIMENTAL_FLAG values
+  // refuse before spawn; the plan-file final-allow ordering gap and KAP
+  // follow-up therefore remain contained and uncertified.
+  //
+  // Exact-0.38.0 temp-binary smoke was GREEN: 12 pass / 0 fail, 55 assertions
+  // in 381.64s. It denied every forced-write label, refused v2 before spawn,
+  // kept fresh/resumed default-plan runs on v1, enforced the hook on every
+  // pursue turn, denied a read-swarm child write, confined write-swarm
+  // (patchBytes=278; user tree clean; worktree removed), and denied the
+  // non-vacuous out-of-root coder write. Daily monitor: 2026-08-24.
+  { major: 0, minor: 37 },
+  { major: 0, minor: 38 },
 ];
 
 export interface KimiVersionProbeOk {

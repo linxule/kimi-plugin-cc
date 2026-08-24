@@ -2,7 +2,13 @@
 
 How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
 
-This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands. The most recent worked example is the 2026-07-15 0.23.6→0.24.2 certification (reports 97-101 → v1.8.1).
+This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands. The most recent worked example is the 2026-08-24 0.36.1→0.38.0 certification, published as v1.9.10.
+
+## Current certified boundary (2026-08-24)
+
+The plugin is certified through `@moonshot-ai/kimi-code@0.38.0` on the forced legacy-v1 path. The cumulative 0.36.1→0.38.0 scoped audit found 0-byte permission and hook diffs, an off-path-only CLI change, and only MCP/session/bootstrap plumbing in the non-empty surfaces. The exact 0.38.0 temporary binary passed `bun run smoke:real` with **12 pass / 0 fail / 55 assertions in 381.64s**. The repository gate passed with **692 tests passing, 10 skipped, 0 failing, and 2,155 assertions**.
+
+Native agent-core-v2 remains fail-closed disabled: accepted children force `KIMI_CODE_LEGACY_FLAG=1`, truthy `KIMI_CODE_EXPERIMENTAL_FLAG` values refuse before spawn, and the plan-file final-allow ordering gap remains unresolved upstream. The 0.38.0 `WaitFor` tool is v2-only and outside the plugin read-only allowlist. Carry MoonshotAI/kimi-code#2376 as an upstream follow-up; do not use `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` as a repair path. The detailed continuity evidence is in [the 2026-08-24 daily monitor report](../.claude/kimi-code-research/daily-monitor/2026-08-24-upstream-monitor.md).
 
 ## When to run
 

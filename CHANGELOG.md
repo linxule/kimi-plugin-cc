@@ -2,6 +2,15 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.9.10 — 2026-08-24
+
+**Certifies kimi-code 0.37.x and 0.38.0 on the forced legacy-v1 path.** Native agent-core-v2 remains fail-closed disabled; no hook, permission, concurrency, budget, confinement, or allowlist policy changed.
+
+- **Scoped source audit preserved the supported contract.** Intermediate 0.37.0→0.37.1 and 0.37.1→0.37.2 diffs were 0 bytes across all five audit surfaces. The cumulative 0.36.1→0.38.0 audit found 1,805 bytes in CLI prompt mode (only the off-path hidden `__update_download` command), 0 bytes in permission, 0 bytes in hooks, 8,525 bytes in wire/session (MCP OAuth/session plumbing plus a 0.38 background-write drain), and 47,360 bytes in session bootstrap/config (MCP registry/OAuth plus create/resume wiring). Hook merge, cwd, policy order, matching, tool-input keys, and standard swarm-child permission inheritance remain unchanged. The 0.38.0 `WaitFor` tool is v2-only and outside the plugin read-only allowlist.
+- **Native-v2 containment remains load-bearing.** Exact 0.38.0 still permits plan-file final approval before the external hook in native v2. Accepted children therefore overwrite `KIMI_CODE_LEGACY_FLAG=1`, while truthy `KIMI_CODE_EXPERIMENTAL_FLAG` values refuse before spawn. KAP indexing and MoonshotAI/kimi-code#2376 remain upstream follow-ups; v2 is not re-enabled.
+- **Certification evidence is green.** The exact-0.38.0 temporary binary passed `bun run smoke:real` with **12 pass / 0 fail / 55 assertions in 381.64s**, covering forced-write denials, v2 refusal, fresh/resumed default-plan v1 pinning, pursue's every-turn hook gate, real read-swarm child denial, write-swarm confinement (`patchBytes=278`, user tree clean, worktree removed), and non-vacuous out-of-root denial. `KIMI_TESTED_MINORS` gains `{0,37}` and `{0,38}`.
+- **Release scope.** v1.9.10 publishes the verified compatibility boundary and regenerated Claude/Codex surfaces without changing safety defaults. Tags: `v1.9.10` and `compat-verified-kimi-code-0.38.0`. Continuity report: `.claude/kimi-code-research/daily-monitor/2026-08-24-upstream-monitor.md`.
+
 ## 1.9.9 — 2026-08-13
 
 **Certifies kimi-code 0.36.0 on the forced legacy-v1 path.** Native agent-core-v2 remains fail-closed disabled; no hook, permission, concurrency, budget, confinement, or allowlist policy changed.

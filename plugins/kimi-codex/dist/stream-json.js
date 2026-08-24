@@ -130,8 +130,9 @@
 //     system.version signal and terminal session pinning), 2026-07-29 covered
 //     0.30.0, 2026-07-31 covered 0.31.0, 2026-08-01 covered 0.31.1, and
 //     2026-08-08 covered 0.32.0 through 0.34.0, 2026-08-12 covered 0.35.0,
-//     and 2026-08-13 covered 0.36.0. The legacy-v1 writer remains compatible
-//     through 0.36.0; custom profiles can change content/tools but
+//     2026-08-13 covered 0.36.0, and 2026-08-24 covered 0.37.0 through
+//     0.38.0. The legacy-v1 writer remains compatible through 0.38.0;
+//     custom profiles can change content/tools but
 //     not the NDJSON envelope. In 0.33.0 native v2 became the unflagged default,
 //     so v1.9.6 forces KIMI_CODE_LEGACY_FLAG=1 in every accepted child while
 //     retaining the old experimental-selector refusal. This parser continues
