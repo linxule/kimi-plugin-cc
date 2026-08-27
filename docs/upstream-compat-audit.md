@@ -2,13 +2,13 @@
 
 How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
 
-This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands. The most recent worked example is the 2026-08-24 0.36.1→0.38.0 certification, published as v1.9.10.
+This document captures the routine that ran on 2026-05-27 for `@moonshot-ai/kimi-code@0.4.0` (reports 31-35 in `.claude/kimi-code-research/reports/`, commit `b67263c`, tag `compat-verified-kimi-code-0.4.0`). Repeat it whenever a new kimi-code minor or major lands. The most recent worked example is the 2026-08-27 0.39.0 certification (reports 111-116), published as v1.9.11.
 
-## Current certified boundary (2026-08-24)
+## Current certified boundary (2026-08-27)
 
-The plugin is certified through `@moonshot-ai/kimi-code@0.38.0` on the forced legacy-v1 path. The cumulative 0.36.1→0.38.0 scoped audit found 0-byte permission and hook diffs, an off-path-only CLI change, and only MCP/session/bootstrap plumbing in the non-empty surfaces. The exact 0.38.0 temporary binary passed `bun run smoke:real` with **12 pass / 0 fail / 55 assertions in 381.64s**. The repository gate passed with **692 tests passing, 10 skipped, 0 failing, and 2,155 assertions**.
+The plugin is certified through `@moonshot-ai/kimi-code@0.39.0` on the forced legacy-v1 path. The 0.38.0→0.39.0 scoped audit found 0-byte CLI-prompt-mode (including the engine selector), permission, hook, and wire/session diffs; the only non-empty scoped surface was MCP-registry `cwd`/OAuth-verify plumbing in `rpc/core-impl.ts`. The v1 tool-layer files outside the scoped diffs (`tools/policies/path-access.ts`, `tools/builtin/shell/bash.ts`) were a win32-only `cygpath` shell-path-bridge refactor, provably identity on POSIX. The exact 0.39.0 temporary binary passed `bun run smoke:real` with **12 pass / 0 fail / 55 assertions in 554.49s**.
 
-Native agent-core-v2 remains fail-closed disabled: accepted children force `KIMI_CODE_LEGACY_FLAG=1`, truthy `KIMI_CODE_EXPERIMENTAL_FLAG` values refuse before spawn, and the plan-file final-allow ordering gap remains unresolved upstream. The 0.38.0 `WaitFor` tool is v2-only and outside the plugin read-only allowlist. Carry MoonshotAI/kimi-code#2376 as an upstream follow-up; do not use `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` as a repair path. The detailed continuity evidence is in [the 2026-08-24 daily monitor report](../.claude/kimi-code-research/daily-monitor/2026-08-24-upstream-monitor.md).
+Native agent-core-v2 remains fail-closed disabled: accepted children force `KIMI_CODE_LEGACY_FLAG=1`, truthy `KIMI_CODE_EXPERIMENTAL_FLAG` values refuse before spawn, and the plan-file final-allow ordering gap is not merely unresolved but documented as intended upstream (`packages/agent-core-v2/docs/Permission.md` reserves `event.allow()` for the plan-file guard and lists listener ordering as an open design question). 0.39.0's experimental tower mode and subagent fork are both v2-only and gated behind that same defect — neither adds a new final-allow listener. Carry MoonshotAI/kimi-code#2376 as an upstream follow-up; do not use `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` as a repair path. Operator-facing (non-contract) notes from 0.39.0: the experimental Remote Control tunnel can patch `hooks` via `POST /api/v1/config` (caught fail-closed by per-spawn byte-exact verification — altered entries refuse as drift, removed ones as not-installed) and forwards the OAuth refresh token to the hard-coded relay `wss://code-rc.kimi.com`. The detailed evidence is in reports 111-116 and [the 2026-08-27 daily monitor report](../.claude/kimi-code-research/daily-monitor/2026-08-27-upstream-monitor.md).
 
 ## When to run
 
@@ -149,9 +149,24 @@ git diff "$PREV".."$NEW" -- \
   packages/agent-core/src/config/workspace-local.ts \
   packages/agent-core/src/config/ \
   > /tmp/kimi-<NEW>-diff/05-session-bootstrap.diff
+
+# The v1 TOOL LAYER and the SDK/kaos packages are on the -p path but were
+# blind spots until the 0.39.0 audit. tools/ holds the input schemas whose
+# field names the hook allowlist reads (Write/Edit `path`, Bash `command`) and
+# the tool-internal path guards; run-prompt.ts imports createKimiHarness from
+# packages/node-sdk (a 0-byte agent-core diff does NOT cover it); kaos is the
+# execution/paths abstraction under both. Exclude node-sdk's v2-only files
+# when reading (v2/ and sdk-rpc-client-v2.ts are behind the refused engine).
+git diff "$PREV".."$NEW" -- \
+  packages/agent-core/src/tools/ \
+  packages/node-sdk/src \
+  ':(exclude)packages/node-sdk/src/v2' \
+  ':(exclude)packages/node-sdk/src/sdk-rpc-client-v2.ts' \
+  packages/kaos/src \
+  > /tmp/kimi-<NEW>-diff/06-v1-tools-sdk.diff
 ```
 
-A 0-byte `03-hooks.diff` (historical `agent/hooks/` plus live `session/hooks/`) is the canonical "hook engine unchanged" signal. The other **four** need real reading. (Note: `04-wire-records.diff` scopes the whole `session/` dir, so it re-includes `session/hooks/`+`session/permission/` — that overlap is intentional belt-and-suspenders, not a bug.) `05-session-bootstrap.diff` scopes the RPC harness impl + the whole `config/` dir, because a non-empty `05` means session construction or on-disk config-load behavior moved — exactly the surface that determines what the permission context (e.g. `additionalDirs`) holds before any policy runs. A non-empty `05` requires reading even when `01`–`04` are clean.
+A 0-byte `03-hooks.diff` (historical `agent/hooks/` plus live `session/hooks/`) is the canonical "hook engine unchanged" signal. The other **five** need real reading. (Note: `04-wire-records.diff` scopes the whole `session/` dir, so it re-includes `session/hooks/`+`session/permission/` — that overlap is intentional belt-and-suspenders, not a bug.) `05-session-bootstrap.diff` scopes the RPC harness impl + the whole `config/` dir, because a non-empty `05` means session construction or on-disk config-load behavior moved — exactly the surface that determines what the permission context (e.g. `additionalDirs`) holds before any policy runs. A non-empty `05` requires reading even when `01`–`04` are clean. `06-v1-tools-sdk.diff` was added after the 0.39.0 audit, where `tools/policies/path-access.ts`, `tools/builtin/shell/bash.ts`, and ~1k changed lines in `packages/node-sdk` sat outside every scoped diff (benign that release — a win32-only path-bridge refactor and additive MCP threading — but a tool_input schema rename or an SDK-level engine/session change would have been invisible). A non-empty `06` means tool input schemas, tool-internal guards, or the harness SDK moved: read it for schema-field renames (the hook allowlist reads `path`/`command` by name), new pre-hook approval paths, and `createKimiHarness` behavior changes.
 
 ### Phase 1 — Multi-agent compat review (4 parallel agents)
 

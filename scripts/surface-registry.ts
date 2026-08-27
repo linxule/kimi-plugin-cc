@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "6b681aa7089f4258d07660e2e6e8caa6f0dc813fdcb7c040a1aa5966e0199fbd" },
-  { path: ".claude-plugin/marketplace.json", sha256: "00851c1314fba3b876eb63452421e3fa2916d6d7e630f8d09ee89f28396f71ab" },
+  { path: ".claude-plugin/plugin.json", sha256: "3c067d6dbf4c1735379eef518c5efd2eee1c01ff713d2fa6240535e87e4a2342" },
+  { path: ".claude-plugin/marketplace.json", sha256: "43d59b8f6eead7cd5021d1efe4790e25c0f8d16791944b09e2acaa0588c8bf02" },
   { path: "commands/README.md", sha256: "f996a084f8c7762c2405c3990443cff49d96003416da8fead8fd875a0f50fd23" },
   { path: "commands/ask.md", sha256: "5ffcd405b1f905f400c00520d210afc6dbf35cae3a0b07c6189866fa639bf778" },
   { path: "commands/cancel.md", sha256: "4d1c1e9d0534fac113fea18e2c8993d99f3ada1335186f66cd995a45f1057db4" },

@@ -1136,6 +1136,42 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // non-vacuous out-of-root coder write. Daily monitor: 2026-08-24.
   { major: 0, minor: 37 },
   { major: 0, minor: 38 },
+  // 0.39.0 certified 2026-08-27 (same-day: npm publish 11:36Z, operator binary
+  // self-upgraded within hours; tag @moonshot-ai/kimi-code@0.39.0, commit
+  // 52e8d19d). Scoped diffs vs 0.38.0: CLI prompt mode (incl. the engine
+  // selector experimental-v2.ts), permission, hooks, and wire/session all
+  // 0-byte; bootstrap/config was 9,060 bytes of MCP-registry cwd threading +
+  // OAuth verify tri-state only (create/resume session bootstrap and the
+  // config/ dir byte-unchanged). The v1 tool-layer files outside the scoped
+  // diffs (tools/policies/path-access.ts, tools/builtin/shell/bash.ts) are a
+  // win32-only cygpath shell-path-bridge refactor, provably identity on POSIX
+  // and post-hook defense-in-depth regardless; audits now also scope
+  // packages/node-sdk/src (v1 portions) and packages/kaos/src, which are on
+  // the -p path but were previously un-scoped (this release: additive/benign).
+  //
+  // New experimental features are both agent-core-v2-only and unreachable on
+  // the pinned path: tower (KIMI_CODE_EXPERIMENTAL_TOWER; TUI /tower command;
+  // zero agent-core presence, node-sdk setTowerMode hard-throws on v1) and
+  // subagent fork (KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK / [experimental]
+  // subagent_fork; the v1 flag registry cannot express either flag, and the
+  // v1 AgentSwarm input schema is .strict() so a model-supplied fork arg is
+  // rejected). Both are subsumed by KIMI_CODE_EXPERIMENTAL_FLAG, which still
+  // refuses before spawn. Native v2 remains fail-closed: the plan listener
+  // still final-allows exact plan-file writes before external hooks (sole
+  // event.allow() call site; ordering is import-order with no contract, and
+  // upstream's Permission.md documents the bypass as intended with listener
+  // ordering an open design question), so accepted children stay pinned to
+  // legacy v1. Remote Control (0.39.0, experimental) can patch hooks via a
+  // tunneled config API; the per-spawn byte-exact hook verification catches
+  // that as RECOVERABLE drift — fail-closed, no runtime change needed.
+  //
+  // Exact-0.39.0 temp-binary smoke was GREEN: 12 pass / 0 fail, 55 assertions
+  // in 554.49s. It denied every forced-write label, refused v2 before spawn,
+  // kept fresh/resumed default-plan runs on v1, enforced the hook on every
+  // pursue turn, denied a read-swarm child write, confined write-swarm
+  // (patchBytes=278; user tree clean; worktree removed), and denied the
+  // non-vacuous out-of-root coder write. Reports 111-116; monitor 2026-08-27.
+  { major: 0, minor: 39 },
 ];
 
 export interface KimiVersionProbeOk {
