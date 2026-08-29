@@ -464,20 +464,12 @@ describe("ask background", () => {
     const pluginDataRoot = await createTestPluginDataRoot("ask-background-early-exit");
     const repoRoot = await createGitRepoFixture("ask-background-early-exit-repo");
 
-    // Use a node binary that exists but an env that will cause the worker to
-    // fail fast (missing scenario + no kimi bin). The worker will try to run
-    // executeAskJob but fail before advancing the phase past worker-spawned.
-    // We don't want to wait too long, so use a very short delay.
-    const env = {
-      ...process.env,
-      CLAUDE_PLUGIN_DATA: pluginDataRoot,
-      // Don't set KIMI_PLUGIN_CC_KIMI_BIN so the worker uses the real kimi binary,
-      // which won't be found, causing the worker process to exit non-zero.
-      // Actually set it to a broken value so spawn fails after phase check.
-      KIMI_PLUGIN_CC_KIMI_BIN: `/tmp/missing-kimi-bin-${randomUUID()}`,
-      KIMI_PLUGIN_CC_NODE_BIN: "node",
-      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
-    } as NodeJS.ProcessEnv;
+    // Keep the Kimi plan valid so dispatch reaches the background-worker seam,
+    // then use an executable that exits immediately as the configured Node
+    // launcher. The parent records worker-spawned and its close listener owns
+    // the early-exit classification.
+    const env = makeMockEnv(pluginDataRoot, "ask-success");
+    env.KIMI_PLUGIN_CC_NODE_BIN = "/usr/bin/false";
 
     try {
       const startOutput = await runAsk(

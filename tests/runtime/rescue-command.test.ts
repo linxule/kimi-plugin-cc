@@ -119,7 +119,10 @@ describe("rescue command lifecycle", () => {
       );
       const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as {
         argv: string[];
-        env: { KIMI_PLUGIN_CC_CMD: string | null };
+        env: {
+          KIMI_PLUGIN_CC_CMD: string | null;
+          KIMI_PLUGIN_CC_WORKSPACE_ROOT: string | null;
+        };
       };
       const status = JSON.parse(
         await runStatus(["--type", "rescue"], makeContext(repoRoot, env)),
@@ -143,6 +146,7 @@ describe("rescue command lifecycle", () => {
       // evaluateRescueHookRequest. That env propagation is the only
       // runtime-side signal that selects the rescue policy.
       expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("rescue");
+      expect(invocation.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT).toBe(repoRoot);
       expect(invocation.argv).toContain("--output-format");
       expect(invocation.argv).toContain("stream-json");
       // v1.0 alpha.4: rescue runs thinking-on always. Locks the contract

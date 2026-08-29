@@ -14,7 +14,7 @@ import {
 const companionPath = path.join(process.cwd(), "runtime/companion.ts");
 
 describe("companion Kimi-unavailable handling", () => {
-  test("ask, review, challenge, and rescue report actionable startup failures and persist failed jobs", async () => {
+  test("ask, review, challenge, and rescue fail actionably before creating a model job", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("companion-unavailable");
     const repoRoot = await createGitRepoFixture("companion-unavailable-repo");
     const env = {
@@ -31,15 +31,14 @@ describe("companion Kimi-unavailable handling", () => {
     };
 
     try {
-      await assertUnavailableCommand(env, ["ask", "What", "changed?"], "ask", "ASK_KIMI_BINARY_UNAVAILABLE");
-      await assertUnavailableCommand(env, ["review"], "review", "REVIEW_KIMI_BINARY_UNAVAILABLE");
+      await assertUnavailableCommand(env, ["ask", "What", "changed?"], "ask");
+      await assertUnavailableCommand(env, ["review"], "review");
       await assertUnavailableCommand(
         env,
         ["task", "challenge", "Challenge", "this"],
         "challenge",
-        "CHALLENGE_KIMI_BINARY_UNAVAILABLE",
       );
-      await assertUnavailableCommand(env, ["task", "rescue", "Fix", "this"], "rescue", "RESCUE_KIMI_BINARY_UNAVAILABLE");
+      await assertUnavailableCommand(env, ["task", "rescue", "Fix", "this"], "rescue");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -51,7 +50,6 @@ async function assertUnavailableCommand(
   env: NodeJS.ProcessEnv,
   argv: string[],
   commandType: "ask" | "review" | "challenge" | "rescue",
-  errorCode: string,
 ): Promise<void> {
   const failure = await runCompanion(argv, env);
   const output = [failure.stdout, failure.stderr].join("\n");
@@ -65,11 +63,10 @@ async function assertUnavailableCommand(
     });
 
     expect(failure.exitCode).not.toBeNull();
-    expect(output).toContain("Run `/kimi:setup`");
-    expect(output).toContain("persisted as failed");
-    expect(latest?.status).toBe("failed");
-    expect(latest?.error?.code).toBe(errorCode);
-    expect(output).toContain(`Job ${latest?.job_id} was persisted as failed.`);
+    expect(output).toContain("KIMI_EXECUTION_PLAN_UNRESOLVED");
+    expect(output).toContain("Run Claude Code `/kimi:setup` or Codex `$kimi-setup`");
+    expect(output).not.toContain("persisted as failed");
+    expect(latest).toBeNull();
   } finally {
     jobStore.close();
   }

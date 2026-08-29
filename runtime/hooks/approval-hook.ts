@@ -60,9 +60,9 @@ async function main(): Promise<void> {
   const decision = await decideHookOutcome(input, {
     commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
     rescueEvaluator: evaluateRescueHookRequest,
-    // Trusted worktree root for the swarm-write label (v1.4). Set by the plugin
-    // spawn; the model inside kimi cannot forge it. Unused by other labels.
-    swarmWriteWorkspaceRoot: process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT,
+    // Trusted root for rescue/pursue/swarm-write. Set by the plugin spawn; the
+    // model inside kimi cannot forge it and hook payload cwd is not trusted.
+    trustedWorkspaceRoot: process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT,
   });
 
   if (decision.decision === "deny") {

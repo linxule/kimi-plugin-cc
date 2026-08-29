@@ -34,7 +34,7 @@ describe("decideHookOutcome", () => {
       { tool_name: "EnterPlanMode", tool_input: {} },
       {
         commandLabel: label,
-        swarmWriteWorkspaceRoot: "/wt",
+        trustedWorkspaceRoot: "/wt",
         rescueEvaluator: async () => {
           evaluatorCalled = true;
           return { decision: "allow" };
@@ -128,7 +128,7 @@ describe("decideHookOutcome", () => {
       for (const tool of ["Read", "Grep", "Glob", "AgentSwarm"]) {
         const decision = await decideHookOutcome(
           { tool_name: tool, tool_input: {} },
-          { commandLabel: "swarm-write", swarmWriteWorkspaceRoot: "/wt" },
+          { commandLabel: "swarm-write", trustedWorkspaceRoot: "/wt" },
         );
         expect(decision.decision).toBe("allow");
       }
@@ -137,7 +137,7 @@ describe("decideHookOutcome", () => {
     test("denies the singular Agent tool", async () => {
       const decision = await decideHookOutcome(
         { tool_name: "Agent", tool_input: {} },
-        { commandLabel: "swarm-write", swarmWriteWorkspaceRoot: "/wt" },
+        { commandLabel: "swarm-write", trustedWorkspaceRoot: "/wt" },
       );
       expect(decision.decision).toBe("deny");
     });
@@ -145,13 +145,13 @@ describe("decideHookOutcome", () => {
     test("confines writes to the TRUSTED env root, NOT the hook payload cwd", async () => {
       // The load-bearing safety property: even if the payload cwd is the user's
       // real repo, the evaluator is called with the trusted worktree root from
-      // ctx.swarmWriteWorkspaceRoot (forge-proof env), never input.cwd.
+      // ctx.trustedWorkspaceRoot (forge-proof env), never input.cwd.
       let seenRoot: string | undefined;
       const decision = await decideHookOutcome(
         { tool_name: "Write", tool_input: { file_path: "x" }, cwd: "/users/real-repo" },
         {
           commandLabel: "swarm-write",
-          swarmWriteWorkspaceRoot: "/plugin/worktrees/swarm-write-abc",
+          trustedWorkspaceRoot: "/plugin/worktrees/swarm-write-abc",
           rescueEvaluator: async (workspaceRoot) => {
             seenRoot = workspaceRoot;
             return { decision: "allow" };
@@ -168,7 +168,7 @@ describe("decideHookOutcome", () => {
         { tool_name: "Bash", tool_input: { command: "rm -rf /" } },
         {
           commandLabel: "swarm-write",
-          swarmWriteWorkspaceRoot: "/wt",
+          trustedWorkspaceRoot: "/wt",
           rescueEvaluator: async () => ({ decision: "deny", reason: "destructive command" }),
         },
       );
@@ -182,7 +182,7 @@ describe("decideHookOutcome", () => {
           { tool_name: tool, tool_input: { file_path: "x", command: "ls" } },
           {
             commandLabel: "swarm-write",
-            // No swarmWriteWorkspaceRoot — misconfiguration.
+            // No trustedWorkspaceRoot — misconfiguration.
             rescueEvaluator: async () => ({ decision: "allow" }),
           },
         );
@@ -206,7 +206,7 @@ describe("decideHookOutcome", () => {
     test.each(["Bash", "Write", "Edit"])("denies %s with stub message", async (tool) => {
       const decision = await decideHookOutcome(
         { tool_name: tool, tool_input: { command: "ls" } },
-        { commandLabel: "rescue" },
+        { commandLabel: "rescue", trustedWorkspaceRoot: "/workspace" },
       );
       expect(decision.decision).toBe("deny");
       expect(decision.reason).toContain("rescue evaluator not configured");
@@ -214,13 +214,14 @@ describe("decideHookOutcome", () => {
   });
 
   describe("rescue label with injected evaluator", () => {
-    test("delegates to evaluator with workspaceRoot from input.cwd", async () => {
+    test("delegates with the trusted env root and ignores input.cwd", async () => {
       const decision = await decideHookOutcome(
         { tool_name: "Bash", tool_input: { command: "git status" }, cwd: "/workspace" },
         {
           commandLabel: "rescue",
+          trustedWorkspaceRoot: "/trusted/workspace",
           rescueEvaluator: async (workspaceRoot, toolName, toolInput) => {
-            expect(workspaceRoot).toBe("/workspace");
+            expect(workspaceRoot).toBe("/trusted/workspace");
             expect(toolName).toBe("Bash");
             expect(toolInput).toEqual({ command: "git status" });
             return { decision: "allow" };
@@ -230,18 +231,16 @@ describe("decideHookOutcome", () => {
       expect(decision).toEqual({ decision: "allow" });
     });
 
-    test("falls back to process.cwd() when input.cwd is missing", async () => {
+    test("denies a write when the trusted root is missing", async () => {
       const decision = await decideHookOutcome(
-        { tool_name: "Read", tool_input: {} },
+        { tool_name: "Write", tool_input: { path: "/tmp/x" }, cwd: "/payload" },
         {
           commandLabel: "rescue",
-          rescueEvaluator: async (workspaceRoot) => {
-            expect(workspaceRoot).toBe(process.cwd());
-            return { decision: "allow" };
-          },
+          rescueEvaluator: async () => ({ decision: "allow" }),
         },
       );
-      expect(decision.decision).toBe("allow");
+      expect(decision.decision).toBe("deny");
+      expect(decision.reason).toContain("no trusted workspace root");
     });
 
     test("forwards deny decisions from evaluator", async () => {
@@ -249,6 +248,7 @@ describe("decideHookOutcome", () => {
         { tool_name: "Bash", tool_input: { command: "rm -rf /" }, cwd: "/w" },
         {
           commandLabel: "rescue",
+          trustedWorkspaceRoot: "/w",
           rescueEvaluator: async () => ({ decision: "deny", reason: "destructive command" }),
         },
       );

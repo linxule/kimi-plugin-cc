@@ -4,7 +4,11 @@ import process from "node:process";
 
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
 import { runCliPromptWithBudget } from "../cli-client.js";
-import { resolveKimiCliCommand } from "../kimi-command.js";
+import {
+  observedExecutionFields,
+  persistedExecutionPlanFields,
+  prepareKimiExecutionPlan,
+} from "../kimi-engine.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { collectReviewContext } from "../git.js";
 import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
@@ -80,6 +84,12 @@ export async function runReview(
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(context.cwd);
+  const executionPlan = await prepareKimiExecutionPlan({
+    operationKind: commandType,
+    cwd: context.cwd,
+    env: context.env,
+    intendedEngine: "legacy-v1",
+  });
   const store = new JobStore(paths);
 
   const jobId = randomUUID();
@@ -102,6 +112,7 @@ export async function runReview(
     kimi_pid: null,
     status: "running",
     kimi_session_id: reviewSessionId,
+    ...persistedExecutionPlanFields(executionPlan),
     agent_profile: REVIEW_AGENT_PROFILE_PLACEHOLDER,
     prompt_digest: digestPrompt(previewPrompt),
     summary: `Running ${commandType}.`,
@@ -118,15 +129,15 @@ export async function runReview(
   const reviewConfig = getManagedCommandConfig(commandType);
   const cancel = reviewConfig.cancellation;
   const handlers = createCliCancellationHandlers();
-  const kimi = resolveKimiCliCommand(context.env);
 
   try {
     const result = await runCliPromptWithBudget(
       {
         cwd: context.cwd,
         env: context.env,
-        command: kimi.command,
-        prefixArgs: kimi.prefixArgs,
+        command: executionPlan.command,
+        prefixArgs: [...executionPlan.prefixArgs],
+        executionPlan,
         prompt: previewPrompt,
         commandLabel: commandType,
         model: parsed.model,
@@ -136,6 +147,8 @@ export async function runReview(
       KIMI_REVIEW_PROMPT_TIMEOUT_MS,
       `${commandType}.prompt`,
     );
+
+    store.updateRunningJob(job.job_id, observedExecutionFields(result));
 
     if (handlers.cancelling) {
       throw new RuntimeError(

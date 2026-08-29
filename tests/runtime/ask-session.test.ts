@@ -6,7 +6,7 @@ import { runAsk } from "../../runtime/commands/ask.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { runStatus } from "../../runtime/commands/status.js";
-import { resolvePluginPaths } from "../../runtime/paths.js";
+import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import {
   cleanupTestPath,
@@ -126,12 +126,13 @@ describe("ask session resume", () => {
 
       const latestJob = JSON.parse(
         await runStatus(["--type", "ask"], makeContext(repoRoot, env)),
-      ) as { job_id: string; kimi_session_id: string };
+      ) as { job_id: string; kimi_session_id: string; resumed_from_job_id: string | null };
       const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
       const sessionIndex = invocation.argv.indexOf("-r");
 
       expect(latestJob.job_id).not.toBe(firstJob?.job_id);
       expect(latestJob.kimi_session_id).toBe(firstSession);
+      expect(latestJob.resumed_from_job_id).toBe(firstJob?.job_id);
       expect(invocation.argv[sessionIndex + 1]).toBe(firstSession);
     } finally {
       await cleanupTestPath(pluginDataRoot);
@@ -171,6 +172,7 @@ describe("ask session resume", () => {
       expect(secondJob?.kimi_session_id).toBeTruthy();
       expect(secondJob?.kimi_session_id).not.toBe(firstSession);
       expect(latestJob?.kimi_session_id).toBe(firstSession);
+      expect(latestJob?.resumed_from_job_id).toBe(firstJob?.job_id);
       expect(invocation.argv[sessionIndex + 1]).toBe(firstSession);
     } finally {
       await cleanupTestPath(pluginDataRoot);
@@ -189,6 +191,60 @@ describe("ask session resume", () => {
         runAsk(["-r", "--fresh", "What", "changed?"], makeContext(repoRoot, env)),
       ).rejects.toMatchObject({
         code: "INVALID_ARGS",
+      });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("refuses a session proven native-v2 instead of silently resuming it under forced v1", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-resume-v2-refusal");
+    const repoRoot = await createGitRepoFixture("ask-resume-v2-refusal-repo");
+    const invocationPath = path.join(pluginDataRoot, "ask-resume-v2-refusal.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
+    const repoId = await getRepoId(repoRoot);
+    const paths = resolvePluginPaths(env);
+    await ensurePluginPaths(paths);
+    const store = new JobStore(paths);
+    try {
+      store.createJob({
+        job_id: "native-v2-source",
+        repo_id: repoId,
+        command_type: "ask",
+        cwd: repoRoot,
+        model: null,
+        thinking: null,
+        background: false,
+        pid: null,
+        kimi_pid: null,
+        status: "completed",
+        kimi_session_id: "session_native_v2",
+        operation_kind: "ask",
+        intended_engine: "native-v2",
+        observed_engine: "native-v2",
+        kimi_version: "0.39.0",
+        system_version: "0.39.0",
+        agent_profile: "<cli-client>",
+        prompt_digest: "digest",
+        summary: "native v2 source",
+        final_output_path: null,
+        stream_log_path: path.join(pluginDataRoot, "missing-v2-log.jsonl"),
+        error: null,
+      });
+    } finally {
+      store.close();
+    }
+
+    try {
+      await expect(
+        runAsk(["--resume", "native-v2-source"], makeContext(repoRoot, env)),
+      ).rejects.toMatchObject({
+        code: "KIMI_SESSION_ENGINE_MISMATCH",
+        details: {
+          source_engine: "native-v2",
+          target_engine: "legacy-v1",
+        },
       });
     } finally {
       await cleanupTestPath(pluginDataRoot);

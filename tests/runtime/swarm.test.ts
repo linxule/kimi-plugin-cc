@@ -178,14 +178,13 @@ describe("runSwarm hook gate", () => {
   });
 });
 
-describe("runSwarm version gate (write fails CLOSED, read fails OPEN on an unconfirmable probe)", () => {
-  // A nonexistent absolute path makes `kimi --version` fail with ENOENT, so the
-  // probe returns {kind:"failed"} fast — the real "flaky probe" the gate must
-  // resolve by mode. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is neutralized ("") so the
-  // probe genuinely runs (some dev/CI envs export it as "1").
+describe("runSwarm certified execution-plan gate", () => {
+  // A nonexistent absolute path cannot become an exact command/version plan.
+  // Both read and write modes now fail closed at the common provenance gate;
+  // KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is neutralized so the gate genuinely runs.
   const BROKEN_KIMI = "/definitely/does/not/exist/kimi-binary-xyz";
 
-  test("--write REFUSES when the probe can't confirm >= 0.18.0 (the hard concurrency cap)", async () => {
+  test("--write refuses when the exact binary cannot be resolved", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("swarm-vgate-w-data");
     const workspace = await createTestPluginDataRoot("swarm-vgate-w-ws");
     const kimiHome = await createTestPluginDataRoot("swarm-vgate-w-home");
@@ -205,12 +204,11 @@ describe("runSwarm version gate (write fails CLOSED, read fails OPEN on an uncon
       } catch (error) {
         caught = error;
       }
-      // Fail CLOSED: without a confirmed >= 0.18.0 the env-based concurrency cap
-      // can't be guaranteed, so a concurrent write fan-out must not launch.
+      // Fail closed before the hook/model boundary: no exact provenance plan,
+      // and therefore no certified hard-concurrency capability, exists.
       expect(caught).toBeInstanceOf(RuntimeError);
-      expect((caught as RuntimeError).code).toBe("SWARM_UNSUPPORTED");
-      expect((caught as RuntimeError).message).toContain("CONFIRMED kimi-code >= 0.18.0");
-      expect((caught as RuntimeError).message).toContain("version probe failed");
+      expect((caught as RuntimeError).code).toBe("KIMI_EXECUTION_PLAN_UNRESOLVED");
+      expect((caught as RuntimeError).message).toContain("exact runnable path");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(workspace);
@@ -218,25 +216,23 @@ describe("runSwarm version gate (write fails CLOSED, read fails OPEN on an uncon
     }
   });
 
-  test("read-only swarm still runs past the gate (fail-open) — a broken probe surfaces the hook refusal, not the version gate", async () => {
+  test("read-only swarm also refuses an unresolvable exact binary", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("swarm-vgate-r-data");
     const workspace = await createTestPluginDataRoot("swarm-vgate-r-ws");
     const kimiHome = await createTestPluginDataRoot("swarm-vgate-r-home");
     try {
-      const output = await runSwarm(
-        ["review", "two", "targets"],
-        makeContext(workspace, {
-          ...process.env,
-          CLAUDE_PLUGIN_DATA: pluginDataRoot,
-          KIMI_CODE_HOME: kimiHome,
-          KIMI_PLUGIN_CC_KIMI_BIN: BROKEN_KIMI,
-          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
-        }),
-      );
-      // Fail OPEN: a too-old read-only binary is only degraded (the read-only hook
-      // still holds), so the gate lets the run reach the hook check.
-      expect(output).toContain("SWARM_HOOK_NOT_INSTALLED");
-      expect(output).not.toContain("SWARM_UNSUPPORTED");
+      await expect(
+        runSwarm(
+          ["review", "two", "targets"],
+          makeContext(workspace, {
+            ...process.env,
+            CLAUDE_PLUGIN_DATA: pluginDataRoot,
+            KIMI_CODE_HOME: kimiHome,
+            KIMI_PLUGIN_CC_KIMI_BIN: BROKEN_KIMI,
+            KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "KIMI_EXECUTION_PLAN_UNRESOLVED" });
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(workspace);

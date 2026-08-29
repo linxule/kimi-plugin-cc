@@ -134,7 +134,8 @@ describe("formatVersionOutOfRangeWarning", () => {
     expect(text).toContain("1.0.0-test");
     expect(text).toContain("0.1.x");
     expect(text).toContain("0.2.x");
-    expect(text).toContain("plugin will still run");
+    expect(text).toContain("model-spawning commands will refuse");
+    expect(text).toContain("not a production compatibility override");
   });
 
   test("H9: flags a version NEWER than the tested max with an above-bound note", () => {

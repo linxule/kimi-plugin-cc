@@ -44,6 +44,15 @@ export class JobStore {
         kimi_pid INTEGER,
         status TEXT NOT NULL,
         kimi_session_id TEXT,
+        operation_kind TEXT,
+        intended_engine TEXT,
+        observed_engine TEXT,
+        kimi_version TEXT,
+        system_version TEXT,
+        kimi_command TEXT,
+        kimi_prefix_args TEXT,
+        plan_certification TEXT,
+        resumed_from_job_id TEXT,
         agent_profile TEXT NOT NULL,
         prompt_digest TEXT NOT NULL,
         summary TEXT NOT NULL,
@@ -55,6 +64,25 @@ export class JobStore {
     `);
             if (!tableHasColumn(this.db, "phase")) {
                 this.db.exec(`ALTER TABLE jobs ADD COLUMN phase TEXT;`);
+            }
+            // Additive provenance migration. Existing rows deliberately remain NULL:
+            // v1.9.5 plus kimi-code 0.33/0.34 could have routed to native v2 before the
+            // legacy pin landed, so a blanket historical v1 backfill would invent fact.
+            const provenanceColumns = [
+                "operation_kind",
+                "intended_engine",
+                "observed_engine",
+                "kimi_version",
+                "system_version",
+                "kimi_command",
+                "kimi_prefix_args",
+                "plan_certification",
+                "resumed_from_job_id",
+            ];
+            for (const column of provenanceColumns) {
+                if (!tableHasColumn(this.db, column)) {
+                    this.db.exec(`ALTER TABLE jobs ADD COLUMN ${column} TEXT;`);
+                }
             }
             this.db.exec(`
 
@@ -129,13 +157,17 @@ export class JobStore {
             this.db.run(`
           INSERT INTO jobs (
             job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
-            background, pid, kimi_pid, status, kimi_session_id, agent_profile, prompt_digest,
-            summary, phase, final_output_path, stream_log_path, error
+            background, pid, kimi_pid, status, kimi_session_id,
+            operation_kind, intended_engine, observed_engine, kimi_version, system_version,
+            kimi_command, kimi_prefix_args, plan_certification, resumed_from_job_id,
+            agent_profile, prompt_digest, summary, phase, final_output_path, stream_log_path, error
           )
           VALUES (
             @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
-            @background, @pid, @kimi_pid, @status, @kimi_session_id, @agent_profile, @prompt_digest,
-            @summary, @phase, @final_output_path, @stream_log_path, @error
+            @background, @pid, @kimi_pid, @status, @kimi_session_id,
+            @operation_kind, @intended_engine, @observed_engine, @kimi_version, @system_version,
+            @kimi_command, @kimi_prefix_args, @plan_certification, @resumed_from_job_id,
+            @agent_profile, @prompt_digest, @summary, @phase, @final_output_path, @stream_log_path, @error
           )
         `, {
                 ...serializeRecord(input),
@@ -209,6 +241,29 @@ export class JobStore {
     updateRunningJob(jobId, patch) {
         return this.updateWhere(jobId, patch, "status = 'running'");
     }
+    /**
+     * Evidence-only backfill for pre-provenance rows. COALESCE prevents forensic
+     * inspection from overwriting a field already recorded at execution time.
+     * updated_at is intentionally unchanged so a status lookup cannot reorder
+     * historical jobs merely because their logs were inspected.
+     */
+    backfillHistoricalProvenance(jobId, patch) {
+        this.db.run(`
+        UPDATE jobs
+        SET operation_kind = COALESCE(operation_kind, @operation_kind),
+            observed_engine = COALESCE(observed_engine, @observed_engine),
+            kimi_version = COALESCE(kimi_version, @kimi_version),
+            system_version = COALESCE(system_version, @system_version)
+        WHERE job_id = @job_id
+      `, {
+            job_id: jobId,
+            operation_kind: patch.operation_kind ?? null,
+            observed_engine: patch.observed_engine ?? null,
+            kimi_version: patch.kimi_version ?? null,
+            system_version: patch.system_version ?? null,
+        });
+        return this.getJob(jobId);
+    }
     markCompleted(jobId, patch) {
         return this.updateWhere(jobId, { ...patch, status: "completed", pid: null, kimi_pid: null }, "status = 'running'");
     }
@@ -223,6 +278,9 @@ export class JobStore {
         "final_output_path", "stream_log_path", "kimi_session_id",
         "error", "command_type", "prompt_digest", "repo_id",
         "cwd", "model", "thinking", "background", "agent_profile",
+        "operation_kind", "intended_engine", "observed_engine", "kimi_version",
+        "system_version", "kimi_command", "kimi_prefix_args", "plan_certification",
+        "resumed_from_job_id",
     ]);
     updateWhere(jobId, patch, whereClause) {
         const updates = ["updated_at = @updated_at"];
@@ -260,6 +318,15 @@ function serializeRecord(record) {
     return {
         ...record,
         phase: record.phase ?? null,
+        operation_kind: record.operation_kind ?? null,
+        intended_engine: record.intended_engine ?? null,
+        observed_engine: record.observed_engine ?? null,
+        kimi_version: record.kimi_version ?? null,
+        system_version: record.system_version ?? null,
+        kimi_command: record.kimi_command ?? null,
+        kimi_prefix_args: record.kimi_prefix_args ?? null,
+        plan_certification: record.plan_certification ?? null,
+        resumed_from_job_id: record.resumed_from_job_id ?? null,
         thinking: record.thinking === null ? null : Number(record.thinking),
         background: Number(record.background),
         error: record.error ? JSON.stringify(record.error) : null,

@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runCliPrompt, runCliPromptWithBudget, requireSessionId } from "../../runtime/cli-client.js";
+import type { KimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import {
   collectDescendantIdentities,
   collectDescendants,
@@ -28,6 +30,10 @@ const mockKimiStreamPath = path.join(
 const termIgnoringWriterPath = path.join(
   process.cwd(),
   "tests/helpers/term-ignoring-writer.mjs",
+);
+const v2MarkerThenWritePath = path.join(
+  process.cwd(),
+  "tests/helpers/v2-marker-then-write.ts",
 );
 
 function mockOptions(overrides: {
@@ -75,11 +81,14 @@ function mockOptions(overrides: {
       KIMI_MOCK_STDERR_SUFFIX: overrides.stderrSuffix,
     }),
   };
+  const prefixArgs = ["run", mockKimiStreamPath];
+  const executionPlan = testExecutionPlan("bun", prefixArgs);
   return {
     cwd: overrides.cwd,
     env,
     command: "bun",
-    prefixArgs: ["run", mockKimiStreamPath],
+    prefixArgs,
+    executionPlan,
     prompt: overrides.prompt ?? "test prompt",
     commandLabel: overrides.commandLabel,
     swarmMaxConcurrency: overrides.swarmMaxConcurrency,
@@ -90,6 +99,22 @@ function mockOptions(overrides: {
     cancellationTeardownHook: overrides.cancellationTeardownHook,
     escalationMs: overrides.escalationMs,
     onRecord: overrides.onRecord,
+  };
+}
+
+function testExecutionPlan(
+  command: string,
+  prefixArgs: readonly string[] = [],
+): KimiExecutionPlan {
+  return {
+    schemaVersion: 1,
+    operationKind: "review",
+    intendedEngine: "legacy-v1",
+    command,
+    prefixArgs: [...prefixArgs],
+    kimiVersion: "0.39.0",
+    certification: "certified",
+    resumedFromJobId: null,
   };
 }
 
@@ -574,6 +599,7 @@ describe("runCliPrompt", () => {
         },
         command: "bun",
         prefixArgs: ["run", mockKimiStreamPath],
+        executionPlan: testExecutionPlan("bun", ["run", mockKimiStreamPath]),
         prompt: "test prompt",
       });
 
@@ -906,6 +932,45 @@ describe("runCliPrompt", () => {
     }
   });
 
+  test("kills a forced-v1 child on the pre-tool native-v2 marker", async () => {
+    const root = await createTestPluginDataRoot("cli-engine-marker-mismatch");
+    const sentinel = path.join(root, "post-marker-write.txt");
+    let recordCount = 0;
+    try {
+      await expect(
+        runCliPrompt({
+          cwd: root,
+          env: {
+            ...process.env,
+            KIMI_MOCK_POST_MARKER_WRITE: sentinel,
+          },
+          command: "bun",
+          prefixArgs: ["run", v2MarkerThenWritePath],
+          executionPlan: testExecutionPlan("bun", ["run", v2MarkerThenWritePath]),
+          prompt: "must never reach a tool",
+          commandLabel: "review",
+          onRecord: () => {
+            recordCount += 1;
+          },
+          escalationMs: 50,
+        }),
+      ).rejects.toMatchObject({
+        code: "CLI_ENGINE_PROVENANCE_MISMATCH",
+        details: {
+          intended_engine: "legacy-v1",
+          observed_engine: "native-v2",
+          system_version: "0.39.0",
+        },
+      });
+
+      await sleepMs(400);
+      expect(recordCount).toBe(0);
+      expect(existsSync(sentinel)).toBe(false);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("onRecord fires per record before the run completes", async () => {
     const root = await createTestPluginDataRoot("cli-client-onrecord");
     try {
@@ -1069,6 +1134,7 @@ describe("runCliPrompt", () => {
           cwd: root,
           env: { ...process.env },
           command: "/nonexistent/path/to/kimi-binary-does-not-exist",
+          executionPlan: testExecutionPlan("/nonexistent/path/to/kimi-binary-does-not-exist"),
           prompt: "x",
         }),
       ).rejects.toMatchObject({
@@ -1105,6 +1171,7 @@ describe("SIGKILL escalation", () => {
         },
         command: "bun",
         prefixArgs: ["run", stubKimiPath],
+        executionPlan: testExecutionPlan("bun", ["run", stubKimiPath]),
         prompt: "x",
         signal: controller.signal,
         escalationMs: 50,
@@ -1145,6 +1212,7 @@ describe("SIGKILL escalation", () => {
         },
         command: process.execPath,
         prefixArgs: [termIgnoringWriterPath],
+        executionPlan: testExecutionPlan(process.execPath, [termIgnoringWriterPath]),
         prompt: "x",
         signal: controller.signal,
         descendantIdentityCollector: async () => {
@@ -1208,6 +1276,7 @@ describe("SIGKILL escalation", () => {
         },
         command: "bun",
         prefixArgs: ["run", stubKimiPath],
+        executionPlan: testExecutionPlan("bun", ["run", stubKimiPath]),
         prompt: "x",
         signal: controller.signal,
         onRecord: () => controller.abort(),
@@ -1287,6 +1356,7 @@ describe("descendant reaping", () => {
         },
         command: "bun",
         prefixArgs: ["run", processGroupGrandchildPath],
+        executionPlan: testExecutionPlan("bun", ["run", processGroupGrandchildPath]),
         prompt: "x",
         signal: controller.signal,
         descendantIdentityCollector: async () => {
@@ -1455,6 +1525,7 @@ describe("descendant reaping", () => {
         },
         command: "bun",
         prefixArgs: ["run", processGroupGrandchildPath],
+        executionPlan: testExecutionPlan("bun", ["run", processGroupGrandchildPath]),
         prompt: "x",
         signal: controller.signal,
         descendantIdentityCollector: async () => {
@@ -1514,6 +1585,7 @@ describe("descendant reaping", () => {
         },
         command: "bun",
         prefixArgs: ["run", processGroupGrandchildPath],
+        executionPlan: testExecutionPlan("bun", ["run", processGroupGrandchildPath]),
         prompt: "x",
         signal: controller.signal,
         descendantIdentityCollector: async () => {

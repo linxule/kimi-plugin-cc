@@ -52,6 +52,14 @@ interface AssistantContentRecord {
 }
 
 async function main(): Promise<void> {
+  // Execution-plan preflight probes the exact command tuple before creating a
+  // job. Keep this branch side-effect free so invocation assertions still
+  // describe the real prompt spawn rather than the probe.
+  if (process.argv.slice(2).includes("--version")) {
+    process.stdout.write(`${process.env.KIMI_PLUGIN_CC_MOCK_VERSION ?? "0.39.0"}\n`);
+    process.exit(0);
+  }
+
   if (invocationPath) {
     // Capture argv (and the env state that decides scenario routing) so
     // tests can assert what flags were forwarded to "kimi".
@@ -62,6 +70,8 @@ async function main(): Promise<void> {
         scenario,
         env: {
           KIMI_PLUGIN_CC_CMD: process.env.KIMI_PLUGIN_CC_CMD ?? null,
+          KIMI_PLUGIN_CC_WORKSPACE_ROOT:
+            process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT ?? null,
         },
       })}\n`,
       "utf8",

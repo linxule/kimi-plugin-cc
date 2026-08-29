@@ -1,6 +1,7 @@
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
+import { reconcileHistoricalJobProvenance } from "../kimi-engine.js";
 import { withJobStore, type JobRecord } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
@@ -16,7 +17,7 @@ export async function runResult(argv: string[], context: CommandContext): Promis
   return withJobStore(paths, async (store) => {
     await sweepStaleJobs(store, paths);
 
-    const job = parsed.jobId
+    const found = parsed.jobId
       ? store.getJob(parsed.jobId)
       : store.findLatestJob({
           repoId: repoIdentity.repoId,
@@ -24,9 +25,11 @@ export async function runResult(argv: string[], context: CommandContext): Promis
           terminalOnly: true,
         });
 
-    if (!job) {
+    if (!found) {
       throw new RuntimeError("JOB_NOT_FOUND", "No matching terminal job was found for result.", "result.lookup");
     }
+
+    const job = await reconcileHistoricalJobProvenance(store, found);
 
     if (job.status === "running") {
       // `result --json` preserves the existing result contract: callers only
@@ -60,6 +63,12 @@ function renderResultEnvelope(
       body,
       created_at: job.created_at,
       completed_at: job.updated_at,
+      operation_kind: job.operation_kind,
+      intended_engine: job.intended_engine,
+      observed_engine: job.observed_engine,
+      kimi_version: job.kimi_version,
+      system_version: job.system_version,
+      resumed_from_job_id: job.resumed_from_job_id,
     },
     null,
     2,

@@ -22,6 +22,12 @@ import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { RuntimeError, formatError } from "./errors.js";
+import {
+  assertNoUnsafeExperimentalSelector,
+  assertExecutionPlanMatchesSpawn,
+  type KimiEngine,
+  type KimiExecutionPlan,
+} from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import {
   StreamJsonParser,
@@ -64,6 +70,8 @@ export interface CliClientOptions {
   env: NodeJS.ProcessEnv;
   /** Resolved kimi binary path (or bare name if it's on PATH). */
   command: string;
+  /** Immutable, pre-spawn-certified engine/command/version plan. */
+  executionPlan: KimiExecutionPlan;
   /** Optional argv prefix (mirrors v0.4's KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS pattern). */
   prefixArgs?: string[];
   /** Required user-facing prompt text. */
@@ -75,14 +83,15 @@ export interface CliClientOptions {
    */
   commandLabel?: string;
   /**
-   * Trusted workspace root for the "swarm-write" label (v1.4), exported to the
-   * spawn as KIMI_PLUGIN_CC_WORKSPACE_ROOT. The swarm-write hook case confines
-   * every subagent write to THIS path instead of the hook payload's `cwd`,
+   * Trusted workspace root for write-capable labels, exported to the spawn as
+   * KIMI_PLUGIN_CC_WORKSPACE_ROOT. The hook confines writes to THIS path instead
+   * of trusting the hook payload's `cwd`,
    * removing any dependence on upstream payload-cwd semantics: the model running
    * inside kimi cannot forge an env var on the already-spawned process. Set by
-   * swarm.ts to the ephemeral worktree path. Ignored by every other label.
+   * rescue/pursue to their job cwd and swarm-write to its ephemeral worktree.
+   * Ignored by read-only labels.
    */
-  swarmWriteWorkspaceRoot?: string;
+  trustedWorkspaceRoot?: string;
   /**
    * Hard cap on how many AgentSwarm subagents kimi-code runs CONCURRENTLY,
    * exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (kimi-code
@@ -179,9 +188,13 @@ export interface CliClientResult {
    * every plugin spawn explicitly pins the legacy-v1 driver instead. The parser
    * field remains for historical logs and a future safe re-enable. Undefined on
    * v1 (which emits no such record). Captured first-announce-wins and filtered
-   * from records[], mirroring the resume-hint. Diagnostic only.
+   * from records[], mirroring the resume-hint. Under a forced-v1 plan this is
+   * load-bearing mismatch evidence: output delivery stops and the owned process
+   * tree is torn down before the caller receives an error.
    */
   systemVersion?: string;
+  /** Engine established from runtime evidence; null on an early opaque exit. */
+  observedEngine: KimiEngine | null;
   /** Lines that failed parsing. Diagnostics only — not load-bearing. */
   malformed: ReadonlyArray<{ line: string; reason: string }>;
   stderrTail: string;
@@ -203,6 +216,25 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     );
   }
 
+  assertExecutionPlanMatchesSpawn(
+    opts.executionPlan,
+    opts.command,
+    opts.prefixArgs ?? [],
+    opts.env,
+  );
+
+  if (
+    (opts.commandLabel === "rescue" || opts.commandLabel === "swarm-write") &&
+    !opts.trustedWorkspaceRoot
+  ) {
+    throw new RuntimeError(
+      "CLI_TRUSTED_WORKSPACE_ROOT_MISSING",
+      `Refusing ${opts.commandLabel}: write-capable plugin launches require a plugin-owned trusted workspace root.`,
+      "cli-client.pre-spawn",
+      { details: { command_label: opts.commandLabel } },
+    );
+  }
+
   // agent-core-v2 registers its plan-file guard before external PreToolUse
   // hooks. An active-plan Write/Edit to the exact KIMI_CODE_HOME plan file calls
   // final `allow()`, preventing the later managed hook from running. This is
@@ -213,19 +245,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   // kimi-code's truth table exactly. Since 0.33.0 this flag enables experimental
   // features without selecting the engine; we still refuse it conservatively,
   // while buildEnv independently pins every accepted spawn to legacy-v1.
-  if (isKimiV2Enabled(opts.env)) {
-    throw new RuntimeError(
-      "CLI_V2_HOOK_ORDER_UNSAFE",
-      "Refusing kimi-code experimental features because native-v2 plan-mode writes can final-allow before external PreToolUse hooks run. Unset KIMI_CODE_EXPERIMENTAL_FLAG; kimi-plugin-cc pins accepted runs to the legacy-v1 engine.",
-      "cli-client.pre-spawn",
-      {
-        details: {
-          refusal_kind: "v2-hook-order-unsafe",
-          experimental_v2: true,
-        },
-      },
-    );
-  }
+  assertNoUnsafeExperimentalSelector(opts.env, "cli-client.pre-spawn");
 
   const args = buildArgs(opts);
   const env = buildEnv(opts);
@@ -283,6 +303,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   let announcedSessionId: string | undefined;
   let announcedGoalSummary: GoalSummaryRecord | undefined;
   let announcedSystemVersion: string | undefined;
+  let engineMismatchVersion: string | undefined;
+  let handleEngineMismatch: ((version: string) => void) | undefined;
   let logChain: Promise<void> = Promise.resolve();
 
   const appendLogLine = (payload: Record<string, unknown>) => {
@@ -301,6 +323,10 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     args,
     cwd: opts.cwd,
     command_label: opts.commandLabel ?? null,
+    operation_kind: opts.executionPlan.operationKind,
+    intended_engine: opts.executionPlan.intendedEngine,
+    kimi_version: opts.executionPlan.kimiVersion,
+    plan_certification: opts.executionPlan.certification,
     swarm_max_concurrency: opts.swarmMaxConcurrency ?? null,
     legacy_v1_forced: env.KIMI_CODE_LEGACY_FLAG === KIMI_LEGACY_FORCED_VALUE,
   });
@@ -316,6 +342,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
 
   const consumeOutcomes = (outcomes: StreamJsonOutcome[]) => {
     for (const outcome of outcomes) {
+      if (engineMismatchVersion !== undefined) return;
       if (outcome.unknownRecord !== undefined) {
         // H3 forward-compat: a stream-json line with a role we don't model
         // (a future kimi-code role). Log it for diagnostics but keep it OUT of
@@ -373,6 +400,11 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
               source: "stream-json.meta",
               version: outcome.record.version,
             });
+            if (opts.executionPlan.intendedEngine !== "native-v2") {
+              engineMismatchVersion = outcome.record.version;
+              handleEngineMismatch?.(outcome.record.version);
+              return;
+            }
           }
           continue;
         }
@@ -594,6 +626,36 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       }
     };
 
+    let engineMismatchError: RuntimeError | undefined;
+    handleEngineMismatch = (version: string) => {
+      if (engineMismatchError !== undefined) return;
+      engineMismatchError = new RuntimeError(
+        "CLI_ENGINE_PROVENANCE_MISMATCH",
+        `Refusing kimi output: execution plan required ${opts.executionPlan.intendedEngine}, but the pre-tool system.version marker proves native-v2 ${version} started.`,
+        "cli-client.engine-provenance",
+        {
+          details: {
+            operation_kind: opts.executionPlan.operationKind,
+            intended_engine: opts.executionPlan.intendedEngine,
+            observed_engine: "native-v2",
+            planned_kimi_version: opts.executionPlan.kimiVersion,
+            system_version: version,
+          },
+        },
+      );
+      appendLogLine({
+        event: "engine_provenance_mismatch",
+        intended_engine: opts.executionPlan.intendedEngine,
+        observed_engine: "native-v2",
+        system_version: version,
+      });
+      cancellationTeardown = teardownChildTree().then<TeardownOutcome, TeardownOutcome>(
+        () => ({ ok: true }),
+        (error: unknown) => ({ ok: false, error }),
+      );
+      settle("reject", engineMismatchError);
+    };
+
     const onAbort = () => {
       if (aborted) return;
       aborted = true;
@@ -696,6 +758,15 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         sessionId,
         goalSummary: announcedGoalSummary,
         systemVersion: announcedSystemVersion,
+        observedEngine:
+          announcedSystemVersion !== undefined
+            ? "native-v2"
+            : exitCode === 0 ||
+                records.length > 0 ||
+                sessionId !== undefined ||
+                announcedGoalSummary !== undefined
+              ? "legacy-v1"
+              : null,
         records,
         malformed,
         stderrTail,
@@ -859,15 +930,8 @@ export async function runCliPromptWithBudget(
   }
 }
 
-const KIMI_V2_TRUTHY_VALUES = new Set(["1", "true", "yes", "on"]);
 const KIMI_LEGACY_ENV = "KIMI_CODE_LEGACY_FLAG";
 const KIMI_LEGACY_FORCED_VALUE = "1";
-
-function isKimiV2Enabled(env: Readonly<NodeJS.ProcessEnv>): boolean {
-  return KIMI_V2_TRUTHY_VALUES.has(
-    (env.KIMI_CODE_EXPERIMENTAL_FLAG ?? "").trim().toLowerCase(),
-  );
-}
 
 function buildArgs(opts: CliClientOptions): string[] {
   const args: string[] = [...(opts.prefixArgs ?? [])];
@@ -905,7 +969,9 @@ function buildEnv(opts: CliClientOptions): NodeJS.ProcessEnv {
   // plugin-owned spawn invariant rather than ambient operator state. Older
   // kimi-code releases ignore the unknown flag. Always overwrite ambient false
   // values; accepting one would silently reopen v2 on 0.33+.
-  env[KIMI_LEGACY_ENV] = KIMI_LEGACY_FORCED_VALUE;
+  if (opts.executionPlan.intendedEngine === "legacy-v1") {
+    env[KIMI_LEGACY_ENV] = KIMI_LEGACY_FORCED_VALUE;
+  }
   env.KIMI_CODE_HOME = resolveKimiHome(opts.env, opts.cwd);
   if (opts.commandLabel !== undefined) {
     env.KIMI_PLUGIN_CC_CMD = opts.commandLabel;
@@ -915,10 +981,10 @@ function buildEnv(opts: CliClientOptions): NodeJS.ProcessEnv {
     // value; older binaries ignore it. See the field doc on CliClientOptions.
     env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY = String(opts.swarmMaxConcurrency);
   }
-  if (opts.swarmWriteWorkspaceRoot !== undefined) {
-    // Trusted allowlist root for the swarm-write PreToolUse hook (v1.4). Forge-
-    // proof (env on the spawned process; the model can't set it). See field doc.
-    env.KIMI_PLUGIN_CC_WORKSPACE_ROOT = opts.swarmWriteWorkspaceRoot;
+  if (opts.trustedWorkspaceRoot !== undefined) {
+    // Trusted allowlist root for write-capable PreToolUse cases. Forge-proof
+    // (env on the spawned process; the model cannot alter it). See field doc.
+    env.KIMI_PLUGIN_CC_WORKSPACE_ROOT = opts.trustedWorkspaceRoot;
   }
   return env;
 }

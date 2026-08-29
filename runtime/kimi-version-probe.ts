@@ -13,11 +13,11 @@
 //   moved the session resume hint from stderr to a stream-json meta
 //   record, and our plugin captured nothing until we noticed).
 //
-//   The defensible posture: probe kimi-code's version at setup time,
-//   compare against the range we've actively tested, and emit a stderr
-//   warning when the user is outside it. We do NOT block — kimi-code is
-//   the user's tool of choice, our plugin sits beside it — but we
-//   loud-warn so a silent version drift can't sneak by.
+//   The defensible posture has two consumers: setup probes the installed
+//   command and warns outside the tested range; model jobs probe the exact
+//   command + prefix tuple to build a fail-closed execution plan before spawn.
+//   The latter is the durable engine-provenance gate: an operation outside its
+//   certified engine/version range is refused rather than guessed.
 //
 //   This is belt-and-suspenders for the alpha.4 `warnIfSessionIdMissing`
 //   surface: that warning fires when capture demonstrably fails on a
@@ -27,14 +27,15 @@
 //
 // What this module is NOT:
 //
-//   - Not a hard gate. We never refuse to run on version mismatch.
+//   - Not, by itself, the policy decision. setup still warns; the execution-
+//     plan layer (`kimi-engine.ts`) decides whether an exact result is certified.
 //   - Not a substitute for upstream compatibility testing. The right
 //     long-term answer is for kimi-code to advertise wire-protocol
 //     compatibility via a stable feature flag or version field in its
 //     stream-json output. Until upstream lands that, this is the best
 //     signal we can give users.
-//   - Not invoked on every spawn. Setup-time check is sufficient — a
-//     per-spawn probe would slow every command for no real benefit.
+//   - Not a license to infer historical versions. Old job rows remain unknown
+//     unless their saved logs contain positive evidence.
 
 import { spawn } from "node:child_process";
 
@@ -1171,6 +1172,22 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // pursue turn, denied a read-swarm child write, confined write-swarm
   // (patchBytes=278; user tree clean; worktree removed), and denied the
   // non-vacuous out-of-root coder write. Reports 111-116; monitor 2026-08-27.
+  //
+  // 0.39.1 patch check certified 2026-08-29 (tag
+  // @moonshot-ai/kimi-code@0.39.1, immutable commit 5efca0c3; published
+  // 2026-08-28T10:01:03.520Z). All six playbook scopes are byte-identical to
+  // 0.39.0: CLI prompt mode, permission, hooks, wire/session,
+  // bootstrap/config, and v1 tools/SDK. Exact 0.39.1 and live upstream main
+  // 9d2304c retain the same v2 plan-before-external-hook final-allow path; no
+  // upstream issue/PR or released ordering API exists, so native v2 remains
+  // fail-closed and the production capability matrix stays empty.
+  //
+  // The exact-0.39.1 temp binary passed the v1.9.12 release-candidate
+  // smoke: 12 pass / 0 fail / 55 assertions in 400.68s. It proved forced-write
+  // denials, v2 pre-spawn refusal, fresh/resumed default-plan legacy pinning,
+  // pursue every-turn enforcement, real read-swarm child denial,
+  // write-swarm confinement (patchBytes=278; user tree clean; worktree
+  // removed), and out-of-root denial. Monitor: 2026-08-29.
   { major: 0, minor: 39 },
 ];
 
@@ -1205,10 +1222,15 @@ export type KimiVersionProbeResult = KimiVersionProbeOk | KimiVersionProbeFailed
  */
 export async function probeKimiVersion(options: {
   kimiBin?: string;
+  /** Prefix argv that identifies the same wrapped CLI used for the real spawn. */
+  prefixArgs?: readonly string[];
+  /** Working directory used by the real spawn; relevant for relative wrappers. */
+  cwd?: string;
   env: NodeJS.ProcessEnv;
   timeoutMs?: number;
 }): Promise<KimiVersionProbeResult> {
   const bin = options.kimiBin ?? "kimi";
+  const args = [...(options.prefixArgs ?? []), "--version"];
   const timeoutMs = options.timeoutMs ?? KIMI_VERSION_PROBE_TIMEOUT_MS;
   return await new Promise<KimiVersionProbeResult>((resolve) => {
     let settled = false;
@@ -1219,7 +1241,8 @@ export async function probeKimiVersion(options: {
     };
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(bin, ["--version"], {
+      child = spawn(bin, args, {
+        cwd: options.cwd,
         env: options.env,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -1246,7 +1269,10 @@ export async function probeKimiVersion(options: {
       } catch {
         // best effort
       }
-      settle({ kind: "failed", reason: `\`${bin} --version\` timed out after ${timeoutMs}ms` });
+      settle({
+        kind: "failed",
+        reason: `\`${[bin, ...args].join(" ")}\` timed out after ${timeoutMs}ms`,
+      });
     }, timeoutMs);
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -1261,7 +1287,7 @@ export async function probeKimiVersion(options: {
         const detail = stderr.trim() !== "" ? stderr.trim() : `exit ${code}`;
         settle({
           kind: "failed",
-          reason: `\`${bin} --version\` failed: ${detail}`,
+          reason: `\`${[bin, ...args].join(" ")}\` failed: ${detail}`,
         });
         return;
       }
@@ -1269,7 +1295,7 @@ export async function probeKimiVersion(options: {
       if (parsed === undefined) {
         settle({
           kind: "failed",
-          reason: `could not parse \`${bin} --version\` output: ${JSON.stringify(stdout.slice(0, 80))}`,
+          reason: `could not parse \`${[bin, ...args].join(" ")}\` output: ${JSON.stringify(stdout.slice(0, 80))}`,
         });
         return;
       }
@@ -1335,8 +1361,8 @@ export function maxTestedMinor(): { major: number; minor: number } {
 
 /**
  * Format a user-facing warning line for an out-of-range version probe.
- * Includes the canonical "not a block, just a heads up" framing so the
- * caller agent doesn't misinterpret this as fatal.
+ * Setup itself may complete, but the execution-plan gate will refuse model
+ * spawns until the operator selects a certified binary or updates the plugin.
  */
 export function formatVersionOutOfRangeWarning(probe: KimiVersionProbeOk, pluginVersion: string): string {
   const tested = KIMI_TESTED_MINORS.map((entry) => `${entry.major}.${entry.minor}.x`).join(", ");
@@ -1348,16 +1374,16 @@ export function formatVersionOutOfRangeWarning(probe: KimiVersionProbeOk, plugin
   ];
   if (aboveMax) {
     // H9: the known-good upper bound. Above it = a release newer than our last
-    // compat audit — usually fine, but unverified (and the case the version
-    // probe exists to flag when out-of-band auto-upgrade drifts the binary).
+    // compat audit — unverified, and exactly the case the version probe exists
+    // to flag when out-of-band auto-upgrade drifts the binary.
     lines.push(
-      `  This is NEWER than the newest version we have tested (${max.major}.${max.minor}.x) — likely fine, but unverified; kimi-code behaviors may have changed since our last compatibility audit.`,
+      `  This is NEWER than the newest version we have tested (${max.major}.${max.minor}.x) and is not yet certified for model execution.`,
     );
   }
   lines.push(
-    `  The plugin will still run, but a silent breakage may exist for behaviors that changed in your version.`,
-    `  If something looks off (missing session ids, malformed records, hook bypasses), check the kimi-code changelog`,
-    `  for changes since the last tested range and report mismatches via the plugin issue tracker.`,
+    `  Setup can complete, but model-spawning commands will refuse before Kimi starts rather than run an unreviewed engine/version route.`,
+    `  Update kimi-plugin-cc to a release that certifies this minor, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified kimi-code binary and retry setup.`,
+    `  KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production compatibility override.`,
   );
   return lines.join("\n");
 }

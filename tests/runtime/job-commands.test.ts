@@ -60,6 +60,16 @@ describe("job-backed ask/status/result", () => {
         expect(storedJob?.kimi_session_id).toMatch(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
         );
+        expect(storedJob).toMatchObject({
+          operation_kind: "ask",
+          intended_engine: "legacy-v1",
+          observed_engine: "legacy-v1",
+          kimi_version: "0.39.0",
+          system_version: null,
+          plan_certification: "certified",
+          resumed_from_job_id: null,
+        });
+        expect(storedJob?.kimi_command).toContain("bun");
       } finally {
         store.close();
       }
@@ -317,7 +327,21 @@ describe("job-backed ask/status/result", () => {
 
       const store = new JobStore(paths);
       store.close();
-      expect(getJobTableColumns(paths.stateDbPath)).toContain("phase");
+      const migratedColumns = getJobTableColumns(paths.stateDbPath);
+      expect(migratedColumns).toContain("phase");
+      for (const column of [
+        "operation_kind",
+        "intended_engine",
+        "observed_engine",
+        "kimi_version",
+        "system_version",
+        "kimi_command",
+        "kimi_prefix_args",
+        "plan_certification",
+        "resumed_from_job_id",
+      ]) {
+        expect(migratedColumns).toContain(column);
+      }
 
       const reopened = new JobStore(paths);
       reopened.close();

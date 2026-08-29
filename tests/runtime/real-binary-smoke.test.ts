@@ -58,6 +58,10 @@ import { runSetup } from "../../runtime/commands/setup.js";
 import { buildGoalPrompt } from "../../runtime/commands/pursue.js";
 import { runSwarm } from "../../runtime/commands/swarm.js";
 import { resolveKimiCliCommand } from "../../runtime/kimi-command.js";
+import type {
+  KimiExecutionPlan,
+  KimiOperationKind,
+} from "../../runtime/kimi-engine.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
@@ -103,6 +107,23 @@ const WRITE_PROMPT = [
   `Attempt it immediately as your first action and do not ask for`,
   `confirmation. If a tool is denied, report the denial verbatim and stop.`,
 ].join(" ");
+
+function legacySmokePlan(
+  command: string,
+  prefixArgs: readonly string[],
+  operationKind: KimiOperationKind,
+): KimiExecutionPlan {
+  return {
+    schemaVersion: 1,
+    operationKind,
+    intendedEngine: "legacy-v1",
+    command,
+    prefixArgs: [...prefixArgs],
+    kimiVersion: null,
+    certification: "test-bypass",
+    resumedFromJobId: null,
+  };
+}
 
 function resolveBinaryForGate(): string | undefined {
   const { command } = resolveKimiCliCommand(process.env);
@@ -275,9 +296,14 @@ suite("real-binary smoke: read-only commands cannot write (H7)", () => {
           try {
             result = await runCliPrompt({
               cwd: workspace,
-              env: { ...process.env, KIMI_CODE_HOME: kimiHome },
+              env: {
+                ...process.env,
+                KIMI_CODE_HOME: kimiHome,
+                KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+              },
               command,
               prefixArgs,
+              executionPlan: legacySmokePlan(command, prefixArgs, label),
               commandLabel: label,
               prompt: WRITE_PROMPT,
               signal: controller.signal,
@@ -354,10 +380,12 @@ suite("real-binary smoke: agent-core-v2 is refused before spawn", () => {
             env: {
               ...process.env,
               KIMI_CODE_HOME: kimiHome,
+              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
               KIMI_CODE_EXPERIMENTAL_FLAG: "1",
             },
             command,
             prefixArgs,
+            executionPlan: legacySmokePlan(command, prefixArgs, "review"),
             commandLabel: "review",
             prompt: WRITE_PROMPT,
           }),
@@ -413,11 +441,13 @@ suite("real-binary smoke: 0.33+ default-v2 routing stays pinned to legacy-v1", (
             env: {
               ...process.env,
               KIMI_CODE_HOME: kimiHome,
+              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
               // Adversarial ambient false value: buildEnv must overwrite it.
               KIMI_CODE_LEGACY_FLAG: "0",
             },
             command,
             prefixArgs,
+            executionPlan: legacySmokePlan(command, prefixArgs, "review"),
             commandLabel: "review",
             prompt: WRITE_PROMPT,
             ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
@@ -496,10 +526,12 @@ suite("real-binary smoke: autonomous goal mode is gated every turn (pursue)", ()
             env: {
               ...process.env,
               KIMI_CODE_HOME: kimiHome,
+              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
               KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND: "1",
             },
             command,
             prefixArgs,
+            executionPlan: legacySmokePlan(command, prefixArgs, "pursue"),
             commandLabel: "review",
             prompt: buildGoalPrompt(GOAL_OBJECTIVE),
             signal: controller.signal,
@@ -632,9 +664,14 @@ suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () =>
             cwd: workspace,
             // The "swarm" label drives the read-only-plus-AgentSwarm allowlist
             // for the coordinator AND every spawned subagent.
-            env: { ...process.env, KIMI_CODE_HOME: kimiHome },
+            env: {
+              ...process.env,
+              KIMI_CODE_HOME: kimiHome,
+              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+            },
             command,
             prefixArgs,
+            executionPlan: legacySmokePlan(command, prefixArgs, "swarm"),
             commandLabel: "swarm",
             prompt: SWARM_WRITE_PROMPT,
             signal: controller.signal,
@@ -951,13 +988,18 @@ suite("real-binary smoke: write-swarm denies out-of-worktree writes (--write)", 
         try {
           result = await runCliPrompt({
             cwd: workspace,
-            env: { ...process.env, KIMI_CODE_HOME: kimiHome },
+            env: {
+              ...process.env,
+              KIMI_CODE_HOME: kimiHome,
+              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+            },
             command,
             prefixArgs,
+            executionPlan: legacySmokePlan(command, prefixArgs, "swarm-write"),
             // The write-capable label + the trusted root = the workspace itself.
             // An in-root write would be ALLOWED; the escape targets are OUTSIDE.
             commandLabel: "swarm-write",
-            swarmWriteWorkspaceRoot: workspace,
+            trustedWorkspaceRoot: workspace,
             prompt: escapePrompt,
             signal: controller.signal,
           });

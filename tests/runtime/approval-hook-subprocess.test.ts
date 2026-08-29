@@ -155,7 +155,11 @@ describe("approval-hook entry script", () => {
         tool_input: { file_path: "x" },
         cwd: process.cwd(),
       },
-      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+      {
+        ...process.env,
+        KIMI_PLUGIN_CC_CMD: "rescue",
+        KIMI_PLUGIN_CC_WORKSPACE_ROOT: process.cwd(),
+      },
     );
     expect(result.exitCode).toBe(0);
   });
@@ -168,7 +172,11 @@ describe("approval-hook entry script", () => {
         tool_input: { file_path: "/etc/should-not-write" },
         cwd: process.cwd(),
       },
-      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+      {
+        ...process.env,
+        KIMI_PLUGIN_CC_CMD: "rescue",
+        KIMI_PLUGIN_CC_WORKSPACE_ROOT: process.cwd(),
+      },
     );
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("outside the workspace");
@@ -182,7 +190,11 @@ describe("approval-hook entry script", () => {
         tool_input: { command: "rm -rf /" },
         cwd: process.cwd(),
       },
-      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+      {
+        ...process.env,
+        KIMI_PLUGIN_CC_CMD: "rescue",
+        KIMI_PLUGIN_CC_WORKSPACE_ROOT: process.cwd(),
+      },
     );
     expect(result.exitCode).toBe(2);
     expect(result.stderr.length).toBeGreaterThan(0);
@@ -196,7 +208,11 @@ describe("approval-hook entry script", () => {
         tool_input: { command: "git status" },
         cwd: process.cwd(),
       },
-      { ...process.env, KIMI_PLUGIN_CC_CMD: "rescue" },
+      {
+        ...process.env,
+        KIMI_PLUGIN_CC_CMD: "rescue",
+        KIMI_PLUGIN_CC_WORKSPACE_ROOT: process.cwd(),
+      },
     );
     expect(result.exitCode).toBe(0);
   });

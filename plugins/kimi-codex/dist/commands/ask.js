@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
 import { runCliPromptWithBudget } from "../cli-client.js";
-import { resolveKimiCliCommand } from "../kimi-command.js";
+import { assertResumeEngineCompatible, executionPlanFromPersisted, observedExecutionFields, persistedExecutionPlanFields, prepareKimiExecutionPlan, reconcileHistoricalJobProvenance, } from "../kimi-engine.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
@@ -49,8 +49,15 @@ export async function runAsk(argv, context) {
     try {
         await sweepStaleJobs(store, paths);
         const jobId = randomUUID();
-        const sessionResolution = resolveAskSession(store, repoIdentity.repoId, parsed.fresh, parsed.resume, parsed.resumeTarget);
+        const sessionResolution = await resolveAskSession(store, repoIdentity.repoId, parsed.fresh, parsed.resume, parsed.resumeTarget);
         const askPrompt = buildAskPrompt(parsed.prompt, sessionResolution.reusedSession);
+        const executionPlan = await prepareKimiExecutionPlan({
+            operationKind: "ask",
+            cwd: context.cwd,
+            env: context.env,
+            intendedEngine: "legacy-v1",
+            resumedFromJobId: sessionResolution.resumedFromJobId,
+        });
         const logPath = path.join(paths.logsDir, `ask-${jobId}.jsonl`);
         const job = store.createJob({
             job_id: jobId,
@@ -64,6 +71,7 @@ export async function runAsk(argv, context) {
             kimi_pid: null,
             status: "running",
             kimi_session_id: sessionResolution.kimiSessionId,
+            ...persistedExecutionPlanFields(executionPlan),
             agent_profile: ASK_AGENT_PROFILE_PLACEHOLDER,
             prompt_digest: digestPrompt(askPrompt),
             summary: shorten(parsed.prompt ?? askPrompt, ASK_SUMMARY_MAX),
@@ -129,15 +137,16 @@ export async function executeAskJob(jobId, prompt, context, options) {
             await requireAskHookInstalled(context);
         }
         handlers = createCliCancellationHandlers();
-        const kimi = resolveKimiCliCommand(context.env);
+        const executionPlan = executionPlanFromPersisted(job);
         if (options?.workerPid) {
             store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
         }
         const result = await runCliPromptWithBudget({
             cwd: job.cwd,
             env: context.env,
-            command: kimi.command,
-            prefixArgs: kimi.prefixArgs,
+            command: executionPlan.command,
+            prefixArgs: [...executionPlan.prefixArgs],
+            executionPlan,
             prompt,
             commandLabel: "ask",
             model: job.model ?? undefined,
@@ -145,6 +154,7 @@ export async function executeAskJob(jobId, prompt, context, options) {
             logPath: job.stream_log_path,
             signal: handlers.signal,
         }, KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
+        store.updateRunningJob(job.job_id, observedExecutionFields(result));
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "ask.runtime");
         }
@@ -226,9 +236,9 @@ async function requireAskHookInstalled(context) {
         hookRefusalRetryProtocol(context.env),
     ].join(" "), "ask.hook-check", { details: hookRefusalDetails(installStatus) });
 }
-function resolveAskSession(store, repoId, fresh, resume, resumeTarget) {
+async function resolveAskSession(store, repoId, fresh, resume, resumeTarget) {
     if (fresh) {
-        return { kimiSessionId: null, reusedSession: false };
+        return { kimiSessionId: null, reusedSession: false, resumedFromJobId: null };
     }
     if (resumeTarget) {
         const byJob = store.getJob(resumeTarget);
@@ -242,24 +252,36 @@ function resolveAskSession(store, repoId, fresh, resume, resumeTarget) {
         // kimi_session_id=NULL (kimi-code assigns the id post-call), so the
         // legacy "no session id → not found" check would mask the more
         // accurate "already running" error.
-        ensureAskSessionIsNotRunning(exact);
-        if (!exact.kimi_session_id) {
+        const source = await reconcileHistoricalJobProvenance(store, exact);
+        ensureAskSessionIsNotRunning(source);
+        assertResumeEngineCompatible(source, "legacy-v1", "ask");
+        if (!source.kimi_session_id) {
             throw new RuntimeError("ASK_RESUME_NOT_FOUND", `No ask job or session matched ${resumeTarget}.`, "ask.resume");
         }
-        return { kimiSessionId: exact.kimi_session_id, reusedSession: true };
+        return {
+            kimiSessionId: source.kimi_session_id,
+            reusedSession: true,
+            resumedFromJobId: source.job_id,
+        };
     }
     if (resume) {
         const latest = store.findLatestJob({ repoId, commandType: "ask" });
         if (!latest) {
             throw new RuntimeError("ASK_RESUME_NOT_FOUND", "No prior ask session exists for this repository.", "ask.resume");
         }
-        ensureAskSessionIsNotRunning(latest);
-        if (!latest.kimi_session_id) {
+        const source = await reconcileHistoricalJobProvenance(store, latest);
+        ensureAskSessionIsNotRunning(source);
+        assertResumeEngineCompatible(source, "legacy-v1", "ask");
+        if (!source.kimi_session_id) {
             throw new RuntimeError("ASK_RESUME_NOT_FOUND", "No prior ask session exists for this repository.", "ask.resume");
         }
-        return { kimiSessionId: latest.kimi_session_id, reusedSession: true };
+        return {
+            kimiSessionId: source.kimi_session_id,
+            reusedSession: true,
+            resumedFromJobId: source.job_id,
+        };
     }
-    return { kimiSessionId: null, reusedSession: false };
+    return { kimiSessionId: null, reusedSession: false, resumedFromJobId: null };
 }
 function ensureAskSessionIsNotRunning(job) {
     if (job.status === "running") {
