@@ -11,10 +11,15 @@ import {
   reconcileHistoricalJobProvenance,
 } from "../../runtime/kimi-engine.js";
 import { JobStore } from "../../runtime/job-store.js";
+import { maxTestedMinor } from "../../runtime/kimi-version-probe.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+
+// The first minor past the certified boundary. Derived so advancing
+// KIMI_TESTED_MINORS never silently turns this fixture into a certified version.
+const NEXT_UNTESTED_VERSION = `${maxTestedMinor().major}.${maxTestedMinor().minor + 1}.0`;
 
 describe("kimi execution plan", () => {
   test("certifies the exact forced-v1 command tuple and version", async () => {
@@ -94,7 +99,7 @@ describe("kimi execution plan", () => {
         prepareKimiExecutionPlan({
           operationKind: "review",
           cwd,
-          env: { ...baseEnv, KIMI_PLUGIN_CC_MOCK_VERSION: "0.41.0" },
+          env: { ...baseEnv, KIMI_PLUGIN_CC_MOCK_VERSION: NEXT_UNTESTED_VERSION },
         }),
       ).rejects.toMatchObject({ code: "KIMI_CAPABILITY_NOT_CERTIFIED" });
 
@@ -137,7 +142,7 @@ describe("kimi execution plan", () => {
           intendedEngine: "legacy-v1",
           command: process.execPath,
           prefixArgs: [],
-          kimiVersion: "0.41.0",
+          kimiVersion: NEXT_UNTESTED_VERSION,
           certification: "certified",
           resumedFromJobId: null,
         },

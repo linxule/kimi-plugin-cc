@@ -95,7 +95,8 @@ describe("isInTestedRange", () => {
   });
 
   test("returns false for an unknown minor", () => {
-    expect(isInTestedRange(0, 41)).toBe(false);
+    const max = maxTestedMinor();
+    expect(isInTestedRange(max.major, max.minor + 1)).toBe(false);
     expect(isInTestedRange(0, 99)).toBe(false);
   });
 
