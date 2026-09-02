@@ -253,7 +253,7 @@ Surgical only. Common doc edits even when no code changes:
 - `runtime/stream-json.ts`: update the source-of-truth comment's verified-through range
 - `ROADMAP-TO-GA.md`: append an audit log entry with date, verdict, and findings
 
-If extending `KIMI_TESTED_MINORS` (`runtime/kimi-version-probe.ts`), that's a runtime change — bump to patch release.
+If extending `KIMI_TESTED_MINORS` (`runtime/kimi-version-probe.ts`), that's a runtime change — bump to patch release. The "untested minor" test fixtures (`tests/runtime/kimi-engine.test.ts` `NEXT_UNTESTED_VERSION`, `tests/runtime/kimi-version-probe.test.ts`) derive from `maxTestedMinor()` since 2026-09-02, so the boundary move needs no test edit — but the `isInTestedRange` "known minor" list in the probe test still enumerates each certified minor and should gain a line. Probe-list comments compile into `dist/`, so batch every wording fix before the final `bun run build && bun run generate:surfaces`; each reviewer round otherwise costs a full gate re-run. On a monitor `BLOCKER` that cites `auth.login_required`, probe auth first: copy `config.toml` + `credentials/` + `oauth/` + `device_id` into a temp `KIMI_CODE_HOME` (never print them) and run `kimi -p 'Reply with exactly: OK' --output-format stream-json` — 20 seconds decides whether anything else is wrong.
 
 ### Phase 4 — Multi-reviewer pass on the audit commit
 
