@@ -131,10 +131,11 @@
 //     0.30.0, 2026-07-31 covered 0.31.0, 2026-08-01 covered 0.31.1, and
 //     2026-08-08 covered 0.32.0 through 0.34.0, 2026-08-12 covered 0.35.0,
 //     2026-08-13 covered 0.36.0, 2026-08-24 covered 0.37.0 through
-//     0.38.0, and 2026-08-27 covered 0.39.0 (prompt-render.ts byte-identical;
+//     0.38.0, 2026-08-27 covered 0.39.0 (prompt-render.ts byte-identical;
 //     the MCP structured-content and error-code changes shift only prose
-//     inside opaque tool content strings). The legacy-v1 writer remains
-//     compatible through 0.39.0;
+//     inside opaque tool content strings), and 2026-09-02 covered 0.40.0
+//     (wire/session scope 0 bytes; run-prompt.ts absent from the diff). The
+//     legacy-v1 writer remains compatible through 0.40.0;
 //     custom profiles can change content/tools but
 //     not the NDJSON envelope. In 0.33.0 native v2 became the unflagged default,
 //     so v1.9.6 forces KIMI_CODE_LEGACY_FLAG=1 in every accepted child while
@@ -251,7 +252,7 @@ export interface TurnStepRetryingRecord {
  * expected v2 line out of the diagnostics log. An upstream default flip is now
  * a release-blocking safety event, not a parser-only non-event: the refusal gate
  * and plan-order audit must be revisited first. Observed at
- * @moonshot-ai/kimi-code 0.24.x → 0.39.0; `version` is the kimi-code semver.
+ * @moonshot-ai/kimi-code 0.24.x → 0.40.0; `version` is the kimi-code semver.
  */
 export interface SystemVersionRecord {
   readonly role: "meta";

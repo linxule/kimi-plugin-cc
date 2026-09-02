@@ -1186,6 +1186,54 @@ export const KIMI_TESTED_MINORS = [
     // write-swarm confinement (patchBytes=278; user tree clean; worktree
     // removed), and out-of-root denial. Monitor: 2026-08-29.
     { major: 0, minor: 39 },
+    // 0.40.0 certified 2026-09-02 (same-day: npm publish 05:58Z; tag
+    // @moonshot-ai/kimi-code@0.40.0, immutable commit e27ee608; 48 commits
+    // past 0.39.1). Scoped diffs vs 0.39.1: permission, hooks, and wire/session
+    // all 0 bytes; CLI prompt mode is --yolo/--auto help text plus new
+    // top-level `fork`/`session` subcommands (off the -p path — the plugin
+    // passes the prompt as the VALUE of -p, never a bare positional);
+    // bootstrap/config is one additive line (ModelAliasBaseSchema.protocol
+    // widens to 'anthropic' | 'openai_responses'); v1 tools/SDK is additive
+    // telemetry/session-list/tower plumbing with tool schemas (Write/Edit
+    // `path`, Bash `command`), kaos, and the v1 createKimiHarness entry point
+    // unchanged (the KimiHarness class gains one optional telemetry field that
+    // entry point does not wire). The
+    // whole packages/agent-core source tree changed by that one schema line.
+    // KIMI_CODE_LEGACY_FLAG=1 still forces v1 for fresh and resumed -p at the
+    // top of runPrompt(); engine selection reads only that env var and never
+    // config, so no config.toml key (incl. [experimental] tables, which can
+    // enable registered v1 flags without the env master switch — v1 registry
+    // holds only tool-select/secondary-model) can defeat the pin. #3427's
+    // config-beats-env flag precedence and #3434's legacy acp-adapter removal are
+    // v2-only / off the -p transport.
+    //
+    // Native v2 stays fail-closed: plan feature (index.ts:330) still registers
+    // before externalHooks (:338); planService.ts:112 is still the sole
+    // event.allow(); toolExecutor/ is a 0-byte diff; MoonshotAI/kimi-code#3431
+    // is open with no maintainer response. 0.40.0 ADDS a v2-only reason to keep
+    // refusing: #3444 removed the RuntimeWorkspaceView.resolve() root assertion,
+    // so v2 Bash can run with an out-of-workspace cwd (zero shared code with v1
+    // or kaos). The new v2 dangerous-command ask policy sits before the first
+    // approve but is skipped under nonInteractive (v2 print sets it) — inert
+    // and not an ordering fix. The 2026-09-01 live repro, re-run 2026-09-02 on the
+    // 0.40.0 binary, still bypasses the hook (REPRO_0391.md Run D).
+    //
+    // Operator-facing, not contract: v2 config writeback (#3392) now preserves
+    // config.toml formatting per domain, so managed-block markers may survive
+    // login/settings writes more often — the marker-less fallback fires less,
+    // never incorrectly; `kimi doctor` now validates config against the v2
+    // schema, whose hook schema is field-for-field identical to v1's.
+    //
+    // Exact-0.40.0 temp-binary smoke was GREEN: 12 pass / 0 fail / 55
+    // assertions in 383.45s (after a morning auth-expiry false alarm — 3/9 with
+    // auth.login_required and records=[] — cleared once operator auth was valid
+    // again; an isolated-home kimi -p probe answered OK before the re-run). It
+    // denied every forced-write label, refused v2 before spawn, kept
+    // fresh/resumed default-plan runs on v1, enforced the hook on every pursue
+    // turn, denied a read-swarm child write, confined write-swarm
+    // (patchBytes=306; user tree clean; worktree removed), and denied the
+    // non-vacuous out-of-root coder write. Reports 117-120; monitor 2026-09-02.
+    { major: 0, minor: 40 },
 ];
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;

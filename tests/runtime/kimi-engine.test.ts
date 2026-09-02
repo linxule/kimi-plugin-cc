@@ -94,7 +94,7 @@ describe("kimi execution plan", () => {
         prepareKimiExecutionPlan({
           operationKind: "review",
           cwd,
-          env: { ...baseEnv, KIMI_PLUGIN_CC_MOCK_VERSION: "0.40.0" },
+          env: { ...baseEnv, KIMI_PLUGIN_CC_MOCK_VERSION: "0.41.0" },
         }),
       ).rejects.toMatchObject({ code: "KIMI_CAPABILITY_NOT_CERTIFIED" });
 
@@ -137,7 +137,7 @@ describe("kimi execution plan", () => {
           intendedEngine: "legacy-v1",
           command: process.execPath,
           prefixArgs: [],
-          kimiVersion: "0.40.0",
+          kimiVersion: "0.41.0",
           certification: "certified",
           resumedFromJobId: null,
         },
