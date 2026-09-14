@@ -106,8 +106,8 @@ grouping each ecosystem into one update PR. CI uses frozen installs and audits
 all locked packages before the full check gate. Updates still require review;
 no automatic merge or release is configured.
 
-The runtime's vendored TOML parser is separate from the development dependency
-and is not scanned by `bun audit`. Its provenance and security backport are
-documented in `runtime/vendor/smol-toml/README.md`; maintainers must review that
-copy when a parser advisory appears. The EOF-comment regression runs against
-source, compiled output, and the generated Codex mirror.
+The runtime's vendored TOML and shell parsers are separate from development
+dependencies and are not scanned by `bun audit`. Their provenance and security
+backports are documented in `runtime/vendor/{smol-toml,shell-quote}/README.md`;
+maintainers must review these copies when a parser advisory appears. Bounded
+regressions run against source, compiled output, and the generated Codex mirror.

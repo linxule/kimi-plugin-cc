@@ -1,5 +1,6 @@
 // @ts-nocheck
-// Vendored from shell-quote 1.8.3 (MIT, James Halliday). Do not edit — this is upstream code. See ./LICENSE for attribution.
+// Vendored from shell-quote 1.8.3 with the upstream 1.9.0 linear-finalization fix.
+// MIT, James Halliday. See ./LICENSE and ./README.md for provenance.
 'use strict';
 
 // '<(' is process substitution operator and
@@ -200,8 +201,13 @@ function parseInternal(string, env, opts) {
 
     return out;
   }).reduce(function (prev, arg) { // finalize parsed arguments
-    // TODO: replace this whole reduce with a concat
-    return typeof arg === 'undefined' ? prev : prev.concat(arg);
+    if (typeof arg === 'undefined') {
+      return prev;
+    }
+    [].concat(arg).forEach(function (entry) {
+      prev[prev.length] = entry;
+    });
+    return prev;
   }, []);
 }
 
@@ -212,17 +218,19 @@ export function parse(s, env?, opts?) {
   }
   return mapped.reduce(function (acc, value) {
     if (typeof value === 'object') {
-      return acc.concat(value);
+      acc[acc.length] = value;
+      return acc;
     }
     var xs = value.split(RegExp('(' + TOKEN + '.*?' + TOKEN + ')', 'g'));
     if (xs.length === 1) {
-      return acc.concat(xs[0]);
+      acc[acc.length] = xs[0];
+      return acc;
     }
-    return acc.concat(xs.filter(Boolean).map(function (x) {
-      if (startsWithToken.test(x)) {
-        return JSON.parse(x.split(TOKEN)[1]);
-      }
-      return x;
-    }));
+    xs.filter(Boolean).forEach(function (x) {
+      acc[acc.length] = startsWithToken.test(x)
+        ? JSON.parse(x.split(TOKEN)[1])
+        : x;
+    });
+    return acc;
   }, []);
 }
