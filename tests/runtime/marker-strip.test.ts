@@ -9,7 +9,7 @@
 // (byte-exact command match on a bare table) and (B) host-scoped pruning.
 //
 // This suite exercises the REAL vendored `smol-toml` package (a devDependency,
-// same 1.6.1 kimi-code vendors) to simulate the rewrite end to end, plus
+// current patched release) to simulate a comment-stripping rewrite end to end, plus
 // direct unit coverage of the new `evaluateInstalled`/`findUnmanagedApprovalHookBlocks`
 // contracts.
 //

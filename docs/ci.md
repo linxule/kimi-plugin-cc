@@ -5,12 +5,12 @@ different cost and trust profiles.
 
 ## `ci.yml` — base CI (every push to `main` + every PR)
 
-Runs `bun run check`: build → `tsc --noEmit` → full `bun test` suite → `dist/`
+Runs `bun audit`, then `bun run check`: build → `tsc --noEmit` → full `bun test` suite → `dist/`
 drift gate. **No secrets, no kimi binary, no model tokens** — the real-binary
 smokes auto-skip without `KIMI_PLUGIN_CC_SMOKE=1`. This is the per-push safety net
 the repo previously only had locally. Nothing to configure; it just runs.
 
-A red `ci.yml` means a real regression: a build break, a type error, a failing
+A red `ci.yml` can mean a dependency advisory or a regression: a build break, a type error, a failing
 test, or a forgotten `dist/` rebuild (the drift gate).
 
 ## `smoke.yml` — real-binary safety gate (run it LOCALLY)
@@ -98,3 +98,16 @@ KIMI_PLUGIN_CC_SMOKE=1 KIMI_PLUGIN_CC_KIMI_BIN="$D/node_modules/.bin/kimi" \
 
 Either OAuth (seeded from `~/.kimi-code`) or env-model (`KIMI_MODEL_*`) auth
 satisfies the smoke's gate; see the auth note in `tests/runtime/real-binary-smoke.test.ts`.
+
+## Dependency maintenance
+
+Dependabot checks Bun's root manifest and lockfile plus GitHub Actions weekly,
+grouping each ecosystem into one update PR. CI uses frozen installs and audits
+all locked packages before the full check gate. Updates still require review;
+no automatic merge or release is configured.
+
+The runtime's vendored TOML parser is separate from the development dependency
+and is not scanned by `bun audit`. Its provenance and security backport are
+documented in `runtime/vendor/smol-toml/README.md`; maintainers must review that
+copy when a parser advisory appears. The EOF-comment regression runs against
+source, compiled output, and the generated Codex mirror.

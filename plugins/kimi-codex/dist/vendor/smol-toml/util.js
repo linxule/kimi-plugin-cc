@@ -76,6 +76,8 @@ export function skipUntil(str, ptr, sep, end, banNewLines = false) {
         let c = str[i];
         if (c === '#') {
             i = indexOfNewline(str, i);
+            if (i < 0)
+                break;
         }
         else if (c === sep) {
             return i + 1;
