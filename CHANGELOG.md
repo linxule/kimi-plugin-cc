@@ -2,6 +2,32 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 1.10.2 — 2026-09-14
+
+**Security patch: bounded parser work during hook validation.** Vendored TOML
+parsing now rejects unfinished arrays or inline tables ending in a comment
+without a newline, instead of looping indefinitely (GHSA-7w5x-hrqm-74c2).
+Vendored shell parsing finalizes tokens in linear time, including callback
+environments, instead of repeatedly copying growing arrays
+(GHSA-395f-4hp3-45gv). Both complete upstream fixes are backported into the
+existing parser versions and included in the Claude and Codex distributions;
+provenance is recorded beside each vendored parser.
+
+Development dependencies, Bun, and GitHub Actions are current. Grouped weekly
+Dependabot checks and CI dependency auditing cover the manifest and lockfile;
+vendor-specific regression tests cover the shipped source that package audits
+cannot inspect. A swarm test fixture now supplies its own executable stub so
+CI does not require an installed Kimi binary.
+
+No UI, approval-policy, engine-selection, or certification changes. Exact
+native-v2 certification remains kimi-code **0.42.0**. Validation: frozen install,
+zero dependency audit findings, generated-surface/distribution checks, and the
+full local suite (832 pass, 25 intentional source-audit/provider-smoke skips).
+Paid live-provider smoke was not run for this maintenance release. Update the
+plugin through its marketplace and run the appropriate host's setup command
+(`/kimi:setup` in Claude Code or `$kimi-setup` in Codex) to activate the new
+version; publishing does not update existing host caches or hook pins.
+
 ## 1.10.1 — 2026-09-09
 
 **Patch: every plugin refusal now states its setup-retryability explicitly.** The 1.10.0
