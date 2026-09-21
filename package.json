@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.1",
     "smol-toml": "1.8.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
