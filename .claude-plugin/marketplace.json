@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Kimi for Claude Code: code questions, reviews, fixes, and parallel tasks through the local Kimi Code CLI.",
-    "version": "2.0.5"
+    "version": "2.0.6"
   },
   "plugins": [
     {

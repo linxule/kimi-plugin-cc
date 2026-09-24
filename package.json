@@ -1,6 +1,6 @@
 {
   "name": "kimi-plugin-cc",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "private": true,
   "description": "Kimi for Claude Code and Codex: code questions, reviews, fixes, and parallel tasks through the local Kimi Code CLI.",
   "type": "module",

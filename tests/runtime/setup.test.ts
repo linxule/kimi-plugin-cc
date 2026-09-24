@@ -834,14 +834,27 @@ describe("setup managed-block installer", () => {
     expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
   });
 
-  test.each(["PermissionRequest", "PermissionResult", "Interrupt"])(
-    "exact 2.0.0/2.0.1/2.0.2 schemas accept %s but refuse unreviewed versions",
-    async (event) => {
+  test.each(["PermissionRequest", "PermissionResult", "Interrupt"].flatMap((event) =>
+    ["2.1.0", "2.1.1"].map((version) => [event, version] as const)))(
+    "exact 2.0.0/2.0.1/2.0.2/2.1.0/2.1.1 schemas accept %s (setup %s) but refuse unreviewed versions",
+    async (event, setupVersion) => {
       const contents = `[[hooks]]\nevent = "${event}"\ncommand = "foreign-hook"\n`;
       expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 0, version: "2.0.0" }).valid).toBe(true);
       expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 1, version: "2.0.1" }).valid).toBe(true);
       expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 2, version: "2.0.2" }).valid).toBe(true);
+      expect(validateKimiHookSet(contents, { major: 2, minor: 1, patch: 0, version: "2.1.0" }).valid).toBe(true);
+      expect(validateKimiHookSet(contents, { major: 2, minor: 1, patch: 1, version: "2.1.1" }).valid).toBe(true);
       for (const version of [
+        { major: 2, minor: 0, patch: 0, version: "2.1.0" },
+        { major: 2, minor: 1, patch: 1, version: "2.1.0" },
+        { major: 2, minor: 1, patch: 0, version: "2.1.0-rc.1" },
+        { major: 2, minor: 1, patch: 0, version: "2.1.0+unreviewed" },
+        { major: 2, minor: 0, patch: 1, version: "2.1.1" },
+        { major: 2, minor: 1, patch: 0, version: "2.1.1" },
+        { major: 2, minor: 1, patch: 1, version: "2.1.1-rc.1" },
+        { major: 2, minor: 1, patch: 1, version: "2.1.1+unreviewed" },
+        { major: 2, minor: 1, patch: 2, version: "2.1.2" },
+        { major: 2, minor: 2, patch: 0, version: "2.2.0" },
         { major: 2, minor: 0 },
         { major: 2, minor: 0, patch: 0 },
         { major: 2, minor: 0, patch: 0, version: "2.0.0-rc.1" },
@@ -867,9 +880,9 @@ describe("setup managed-block installer", () => {
       expect(validateKimiHookSet(contents + 'unexpected = true\n',
         { major: 2, minor: 0, patch: 2, version: "2.0.2" }).valid).toBe(false);
       if (process.platform === "win32") return;
-      const { env, configPath } = await makeCase(`major-two-${event}`);
+      const { env, configPath } = await makeCase(`major-two-${event}-${setupVersion}`);
       const kimiBin = path.join(path.dirname(configPath), "kimi-two");
-      await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '2.0.2'\n", "utf8");
+      await writeFile(kimiBin, `#!/bin/sh\nprintf '%s\\n' '${setupVersion}'\n`, "utf8");
       await chmod(kimiBin, 0o700);
       await writeFile(configPath, contents, "utf8");
       const result = await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_KIMI_BIN: kimiBin }));

@@ -33,9 +33,9 @@ on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "kimi-code version to smoke against. Must be one the plugin certifies: an exact certified native-v2 version (2.0.2 recommended) runs every lane incl. the v2 resume/taint lane; a pinned <= 0.41 binary runs the legacy-v1 lanes (>= 0.8.0 for goal mode, >= 0.18.0 for write-swarm)."
+        description: "kimi-code version to smoke against. Must be one the plugin certifies: an exact certified native-v2 version (2.1.1 recommended) runs every lane incl. the v2 resume/taint lane; a pinned <= 0.41 binary runs the legacy-v1 lanes (>= 0.8.0 for goal mode, >= 0.18.0 for write-swarm)."
         type: string
-        default: "2.0.2"
+        default: "2.1.1"
       goal_budget_ms:
         description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
         type: string

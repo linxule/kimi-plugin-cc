@@ -36,7 +36,7 @@ You need:
 - macOS or Linux
 - Claude Code or Codex with plugin support
 - Node.js 22.5 or newer
-- Kimi Code CLI 2.0.2, the recommended version for plugin 2.0.5
+- Kimi Code CLI 2.1.1, the recommended version for plugin 2.0.6
 
 Windows is not currently supported. Check your versions in a terminal:
 
@@ -220,7 +220,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code 或 Codex
 - Node.js 22.5 或更高版本
-- Kimi Code CLI 2.0.2，这是插件 2.0.5 的推荐版本
+- Kimi Code CLI 2.1.1，这是插件 2.0.6 的推荐版本
 
 目前不支持 Windows。在终端检查版本：
 
@@ -400,7 +400,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code ou de Codex prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure
-- Kimi Code CLI 2.0.2, la version recommandée pour le plugin 2.0.5
+- Kimi Code CLI 2.1.1, la version recommandée pour le plugin 2.0.6
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -580,7 +580,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code または Codex
 - Node.js 22.5 以降
-- Kimi Code CLI 2.0.2（プラグイン 2.0.5 の推奨バージョン）
+- Kimi Code CLI 2.1.1（プラグイン 2.0.6 の推奨バージョン）
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 

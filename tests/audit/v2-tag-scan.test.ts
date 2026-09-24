@@ -232,6 +232,60 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
     [`${CORE}/wire/tree/fork.ts`]:
       "843b09947cb7b3bc91cb8bf8216c10d00baba4fcd268b34b174c57b9ea04c533",
   },
+  // 2.1.0: reviewed construction and hook-schema bytes match 2.0.2.
+  "2.1.0": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "d4cdf4d4dc3fd0fb761f21ffbe9bfa0b6f313243fcbf7e259e2aa7090c4f0fc6",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "ef981d83e607f0427f77a0fc89e4c03d301116b01ac5f0c33bb68ea955749455",
+    [`${CORE}/features/plan/planService.ts`]:
+      "1d3526543839a78820e6a2e21f746c311e3034812f479233a4462a2a4fe5fc4d",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "0b0f74748c10a85d300c9af40ce7194049aeb5747de4457858d6db6569926e2c",
+    [`${CORE}/state/state.ts`]:
+      "f473464f22800937ef85a0eb9f4ddd16a8041277eeb4c35b55f4bca6ac52255b",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "5fc805219ac755c7f155695f783b553088aab90a1ed44aa8f3d59e2926204dde",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "3f79dfb010e9a6fe4490b28e77e6c2446516eef755f3cee6d9475a32801f5b5e",
+    [`${CORE}/wire/record.ts`]:
+      "8b9eead225a5120d5dccd829cb900cd31fe2262ac0771bff4983043bb6f55056",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "843b09947cb7b3bc91cb8bf8216c10d00baba4fcd268b34b174c57b9ea04c533",
+  },
+  // 2.1.1: reviewed construction and hook-schema bytes match 2.0.2.
+  "2.1.1": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "d4cdf4d4dc3fd0fb761f21ffbe9bfa0b6f313243fcbf7e259e2aa7090c4f0fc6",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "ef981d83e607f0427f77a0fc89e4c03d301116b01ac5f0c33bb68ea955749455",
+    [`${CORE}/features/plan/planService.ts`]:
+      "1d3526543839a78820e6a2e21f746c311e3034812f479233a4462a2a4fe5fc4d",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "0b0f74748c10a85d300c9af40ce7194049aeb5747de4457858d6db6569926e2c",
+    [`${CORE}/state/state.ts`]:
+      "f473464f22800937ef85a0eb9f4ddd16a8041277eeb4c35b55f4bca6ac52255b",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "5fc805219ac755c7f155695f783b553088aab90a1ed44aa8f3d59e2926204dde",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "3f79dfb010e9a6fe4490b28e77e6c2446516eef755f3cee6d9475a32801f5b5e",
+    [`${CORE}/wire/record.ts`]:
+      "8b9eead225a5120d5dccd829cb900cd31fe2262ac0771bff4983043bb6f55056",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "843b09947cb7b3bc91cb8bf8216c10d00baba4fcd268b34b174c57b9ea04c533",
+  },
 };
 
 /**

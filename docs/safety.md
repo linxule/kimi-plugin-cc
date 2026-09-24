@@ -1,8 +1,8 @@
 # Safety
 
-This guide describes the shipped 2.0.1 runtime. Read-only tasks deny file writes and shell commands. Rescue and pursue can edit your workspace. Write-swarm returns a patch from a temporary Git worktree.
+This guide describes the shipped 2.0.6 runtime. Read-only tasks deny file writes and shell commands. Rescue and pursue can edit your workspace. Write-swarm returns a patch from a temporary Git worktree.
 
-Native agent-core-v2 is certified at exact CLI versions `0.42.0`, `0.43.0`, `0.43.1`, and `2.0.0`, with plan mode disabled. The [runtime certification table](../runtime/kimi-engine.ts) controls routing. The hook is not an operating-system sandbox.
+Native agent-core-v2 is certified at exact CLI versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, and `2.1.1`, with plan mode disabled. The [runtime certification table](../runtime/kimi-engine.ts) controls routing. The hook is not an operating-system sandbox.
 
 ## Why the safety story is hook-based
 
@@ -283,6 +283,7 @@ Every refusal below is raised BEFORE a kimi process is created (or, for the prov
 
 ## What this safety story does NOT cover
 
+- **Repository Git configuration and internal subprocesses.** The managed hook gates tool calls, not every internal subprocess. Upstream's explorer profile builds Git context with `git status` and `git log` outside the child tool hook. On 2.0.2 and 2.1.1, repository settings such as `core.fsmonitor` can execute a helper there, including during read-only swarm startup. Version 2.1.0 hardens these Git invocations; 2.1.1 rolls that hardening back to the previously certified behavior. Use trusted repositories and Git configuration. Certification does not establish a sandbox for hostile repositories or arbitrary Git helpers.
 - **Malicious kimi-code binaries.** The threat model assumes the user trusts the kimi-code binary they installed. A hostile binary can ignore the hook entry in its own config.
 - **TOCTOU between path check and edit.** The rescue allowlist resolves and checks paths at allowlist time. Between that check and the actual file write, an attacker with workspace write access could swap a symlink. The mitigation is workspace-write-trust — if untrusted code can edit your workspace, you have bigger problems than this plugin.
 - **Custom kimi-code skill libraries that bypass the hook.** Hooks fire on tool calls, not on skill activations. A skill that calls `Bash` will be hooked; a skill that performs file ops via a Node binding that doesn't surface as a tool call won't be. The default kimi-code skill catalog uses the standard tool surface.

@@ -2,6 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.0.6 — 2026-09-24
+
+- Certify exact Kimi Code CLI 2.1.0 and 2.1.1 for all eight native-v2 operations under the no-plan construction. Previous certified versions remain supported; legacy-v1 stays capped at 0.41.x.
+- Review both exact hook schemas and pin their source hashes. Unreviewed versions, prereleases and build suffixes remain refused. Update the recommended CLI and manual smoke default to 2.1.1.
+- Verify each candidate independently with a 15-test tag scan, plan-ON/OFF controls and the complete sequential live smoke. The active-plan bypass remains, so managed sessions continue to refuse plan mode.
+- Document trusted repository Git configuration: internal explorer Git commands can execute helpers outside tool hooks, including read-only swarm. 2.1.1 rolls back much of 2.1.0's path/Git hardening to the certified 2.0.2 baseline.
+- See [certification evidence and validation](docs/upstream-2.1-certification.md). Publication does not update installed hosts or the operator CLI.
+
 ## 2.0.5 — 2026-09-20
 
 - Fix lockfile-clean TypeScript 7.0.2 emission for `repair-sessions` by binding SQLite constructors before `new`. Preserve read-only database access and preview behavior.

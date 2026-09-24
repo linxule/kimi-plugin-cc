@@ -25,7 +25,7 @@ The real-binary smoke suite skips unless explicitly enabled. A successful base C
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.0.2`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.1.1`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
@@ -75,7 +75,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  bun add @moonshot-ai/kimi-code@2.0.2
+  bun add @moonshot-ai/kimi-code@2.1.1
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```

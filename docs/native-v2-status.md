@@ -1,8 +1,11 @@
-# Native v2 status — 2026-09-20
+# Native v2 status — 2026-09-24
 
-Plugin 2.0.5 fixes lockfile-clean compiled output for session repair; exact
-CLI certification remains through 2.0.2. It does not change hook enforcement
-or the no-plan construction. See [build-fix evidence](release-2.0.5-build-fix.md).
+Plugin 2.0.6 certifies exact CLI 2.1.0 and 2.1.1 for all eight operations
+under the unchanged no-plan construction. Each version passed its own source
+scan, plan-ON/OFF controls and complete sequential candidate smoke. The active
+plan-file bypass persists. Version 2.1.1 rolls back much of 2.1.0's path/Git
+hardening to 2.0.2 behavior; trusted repository Git configuration remains an
+explicit boundary. See [evidence and limits](upstream-2.1-certification.md).
 
 > **2.0.2 (certified 2026-09-20, plugin 2.0.4):** exact source `9d07f634`
 > retains the no-plan construction and unchanged hook schema. Four source
