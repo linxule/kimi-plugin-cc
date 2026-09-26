@@ -2,6 +2,8 @@
 
 Status: proposed specification, September 17, 2026; published September 19, 2026. No feature in this document is implemented in plugin 2.0.3. Target release number is unassigned.
 
+Implementation spike, September 19: exact CLI 2.0.1 does not meet D1, D2 or D3. The [capability audit and offline probes](subscription-capability-audit.md) reproduce routing separation and missing terminal failure evidence. Both stages remain blocked on the upstream interfaces described there.
+
 ## Outcome
 
 Use the user's normal Kimi subscription by default. Let them select their kimi.com or kimi.ai subscription for a task. After they enable automatic fallback, an eligible task can continue on the other subscription when the first exhausts its allowance.
