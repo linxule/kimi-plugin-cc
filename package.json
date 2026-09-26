@@ -1,7 +1,6 @@
 {
   "name": "kimi-plugin-cc",
-  "version": "2.0.6",
-  "private": true,
+  "version": "2.0.7",
   "description": "Kimi for Claude Code and Codex: code questions, reviews, fixes, and parallel tasks through the local Kimi Code CLI.",
   "type": "module",
   "engines": {
@@ -14,7 +13,8 @@
     "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && mkdir -p dist/vendor/shell-quote dist/vendor/smol-toml && cp runtime/vendor/shell-quote/LICENSE dist/vendor/shell-quote/LICENSE && cp runtime/vendor/smol-toml/*.js runtime/vendor/smol-toml/LICENSE dist/vendor/smol-toml/ && echo '{\"type\":\"module\"}' > dist/package.json",
     "companion": "node --import tsx runtime/companion.ts",
     "test": "bun test",
-    "smoke:real": "KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts"
+    "smoke:real": "KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts",
+    "check:package": "node scripts/check-package.mjs"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
@@ -23,5 +23,45 @@
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "license": "Apache-2.0",
+  "author": "Xule Lin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linxule/kimi-plugin-cc.git"
+  },
+  "homepage": "https://github.com/linxule/kimi-plugin-cc#readme",
+  "bugs": {
+    "url": "https://github.com/linxule/kimi-plugin-cc/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "kimi",
+    "plugin",
+    "code-review"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    ".claude-plugin/",
+    ".agents/plugins/marketplace.json",
+    "agents/",
+    "commands/",
+    "hooks/",
+    "dist/",
+    "plugins/kimi-codex/",
+    "scripts/companion.sh",
+    "scripts/review-gate-hook.sh",
+    "docs/safety.md",
+    "docs/migration.md",
+    "docs/models.md",
+    "docs/session-visibility.md",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/registry-releases.md"
+  ]
 }

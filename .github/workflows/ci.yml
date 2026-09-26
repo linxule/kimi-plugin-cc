@@ -45,3 +45,6 @@ jobs:
       # Generated surface hashes and untracked distribution files are checked too.
       - name: Check (build, surfaces, typecheck, test, drift gate)
         run: bun run check
+
+      - name: Check npm package installation
+        run: bun run check:package

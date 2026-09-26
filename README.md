@@ -93,6 +93,31 @@ Use $kimi-ask to explain how this project's main entry point works.
 
 If you use both Claude Code and Codex, run setup in each. Each app has its own hook in the shared Kimi configuration.
 
+## npm distribution (optional)
+
+The existing marketplace commands above remain the default for Claude Code and
+Codex. The same release is also available as
+[`kimi-plugin-cc` on npm](https://www.npmjs.com/package/kimi-plugin-cc), including
+both compiled plugin distributions. No Bun, TypeScript, or install scripts are
+needed to use the package. Kimi Code CLI and Node are still prerequisites.
+
+For an explicitly versioned local Claude Code plugin:
+
+```sh
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.0.7
+claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
+```
+
+Run `/kimi:setup`, then `/kimi:setup --check` in that Claude Code session. Use
+one installation of the plugin per host; do not load the local copy alongside
+an enabled marketplace copy. The package is a plugin, not a replacement for the
+upstream `kimi` executable, and does not expose an `npx kimi-plugin-cc` command.
+
+To update this local copy, install the desired npm version into the same prefix,
+restart the session, and run setup/check again. Codex users should continue to
+use the GitHub marketplace instructions above. Maintainers: see
+[registry releases](./docs/registry-releases.md).
+
 ## Choose a task
 
 | Task | Claude Code command | Codex skill | File access |

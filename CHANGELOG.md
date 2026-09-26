@@ -2,6 +2,18 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.0.7 — 2026-09-26
+
+- Add npm distribution as `kimi-plugin-cc`, with an explicit file allowlist and
+  compiled runtime for both Claude Code and Codex. No install scripts or build
+  tools run on the user's machine; the existing GitHub marketplaces still work.
+- Verify the actual tarball after extraction: both host setup/check probes must
+  enforce the hook in isolated homes, and both distributions must refuse an
+  unsupported CLI version. No credentials or model calls are used by this check.
+- Add tag-verified GitHub Actions publishing with npm Trusted Publishing and
+  document the first-publish bootstrap and registry installation path.
+- Runtime behavior and exact upstream certification remain unchanged from 2.0.6.
+
 ## 2.0.6 — 2026-09-24
 
 - Certify exact Kimi Code CLI 2.1.0 and 2.1.1 for all eight native-v2 operations under the no-plan construction. Previous certified versions remain supported; legacy-v1 stays capped at 0.41.x.

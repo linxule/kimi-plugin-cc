@@ -1,0 +1,67 @@
+name: Publish to npm
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish (vX.Y.Z)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          node --input-type=module -e 'import p from "./package.json" with { type: "json" }; if (process.env.RELEASE_TAG !== `v${p.version}`) throw Error("Tag/package version mismatch");'
+      - run: bun install --frozen-lockfile
+      - run: bun audit
+      - run: bun run check
+      - name: Pack and test both host distributions
+        run: bun run check:package .tmp/npm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: .tmp/npm/*.tgz
+          if-no-files-found: error
+          include-hidden-files: true
+  publish:
+    # Enable after the first authenticated publish and trusted-publisher setup.
+    if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/kimi-plugin-cc
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: package
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      # Bun owns installs/builds. npm is used only for its OIDC publishing support.
+      - run: npm publish package/*.tgz --access public --provenance
