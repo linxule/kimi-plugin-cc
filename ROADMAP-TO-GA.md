@@ -1,6 +1,6 @@
 # Roadmap
 
-Current direction after [2.0.6](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.0.6), updated 2026-09-24. The original filename is retained so existing links keep working.
+Current direction after [2.0.7](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.0.7), updated 2026-09-26. The original filename is retained so existing links keep working.
 
 For installation, start with the [multilingual README](./README.md). For release details, see the [changelog](./CHANGELOG.md). The exact compatibility table lives in [runtime/kimi-engine.ts](./runtime/kimi-engine.ts); the standing safety contracts live in [AGENTS.md](./AGENTS.md) and [docs/invariants.md](./docs/invariants.md).
 
@@ -18,6 +18,7 @@ The plugin is released for **Claude Code and Codex**, using the same subprocess 
 | Model selection | Credential-safe offline inventory, explicit per-task aliases and native provider-setup guidance |
 | Host setup | Separate Claude Code and Codex hooks, verified before managed work |
 | Onboarding | English, Simplified Chinese, French and Japanese guides in one expandable README |
+| Distribution | GitHub marketplaces plus the complete [`kimi-plugin-cc` npm package](https://www.npmjs.com/package/kimi-plugin-cc); future releases use GitHub OIDC publishing |
 
 The optional Claude Code review gate remains disabled by default. Model listing does not test provider connectivity. A successful Moonshot K3 API test establishes that route, not universal support for every provider/model combination.
 
@@ -224,6 +225,12 @@ Remaining v1.1 items: H1 (hook fail-open runtime drift), H3 partial (unknown top
 </details>
 
 ## Post-GA audit log
+
+**2026-09-26 — Registry documentation check.** Confirmed npm 2.0.7, the validated
+artifact, both isolated host setup checks, and the configured trusted publisher.
+Updated the multilingual README, current compatibility guide, contributor
+versioning guidance, roadmap, and publishing status. The certified CLI table and
+runtime are unchanged. Historical certification records retain their original versions.
 
 <details>
 <summary>Open the dated release and compatibility audit history</summary>

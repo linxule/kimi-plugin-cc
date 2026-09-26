@@ -4,7 +4,7 @@
 
 Use Kimi to explain code, review changes, challenge a design, or work toward a goal — an independent second opinion from a different model family, inside the Claude Code or Codex session you're already in.
 
-[Latest release](https://github.com/linxule/kimi-plugin-cc/releases/latest) · [Roadmap](./ROADMAP-TO-GA.md) · [Report an issue](https://github.com/linxule/kimi-plugin-cc/issues) · [Apache-2.0 license](./LICENSE)
+[Latest release](https://github.com/linxule/kimi-plugin-cc/releases/latest) · [npm package](https://www.npmjs.com/package/kimi-plugin-cc) · [Roadmap](./ROADMAP-TO-GA.md) · [Report an issue](https://github.com/linxule/kimi-plugin-cc/issues) · [Apache-2.0 license](./LICENSE)
 
 ![Claude Code running /kimi:review on this repository, with Kimi's findings verified claim by claim in the same session](./assets/claude-code-kimi-review.jpg)
 
@@ -36,7 +36,7 @@ You need:
 - macOS or Linux
 - Claude Code or Codex with plugin support
 - Node.js 22.5 or newer
-- Kimi Code CLI 2.1.1, the recommended version for plugin 2.0.6
+- Kimi Code CLI 2.1.1, the recommended version for plugin 2.0.7
 
 Windows is not currently supported. Check your versions in a terminal:
 
@@ -245,7 +245,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code 或 Codex
 - Node.js 22.5 或更高版本
-- Kimi Code CLI 2.1.1，这是插件 2.0.6 的推荐版本
+- Kimi Code CLI 2.1.1，这是插件 2.0.7 的推荐版本
 
 目前不支持 Windows。在终端检查版本：
 
@@ -301,6 +301,10 @@ codex plugin add kimi@kimi-marketplace
 ```
 
 如果同时使用 Claude Code 和 Codex，请分别运行 setup。两个应用各有自己的钩子，共用一份 Kimi 配置。
+
+## npm 分发（可选）
+
+完整插件也已发布到 [npm，包名为 `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc)，包含 Claude Code 和 Codex 的预编译运行时，无需 Bun 或构建步骤。默认仍推荐上方的插件市场安装方式。需要通过 npm 安装本地 Claude Code 插件时，请参照 [npm 安装步骤](#npm-distribution-optional)。每个应用只加载一份插件；npm 不提供 `npx kimi-plugin-cc` 命令。Codex 用户继续使用上方的 GitHub 插件市场命令。
 
 ## 选择任务
 
@@ -425,7 +429,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code ou de Codex prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure
-- Kimi Code CLI 2.1.1, la version recommandée pour le plugin 2.0.6
+- Kimi Code CLI 2.1.1, la version recommandée pour le plugin 2.0.7
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -481,6 +485,10 @@ Utilise $kimi-ask pour expliquer le fonctionnement du point d'entrée principal 
 ```
 
 Si vous utilisez Claude Code et Codex, lancez setup dans chaque application. Chacune possède son propre hook dans la configuration Kimi commune.
+
+## Distribution npm (facultative)
+
+Le plugin complet est aussi disponible sur [npm sous le nom `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc), avec les runtimes précompilés pour Claude Code et Codex, sans Bun ni compilation. Les marketplaces ci-dessus restent le mode d'installation par défaut. Pour installer une copie locale dans Claude Code via npm, suivez les [étapes npm](#npm-distribution-optional) (en anglais). Ne chargez qu'une copie du plugin par application ; le paquet ne fournit pas de commande `npx kimi-plugin-cc`. Pour Codex, continuez à utiliser la marketplace GitHub ci-dessus.
 
 ## Choisir une tâche
 
@@ -605,7 +613,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code または Codex
 - Node.js 22.5 以降
-- Kimi Code CLI 2.1.1（プラグイン 2.0.6 の推奨バージョン）
+- Kimi Code CLI 2.1.1（プラグイン 2.0.7 の推奨バージョン）
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 
@@ -661,6 +669,10 @@ $kimi-ask を使って、このプロジェクトのメインのエントリー�
 ```
 
 Claude Code と Codex の両方を使う場合は、それぞれで setup を実行します。共通の Kimi 設定内に、各アプリ専用のフックが作られます。
+
+## npm 配布（任意）
+
+完全なプラグインは [npm の `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc) としても公開されています。Claude Code と Codex 向けのコンパイル済みランタイムを含み、Bun やビルド作業は不要です。通常は上記のマーケットプレイス経由でインストールしてください。npm から Claude Code 用のローカルコピーを入れる場合は、[npm のインストール手順](#npm-distribution-optional)（英語）を参照してください。各アプリで読み込むプラグインは一つにし、重複させないでください。`npx kimi-plugin-cc` コマンドはありません。Codex では引き続き上記の GitHub マーケットプレイスを使います。
 
 ## タスクを選ぶ
 

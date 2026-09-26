@@ -54,4 +54,4 @@ Normal `bun run check` skips these tests. A skipped smoke does not certify a rel
 
 ## Release a change
 
-Follow [the release checklist](./AGENTS.md#releasing). Certification releases from 2.0.0 normally align with the upstream version they certify. Plugin-only maintenance fixes use a new patch version without changing the certified CLI table. Never reuse a published plugin version. Matching version numbers never replace the source audit or live tests. Documentation-only updates do not require a release tag.
+Follow [the release checklist](./AGENTS.md#releasing) and [npm publishing guide](./docs/registry-releases.md). Plugin versions advance independently of the upstream CLI; compatible maintenance and certification updates take the next unused plugin patch. Plugin-only fixes do not change the certified CLI table. Never reuse a published plugin version. Matching version numbers never replace the source audit or live tests. Documentation-only updates do not require a release tag.

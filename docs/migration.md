@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-For plugin 2.0.3, use Kimi Code CLI 2.0.1. The plugin also certifies exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, and `2.0.0` for all eight operations. It does not automatically accept later patches or minor releases.
+For plugin 2.0.7, use Kimi Code CLI 2.1.1. The plugin certifies exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, and `2.1.1` for all eight operations. It does not automatically accept later patches or minor releases. The npm distribution adds an installation channel; it does not change this compatibility table.
 
 Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS`, through 0.41.x, subject to each operation's minimum version. The [runtime table](../runtime/kimi-engine.ts) is the authority.
 
@@ -8,8 +8,8 @@ Use the [README installation and update steps](../README.md) for Claude Code or 
 
 ## Plugin versions and upgrades
 
-Plugin versions advance independently using ordinary SemVer. Plugin 2.0.3 certifies
-exact Kimi Code CLI 2.0.1; the runtime table records that mapping. Each compatible
+Plugin versions advance independently using ordinary SemVer. Plugin 2.0.7 retains
+the exact CLI certifications from 2.0.6; the runtime table records that mapping. Each compatible
 maintenance or certification update takes the next unused plugin patch. Published
 versions and tags are never reused. Every upstream patch requires its own certification.
 The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.

@@ -4,6 +4,19 @@ The npm package `kimi-plugin-cc` ships the Claude plugin at its root and the
 self-contained Codex plugin under `plugins/kimi-codex`. GitHub marketplaces
 remain available. The package has no install scripts and no separate CLI.
 
+## Publishing status
+
+As of September 26, 2026, [2.0.7 is live on npm](https://www.npmjs.com/package/kimi-plugin-cc/v/2.0.7).
+The first upload used the validated GitHub Actions artifact and interactive npm
+authentication. Its public tarball matched that artifact byte-for-byte, and a
+fresh registry install passed isolated setup/check for both hosts.
+
+The trusted publisher is configured for `linxule/kimi-plugin-cc`, workflow
+`publish.yml`, environment `npm`, with direct publishing allowed.
+`NPM_TRUSTED_PUBLISHING=true` is enabled in GitHub Actions. Future GitHub releases
+use short-lived OIDC credentials, without a stored npm token or interactive 2FA.
+The first npm OIDC publication will be the next release; do not republish 2.0.7.
+
 ## Validation
 
 Use the repository's normal version bump and generated-surface procedure in
@@ -25,7 +38,7 @@ vendored licenses, and installs/checks the safety hook in isolated homes for
 both hosts. It also exercises unsupported-version refusal using a fake CLI.
 It does not invoke a model or read the maintainer's Kimi configuration.
 
-## First publication
+## First publication (completed bootstrap reference)
 
 The package must first exist on npm before its package settings can be configured.
 After the release commit passes CI, create its immutable version tag and GitHub
