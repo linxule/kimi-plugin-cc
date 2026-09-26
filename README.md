@@ -4,6 +4,10 @@
 
 Use Kimi to explain code, review changes, challenge a design, or work toward a goal — an independent second opinion from a different model family, inside the Claude Code or Codex session you're already in.
 
+[![Kimi Ambassador — academia](./assets/kimi-ambassador-academia.webp)](https://www.kimi.ai/lp/kimi-ambassador)
+
+I'm a [Kimi Ambassador](https://www.kimi.ai/lp/kimi-ambassador) (academia). Kimi (Moonshot AI) supports this project through that role.
+
 [Latest release](https://github.com/linxule/kimi-plugin-cc/releases/latest) · [npm package](https://www.npmjs.com/package/kimi-plugin-cc) · [Roadmap](./ROADMAP-TO-GA.md) · [Report an issue](https://github.com/linxule/kimi-plugin-cc/issues) · [Apache-2.0 license](./LICENSE)
 
 ![Claude Code running /kimi:review on this repository, with Kimi's findings verified claim by claim in the same session](./assets/claude-code-kimi-review.jpg)
