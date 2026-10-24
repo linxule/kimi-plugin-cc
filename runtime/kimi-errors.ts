@@ -71,6 +71,9 @@ export function classifyManagedCommandFailure(
   const details: Record<string, unknown> = { availability: classification.kind };
   if (error instanceof RuntimeError) {
     details.cause_code = error.code;
+    for (const key of ["spawn_code", "spawn_errno", "spawn_message"]) {
+      if (error.details[key] !== undefined) details[key] = error.details[key];
+    }
     if (error.code === "RESPONSE_TIMEOUT") {
       for (const key of ["budget_ms", "record_count", "partial_output_chars", "aborted", "settled_post_abort", "hook_escapes"]) {
         if (error.details[key] !== undefined) details[key] = error.details[key];
@@ -174,31 +177,31 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
     };
   }
 
-  if (error instanceof RuntimeError && error.code === "CLI_SPAWN_FAILED") {
-    return {
-      kind: "binary_unavailable",
-      summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
-      nextStep: "Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.",
-      runtimeProbe: "failed",
-      authProbe: "failed",
-    };
-  }
-
-  // v1.0 cli-client surfaces async ENOENT (Bun) as CLI_PROCESS_ERROR with
-  // "spawn ... ENOENT" in the message. Map that to binary_unavailable so
-  // the failure message points users at /kimi:setup.
   if (
     error instanceof RuntimeError &&
-    error.code === "CLI_PROCESS_ERROR" &&
-    /\bENOENT\b/.test(message)
+    (error.code === "CLI_SPAWN_FAILED" || error.code === "CLI_PROCESS_ERROR")
   ) {
-    return {
-      kind: "binary_unavailable",
-      summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
-      nextStep: "Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.",
-      runtimeProbe: "failed",
-      authProbe: "failed",
-    };
+    const spawnCode = error.details.spawn_code;
+    const binaryUnavailable = typeof spawnCode === "string" && ["ENOENT", "EACCES", "ENOEXEC"].includes(spawnCode);
+    if (typeof spawnCode === "string" && !binaryUnavailable) {
+      return {
+        kind: "startup_failed",
+        summary: "the Kimi subprocess could not be started or used.",
+        nextStep: "Check the underlying process error; shorten the prompt or environment if an argument-size limit was exceeded, then retry.",
+        runtimeProbe: "failed",
+        authProbe: "failed",
+      };
+    }
+    // Keep opaque synchronous failures and legacy async ENOENT diagnostics compatible.
+    if (binaryUnavailable || error.code === "CLI_SPAWN_FAILED" || /\bENOENT\b/.test(message)) {
+      return {
+        kind: "binary_unavailable",
+        summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
+        nextStep: "Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.",
+        runtimeProbe: "failed",
+        authProbe: "failed",
+      };
+    }
   }
 
   // v1.0 cli-client surfaces non-ENOENT process errors and non-zero

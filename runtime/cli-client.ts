@@ -189,6 +189,15 @@ export interface CliClientResult {
   hookEscapes?: HookEscape[];
 }
 
+function spawnErrorDetails(error: unknown): Record<string, unknown> {
+  const cause = error as NodeJS.ErrnoException | undefined;
+  return {
+    spawn_code: cause?.code,
+    spawn_errno: cause?.errno,
+    spawn_message: formatError(error),
+  };
+}
+
 export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientResult> {
   // Pre-aborted signal: refuse to spawn at all.
   if (opts.signal?.aborted === true) {
@@ -270,8 +279,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       `Failed to spawn kimi: ${formatError(err)}`,
       "cli-client.spawn",
       err instanceof Error
-        ? { cause: err, details: { command: opts.command, args } }
-        : { details: { command: opts.command, args } },
+        ? { cause: err, details: { command: opts.command, args, ...spawnErrorDetails(err) } }
+        : { details: { command: opts.command, args, ...spawnErrorDetails(err) } },
     );
   }
 
@@ -803,8 +812,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           `kimi subprocess error: ${formatError(err)}`,
           "cli-client.process",
           err instanceof Error
-            ? { cause: err, details: errorDetails() }
-            : { details: errorDetails() },
+            ? { cause: err, details: { ...errorDetails(), ...spawnErrorDetails(err) } }
+            : { details: { ...errorDetails(), ...spawnErrorDetails(err) } },
         ),
       );
     });
@@ -823,7 +832,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
             "CLI_PROCESS_ERROR",
             `kimi subprocess error: ${formatError(captured)}`,
             "cli-client.process",
-            { cause: captured, details: errorDetails() },
+            { cause: captured, details: { ...errorDetails(), ...spawnErrorDetails(captured) } },
           ),
         );
       });
@@ -917,8 +926,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           `kimi subprocess stream setup failed: ${formatError(err)}`,
           "cli-client.streams",
           err instanceof Error
-            ? { cause: err, details: errorDetails() }
-            : { details: errorDetails() },
+            ? { cause: err, details: { ...errorDetails(), ...spawnErrorDetails(err) } }
+            : { details: { ...errorDetails(), ...spawnErrorDetails(err) } },
         ),
       );
     }

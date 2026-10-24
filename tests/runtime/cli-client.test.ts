@@ -1,11 +1,14 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
+import * as childProcess from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId } from "../../runtime/cli-client.js";
 import { assertCliResultSuccess } from "../../runtime/commands/cli-helpers.js";
+import { RuntimeError } from "../../runtime/errors.js";
+import { classifyManagedCommandFailure, classifySetupFailure } from "../../runtime/kimi-errors.js";
 import type { KimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import {
   collectDescendantIdentities,
@@ -1148,23 +1151,57 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test("classifies an unspawnable binary as CLI_SPAWN_FAILED or CLI_PROCESS_ERROR", async () => {
+  for (const timing of ["sync", "early", "event", "streams"]) {
+    test.each(["E2BIG", "ENOMEM"])(`classifies cli-client ${timing} spawn cause %s as a review startup failure`, async (code) => {
+      const root = await createTestPluginDataRoot("cli-client-spawn-cause");
+      const cause = Object.assign(new Error("system launch failure"), { code, errno: -7 });
+      const originalSpawn = childProcess.spawn;
+      let closed: Promise<void> | undefined;
+      const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
+        if (timing === "sync") throw cause;
+        const child = originalSpawn(...args);
+        closed = new Promise((resolve) => child.once("close", () => resolve()));
+        if (timing === "streams") child.stdout!.setEncoding = () => { throw cause; };
+        else if (timing === "early") queueMicrotask(() => child.emit("error", cause));
+        else setImmediate(() => child.emit("error", cause));
+        return child;
+      }) as typeof spawn);
+      try {
+        const error = await runCliPrompt({
+          ...mockOptions({ cwd: root, records: [] }),
+          onSpawn: timing === "early" ? () => new Promise<void>((resolve) => setImmediate(resolve)) : undefined,
+        }).catch((error: unknown) => error);
+        const classification = classifySetupFailure(error);
+        expect(classification?.kind).toBe("startup_failed");
+        expect(classification?.nextStep).toBe("Check the underlying process error; shorten the prompt or environment if an argument-size limit was exceeded, then retry.");
+        const result = classifyManagedCommandFailure(error, "review", "job-spawn") as RuntimeError;
+        expect(result.code).toBe("REVIEW_KIMI_STARTUP_FAILED");
+        expect(result.details).toMatchObject({ spawn_code: code, spawn_errno: -7, spawn_message: "system launch failure" });
+      } finally {
+        spawnSpy.mockRestore();
+        await closed;
+        await cleanupTestPath(root);
+      }
+    });
+  }
+
+  test("classifies a short-prompt missing executable with the review install remedy", async () => {
     const root = await createTestPluginDataRoot("cli-client-no-bin");
     try {
       // node's spawn raises ENOENT asynchronously via the 'error' event for
       // bare names not found on PATH, surfacing as CLI_PROCESS_ERROR. An
       // absolute non-existent path also routes through the same listener.
-      await expect(
-        runCliPrompt({
-          cwd: root,
-          env: { ...process.env },
-          command: "/nonexistent/path/to/kimi-binary-does-not-exist",
-          executionPlan: testExecutionPlan("/nonexistent/path/to/kimi-binary-does-not-exist"),
-          prompt: "x",
-        }),
-      ).rejects.toMatchObject({
-        code: expect.stringMatching(/^CLI_(SPAWN_FAILED|PROCESS_ERROR)$/),
-      });
+      const error = await runCliPrompt({
+        cwd: root,
+        env: { ...process.env },
+        command: "/nonexistent/path/to/kimi-binary-does-not-exist",
+        executionPlan: testExecutionPlan("/nonexistent/path/to/kimi-binary-does-not-exist"),
+        prompt: "x",
+      }).catch((error: unknown) => error);
+      const result = classifyManagedCommandFailure(error, "review", "job-no-bin") as RuntimeError;
+      expect(result.code).toBe("REVIEW_KIMI_BINARY_UNAVAILABLE");
+      expect(result.details.spawn_code).toBe("ENOENT");
+      expect(classifySetupFailure(error)?.nextStep).toBe("Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.");
     } finally {
       await cleanupTestPath(root);
     }

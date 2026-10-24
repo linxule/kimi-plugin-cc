@@ -29,6 +29,14 @@ const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 1_000;
 /** Hard bound for each batched identity revalidation pass. */
 const IDENTITY_REVALIDATION_TIMEOUT_MS = 250;
 const DESCENDANT_SNAPSHOT_TIMEOUT = Symbol("descendant-snapshot-timeout");
+function spawnErrorDetails(error) {
+    const cause = error;
+    return {
+        spawn_code: cause?.code,
+        spawn_errno: cause?.errno,
+        spawn_message: formatError(error),
+    };
+}
 export async function runCliPrompt(opts) {
     // Pre-aborted signal: refuse to spawn at all.
     if (opts.signal?.aborted === true) {
@@ -82,8 +90,8 @@ export async function runCliPrompt(opts) {
     }
     catch (err) {
         throw new RuntimeError("CLI_SPAWN_FAILED", `Failed to spawn kimi: ${formatError(err)}`, "cli-client.spawn", err instanceof Error
-            ? { cause: err, details: { command: opts.command, args } }
-            : { details: { command: opts.command, args } });
+            ? { cause: err, details: { command: opts.command, args, ...spawnErrorDetails(err) } }
+            : { details: { command: opts.command, args, ...spawnErrorDetails(err) } });
     }
     // Pre-attach an 'error' listener immediately. Bun (and Node) can emit
     // 'error' asynchronously between spawn returning and our Promise body
@@ -550,8 +558,8 @@ export async function runCliPrompt(opts) {
         child.on("error", (err) => {
             appendLogLine({ event: "process_error", message: formatError(err) });
             settle("reject", new RuntimeError("CLI_PROCESS_ERROR", `kimi subprocess error: ${formatError(err)}`, "cli-client.process", err instanceof Error
-                ? { cause: err, details: errorDetails() }
-                : { details: errorDetails() }));
+                ? { cause: err, details: { ...errorDetails(), ...spawnErrorDetails(err) } }
+                : { details: { ...errorDetails(), ...spawnErrorDetails(err) } }));
         });
         if (earlyErrors.length > 0) {
             const captured = earlyErrors[0];
@@ -562,7 +570,7 @@ export async function runCliPrompt(opts) {
                     early: true,
                     additional_count: earlyErrors.length - 1,
                 });
-                settle("reject", new RuntimeError("CLI_PROCESS_ERROR", `kimi subprocess error: ${formatError(captured)}`, "cli-client.process", { cause: captured, details: errorDetails() }));
+                settle("reject", new RuntimeError("CLI_PROCESS_ERROR", `kimi subprocess error: ${formatError(captured)}`, "cli-client.process", { cause: captured, details: { ...errorDetails(), ...spawnErrorDetails(captured) } }));
             });
         }
         child.on("close", async (exitCode, signal) => {
@@ -643,8 +651,8 @@ export async function runCliPrompt(opts) {
         }
         catch (err) {
             settle("reject", new RuntimeError("CLI_PROCESS_ERROR", `kimi subprocess stream setup failed: ${formatError(err)}`, "cli-client.streams", err instanceof Error
-                ? { cause: err, details: errorDetails() }
-                : { details: errorDetails() }));
+                ? { cause: err, details: { ...errorDetails(), ...spawnErrorDetails(err) } }
+                : { details: { ...errorDetails(), ...spawnErrorDetails(err) } }));
         }
     });
 }
