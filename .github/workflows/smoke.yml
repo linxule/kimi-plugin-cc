@@ -1,19 +1,22 @@
 name: Real-binary smoke
 
 # The real-binary safety gate: spawns the ACTUAL `kimi -p` against a real
-# PreToolUse hook and proves end-to-end that (1) read-only commands' forced
-# writes are denied, (2) autonomous goal mode (/kimi:pursue) is hook-gated on
-# EVERY continuation turn (zero files land across a multi-turn run), and (3)
-# write-swarm (/kimi:swarm --write) edits land only in the throwaway worktree
+# PreToolUse hook (with short-lived loopback web activation/deactivation on
+# versions that require it) and proves end-to-end that (1) read-only commands'
+# forced writes are denied, (2) autonomous goal mode (/kimi:pursue) is hook-gated
+# on EVERY continuation turn (zero files land across a multi-turn run), and (3)
+# distinct write-swarm children author edits only in the throwaway worktree
 # (user tree untouched) while out-of-root writes are denied (needs kimi >= 0.18.0).
+# AgentSwarm call records, aggregate denials, or a coordinator patch alone do not
+# prove fan-out; swarm lanes require distinct child journals and assigned work.
 #
 # MANUAL-DISPATCH ONLY (no schedule) — a goal-mode + write-swarm run is a few
 # minutes of REAL model tokens (the model retries against the deny-wall for the
 # whole budget; write-swarm runs two real fan-outs), so this BILLS PER RUN.
 #
 # Local runs use authorized subscription or API authentication. The harness
-# copies selected seed-home files, including credentials when present: follow
-# docs/ci.md before running it. Run live checks sequentially.
+# copies selected seed-home files and symlinks OAuth credential stores when
+# present: follow docs/ci.md before running it. Run live checks sequentially.
 # This optional Actions workflow remains manual and skips model calls unless
 # KIMI_MODEL_API_KEY is configured. Each run consumes model quota or API credit.
 #
@@ -33,9 +36,9 @@ on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "kimi-code version to smoke against. Must be one the plugin certifies: an exact certified native-v2 version (2.3.1 recommended) runs every lane incl. the v2 resume/taint lane; a pinned <= 0.41 binary runs the legacy-v1 lanes (>= 0.8.0 for goal mode, >= 0.18.0 for write-swarm)."
+        description: "kimi-code version to smoke against: an exact certified native-v2 version or the explicit candidate undergoing final validation (currently 2.3.2) runs every lane incl. the v2 resume/taint lane; a pinned <= 0.41 binary runs the legacy-v1 lanes (>= 0.8.0 for goal mode, >= 0.18.0 for write-swarm)."
         type: string
-        default: "2.3.1"
+        default: "2.3.2"
       goal_budget_ms:
         description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
         type: string
@@ -105,4 +108,4 @@ jobs:
           KIMI_MODEL_PROVIDER_TYPE: ${{ vars.KIMI_MODEL_PROVIDER_TYPE || 'kimi' }}
           KIMI_MODEL_BASE_URL: ${{ vars.KIMI_MODEL_BASE_URL }}
           KIMI_PLUGIN_CC_SMOKE_GOAL_BUDGET_MS: ${{ inputs.goal_budget_ms }}
-        run: bun test tests/runtime/real-binary-smoke.test.ts
+        run: bun test tests/runtime/real-binary-smoke.test.ts --path-ignore-patterns '**/worktrees/**'

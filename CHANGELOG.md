@@ -2,6 +2,15 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.4.1 — 2026-10-25
+
+- Certify exact kimi-code 2.3.2 for all eight operations using the 15-test/92-assertion source scan, plan-ON/OFF controls, and the final 19-test/125-assertion production smoke. Keep the no-plan construction and legacy-v1 boundary at 0.41.x. See [evidence](docs/upstream-2.3.2-certification.md).
+- Preserve swarm support after upstream removed model self-activation: exact-version, authenticated loopback activation creates a same-job session with the selected model, auto permission, and plan mode off, then resumes through ordinary `kimi -p`. `runSwarm` solely owns bounded deactivation and verifies the journal; older certified versions stay on direct print.
+- Bind activation to exact provenance, finite budgets, process identity, and session identity (`preactivated`). Failure recovery is cancellation-aware and preserves primary print errors. Unknown late-fork or changed-PGID survivors remain unverified, never false quiescence or unproven signal targets. Cleanup failure blocks completion and retains raw output, structured diagnostics, and the write worktree. MCP uses the same implementation and existing task/job ownership.
+- Close a certification blind spot found by adversarial review: AgentSwarm call records, aggregate denial text, and coordinator-only patches no longer count as fan-out. Smoke requires distinct child journals and correlates each assigned Write/Edit path and toolCallId with its own denial or successful result; the final production run passed 19/19 with 125 assertions in 296.67 seconds.
+
+Contributors: **Kimi** (source audit, design, implementation, documentation, and verification), **Claude** and **Codex** (adversarial review and re-review).
+
 ## 2.4.0 — 2026-10-24
 
 - Add one dependency-free MCP stdio server for Claude Code and Codex, with typed schemas for seven model operations plus job status, result, and cancellation. The existing slash commands, skills, safety hooks, and review gate remain intact.

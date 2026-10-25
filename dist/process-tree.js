@@ -23,6 +23,18 @@ export async function collectDescendantIdentities(rootPid) {
     }
     return snapshot;
 }
+/** Return current members of the selected process groups, or undefined when unreadable. */
+export async function collectProcessGroupsIdentities(processGroupIds) {
+    if (process.platform === "win32")
+        return undefined;
+    const groups = new Set(processGroupIds.filter((id) => Number.isInteger(id) && id > 0));
+    if (groups.size === 0)
+        return [];
+    const rows = await raceValueWithTimeout(collectProcessSnapshotRows(), PROCESS_SNAPSHOT_TIMEOUT_MS);
+    if (rows === PROBE_TIMEOUT || rows === undefined)
+        return undefined;
+    return rows.filter((row) => groups.has(row.processGroupId)).map(toProcessIdentity);
+}
 /**
  * Compatibility surface for callers that only need numeric process listings.
  * Cancellation must use collectDescendantIdentities so ancestry and identity
@@ -63,16 +75,26 @@ export async function revalidateProcessIdentities(expectedIdentities, options = 
     if (batch === PROBE_TIMEOUT)
         return { identities: [], complete: false };
     const identities = [];
+    const groupChanged = [];
     for (const expectedIdentity of expected) {
         const current = batch.identities.get(expectedIdentity.pid);
-        if (current !== undefined &&
-            current.startToken === expectedIdentity.startToken &&
-            current.processGroupId === expectedIdentity.processGroupId &&
-            !isQuiescentState(current.state)) {
+        if (current === undefined ||
+            current.startToken !== expectedIdentity.startToken ||
+            isQuiescentState(current.state)) {
+            continue;
+        }
+        if (current.processGroupId !== expectedIdentity.processGroupId) {
+            groupChanged.push(current);
+        }
+        else {
             identities.push(current);
         }
     }
-    return { identities, complete: batch.complete };
+    return {
+        identities,
+        complete: batch.complete,
+        ...(groupChanged.length > 0 ? { groupChanged } : {}),
+    };
 }
 /** Return the current identity only when pid, start token, and PGID still match. */
 export async function revalidateProcessIdentity(expected, identityReader) {
@@ -104,7 +126,7 @@ export async function waitForProcessTreeExit(identities, timeoutMs, options = {}
                 identityReader: options.identityReader,
                 timeoutMs: probeTimeoutMs,
             });
-            active = !validation.complete || validation.identities.length > 0;
+            active = !validation.complete || validation.identities.length > 0 || (validation.groupChanged?.length ?? 0) > 0;
         }
         if (!active)
             return true;

@@ -60,7 +60,7 @@ export async function runCliPrompt(opts) {
         });
     }
     const args = buildArgs(opts);
-    const env = buildEnv(opts);
+    const env = buildKimiCliEnvironment(opts);
     if (opts.logPath !== undefined) {
         await mkdir(path.dirname(opts.logPath), { recursive: true }).catch(() => {
             // Best-effort; if mkdir fails the appendFile below will error and be
@@ -788,7 +788,7 @@ function buildArgs(opts) {
     args.push("-p", opts.prompt);
     return args;
 }
-function buildEnv(opts) {
+export function buildKimiCliEnvironment(opts) {
     const env = { ...opts.env };
     if (opts.thinkingEffort !== undefined)
         env.KIMI_MODEL_THINKING_EFFORT = opts.thinkingEffort;

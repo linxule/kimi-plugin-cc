@@ -27,7 +27,7 @@ The real-binary smoke suite skips unless explicitly enabled. A successful base C
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.3.1`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.3.2`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
@@ -35,9 +35,11 @@ The suite checks:
 - unsafe experimental selectors and default plan mode refused before spawn
 - native-v2 provenance, resume, and plan-tainted journal refusal
 - hook enforcement across goal-mode continuation turns
-- actual read-only swarm fan-out and child write denial
-- write-swarm edits captured in a patch, with the real checkout unchanged
-- out-of-worktree write attempts denied
+- actual read-only swarm fan-out, proved by distinct child journals with each child's assigned Write attempt and managed denial, not merely an `AgentSwarm` call or aggregate denial
+- write-swarm edits authored by distinct children and captured in a patch, with the real checkout unchanged; a coordinator-only patch is not fan-out evidence
+- out-of-worktree write attempts by real children denied
+
+On versions requiring host activation (currently exact 2.3.2), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
 
 Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidate, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
 
@@ -98,7 +100,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.3.1
+  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.3.2
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```

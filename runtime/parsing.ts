@@ -109,7 +109,7 @@ export interface SwarmArgs extends KimiFlagState {
    * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY and enforced on kimi-code 0.18.0+;
    * older binaries ignore it. Distinct from `cap`: concurrency (how many run
    * simultaneously) ≠ total count (how many run over the whole life of the
-   * swarm). See runtime/cli-client.ts buildEnv.
+   * swarm). See runtime/cli-client.ts buildKimiCliEnvironment.
    *
    * Undefined here means "apply the command default" — swarm.ts owns it
    * (resolveSwarmMaxConcurrency → SWARM_DEFAULT_MAX_CONCURRENCY) so parsing

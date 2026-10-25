@@ -27,7 +27,7 @@ export interface JobRecord {
   kimi_pid: number | null;
   status: JobStatus;
   kimi_session_id: string | null;
-  kimi_session_id_source: "announced" | "recovered_session_dir" | null;
+  kimi_session_id_source: "announced" | "recovered_session_dir" | "preactivated" | null;
   /** Real operation; null means a historical row without proven provenance. */
   operation_kind: KimiOperationKind | null;
   intended_engine: KimiEngine | null;
@@ -72,7 +72,7 @@ export interface CreateJobInput {
   kimi_pid: number | null;
   status: JobStatus;
   kimi_session_id: string | null;
-  kimi_session_id_source?: "announced" | "recovered_session_dir" | null;
+  kimi_session_id_source?: "announced" | "recovered_session_dir" | "preactivated" | null;
   operation_kind?: KimiOperationKind | null;
   intended_engine?: KimiEngine | null;
   observed_engine?: KimiEngine | null;
@@ -632,7 +632,7 @@ interface DbRow {
   kimi_pid: number | null;
   status: JobStatus;
   kimi_session_id: string | null;
-  kimi_session_id_source: "announced" | "recovered_session_dir" | null;
+  kimi_session_id_source: "announced" | "recovered_session_dir" | "preactivated" | null;
   operation_kind: KimiOperationKind | null;
   intended_engine: KimiEngine | null;
   observed_engine: KimiEngine | null;

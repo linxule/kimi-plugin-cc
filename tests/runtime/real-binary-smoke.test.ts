@@ -54,7 +54,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { access, appendFile, cp, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { access, appendFile, cp, mkdir, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,6 +63,13 @@ import { runCliPrompt } from "../../runtime/cli-client.js";
 import { runSetup } from "../../runtime/commands/setup.js";
 import { buildGoalPrompt } from "../../runtime/commands/pursue.js";
 import { runSwarm } from "../../runtime/commands/swarm.js";
+import {
+  deactivateSwarmSession,
+  preactivateSwarmSession,
+  requiresSwarmPreactivation,
+  type SwarmActivationOptions,
+} from "../../runtime/swarm-activation.js";
+import { JobStore } from "../../runtime/job-store.js";
 import { resolveKimiCliCommand } from "../../runtime/kimi-command.js";
 import {
   NATIVE_V2_CERTIFIED,
@@ -211,6 +218,180 @@ function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return { cwd, env, stdout: process.stdout, stderr: process.stderr };
 }
 
+interface SmokeSwarmActivation {
+  sessionId: string;
+  workspaceId: string;
+  finish: () => Promise<void>;
+}
+
+async function maybeActivateSwarmForSmoke(options: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  command: string;
+  prefixArgs: readonly string[];
+  operationKind: "swarm" | "swarm-write";
+  trustedWorkspaceRoot?: string;
+}): Promise<SmokeSwarmActivation | undefined> {
+  if (!requiresSwarmPreactivation(BINARY_VERSION ?? null)) return undefined;
+  const activationOptions: SwarmActivationOptions = {
+    cwd: options.cwd,
+    env: options.env,
+    command: options.command,
+    prefixArgs: options.prefixArgs,
+    executionPlan: smokePlan(options.command, options.prefixArgs, options.operationKind),
+    commandLabel: options.operationKind,
+    swarmMaxConcurrency: 2,
+    trustedWorkspaceRoot: options.trustedWorkspaceRoot,
+    expectedVersion: BINARY_VERSION,
+  };
+  const binding = await preactivateSwarmSession(activationOptions);
+  return {
+    sessionId: binding.sessionId,
+    workspaceId: binding.workspaceId,
+    finish: () => deactivateSwarmSession({ ...activationOptions, ...binding }),
+  };
+}
+
+async function findSwarmAgentsDir(kimiHome: string, sessionId: string, workspaceId?: string): Promise<string> {
+  if (workspaceId !== undefined) {
+    const direct = path.join(kimiHome, "sessions", workspaceId, sessionId, "agents");
+    if (existsSync(direct)) return direct;
+  }
+  const sessionsRoot = path.join(kimiHome, "sessions");
+  const workspaces = await readdir(sessionsRoot, { withFileTypes: true });
+  const matches = workspaces
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(sessionsRoot, entry.name, sessionId, "agents"))
+    .filter((candidate) => existsSync(candidate));
+  expect(matches, `expected one session directory for ${sessionId}`).toHaveLength(1);
+  return matches[0]!;
+}
+
+interface SwarmToolCall {
+  readonly name: string;
+  readonly args: unknown;
+  readonly toolCallId: string;
+}
+
+interface SwarmToolResult {
+  readonly toolCallId: string;
+  readonly output: string;
+  readonly isError: boolean;
+}
+
+interface SwarmChildEvidence {
+  readonly id: string;
+  readonly calls: readonly SwarmToolCall[];
+  readonly results: readonly SwarmToolResult[];
+}
+
+function swarmToolEvidence(wire: string): { calls: SwarmToolCall[]; results: SwarmToolResult[] } {
+  const calls: SwarmToolCall[] = [];
+  const results: SwarmToolResult[] = [];
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return;
+    const candidate = value as Record<string, unknown>;
+    if (candidate.type === "tool.call" && typeof candidate.name === "string") {
+      calls.push({
+        name: candidate.name,
+        args: candidate.args,
+        toolCallId: typeof candidate.toolCallId === "string" ? candidate.toolCallId : "",
+      });
+      return;
+    }
+    if (candidate.type === "tool.result") {
+      const result = candidate.result;
+      const resultRecord = result !== null && typeof result === "object" && !Array.isArray(result)
+        ? result as Record<string, unknown>
+        : undefined;
+      results.push({
+        toolCallId: typeof candidate.toolCallId === "string" ? candidate.toolCallId : "",
+        output: typeof result === "string"
+          ? result
+          : typeof resultRecord?.output === "string" ? resultRecord.output : "",
+        isError: candidate.isError === true || resultRecord?.isError === true,
+      });
+      return;
+    }
+    for (const child of Object.values(candidate)) visit(child);
+  };
+  for (const line of wire.split("\n")) {
+    if (line.trim()) visit(JSON.parse(line));
+  }
+  return { calls, results };
+}
+
+function normalizedEvidencePath(value: string): string {
+  const normalized = path.normalize(value).replaceAll("\\", "/");
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+}
+
+function isAssignedToolPath(callPath: unknown, target: string): boolean {
+  if (typeof callPath !== "string" || callPath.length === 0) return false;
+  const actual = normalizedEvidencePath(callPath);
+  const assigned = normalizedEvidencePath(target);
+  if (path.isAbsolute(target)) return path.isAbsolute(callPath) && actual === assigned;
+  if (path.isAbsolute(callPath)) return actual.endsWith(`/${assigned}`);
+  return actual === assigned;
+}
+
+function hasCorrelatedOutcome(
+  child: SwarmChildEvidence,
+  target: string,
+  outcome: "managed-denial" | "rescue-denial" | "write-success",
+  sentinel?: string,
+): boolean {
+  return child.calls.some((call) => {
+    if (call.name !== "Write" && call.name !== "Edit") return false;
+    if (call.toolCallId.length === 0) return false;
+    const args = call.args !== null && typeof call.args === "object" && !Array.isArray(call.args)
+      ? call.args as Record<string, unknown>
+      : {};
+    if (!isAssignedToolPath(args.path, target)) return false;
+    if (sentinel !== undefined && !JSON.stringify(call.args).includes(sentinel)) return false;
+    return child.results.some((result) => {
+      if (result.toolCallId !== call.toolCallId) return false;
+      if (outcome === "managed-denial") return result.output.includes(DENY_MARKER);
+      if (outcome === "rescue-denial") return WRITE_OUT_OF_ROOT_DENY.test(result.output);
+      return !result.isError && /\b(?:Wrote|Replaced)\b/.test(result.output) &&
+        !result.output.includes(DENY_MARKER);
+    });
+  });
+}
+
+async function assertSwarmChildEvidence(options: {
+  kimiHome: string;
+  sessionId: string;
+  workspaceId?: string;
+  targets: readonly string[];
+  outcome: "managed-denial" | "rescue-denial" | "write-success";
+  sentinel?: string;
+}): Promise<void> {
+  const agentsDir = await findSwarmAgentsDir(options.kimiHome, options.sessionId, options.workspaceId);
+  const entries = await readdir(agentsDir, { withFileTypes: true });
+  const childIds = entries.filter((entry) => entry.isDirectory() && entry.name !== "main").map((entry) => entry.name);
+  expect(childIds.length, "the operation must launch real children, not fall back to the coordinator").toBeGreaterThanOrEqual(options.targets.length);
+  const mainWire = await readFile(path.join(agentsDir, "main", "wire.jsonl"), "utf8");
+  expect(mainWire).toContain("subagent.spawned");
+  const mainCalls = swarmToolEvidence(mainWire).calls;
+  expect(mainCalls.filter((call) => call.name === "Write" || call.name === "Edit")).toEqual([]);
+
+  const children = await Promise.all(childIds.map(async (id): Promise<SwarmChildEvidence> => {
+    const wire = await readFile(path.join(agentsDir, id, "wire.jsonl"), "utf8");
+    return { id, ...swarmToolEvidence(wire) };
+  }));
+  const unmatched = [...children];
+  for (const target of options.targets) {
+    const index = unmatched.findIndex((child) =>
+      hasCorrelatedOutcome(child, target, options.outcome, options.sentinel));
+    expect(
+      index,
+      `no distinct child had a Write/Edit for ${target} with correlated ${options.outcome} evidence`,
+    ).toBeGreaterThanOrEqual(0);
+    unmatched.splice(index, 1);
+  }
+}
+
 // Copy the curated config surface from the seed home into an isolated
 // KIMI_CODE_HOME. Missing entries are skipped (not every install has
 // mcp.json / tui.toml). The token stores (`credentials/`, `oauth/`) are
@@ -256,6 +437,126 @@ async function fileExists(target: string): Promise<boolean> {
     return false;
   }
 }
+
+function smokeToolCall(toolCallId: string, name: string, args: unknown): Record<string, unknown> {
+  return { event: { type: "tool.call", toolCallId, name, args } };
+}
+
+function smokeToolResult(toolCallId: string, output: string, isError = false): Record<string, unknown> {
+  return { event: { type: "tool.result", toolCallId, result: { output, isError } } };
+}
+
+async function writeSwarmEvidenceFixture(
+  children: Readonly<Record<string, readonly unknown[]>>,
+): Promise<string> {
+  const home = await createTestPluginDataRoot("smoke-swarm-evidence");
+  const agentsDir = path.join(home, "sessions", "wd_smoke", "session_smoke", "agents");
+  await mkdir(path.join(agentsDir, "main"), { recursive: true });
+  await writeFile(
+    path.join(agentsDir, "main", "wire.jsonl"),
+    `${JSON.stringify({ type: "subagent.spawned", agentId: "main" })}\n`,
+    "utf8",
+  );
+  for (const [id, records] of Object.entries(children)) {
+    await mkdir(path.join(agentsDir, id), { recursive: true });
+    await writeFile(
+      path.join(agentsDir, id, "wire.jsonl"),
+      records.map((record) => `${JSON.stringify(record)}\n`).join(""),
+      "utf8",
+    );
+  }
+  return home;
+}
+
+test("swarm child evidence accepts correlated Write and Edit success with extra children", async () => {
+  const home = await writeSwarmEvidenceFixture({
+    child_a: [
+      smokeToolCall("write-a", "Write", { path: "./alpha.txt", content: "sentinel" }),
+      smokeToolResult("write-a", "Wrote 8 bytes to ./alpha.txt"),
+    ],
+    child_b: [
+      smokeToolCall("edit-b", "Edit", { path: "/tmp/work/nested/../beta.txt", new_string: "sentinel" }),
+      smokeToolResult("edit-b", "Replaced 1 occurrence in /tmp/work/beta.txt"),
+    ],
+    extra_child: [smokeToolCall("read-extra", "Read", { path: "unrelated.txt" })],
+  });
+  try {
+    await assertSwarmChildEvidence({
+      kimiHome: home,
+      sessionId: "session_smoke",
+      targets: ["alpha.txt", "beta.txt"],
+      outcome: "write-success",
+      sentinel: "sentinel",
+    });
+  } finally {
+    await cleanupTestPath(home);
+  }
+});
+
+test("swarm child evidence rejects a target found only in Write content and an unrelated denial", async () => {
+  const home = await writeSwarmEvidenceFixture({
+    child_a: [
+      smokeToolCall("write-content", "Write", { path: "unrelated.txt", content: "alpha.txt" }),
+      smokeToolResult("write-content", "Wrote 9 bytes to unrelated.txt"),
+      smokeToolCall("write-other", "Write", { path: "other.txt", content: "x" }),
+      smokeToolResult("write-other", `denied: ${DENY_MARKER}`),
+    ],
+  });
+  try {
+    await expect(assertSwarmChildEvidence({
+      kimiHome: home,
+      sessionId: "session_smoke",
+      targets: ["alpha.txt"],
+      outcome: "managed-denial",
+    })).rejects.toThrow(/no distinct child/);
+  } finally {
+    await cleanupTestPath(home);
+  }
+});
+
+test("swarm child evidence requires the denial on the assigned call ID", async () => {
+  const home = await writeSwarmEvidenceFixture({
+    child_a: [
+      smokeToolCall("write-target", "Write", { path: "alpha.txt", content: "x" }),
+      smokeToolResult("write-target", "Wrote 1 bytes to alpha.txt"),
+      smokeToolCall("write-other", "Write", { path: "other.txt", content: "x" }),
+      smokeToolResult("write-other", `denied: ${DENY_MARKER}`),
+    ],
+  });
+  try {
+    await expect(assertSwarmChildEvidence({
+      kimiHome: home,
+      sessionId: "session_smoke",
+      targets: ["alpha.txt"],
+      outcome: "managed-denial",
+    })).rejects.toThrow(/no distinct child/);
+  } finally {
+    await cleanupTestPath(home);
+  }
+});
+
+test("swarm child evidence accepts the managed denial correlated to its assigned call", async () => {
+  const home = await writeSwarmEvidenceFixture({
+    child_a: [
+      smokeToolCall("write-target", "Write", { path: "alpha.txt", content: "x" }),
+      smokeToolResult("write-target", `denied: ${DENY_MARKER}`),
+    ],
+    extra_child: [
+      smokeToolCall("write-other", "Write", { path: "other.txt", content: "x" }),
+      smokeToolResult("write-other", "Wrote 1 bytes to other.txt"),
+    ],
+  });
+  try {
+    await assertSwarmChildEvidence({
+      kimiHome: home,
+      sessionId: "session_smoke",
+      targets: ["alpha.txt"],
+      outcome: "managed-denial",
+    });
+  } finally {
+    await cleanupTestPath(home);
+  }
+});
 
 test("setDefaultPlanMode creates config for env-model auth homes", async () => {
   const kimiHome = await createTestPluginDataRoot("smoke-home-plan-config");
@@ -889,6 +1190,14 @@ suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () =>
         ).toBe("ok");
 
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
+        const executionPlan = smokePlan(command, prefixArgs, "swarm");
+        const activation = await maybeActivateSwarmForSmoke({
+          cwd: workspace,
+          env: { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" },
+          command,
+          prefixArgs,
+          operationKind: "swarm",
+        });
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), SWARM_BUDGET_MS);
         timer.unref?.();
@@ -896,8 +1205,6 @@ suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () =>
         try {
           result = await runCliPrompt({
             cwd: workspace,
-            // The "swarm" label drives the read-only-plus-AgentSwarm allowlist
-            // for the coordinator AND every spawned subagent.
             env: {
               ...process.env,
               KIMI_CODE_HOME: kimiHome,
@@ -905,18 +1212,17 @@ suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () =>
             },
             command,
             prefixArgs,
-            executionPlan: smokePlan(command, prefixArgs, "swarm"),
+            executionPlan,
             commandLabel: "swarm",
             prompt: SWARM_WRITE_PROMPT,
+            resumeSessionId: activation?.sessionId,
             signal: controller.signal,
           });
         } finally {
           clearTimeout(timer);
+          await activation?.finish();
         }
 
-        // PRIMARY safety invariant: NOT ONE subagent landed its file. A landed
-        // file means a swarm subagent escaped the read-only contract — the exact
-        // failure this command's safety story must rule out.
         for (const name of SWARM_FILES) {
           const wrote = await fileExists(path.join(workspace, name));
           expect(
@@ -924,20 +1230,14 @@ suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () =>
             `read-only swarm must NOT create ${name} — a landed file means a spawned subagent's write was not hook-denied`,
           ).toBe(false);
         }
-
-        // EVIDENCE a subagent actually ATTEMPTED a write and was blocked (rather
-        // than the swarm never launching or subagents declining): the hook deny
-        // marker appears in the aggregated run output. If this fails while the
-        // no-file invariant holds, suspect the swarm didn't launch (needs a kimi
-        // >= 0.12.0 binary with the AgentSwarm tool) or subagents paraphrased
-        // the denial.
-        const haystack = `${JSON.stringify(result.records)}\n${result.stderrTail}`;
-        expect(
-          haystack,
-          `expected the hook deny marker "${DENY_MARKER}" in the swarm run output — ` +
-            `a swarm subagent should have attempted a write and been blocked ` +
-            `(exit=${result.exitCode}, aborted=${result.aborted}; needs kimi >= 0.12.0 for AgentSwarm)`,
-        ).toContain(DENY_MARKER);
+        expect(result.sessionId).toBeDefined();
+        await assertSwarmChildEvidence({
+          kimiHome,
+          sessionId: result.sessionId!,
+          workspaceId: activation?.workspaceId,
+          targets: SWARM_FILES,
+          outcome: "managed-denial",
+        });
       } finally {
         await cleanupTestPath(kimiHome);
         await cleanupTestPath(workspace);
@@ -1020,11 +1320,10 @@ suite("real-binary smoke: pursue can terminate its current goal", () => {
 // worktree create/capture/remove lifecycle), not raw runCliPrompt, so the spawn
 // cwd, the trusted-root env, the patch capture, and cleanup are all exercised.
 //
-// NON-VACUOUSNESS: a smoke that "passes" because the model never fanned out or
-// never wrote proves nothing. So the evidence assertions are HARD — the captured
-// patch MUST contain the sentinel (proves a real write landed in the worktree)
-// and the stream log MUST contain `AgentSwarm` (proves the fan-out happened). If
-// the model no-ops, those fail loudly. Needs kimi >= 0.18.0 (the write gate).
+// NON-VACUOUSNESS: a coordinator-only patch or an AgentSwarm call record does
+// not prove fan-out. The captured patch MUST contain the sentinel, the stream log
+// MUST contain AgentSwarm, and each assigned child journal MUST contain its own
+// successful Write with no corresponding coordinator write. Needs kimi >= 0.18.0.
 // Write does strictly MORE work than the read-only swarm (coordinator turn +
 // coder subagents that think AND edit + a consolidation turn). The read-only
 // swarm completed naturally at ~183s; give write generous headroom so a budget
@@ -1196,6 +1495,24 @@ suite("real-binary smoke: write-swarm edits land in the worktree, never the user
         }
         // The report names the patch for the human to apply.
         expect(report).toContain("Patch written to:");
+        const jobStore = new JobStore(paths);
+        let swarmJob;
+        try {
+          swarmJob = jobStore.findLatestJob({ repoId, commandType: "rescue" });
+        } finally {
+          jobStore.close();
+        }
+        expect(swarmJob?.kimi_session_id).toBeDefined();
+        expect(swarmJob?.kimi_session_id_source).toBe(
+          requiresSwarmPreactivation(BINARY_VERSION ?? null) ? "preactivated" : "announced",
+        );
+        await assertSwarmChildEvidence({
+          kimiHome,
+          sessionId: swarmJob!.kimi_session_id!,
+          targets: WRITE_TARGETS,
+          outcome: "write-success",
+          sentinel: WRITE_SENTINEL,
+        });
         console.log(
           `[smoke] write-swarm: patchBytes=${patchText.length} userTreeClean=${status === ""} worktreeCleaned=${leftover.length === 0}`,
         );
@@ -1236,10 +1553,6 @@ const WRITE_ESCAPE_BUDGET_MS = Number(
 // is the deterministic "outside the workspace"; the alternation covers a Bash
 // fallback). Its presence proves a subagent ATTEMPTED an escape and was blocked.
 const WRITE_OUT_OF_ROOT_DENY = /rescue rejects file edits outside the workspace|Rescue rejects (?:shell|non-standard|command)/i;
-// A structured AgentSwarm tool-call in the coordinator's records — the
-// deterministic, model-phrasing-independent proof the fan-out actually launched
-// (so a no-escape-file result reflects DENIAL, not a swarm that never ran).
-const AGENT_SWARM_LAUNCHED = /"name"\s*:\s*"AgentSwarm"/;
 const ESCAPE_FILES = [
   "WRITE_SWARM_ESCAPE_1_SHOULD_NOT_EXIST.txt",
   "WRITE_SWARM_ESCAPE_2_SHOULD_NOT_EXIST.txt",
@@ -1284,6 +1597,15 @@ suite("real-binary smoke: write-swarm denies out-of-worktree writes (--write)", 
         ].join(" ");
 
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
+        const executionPlan = smokePlan(command, prefixArgs, "swarm-write");
+        const activation = await maybeActivateSwarmForSmoke({
+          cwd: workspace,
+          env: { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" },
+          command,
+          prefixArgs,
+          operationKind: "swarm-write",
+          trustedWorkspaceRoot: workspace,
+        });
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), WRITE_ESCAPE_BUDGET_MS);
         timer.unref?.();
@@ -1298,64 +1620,30 @@ suite("real-binary smoke: write-swarm denies out-of-worktree writes (--write)", 
             },
             command,
             prefixArgs,
-            executionPlan: smokePlan(command, prefixArgs, "swarm-write"),
-            // The write-capable label + the trusted root = the workspace itself.
-            // An in-root write would be ALLOWED; the escape targets are OUTSIDE.
+            executionPlan,
             commandLabel: "swarm-write",
             trustedWorkspaceRoot: workspace,
             prompt: escapePrompt,
+            resumeSessionId: activation?.sessionId,
             signal: controller.signal,
           });
         } finally {
           clearTimeout(timer);
+          await activation?.finish();
         }
 
-        // PRIMARY safety invariant: NOT ONE escape file landed outside the
-        // trusted root. A landed file means a swarm-write subagent escaped the
-        // worktree confinement — the exact failure this design must rule out.
         for (const p of escapePaths) {
           const escaped = await fileExists(p);
           expect(escaped, `out-of-root write must be DENIED — ${p} must not exist`).toBe(false);
         }
-
-        // NON-VACUOUS (HARD, deterministic): the fan-out actually happened — the
-        // coordinator emitted an AgentSwarm TOOL CALL (a structured
-        // `"name":"AgentSwarm"` in a tool_calls record, not model prose). This is
-        // the load-bearing guard against a vacuous pass: it proves the no-file
-        // invariant above held because writes were DENIED, not because the swarm
-        // never launched. It keys off the tool-call structure, so unlike a
-        // deny-reason string it does NOT depend on how the model phrases anything.
-        // A miss here means the model declined to fan out (re-run / strengthen the
-        // prompt; needs kimi >= 0.12.0 for AgentSwarm) — NOT a safety regression.
-        const recordsJson = JSON.stringify(result.records);
-        expect(
-          AGENT_SWARM_LAUNCHED.test(recordsJson),
-          `expected an AgentSwarm tool-call record in the swarm-write run output — the coordinator may not have ` +
-            `fanned out (exit=${result.exitCode}, aborted=${result.aborted}; needs kimi >= 0.12.0 for AgentSwarm)`,
-        ).toBe(true);
-
-        // EVIDENCE (SOFT, diagnostic): ideally a subagent ATTEMPTED an out-of-root
-        // write and quoted the rescue deny reason. This travels back to the parent
-        // ONLY via the `agent_swarm_result` aggregation and depends on the subagent
-        // quoting the denial verbatim — so a paraphrase makes it absent even though
-        // the safety invariant (no escape file) held. It is therefore a WARN, not a
-        // hard assertion. NOTE the residual gap this leaves: the two HARD checks
-        // above establish SAFETY (no escape file) and that the FAN-OUT happened, but
-        // NOT that a subagent actually exercised the deny path — a swarm that fans
-        // out and then writes nothing would also pass with no escape file (a vacuous
-        // mode). This soft check is the best-effort signal that the deny path WAS
-        // hit; we warn rather than fail because that signal is model-phrasing-
-        // dependent (the deny reason is emitted hook-side in the subagent process
-        // and only reaches the parent if quoted). The unit + rescue-approval suites
-        // assert the deny path deterministically; here the load-bearing guarantee is
-        // the hard no-escape-file invariant.
-        const haystack = `${recordsJson}\n${result.stderrTail}`;
-        if (!WRITE_OUT_OF_ROOT_DENY.test(haystack)) {
-          console.warn(
-            `[smoke] write-swarm escape: no verbatim rescue deny reason surfaced (subagent likely paraphrased the ` +
-              `denial through agent_swarm_result). Safety held — no escape file landed and AgentSwarm fanned out.`,
-          );
-        }
+        expect(result.sessionId).toBeDefined();
+        await assertSwarmChildEvidence({
+          kimiHome,
+          sessionId: result.sessionId!,
+          workspaceId: activation?.workspaceId,
+          targets: escapePaths,
+          outcome: "rescue-denial",
+        });
       } finally {
         await cleanupTestPath(kimiHome);
         await cleanupTestPath(workspace);

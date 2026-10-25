@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-For plugin 2.4.0, use Kimi Code CLI 2.3.1. The plugin certifies exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, and `2.3.1` for all eight operations. It does not automatically accept later patches or minor releases. The npm distribution adds an installation channel; it does not change this compatibility table.
+Plugin 2.4.1 certifies Kimi Code CLI 2.3.2 for all eight operations, alongside exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, and `2.3.1`. Later patches and minor releases are not accepted automatically. The npm distribution adds an installation channel; it does not change this compatibility table.
 
 Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS`, through 0.41.x, subject to each operation's minimum version. The [runtime table](../runtime/kimi-engine.ts) is the authority.
 
@@ -8,7 +8,17 @@ Use the [README installation and update steps](../README.md) for Claude Code or 
 
 ## Plugin versions and upgrades
 
-Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Plugin 2.4.0 certifies CLI 2.3.1; the runtime table records that mapping. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
+Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Plugin 2.4.1 certifies exact CLI 2.3.2; the nearby numbers do not imply version alignment. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
+
+## CLI 2.3.2 swarm activation
+
+Upstream 2.3.2 removes model self-activation of `AgentSwarm` in fresh print sessions. On that exact version only, swarm commands and MCP calls use the same `runSwarm` lifecycle:
+
+1. A short-lived `web --no-open --host 127.0.0.1 --port 0 --log-level error` process uses authenticated loopback routes to verify the exact v2 server, choose the explicit or configured default model, create a session, bind the model and auto permission, enable and verify `swarm_mode`, and shut down.
+2. One ordinary `kimi -p -r` prompt runner resumes that session. Its recorded session-id source is `preactivated`, and the returned print session must match it.
+3. A second short-lived web lifecycle disables swarm mode, verifies status and the `swarm_mode.exit` journal record, and shuts down.
+
+Activation is inside the job's finite budget. `runSwarm` solely owns deactivation: normal cleanup uses the remaining budget, while failure recovery has a separate two-second cancellation-aware bound and is never retried. Print/session failures stay primary. The ready token stays in memory and out of logs, and success cannot complete if cleanup fails. Post-mutation identity or process/group uncertainty preserves diagnostics and, for write-swarm, the recovery worktree. Process groups are rechecked after teardown; unknown survivors are unverified and unproven groups are not signalled. Older certified versions still launch swarm directly with `kimi -p`. This narrow lifecycle is not a full RPC transport or a model-driven activation workaround; the managed hook and workspace boundaries still govern every tool call.
 
 After updating the plugin, run Claude Code `/kimi:setup` or Codex `$kimi-setup`
 from that host's active install to re-pin its version-stamped hook path, then

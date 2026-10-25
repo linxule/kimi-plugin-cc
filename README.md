@@ -40,7 +40,7 @@ You need:
 - macOS or Linux
 - Claude Code or Codex with plugin support
 - Node.js 22.5 or newer
-- Kimi Code CLI 2.3.1 (2.3.0 also certified), the recommended version for plugin 2.4.0
+- Kimi Code CLI 2.3.2 (certified; 2.3.1 and 2.3.0 are also certified)
 
 Windows is not currently supported. Check your versions in a terminal:
 
@@ -100,12 +100,12 @@ If you use both Claude Code and Codex, run setup in each. Each app has its own h
 ## npm distribution (optional)
 
 The existing marketplace commands above remain the default for Claude Code and
-Codex. The same release is also available as
+Codex. Published releases are also available as
 [`kimi-plugin-cc` on npm](https://www.npmjs.com/package/kimi-plugin-cc), including
 both compiled plugin distributions. No Bun, TypeScript, or install scripts are
 needed to use the package. Kimi Code CLI and Node are still prerequisites.
 
-For an explicitly versioned local Claude Code plugin:
+For an explicitly versioned local Claude Code plugin, this example pins the published 2.4.0 package; 2.4.1 is not yet published:
 
 ```sh
 npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.4.0
@@ -228,6 +228,8 @@ All refusal codes and their remedies are listed in the [refusal-code catalog](./
 
 The tool rules for ask, review, challenge, and read-only swarm deny file writes and shell commands. Rescue and pursue can write files in your workspace. Swarm with `--write` works in a temporary Git worktree. It starts from your latest commit, so it does not include uncommitted changes. It returns a patch without applying it to your project.
 
+For swarm on CLI 2.3.2, the plugin briefly starts an authenticated loopback `kimi web` process to activate a session and another to deactivate swarm mode afterward; one ordinary `kimi -p -r` process still performs the task. Activation counts against the time limit, the access token stays in memory and out of logs, and cleanup failure prevents success. Older certified versions use `kimi -p` directly.
+
 The plugin does not commit changes. Review changes before you keep or apply them.
 
 Only use tasks that can write files in repositories you trust. Rescue, pursue, and swarm with `--write` can run tests and similar commands. These commands execute code from your repository. The hook restricts tool use; it is not an operating-system sandbox.
@@ -262,7 +264,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code 或 Codex
 - Node.js 22.5 或更高版本
-- Kimi Code CLI 2.3.1（2.3.0 亦已认证），这是插件 2.4.0 的推荐版本
+- Kimi Code CLI 2.3.2（已认证；2.3.1 和 2.3.0 也已认证）
 
 目前不支持 Windows。在终端检查版本：
 
@@ -425,6 +427,8 @@ codex plugin add kimi@kimi-marketplace
 
 Ask、review、challenge 和只读 swarm 的工具规则禁止写入文件和执行 shell 命令。Rescue 和 pursue 可以修改工作区内的文件。带 `--write` 的 swarm 在临时 Git 工作树中操作。它从最新提交开始，不包含尚未提交的修改。任务结束后返回补丁，不会自动应用到项目。
 
+在 CLI 2.3.2 上运行 swarm 时，插件会短暂启动需要认证的本地回环 `kimi web` 进程来激活会话，并在结束后再次启动以停用 swarm 模式；任务本身仍由一个普通的 `kimi -p -r` 进程执行。激活计入任务时限，访问令牌只保存在内存且不会写入日志；无法确认清理完成时，任务不会报告成功。较早的已认证版本仍直接通过 `kimi -p` 运行。
+
 插件不会提交修改。保留或应用修改前，请先审查。
 
 只在你信任的仓库中运行能修改文件的任务。Rescue、pursue 和带 `--write` 的 swarm 可以运行测试等命令。这些命令会执行仓库中的代码。钩子限制的是工具调用，它不是操作系统沙箱。
@@ -459,7 +463,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code ou de Codex prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure
-- Kimi Code CLI 2.3.1 (2.3.0 également certifiée), la version recommandée pour le plugin 2.4.0
+- Kimi Code CLI 2.3.2 (certifiée ; les versions 2.3.1 et 2.3.0 sont également certifiées)
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -622,6 +626,8 @@ Tous les codes de refus et leurs remèdes sont répertoriés dans le [catalogue 
 
 Les règles des modes ask, review, challenge et swarm en lecture seule interdisent les écritures et les commandes shell. Rescue et pursue peuvent modifier les fichiers de votre espace de travail. Swarm avec `--write` travaille dans un worktree Git temporaire. Il part du dernier commit et n'inclut donc pas les modifications non commitées. Il renvoie un patch sans l'appliquer à votre projet.
 
+Avec le CLI 2.3.2, les tâches swarm lancent brièvement un processus `kimi web` authentifié sur l'interface de boucle locale pour activer la session, puis un second pour désactiver le mode swarm ; un seul processus `kimi -p -r` ordinaire exécute toujours la tâche. L'activation est comptée dans la limite de temps, le jeton reste en mémoire et hors des journaux, et l'échec du nettoyage empêche de déclarer la réussite. Les versions certifiées antérieures utilisent directement `kimi -p`.
+
 Le plugin ne crée aucun commit. Examinez les modifications avant de les conserver ou de les appliquer.
 
 N'utilisez les tâches pouvant écrire des fichiers que dans des dépôts auxquels vous faites confiance. Rescue, pursue et swarm avec `--write` peuvent lancer des tests et des commandes similaires. Ces commandes exécutent du code du dépôt. Le hook limite l'utilisation des outils ; ce n'est pas un bac à sable du système d'exploitation.
@@ -656,7 +662,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code または Codex
 - Node.js 22.5 以降
-- Kimi Code CLI 2.3.1（2.3.0 も認証済み。プラグイン 2.4.0 の推奨バージョン）
+- Kimi Code CLI 2.3.2（認証済み。2.3.1 と 2.3.0 も認証済み）
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 
@@ -818,6 +824,8 @@ codex plugin add kimi@kimi-marketplace
 ## 安全上の制限を理解する
 
 Ask、review、challenge、読み取り専用 swarm のツールルールでは、ファイルへの書き込みとシェルコマンドを禁止しています。Rescue と pursue はワークスペース内のファイルを変更できます。`--write` を指定した swarm は、一時的な Git ワークツリーで作業します。最新のコミットから開始するため、未コミットの変更は含まれません。パッチを返すだけで、プロジェクトには自動適用しません。
+
+CLI 2.3.2 の swarm では、セッションを有効化するため、そして終了後に swarm モードを無効化するため、認証付きのローカルループバック `kimi web` プロセスをそれぞれ短時間だけ起動します。タスク自体は従来どおり 1 つの `kimi -p -r` プロセスが実行します。有効化も制限時間に含まれ、トークンはメモリー内にのみ保持されてログには出ません。後処理を確認できない場合、タスクは成功と報告されません。以前の認証済みバージョンでは、引き続き `kimi -p` を直接使います。
 
 プラグインは変更をコミットしません。変更を残す、または適用する前に内容を確認してください。
 

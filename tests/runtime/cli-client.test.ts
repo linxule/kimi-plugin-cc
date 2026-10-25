@@ -557,7 +557,7 @@ describe("runCliPrompt", () => {
         swarmMaxConcurrency: 3,
         logPath,
       });
-      // Ask the child to echo the env var so we prove buildEnv set it on the
+      // Ask the child to echo the env var so we prove buildKimiCliEnvironment set it on the
       // spawn, not merely that the option threaded into the diagnostics log.
       opts.env.KIMI_MOCK_ECHO_ENV = "KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY";
       const result = await runCliPrompt(opts);

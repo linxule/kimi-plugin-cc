@@ -1,15 +1,51 @@
-# Native v2 status — 2026-10-24
+# Native v2 status — 2026-10-25
 
-Plugin 2.4.0 preserves exact CLI 2.3.1 certification for all eight operations under the
-unchanged no-plan construction, alongside 0.42.0, 0.43.0, 0.43.1, 2.0.0–2.0.2,
-2.1.0, 2.1.1, 2.2.0 and 2.3.0, and adds the shared MCP transport. The 2.3.1 tag scan,
-plan-ON/OFF controls and full candidate smoke passed (15/15, no skips). Workspace trust
-and session locking changed without adding a plan-arming vector or a print-mode takeover path.
-See [evidence and limits](upstream-2.3.1-certification.md).
+Plugin 2.4.1 certifies exact CLI 2.3.2
+(`b8dd3a134060c6e80ba4a1659335cd63b68483f2`) for all eight operations under the
+unchanged no-plan construction, alongside certified 0.42.0, 0.43.0, 0.43.1,
+2.0.0–2.0.2, 2.1.0, 2.1.1, 2.2.0, 2.3.0 and 2.3.1. The exact-tag scan passed 15
+tests with 92 assertions, the non-vacuous plan controls passed, the hardened
+candidate matrix passed 15/15 with 115 assertions, and the final production
+matrix passed 19/19 with 125 assertions in 296.67 seconds. Independent review,
+repository validation and package validation also passed; release CI and
+publication remain pending.
 
-Plugin and CLI versions are independent even when deliberately aligned:
-plugin 2.3.1 added CLI 2.3.1 support; plugin 2.4.0 retains that certification.
-Publication does not update installed hosts or the operator's CLI pin.
+Upstream 2.3.2 removes model-started `AgentSwarm` from fresh print sessions. For
+versions that require activation (currently exact 2.3.2), the plugin runs the
+planned CLI through short-lived, authenticated loopback
+`web --no-open --host 127.0.0.1 --port 0 --log-level error` lifecycles before and
+after one ordinary `kimi -p -r` prompt runner. Activation creates and verifies a
+session with the selected model, auto permission and `swarm_mode:true`; cleanup
+disables it and verifies `swarm_mode.exit`. The ready token remains in memory and
+out of logs, activation is inside the finite job budget, the returned print
+session must match the `preactivated` session id, and cleanup failure prevents
+success. Older certified versions continue to use direct `kimi -p`; this is not a
+full RPC transport or a model-self-activation workaround. MCP uses the same
+`runSwarm` implementation.
+
+The initial 15/15 candidate smoke with 84 assertions was rejected as vacuous for
+swarm: a direct OFF control produced zero child journals. The hardened matrix
+instead requires distinct child journals, assigned Write attempts and results,
+and child-authored patches. Targeted OFF/ON controls prove the activation path.
+Final lifecycle and process tests passed 54/54 with 275 assertions, engine and
+setup tests 97/97 with 1,305 assertions, focused runtime tests 142/142, recovery
+tests 41/41, and the compiled survivor lifecycle passed with two inactive
+descendants. The final production-mode run passed 19/19 with 125 assertions in
+296.67 seconds. The final full `bun run check` passed 1,264 tests with zero
+failures and 16,046 assertions across 78 files. Package validation passed 224
+files. Independent review is complete: Claude reports no blockers and Codex
+returned RESOLVED. Release CI, tagging and npm publication remain pending;
+certification does not update installed hosts.
+
+Plugin and CLI versions advance independently. Plugin 2.4.1 certifies exact CLI
+2.3.2; their nearby numbers do not imply version alignment. Publication does not
+update installed hosts or the operator's CLI pin.
+
+> **2.3.1 (certified 2026-10-23, plugin 2.3.1; retained by 2.4.0):** the exact
+> tag scan, plan-ON/OFF controls and full candidate smoke passed (15/15, no
+> skips). Plugin 2.4.0 also added the shared MCP transport. Workspace trust and
+> session locking changed without adding a plan-arming vector or a print-mode
+> takeover path. See [evidence and limits](upstream-2.3.1-certification.md).
 
 > **2.3.0 (certified 2026-10-22, plugin 2.2.2):** the reload path rereads trusted
 > operator journals; the earlier monitor's fix-first conclusion was corrected,

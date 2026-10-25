@@ -1,7 +1,7 @@
 {
   "name": "kimi",
   "description": "Kimi for Claude Code: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP tasks through the local Kimi Code CLI, with PreToolUse safety hooks.",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "homepage": "https://github.com/linxule/kimi-plugin-cc",
   "repository": "https://github.com/linxule/kimi-plugin-cc",
   "license": "Apache-2.0",

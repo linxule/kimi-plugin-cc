@@ -144,7 +144,11 @@ export async function captureTimeoutPartialOutput(
   if (!(timeout instanceof ResponseTimeoutError) || !timeout.partialResult) return undefined;
   const result = timeout.partialResult;
   let sessionId = result.sessionId;
-  let source: JobRecord["kimi_session_id_source"] = sessionId ? "announced" : null;
+  let source: JobRecord["kimi_session_id_source"] = sessionId
+    ? sessionId === job.kimi_session_id
+      ? job.kimi_session_id_source
+      : "announced"
+    : null;
   const details = classified instanceof RuntimeError ? classified.details : timeout.details;
   details.kimi_session_id_source = job.kimi_session_id_source;
   // The persisted plan is plugin-owned. Recovery never runs on cancellation,

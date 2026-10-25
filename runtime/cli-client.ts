@@ -243,7 +243,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   }
 
   const args = buildArgs(opts);
-  const env = buildEnv(opts);
+  const env = buildKimiCliEnvironment(opts);
 
   if (opts.logPath !== undefined) {
     await mkdir(path.dirname(opts.logPath), { recursive: true }).catch(() => {
@@ -1092,7 +1092,12 @@ function buildArgs(opts: CliClientOptions): string[] {
   return args;
 }
 
-function buildEnv(opts: CliClientOptions): NodeJS.ProcessEnv {
+export type CliClientEnvironmentOptions = Pick<
+  CliClientOptions,
+  "cwd" | "env" | "executionPlan" | "thinkingEffort" | "commandLabel" | "swarmMaxConcurrency" | "trustedWorkspaceRoot"
+>;
+
+export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...opts.env };
   if (opts.thinkingEffort !== undefined) env.KIMI_MODEL_THINKING_EFFORT = opts.thinkingEffort;
   // Ambient workspace trust starts project MCP stdio servers outside PreToolUse.

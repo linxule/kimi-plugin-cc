@@ -2,12 +2,12 @@
 
 How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
 
-Use this routine for every new exact native-v2 version, including patches. The 2.3.1 certification is the current worked example. Earlier audits remain useful historical evidence, but their legacy-v1 minor-version rules do not apply to native v2.
+Use this routine for every new exact native-v2 version, including patches. The 2.3.2 certification is the current worked example. Earlier audits remain useful historical evidence, but their legacy-v1 minor-version rules do not apply to native v2.
 
-## Current checkout certification boundary (2026-10-23)
+## Current checkout certification boundary (2026-10-25)
 
 The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.42.0`,
-`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0` and `2.3.1`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
+`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1` and `2.3.2`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
 `ffa94fae854dedf594919acbea280d98cbe8e14e`, `75ac010bcb2050338444455de8328492d152c919`,
 `1b89e4b039f052d10f258464413b2047acca12ba`, `caf7d4e2fef06967280b325da06e44a4b0516eba`,
 `9d07f634be94ebeb1deba2f55d247807cf729315`,
@@ -15,18 +15,24 @@ The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.4
 `f67e6398fb3210ad8ace970e2dfd5bcc984ed61f`,
 `472192c34c1efad89a369870eff0da0b708ce9bb`,
 `b5e28fd6beac752a2cdcc0ff2f5fdf40e6494fbb`,
-`684bae9ea6a437f3bae98bba1dcb797a917d500b`)
-for all eight operations, and legacy-v1 through 0.41.x for an explicitly pinned binary.
-The most recent worked example is the 2026-10-23 exact 2.3.1 certification
-([evidence](upstream-2.3.1-certification.md)). Plugin 2.4.0 preserves that certification through CLI 2.3.1.
+`684bae9ea6a437f3bae98bba1dcb797a917d500b` and
+`b8dd3a134060c6e80ba4a1659335cd63b68483f2`)
+for all eight operations. Legacy-v1 remains supported through 0.41.x for an explicitly pinned binary.
+The most recent worked example is the 2026-10-25 exact 2.3.2 certification; its
+local working record is `.claude/kimi-code-research/reports/2026-10-25-2.3.2-synthesis.md`.
+Plugin 2.4.1's final production smoke passed 19/19 with 125 assertions in 296.67
+seconds. Independent review is complete (Claude: no blockers; Codex: RESOLVED).
+Final repository validation passed 1,264 tests with zero failures and 16,046
+assertions across 78 files, and package validation passed 224 files. Release CI
+and publication remain pending.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 
 The certification basis is the **no-plan construction** (see
 [`native-v2-certification-provenance.md` §2](native-v2-certification-provenance.md#2-native-v2-entry-gate)),
 not an upstream ordering guarantee — plan still registers before external
-hooks at every certified version through 2.3.1 (confirmed in `dist/main.mjs` at 0.42.0 and by the
-plan-ON live control on every certified binary). Certification is per EXACT
+hooks at every reviewed version through 2.3.2 (confirmed in `dist/main.mjs` at 0.42.0 and by the
+plan-ON live control on every audited binary). Certification is per EXACT
 version and per operation; a patch release is NOT certified until the three
 gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
 
@@ -151,13 +157,14 @@ These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our
 | Auto-approve policy vs. hook | `agent/permissionGate/permissionGateService.ts` (→ `AutoModeApprovePermissionPolicyService`) | the auto-mode approval uses non-terminal `pass()`, never `allow()`, so it cannot pre-empt the external-hooks listener that runs after it | implicit — the entire safety model assumes a hook veto beats auto-approve; the tag scan's allow-count invariant covers it |
 | Plugin slash commands / command activation | `agent/pluginCommand/`, `agent/plugin/`, `app/plugin/` | activation stays RPC/host-initiated and absent from `-p`; `-p` intercepts exactly one prefix, `/goal` (`apps/kimi-code/src/cli/goal-prompt.ts:43`); a plugin command must never become a model-reachable tool or a permission bypass | read-only commands hard-prefix an instruction line so their prompt never starts with `/goal`; `runtime/commands/pursue.ts` is the only `/goal` producer |
 | Tool input schemas the allowlist reads | `agent/tools/os/write/writeTool.ts`, `agent/tools/edit/editTool.ts` (`path`; Write also `mode`), `agent/tools/os/bash/bashTool.ts` (`command`, **`cwd`**, `timeout`, `run_in_background`; `effectiveCwd` asserts NO workspace membership, `:191`) | field names, and the fact that `Bash.cwd` is honoured without an upstream membership check while the hook payload's top-level `cwd` is the process cwd | `runtime/rescue-approval.ts` (`checkApprovedPath`, `checkApprovedDirectory` confines `tool_input.cwd` to the trusted root before the command string); tag scan asserts the field names |
-| AgentSwarm / subagents | `features/swarm/tools/agent-swarm/agentSwarmTool.ts` (`'AgentSwarm'`, strict schema), `features/swarm/agent/swarmService.ts`; `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` (unset = no cap) | children run in-process in a child DI scope sharing the session workspace with their OWN eager external-hooks service — every child tool call fires the hook; no deny-all path on the swarm route; `fork` gated by `subagent_fork` | `runtime/commands/swarm.ts` always exports the concurrency cap (4 read / 1 write); the `swarm`/`swarm-write` hook labels; worktree confinement via `KIMI_PLUGIN_CC_WORKSPACE_ROOT` |
+| AgentSwarm / subagents | `features/swarm/tools/agent-swarm/agentSwarmTool.ts` (`'AgentSwarm'`, strict schema), `features/swarm/agent/swarmService.ts`; `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` (unset = no cap) | children run in-process in a child DI scope sharing the session workspace with their OWN eager external-hooks service — every child tool call fires the hook; no deny-all path on the swarm route; `fork` gated by `subagent_fork`. Since 2.3.2, fresh print no longer lets the model self-activate swarm; an `AgentSwarm` call record alone is not evidence of children | `runtime/commands/swarm.ts` always exports the concurrency cap (4 read / 1 write); the `swarm`/`swarm-write` hook labels; worktree confinement via `KIMI_PLUGIN_CC_WORKSPACE_ROOT`; smoke proves distinct child journals and per-child assigned work |
+| Swarm host activation (exact versions that require it; currently 2.3.2) | Exact CLI `web` ready line and authenticated loopback `/meta`, `/config`, session create, `/profile`, `/status` and `/shutdown` routes; review their exact implementations on every new candidate | exact v2/version/auth-bypass checks, explicit or configured default model binding, `permission_mode:auto`, plan off, `swarm_mode` enter/exit status and journal evidence, bounded token/response/process handling; no model self-activation substitute and no full RPC runner | `runtime/swarm-activation.ts`; `runtime/commands/swarm.ts` runs one ordinary `kimi -p -r` per swarm job between activation and deactivation, records `preactivated`, requires the same returned session id, includes activation in the finite budget, and refuses success if cleanup fails |
 | Experimental features | `packages/agent-core-v2/src/app/flag/` + each feature's `flag.ts` (the flag registry since 2.x; `apps/kimi-code/src/utils/experimental-features.ts` is the vestigial CLI-side shim) (`[experimental]` config table, per-flag `KIMI_CODE_EXPERIMENTAL_*` env, master `KIMI_CODE_EXPERIMENTAL_FLAG`; precedence env → config → master → default) | `tower` and `subagent_fork` are v2-only features outside the certified profile; the master flag enables all of them | `inspectExperimentalSelectors` (`CLI_V2_EXPERIMENTAL_UNSAFE`) + `assertNoUnsafeExperimentalSelector` (`CLI_V2_HOOK_ORDER_UNSAFE`) refuse before spawn |
 | Stream-json output | `apps/kimi-code/src/cli/prompt-render.ts` (`system.version` FIRST line, `session.resume_hint`, `turn.step.retrying`), `apps/kimi-code/src/cli/goal-prompt.ts` (`goal.summary`) | NDJSON record shapes for assistant/tool/tool_result; `role:"meta", type:"system.version"` is the provenance marker a v2 plan requires first and must equal the probed version; `session.resume_hint` carries the `session_<uuid>` token that round-trips via `-r` | `runtime/stream-json.ts` parser; `runtime/cli-client.ts` provenance gate (`CLI_ENGINE_PROVENANCE_MISMATCH`) and session pinning |
 | CLI argv | `apps/kimi-code/src/cli/options.ts` | `-p` (prompt as VALUE), `-r`/`-S`/`--session`, `--output-format stream-json`, `-m`, `--skills-dir` accepted with current semantics; `--agent`/`--agent-file`/`--add-dir` exist and are NEVER passed | `runtime/cli-client.ts::buildArgs`; `runtime/kimi-command.ts::assertPrefixArgsSafe` refuses reserved flags in the launcher prefix |
 | Session store layout | `<KIMI_CODE_HOME>/sessions/<workspaceId>/<sessionId>/agents/<agentId>/wire.jsonl` (+ `state.json`, `logs/`) | the journal the preflight scans lives exactly there; a layout change fails closed as `KIMI_SESSION_JOURNAL_UNAVAILABLE` (every v2 resume would refuse) | `scanSessionJournalsForPlan`; smoke lane 3b asserts the real layout |
 | Session state + journal shape (timeout recovery) | `packages/agent-core-v2/src/_base/utils/workdir-slug.ts` (`wd_<basename>_<hash12>`), the session `state.json` writer (`{id:"session_<uuid>", version:2, cwd, createdAt(ms), …}`, `createdAt` written at session creation before the first turn), the journal's first user record (`type:"context.append_message"`, `message:{role:"user", content:[{type:"text", text}]}` where one text item is the verbatim `-p` prompt), and `run-v2-print.ts` (`session.resume_hint` only at turn END) | `runtime/session-recovery.ts` matches on exactly these fields; the GOOD failure of a shape change is `session_recovery: none`/`digest_mismatch` on every timeout (recovery silently stops), the BAD one is a shape that still parses but binds differently — re-read the writer each audit; if upstream announces the id at session start (asked as MoonshotAI/kimi-code#4240, filed 2026-10-15), this module becomes a fallback for older certified versions and should then be removed | `recoverSessionIdFromStore`, `firstUserMessageMatches`; `tests/runtime/budget-artifacts.test.ts` recovery lane (mock journal mirrors the real record shape) |
-| Auto-update preflight | update check on the `-p` path | a background upgrade must never swap the certified binary under an execution plan | every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1` and an absolute `KIMI_CODE_HOME` (`runtime/cli-client.ts::buildEnv`) |
+| Auto-update preflight | update check on the `-p` path | a background upgrade must never swap the certified binary under an execution plan | every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1` and an absolute `KIMI_CODE_HOME` (`runtime/cli-client.ts::buildKimiCliEnvironment`) |
 | Process / exit / lifecycle | `apps/kimi-code/src/cli/v2/run-v2-print.ts` and OS-level | stdout = stream-json only; stderr = humans-only; goal exits 0/3/6; SIGTERM lands; process group enumerable | `runtime/cli-client.ts` cancellation; `runtime/background-spawn.ts` |
 
 ## The routine
@@ -308,6 +315,14 @@ The candidate version must match the binary. Candidate mode does not bypass hook
 
 For native v2, the smoke checks the first-line `system.version` marker against the probed version and exercises every operation. It covers hook denials, default-plan and experimental-selector refusals, native-v2 resume and tainted-journal refusal, `Bash.cwd` confinement, and write-swarm patch capture and cleanup. Pinned legacy binaries use the legacy lanes and must not emit the v2 provenance marker. Read the test results to confirm which lanes ran; skipped tests are not passing evidence.
 
+Every swarm smoke must prove real children, not just `AgentSwarm` calls, aggregate denials, or a patch:
+
+- Read-only lanes require distinct child journals, with each assigned Write attempt and its managed denial in that child's own journal and no probe file created.
+- Write lanes require distinct child journals containing the assigned edits and a captured patch containing those child-authored changes; a coordinator-only patch fails the proof. Out-of-root lanes likewise require real child journals and the expected rescue denials.
+- On versions requiring host activation (currently exact 2.3.2), run targeted OFF/ON controls too. Direct OFF must produce zero child journals; preactivated ON must produce the distinct children and verify deactivation. Exit 0 is not evidence of fan-out.
+
+The 2.3.2 worked example illustrates why: the initial 15/15 smoke with 84 assertions was rejected as vacuous after its OFF control produced no children. The hardened candidate matrix passed 15/15 with 115 assertions and no skips; final production-mode smoke and the other release gates remain separate requirements.
+
 If authentication fails before a tool call, record an authentication blocker. Do not infer that hook enforcement passed or failed. Obtain authorization before fetching credentials or retrying paid calls. Run the smoke unpiped, or preserve its exit status; a successful `tail` command does not mean the tests passed.
 
 ### Phase 2 — Synthesis
@@ -361,6 +376,7 @@ Documentation corrections do not need a new version or a compatibility tag. Hist
 - Do not add a certification row on source reading alone. Record the exact binary, source tag, final implementation, and live gates that passed.
 - Do not describe a skipped smoke as a pass. A cloud-prepared change remains smoke-pending until the final tree passes with authorized authentication. The manual GitHub workflow supports API-key authentication; enabling per-push calls is a separate cost decision.
 - Do not reuse an earlier green run to cover later behavior changes. Run the affected live lanes against the implementation that will ship.
+- Do not certify swarm from an `AgentSwarm` call record, aggregate denial text, a sentinel patch, or exit 0. Require distinct child journals and assigned per-child attempts/results; write lanes must also tie the captured changes to those children, and activation versions need direct-OFF/preactivated-ON controls.
 - Do not treat a zero-byte hook diff as proof of the whole construction. Inspect bootstrap, session restoration, tool execution, and child scope creation too.
 - Do not assume the hook is the first native-v2 listener. Its enforcement depends on the no-plan construction and the absence of any other chain-breaking final allow.
 - Do not skip the review of the plugin edits. Source-audit reports can contain wrong paths, stale assumptions, or claims that the live evidence does not support.

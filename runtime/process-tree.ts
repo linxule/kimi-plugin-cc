@@ -36,6 +36,8 @@ export type ProcessIdentityReader = (pid: number) => Promise<ProcessIdentity | u
 
 export interface ProcessIdentityValidation {
   identities: ProcessIdentity[];
+  /** Same PID/start token under a changed PGID: active, but not a validated signal target. */
+  groupChanged?: ProcessIdentity[];
   /** False means at least one identity could not be checked before the deadline. */
   complete: boolean;
 }
@@ -68,6 +70,18 @@ export async function collectDescendantIdentities(rootPid: number): Promise<Proc
     throw new Error(`process snapshot exceeded ${PROCESS_SNAPSHOT_TIMEOUT_MS}ms`);
   }
   return snapshot;
+}
+
+/** Return current members of the selected process groups, or undefined when unreadable. */
+export async function collectProcessGroupsIdentities(
+  processGroupIds: readonly number[],
+): Promise<ProcessIdentity[] | undefined> {
+  if (process.platform === "win32") return undefined;
+  const groups = new Set(processGroupIds.filter((id) => Number.isInteger(id) && id > 0));
+  if (groups.size === 0) return [];
+  const rows = await raceValueWithTimeout(collectProcessSnapshotRows(), PROCESS_SNAPSHOT_TIMEOUT_MS);
+  if (rows === PROBE_TIMEOUT || rows === undefined) return undefined;
+  return rows.filter((row) => groups.has(row.processGroupId)).map(toProcessIdentity);
 }
 
 /**
@@ -114,18 +128,27 @@ export async function revalidateProcessIdentities(
   if (batch === PROBE_TIMEOUT) return { identities: [], complete: false };
 
   const identities: ProcessIdentity[] = [];
+  const groupChanged: ProcessIdentity[] = [];
   for (const expectedIdentity of expected) {
     const current = batch.identities.get(expectedIdentity.pid);
     if (
-      current !== undefined &&
-      current.startToken === expectedIdentity.startToken &&
-      current.processGroupId === expectedIdentity.processGroupId &&
-      !isQuiescentState(current.state)
+      current === undefined ||
+      current.startToken !== expectedIdentity.startToken ||
+      isQuiescentState(current.state)
     ) {
+      continue;
+    }
+    if (current.processGroupId !== expectedIdentity.processGroupId) {
+      groupChanged.push(current);
+    } else {
       identities.push(current);
     }
   }
-  return { identities, complete: batch.complete };
+  return {
+    identities,
+    complete: batch.complete,
+    ...(groupChanged.length > 0 ? { groupChanged } : {}),
+  };
 }
 
 /** Return the current identity only when pid, start token, and PGID still match. */
@@ -167,7 +190,7 @@ export async function waitForProcessTreeExit(
         identityReader: options.identityReader,
         timeoutMs: probeTimeoutMs,
       });
-      active = !validation.complete || validation.identities.length > 0;
+      active = !validation.complete || validation.identities.length > 0 || (validation.groupChanged?.length ?? 0) > 0;
     }
     if (!active) return true;
 

@@ -2,7 +2,8 @@ import { allocateJobId } from "../job-id.js";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
-import { runCliPromptWithBudget } from "../cli-client.js";
+import { ResponseTimeoutError, runCliPromptWithBudget } from "../cli-client.js";
+import { deactivateSwarmSession, preactivateSwarmSession, requiresSwarmPreactivation, } from "../swarm-activation.js";
 import { executionPlanFromPersisted, observedExecutionFields, persistedExecutionPlanFields, prepareKimiExecutionPlan, } from "../kimi-engine.js";
 import { RuntimeError } from "../errors.js";
 import { captureWorktreePatch, createEphemeralWorktree, hasBornHead, isWorkingTreeDirty, pruneWorktrees, removeWorktree, resolveRepoIdentity, } from "../git.js";
@@ -24,7 +25,8 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 // only the wall-clock hard bound. Read/write modes reuse review/rescue lineage,
 // and the mandatory PreToolUse hook enforces read-only policy or trusted-worktree
 // write confinement on the coordinator and every subagent. Write mode requires
-// kimi-code 0.18.0+.
+// kimi-code 0.18.0+. Exact 2.3.2 additionally activates a same-job session through
+// a bounded loopback web lifecycle, then resumes it through the normal print path.
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
 const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
@@ -87,7 +89,7 @@ export function resolveSwarmWriteMaxConcurrency(requested) {
  * subagent, so slimming this text does not move the safety boundary. The optional
  * `cap` is a SOFT subagent-count hint (the hook cannot enforce a count). The HARD
  * concurrency ceiling is separate: --max-concurrency →
- * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (see executeSwarmJob / cli-client buildEnv).
+ * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (see executeSwarmJob / cli-client buildKimiCliEnvironment).
  * The --budget wall-clock ceiling is the always-on hard bound on the whole run.
  */
 export function buildSwarmPrompt(objective, cap) {
@@ -343,7 +345,7 @@ async function runWriteSwarm(parsed, objective, context) {
         }
         finally {
             if (preserveWorktree) {
-                context.stderr.write(`[kimi-plugin-cc] swarm-write patch capture failed; worktree retained at ${worktreePath}.\n`);
+                context.stderr.write(`[kimi-plugin-cc] swarm-write patch capture or session cleanup failed; worktree retained at ${worktreePath}.\n`);
             }
             else {
                 await removeWorktree(repoIdentity.repoRoot, worktreePath);
@@ -465,44 +467,163 @@ writeMode) {
         }
     }
     const handlers = createCliCancellationHandlers();
+    const budgetDeadline = Date.now() + budgetMs;
+    let activationOptions;
+    let preactivated;
+    let deactivationRequired = false;
+    let cleanupAttempted = false;
+    let cleanupFailure;
+    let finalText;
+    const commandLabel = writeMode ? "swarm-write" : "swarm";
+    const recoveryCleanupTimeoutMs = 2_000;
+    const cleanupSignal = (timeoutMs) => AbortSignal.any([
+        handlers.signal,
+        AbortSignal.timeout(Math.max(1, timeoutMs)),
+    ]);
+    const attemptDeactivation = async (identity, fallbackStage, timeoutMs = Math.max(1, budgetDeadline - Date.now())) => {
+        cleanupAttempted = true;
+        try {
+            await deactivateSwarmSession({
+                ...activationOptions,
+                ...identity,
+                signal: cleanupSignal(timeoutMs),
+            });
+            deactivationRequired = false;
+            return undefined;
+        }
+        catch (error) {
+            return error instanceof RuntimeError
+                ? error
+                : new RuntimeError("SWARM_SESSION_CLEANUP_FAILED", "Swarm session cleanup failed without a safe diagnostic payload.", fallbackStage);
+        }
+    };
     try {
         const executionPlan = executionPlanFromPersisted(job);
+        activationOptions = {
+            cwd: writeMode?.spawnCwd ?? job.cwd,
+            env: context.env,
+            command: executionPlan.command,
+            prefixArgs: executionPlan.prefixArgs,
+            executionPlan,
+            commandLabel,
+            model: job.model ?? undefined,
+            thinkingEffort: job.thinking_effort ?? undefined,
+            swarmMaxConcurrency: maxConcurrency,
+            trustedWorkspaceRoot: writeMode?.workspaceRoot,
+            expectedVersion: executionPlan.kimiVersion ?? undefined,
+        };
+        if (requiresSwarmPreactivation(executionPlan.kimiVersion)) {
+            store.updateRunningJob(job.job_id, { phase: "turn-running" });
+            const activationController = new AbortController();
+            const onParentAbort = () => activationController.abort();
+            let activationTimedOut = false;
+            handlers.signal.addEventListener("abort", onParentAbort, { once: true });
+            if (handlers.signal.aborted)
+                onParentAbort();
+            const activationTimer = setTimeout(() => {
+                activationTimedOut = true;
+                activationController.abort();
+            }, Math.max(1, budgetDeadline - Date.now()));
+            activationTimer.unref();
+            try {
+                preactivated = await preactivateSwarmSession({
+                    ...activationOptions,
+                    signal: activationController.signal,
+                });
+                deactivationRequired = true;
+                store.updateRunningJob(job.job_id, {
+                    kimi_session_id: preactivated.sessionId,
+                    kimi_session_id_source: "preactivated",
+                });
+            }
+            catch (error) {
+                const activationDidTimeOut = activationTimedOut;
+                clearTimeout(activationTimer);
+                handlers.signal.removeEventListener("abort", onParentAbort);
+                const details = error instanceof RuntimeError ? error.details : {};
+                const sessionId = typeof details.session_id === "string" ? details.session_id : undefined;
+                const workspaceId = typeof details.workspace_id === "string" ? details.workspace_id : undefined;
+                const hasSessionIdentity = sessionId !== undefined && workspaceId !== undefined;
+                if (error instanceof RuntimeError &&
+                    error.code === "SWARM_SESSION_CLEANUP_FAILED" &&
+                    details.process_cleanup_unverified === true) {
+                    cleanupFailure = error;
+                }
+                if (hasSessionIdentity) {
+                    store.updateRunningJob(job.job_id, {
+                        kimi_session_id: sessionId,
+                        kimi_session_id_source: "preactivated",
+                    });
+                }
+                if (hasSessionIdentity && !handlers.cancelling) {
+                    const sessionCleanupFailure = await attemptDeactivation({ sessionId, workspaceId }, "swarm.activation-cleanup", recoveryCleanupTimeoutMs);
+                    if (sessionCleanupFailure)
+                        cleanupFailure = sessionCleanupFailure;
+                }
+                else if (hasSessionIdentity && cleanupFailure === undefined) {
+                    cleanupFailure = new RuntimeError("SWARM_SESSION_CLEANUP_FAILED", "Swarm session cleanup was not completed after activation was cancelled.", "swarm.activation-cleanup", { details: { cancelled: true, cleanup_unverified: true } });
+                }
+                if (activationDidTimeOut && !handlers.cancelling) {
+                    throw new ResponseTimeoutError(budgetMs, "swarm.activation", commandLabel, undefined, error);
+                }
+                throw error;
+            }
+            finally {
+                clearTimeout(activationTimer);
+                handlers.signal.removeEventListener("abort", onParentAbort);
+            }
+        }
+        const promptBudgetMs = budgetDeadline - Date.now();
+        if (promptBudgetMs <= 0)
+            throw new ResponseTimeoutError(budgetMs, "swarm.prompt", commandLabel);
         store.updateRunningJob(job.job_id, { phase: "turn-running" });
         const result = await runCliPromptWithBudget({
-            // Read mode spawns in the user's cwd; WRITE mode spawns in the throwaway
-            // worktree so coder subagents edit there (job.cwd stays the user's real
-            // cwd for lineage). This is the load-bearing isolation seam.
-            cwd: writeMode?.spawnCwd ?? job.cwd,
+            cwd: activationOptions.cwd,
             env: context.env,
             command: executionPlan.command,
             prefixArgs: [...executionPlan.prefixArgs],
             executionPlan,
             prompt,
-            // "swarm" → read-only-plus-AgentSwarm allowlist; "swarm-write" → the same
-            // PLUS rescue-grade write confinement to the trusted worktree root. The
-            // label drives the hook for the coordinator AND every spawned subagent.
-            commandLabel: writeMode ? "swarm-write" : "swarm",
-            // Always exported as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY. kimi-code
-            // 0.18.0+ enforces this hard peak ceiling; older read-only binaries ignore
-            // it and retain only the wall-clock hard bound. Write mode requires
-            // 0.18.0+. Distinct from --cap, the soft total-count prompt hint.
+            commandLabel,
             swarmMaxConcurrency: maxConcurrency,
-            // Trusted allowlist root for the swarm-write hook (forge-proof; ignored
-            // by other labels). Only set in write mode.
             trustedWorkspaceRoot: writeMode?.workspaceRoot,
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
+            resumeSessionId: preactivated?.sessionId,
             logPath: job.stream_log_path,
             onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             signal: handlers.signal,
-        }, budgetMs, "swarm.prompt");
+        }, promptBudgetMs, "swarm.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));
+        finalText = reassembleProseFromRecords(result.records);
+        let resultError;
+        if (handlers.cancelling) {
+            resultError = new RuntimeError("SWARM_CANCELLED", "Swarm cancelled by user request.", "swarm.runtime");
+        }
+        else {
+            try {
+                assertCliResultSuccess(result, "swarm.runtime");
+                if (preactivated && result.sessionId !== preactivated.sessionId) {
+                    throw new RuntimeError("SWARM_SESSION_MISMATCH", "The resumed print session differs from the preactivated swarm session.", "swarm.session-provenance", { details: { expected_session_id: preactivated.sessionId, actual_session_id: result.sessionId ?? null } });
+                }
+            }
+            catch (error) {
+                resultError = error;
+            }
+        }
+        warnHookEscapes(result, "swarm", context.stderr);
+        if (preactivated) {
+            cleanupFailure = await attemptDeactivation(preactivated, "swarm.cleanup");
+        }
+        if (resultError !== undefined)
+            throw resultError;
         if (handlers.cancelling) {
             throw new RuntimeError("SWARM_CANCELLED", "Swarm cancelled by user request.", "swarm.runtime");
         }
-        assertCliResultSuccess(result, "swarm.runtime");
-        warnHookEscapes(result, "swarm", context.stderr);
-        if (result.sessionId !== undefined &&
+        if (cleanupFailure)
+            throw cleanupFailure;
+        if (!preactivated &&
+            result.sessionId !== undefined &&
             result.sessionId.length > 0 &&
             result.sessionId !== job.kimi_session_id) {
             store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
@@ -517,7 +638,7 @@ writeMode) {
         });
         warnIfSessionIdMissing(result, "swarm", job.job_id, context.stderr);
         const prose = reassembleProseFromRecords(result.records);
-        let finalText = prose;
+        finalText = prose;
         if (writeMode) {
             const captured = await capturePatchArtifact(paths, job.job_id, writeMode.workspaceRoot, context.stderr, writeMode.onPatchCaptureFailure);
             if (captured === null) {
@@ -549,6 +670,21 @@ writeMode) {
         }) ?? job);
     }
     catch (error) {
+        if (preactivated && deactivationRequired && activationOptions) {
+            if (handlers.cancelling) {
+                cleanupFailure = new RuntimeError("SWARM_SESSION_CLEANUP_FAILED", "Swarm session cleanup was not completed after cancellation.", "swarm.cleanup", { details: { cancelled: true, cleanup_unverified: true } });
+            }
+            else if (!cleanupAttempted) {
+                cleanupFailure = await attemptDeactivation(preactivated, "swarm.cleanup", recoveryCleanupTimeoutMs);
+            }
+            else if (error instanceof RuntimeError && error.code === "SWARM_SESSION_CLEANUP_FAILED") {
+                cleanupFailure ??= error;
+            }
+        }
+        if (cleanupFailure) {
+            writeMode?.onPatchCaptureFailure?.();
+            context.stderr.write(`[kimi-plugin-cc] swarm session cleanup also failed: ${cleanupFailure.message}\n`);
+        }
         let captureFailed = writeMode !== undefined && error instanceof RuntimeError && error.code === "SWARM_PATCH_CAPTURE_FAILED";
         if (writeMode && !(error instanceof RuntimeError && error.code === "SWARM_PATCH_CAPTURE_FAILED")) {
             const captured = await capturePatchArtifact(paths, job.job_id, writeMode.workspaceRoot, context.stderr, writeMode.onPatchCaptureFailure);
@@ -557,34 +693,55 @@ writeMode) {
                 context.stderr.write(`[kimi-plugin-cc] swarm-write run ended early; partial patch captured at ${captured.path}.\n`);
             }
         }
-        const recoveryDetails = captureFailed && writeMode ? { worktreePath: writeMode.workspaceRoot } : {};
+        const recoveryDetails = {
+            ...(error instanceof RuntimeError && typeof error.details.exit_code === "number"
+                ? { exit_code: error.details.exit_code }
+                : {}),
+            ...((captureFailed || cleanupFailure) && writeMode ? { worktreePath: writeMode.workspaceRoot } : {}),
+            ...(cleanupFailure
+                ? {
+                    cleanup_error: {
+                        code: cleanupFailure.code,
+                        stage: cleanupFailure.stage,
+                        cancelled: handlers.cancelling,
+                        unverified: true,
+                    },
+                    ...(finalText !== undefined ? { rawOutput: finalText } : {}),
+                }
+                : {}),
+        };
         if (handlers.cancelling) {
+            const cancellationCause = classifyManagedCommandFailure(error, writeMode ? "rescue" : "review", job.job_id, {
+                preserveStage: true,
+            });
             const cancelledError = new RuntimeError("SWARM_CANCELLED", captureFailed && writeMode
                 ? `Swarm cancelled; patch capture failed and worktree retained at ${writeMode.workspaceRoot}.`
                 : "Swarm cancelled by user request.", "swarm.runtime", {
                 ...(error instanceof Error ? { cause: error } : {}),
-                details: recoveryDetails,
+                details: {
+                    ...(cancellationCause instanceof RuntimeError ? cancellationCause.details : {}),
+                    ...recoveryDetails,
+                },
             });
             return await markJobCancelled(store, paths, job, "Swarm cancelled by user request.", cancelledError, {
                 phase: "cancelled",
             });
         }
+        if (error === cleanupFailure && budgetDeadline <= Date.now() && !(error instanceof ResponseTimeoutError)) {
+            error = new ResponseTimeoutError(budgetMs, "swarm.cleanup", commandLabel, undefined, cleanupFailure);
+        }
         const classified = classifyManagedCommandFailure(error, writeMode ? "rescue" : "review", job.job_id, {
             preserveStage: true,
         });
-        if (captureFailed && writeMode) {
-            const withRecovery = classified instanceof RuntimeError
+        const withRecovery = captureFailed || cleanupFailure
+            ? classified instanceof RuntimeError
                 ? new RuntimeError(classified.code, classified.message, classified.stage, {
                     cause: classified,
                     details: { ...classified.details, ...recoveryDetails },
                 })
-                : new RuntimeError("SWARM_PATCH_CAPTURE_FAILED", classified.message, "swarm.patch-capture", {
-                    cause: classified,
-                    details: recoveryDetails,
-                });
-            return await markJobFailed(store, paths, job, withRecovery, "Swarm failed.", { phase: "failed" });
-        }
-        return await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
+                : new RuntimeError(cleanupFailure?.code ?? "SWARM_PATCH_CAPTURE_FAILED", classified.message, cleanupFailure?.stage ?? "swarm.patch-capture", { cause: classified, details: recoveryDetails })
+            : classified;
+        return await markJobFailed(store, paths, job, withRecovery, "Swarm failed.", { phase: "failed" });
     }
     finally {
         handlers.dispose();

@@ -68,7 +68,7 @@ describe("kimi execution plan", () => {
   });
 
   test("native-v2 certifies only the exact per-operation version set, under the no-plan profile", async () => {
-    expect(NATIVE_V2_CERTIFIED_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1"]);
+    expect(NATIVE_V2_CERTIFIED_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2"]);
     expect([...NATIVE_V2_CERTIFIED.keys()].sort()).toEqual(
       ["ask", "challenge", "pursue", "rescue", "review", "review_gate", "swarm", "swarm-write"],
     );
@@ -111,7 +111,7 @@ describe("kimi execution plan", () => {
         }),
       ).resolves.toMatchObject({ intendedEngine: "native-v2", kimiVersion: "0.42.0" });
 
-      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1"]) {
+      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           const majorTwo = await prepareKimiExecutionPlan({
             operationKind,
