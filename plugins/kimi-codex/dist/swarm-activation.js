@@ -93,7 +93,7 @@ export async function deactivateSwarmSession(options) {
     catch (error) {
         const primary = asSafeFailure(error, failureCode, "swarm-deactivation");
         if (web !== undefined && !(await teardownOwnedChild(web))) {
-            throw failure("SWARM_SESSION_CLEANUP_FAILED", "swarm-deactivation.process-cleanup", "Swarm deactivation failed and the Kimi web process tree did not become quiescent.", { cleanup_error: errorReference(primary) });
+            throw failure("SWARM_SESSION_CLEANUP_FAILED", "swarm-deactivation.process-cleanup", `Swarm deactivation failed and the Kimi web process tree did not become quiescent (${web.cleanupSummary ?? "summary unavailable"}).`, { cleanup_error: errorReference(primary) });
         }
         throw primary;
     }
@@ -636,13 +636,22 @@ async function teardownOwnedChild(owned) {
             isRootAlive: () => !owned.exited,
         });
         let quiescent = exited && await processGroupsQuiescent(owned, childPid);
+        let killWaitExited;
         if (!quiescent) {
             await signalCapturedTree(owned, childPid, identities, "SIGKILL");
-            const stopped = await waitForProcessTreeExit(identities, POST_KILL_QUIESCENCE_MS, {
+            killWaitExited = await waitForProcessTreeExit(identities, POST_KILL_QUIESCENCE_MS, {
                 isRootAlive: () => !owned.exited,
             });
-            quiescent = stopped && await processGroupsQuiescent(owned, childPid);
+            quiescent = killWaitExited && await processGroupsQuiescent(owned, childPid);
         }
+        owned.cleanupSummary = [
+            `root_exited=${owned.exited}`,
+            `first_wait_exited=${exited}`,
+            `kill_wait_exited=${killWaitExited ?? "not-run"}`,
+            `groups_quiescent=${quiescent}`,
+            `last_snapshot_complete=${owned.lastSnapshotComplete}`,
+            `descendants=${identities.length}`,
+        ].join(", ");
         return quiescent && owned.lastSnapshotComplete;
     }
     catch {
