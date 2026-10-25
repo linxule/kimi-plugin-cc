@@ -24,7 +24,9 @@ Plugin 2.4.1's final production smoke passed 19/19 with 125 assertions in 296.67
 seconds. Independent review is complete (Claude: no blockers; Codex: RESOLVED).
 Final repository validation passed 1,268 tests with zero failures and 16,055
 assertions across 78 files, and package validation passed 224 files. Release CI
-and publication remain pending.
+run 40236704464 and publish run 40237085945 passed; npm `latest` is 2.4.1 with
+224 files and SHA-1 `77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`, byte-identical
+to the CI artifact. Final closeout CI remains pending.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 

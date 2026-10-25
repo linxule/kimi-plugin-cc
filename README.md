@@ -105,10 +105,10 @@ Codex. Published releases are also available as
 both compiled plugin distributions. No Bun, TypeScript, or install scripts are
 needed to use the package. Kimi Code CLI and Node are still prerequisites.
 
-For an explicitly versioned local Claude Code plugin, this example pins the published 2.4.0 package; 2.4.1 is not yet published:
+For an explicitly versioned local Claude Code plugin, this example pins the published 2.4.1 package:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.4.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.4.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 

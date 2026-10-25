@@ -189,6 +189,13 @@ are recorded below only after they complete.
   hook setup/check, and unsupported-version refusal. Compiled controls passed
   normal-survivor cleanup, late-fork uncertainty, and changed-PGID uncertainty.
 - Independent final re-review is complete: Claude reports no blockers and Codex
-  independently returned RESOLVED on the changed-PGID reproduction. Release CI,
-  tagging, and registry verification remain pending. No host installation or
-  CLI pin change is implied by this record.
+  independently returned RESOLVED on the changed-PGID reproduction and the full
+  capture/refresh/teardown path. Release commit `06a0a47f2b34dffb8dd71e7ce93646212e74ed19`
+  passed [CI run 40236704464](https://github.com/linxule/kimi-plugin-cc/actions/runs/40236704464);
+  the annotated `v2.4.1` tag and [release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.1)
+  are live. [Publish run 40237085945](https://github.com/linxule/kimi-plugin-cc/actions/runs/40237085945)
+  passed. npm `latest` is 2.4.1 with 224 files and SHA-1
+  `77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`; the registry tarball is
+  byte-identical to the CI artifact. Fresh registry and CI-artifact installs
+  passed isolated setup/check for both hosts. Final closeout CI remains pending.
+  No host installation or CLI pin change is implied by this record.

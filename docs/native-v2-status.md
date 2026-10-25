@@ -34,8 +34,12 @@ descendants. The final production-mode run passed 19/19 with 125 assertions in
 296.67 seconds. The final full `bun run check` passed 1,268 tests with zero
 failures and 16,055 assertions across 78 files. Package validation passed 224
 files. Independent review is complete: Claude reports no blockers and Codex
-returned RESOLVED. Release CI, tagging and npm publication remain pending;
-certification does not update installed hosts.
+returned RESOLVED. Release commit `06a0a47f2b34dffb8dd71e7ce93646212e74ed19`
+passed CI run 40236704464; annotated `v2.4.1` and publish run 40237085945 are
+live. npm `latest` is 2.4.1 with 224 files and SHA-1
+`77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`, byte-identical to the CI artifact;
+fresh registry and artifact installs passed both host setup/checks. Final
+closeout CI remains pending; certification does not update installed hosts.
 
 Plugin and CLI versions advance independently. Plugin 2.4.1 certifies exact CLI
 2.3.2; their nearby numbers do not imply version alignment. Publication does not
