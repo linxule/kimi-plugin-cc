@@ -13,8 +13,9 @@ plugin pins were not changed.
 Status: certified for all eight operations. The exact-tag scan, plan controls,
 activation prototype, hardened candidate matrix, final production smoke, full
 repository validation, package validation, and independent reviews passed.
-Release CI and registry publication remain pending. The initial superficially
-green swarm result is explicitly rejected below.
+Release CI run 40236704464, publish run 40237085945, and closeout CI run
+40238295139 passed. The initial superficially green swarm result is explicitly
+rejected below.
 
 ## Source review
 
@@ -197,5 +198,5 @@ are recorded below only after they complete.
   passed. npm `latest` is 2.4.1 with 224 files and SHA-1
   `77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`; the registry tarball is
   byte-identical to the CI artifact. Fresh registry and CI-artifact installs
-  passed isolated setup/check for both hosts. Final closeout CI remains pending.
+  passed isolated setup/check for both hosts. Final closeout CI run 40238295139 passed.
   No host installation or CLI pin change is implied by this record.

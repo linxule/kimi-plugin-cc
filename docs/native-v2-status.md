@@ -7,8 +7,8 @@ unchanged no-plan construction, alongside certified 0.42.0, 0.43.0, 0.43.1,
 tests with 92 assertions, the non-vacuous plan controls passed, the hardened
 candidate matrix passed 15/15 with 115 assertions, and the final production
 matrix passed 19/19 with 125 assertions in 296.67 seconds. Independent review,
-repository validation and package validation also passed; release CI and
-publication remain pending.
+repository validation and package validation also passed. Release CI run
+40236704464, publish run 40237085945, and closeout CI run 40238295139 passed.
 
 Upstream 2.3.2 removes model-started `AgentSwarm` from fresh print sessions. For
 versions that require activation (currently exact 2.3.2), the plugin runs the
@@ -39,7 +39,7 @@ passed CI run 40236704464; annotated `v2.4.1` and publish run 40237085945 are
 live. npm `latest` is 2.4.1 with 224 files and SHA-1
 `77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`, byte-identical to the CI artifact;
 fresh registry and artifact installs passed both host setup/checks. Final
-closeout CI remains pending; certification does not update installed hosts.
+closeout CI run 40238295139 passed; certification does not update installed hosts.
 
 Plugin and CLI versions advance independently. Plugin 2.4.1 certifies exact CLI
 2.3.2; their nearby numbers do not imply version alignment. Publication does not
