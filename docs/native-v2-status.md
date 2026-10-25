@@ -27,12 +27,12 @@ The initial 15/15 candidate smoke with 84 assertions was rejected as vacuous for
 swarm: a direct OFF control produced zero child journals. The hardened matrix
 instead requires distinct child journals, assigned Write attempts and results,
 and child-authored patches. Targeted OFF/ON controls prove the activation path.
-Final lifecycle and process tests passed 54/54 with 275 assertions, engine and
+Final lifecycle and process tests passed 58/58 with 284 assertions, engine and
 setup tests 97/97 with 1,305 assertions, focused runtime tests 142/142, recovery
 tests 41/41, and the compiled survivor lifecycle passed with two inactive
 descendants. The final production-mode run passed 19/19 with 125 assertions in
-296.67 seconds. The final full `bun run check` passed 1,264 tests with zero
-failures and 16,046 assertions across 78 files. Package validation passed 224
+296.67 seconds. The final full `bun run check` passed 1,268 tests with zero
+failures and 16,055 assertions across 78 files. Package validation passed 224
 files. Independent review is complete: Claude reports no blockers and Codex
 returned RESOLVED. Release CI, tagging and npm publication remain pending;
 certification does not update installed hosts.

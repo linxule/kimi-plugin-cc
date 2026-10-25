@@ -8,7 +8,7 @@ const MAX_DESCENDANT_DEPTH = 8;
 const MAX_DESCENDANT_PIDS = 512;
 const PROCESS_EXIT_POLL_MS = 10;
 const PROCESS_SNAPSHOT_TIMEOUT_MS = 1_000;
-const PROCESS_IDENTITY_PROBE_TIMEOUT_MS = 250;
+const PROCESS_IDENTITY_PROBE_TIMEOUT_MS = 1_000;
 const PROBE_TIMEOUT = Symbol("process-probe-timeout");
 
 interface ProcessSnapshotRow extends ProcessIdentity {
@@ -97,15 +97,26 @@ export async function collectDescendants(rootPid: number): Promise<number[]> {
   }
 }
 
-/** Read one reusable process identity. PID alone is not stable across teardown. */
-export async function readProcessIdentity(pid: number): Promise<ProcessIdentity | undefined> {
-  if (!Number.isInteger(pid) || pid <= 0 || process.platform === "win32") return undefined;
+export interface ProcessIdentityProbe {
+  readonly identity?: ProcessIdentity;
+  readonly complete: boolean;
+}
+
+/** Distinguish a missing process from a failed or timed-out identity probe. */
+export async function probeProcessIdentity(pid: number): Promise<ProcessIdentityProbe> {
+  if (!Number.isInteger(pid) || pid <= 0 || process.platform === "win32") return { complete: true };
 
   const read = process.platform === "linux"
     ? readProcessIdentityBatchFromProc([pid])
     : readProcessIdentityBatchWithPs([pid]);
   const batch = await raceValueWithTimeout(read, PROCESS_IDENTITY_PROBE_TIMEOUT_MS);
-  return batch === PROBE_TIMEOUT ? undefined : batch.identities.get(pid);
+  if (batch === PROBE_TIMEOUT) return { complete: false };
+  return { identity: batch.identities.get(pid), complete: batch.complete };
+}
+
+/** Read one reusable process identity. PID alone is not stable across teardown. */
+export async function readProcessIdentity(pid: number): Promise<ProcessIdentity | undefined> {
+  return (await probeProcessIdentity(pid)).identity;
 }
 
 /**
@@ -202,14 +213,14 @@ export async function waitForProcessTreeExit(
 
 async function collectVerifiedDescendantIdentities(rootPid: number): Promise<ProcessIdentity[]> {
   const initialRows = await collectProcessSnapshotRows();
-  if (initialRows === undefined) return [];
+  if (initialRows === undefined) throw new Error("process snapshot unavailable");
 
   const candidateRows = descendantRowsFromSnapshot(rootPid, initialRows);
   const initialRoot = initialRows.find((row) => row.pid === rootPid);
   if (initialRoot === undefined || candidateRows.length === 0) return [];
 
-  // A second, targeted snapshot closes the cross-row /proc race: every child
-  // identity and every numeric parent edge must still match before acceptance.
+  // A second, targeted snapshot closes the cross-row /proc race: each child
+  // must retain its PID and start token. Reparenting and PGID changes are not exit.
   const expectedRows = [initialRoot, ...candidateRows];
   const expectedByPid = new Map(expectedRows.map((row) => [row.pid, row]));
   const verificationRows = await readCurrentSnapshotRows(expectedRows);
@@ -218,13 +229,11 @@ async function collectVerifiedDescendantIdentities(rootPid: number): Promise<Pro
     return (
       expected !== undefined &&
       current.startToken === expected.startToken &&
-      current.processGroupId === expected.processGroupId &&
-      current.parentPid === expected.parentPid &&
       !isQuiescentState(current.state)
     );
   });
 
-  return descendantRowsFromSnapshot(rootPid, stableRows).map(toProcessIdentity);
+  return stableRows.map(toProcessIdentity);
 }
 
 function descendantRowsFromSnapshot(
@@ -280,6 +289,9 @@ async function readCurrentSnapshotRows(
     Promise.all(procPids.map((pid) => readProcRow(pid))),
     collectProcessSnapshotRowsFromPs(psPids),
   ]);
+  if (procOutcomes.some((outcome) => outcome.status === "error") || (psPids.length > 0 && psRows === undefined)) {
+    throw new Error("process identity verification failed");
+  }
   return [
     ...procOutcomes.flatMap((outcome) => outcome.status === "found" ? [outcome.row] : []),
     ...(psRows ?? []),
@@ -308,6 +320,7 @@ async function collectProcessSnapshotRowsFromProc(): Promise<ProcessSnapshotRow[
       .filter((entry) => /^\d+$/.test(entry))
       .map((entry) => readProcRow(Number.parseInt(entry, 10))),
   );
+  if (outcomes.some((outcome) => outcome.status === "error")) return undefined;
   return outcomes.flatMap((outcome) => outcome.status === "found" ? [outcome.row] : []);
 }
 

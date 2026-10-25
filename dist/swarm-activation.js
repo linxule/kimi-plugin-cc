@@ -8,7 +8,7 @@ import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
-import { collectDescendantIdentities, collectProcessGroupsIdentities, readProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
+import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
 const PREACTIVATION_VERSION = "2.3.2";
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
@@ -18,7 +18,7 @@ const JOURNAL_POLL_MS = 50;
 const READY_LINE_MAX_CHARS = 65_536;
 const REST_RESPONSE_MAX_BYTES = 1024 * 1024;
 const JOURNAL_MAX_BYTES = 64 * 1024 * 1024;
-const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 1_000;
+const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 2_000;
 const DESCENDANT_TRACK_INTERVAL_MS = 50;
 const IDENTITY_REVALIDATION_TIMEOUT_MS = 250;
 const ESCALATION_MS = 1_500;
@@ -186,6 +186,7 @@ async function startWebChild(options, env, failureCode) {
         descendants: [],
         trackingStopped: false,
         lastSnapshotComplete: false,
+        snapshotIncomplete: false,
         get exited() {
             return exited;
         },
@@ -582,6 +583,17 @@ async function refreshOwnedDescendants(owned) {
     }
     owned.refreshPromise = (async () => {
         const snapshot = await captureDescendantIdentities(childPid);
+        const previousRoot = owned.rootIdentity;
+        if (snapshot.root !== undefined) {
+            if (previousRoot === undefined) {
+                owned.rootIdentity = snapshot.root;
+            }
+            else if (previousRoot.startToken !== snapshot.root.startToken) {
+                owned.snapshotIncomplete = true;
+                owned.lastSnapshotComplete = false;
+                return;
+            }
+        }
         const seen = new Set(owned.descendants.map(identityKey));
         for (const identity of snapshot.identities) {
             const key = identityKey(identity);
@@ -590,10 +602,14 @@ async function refreshOwnedDescendants(owned) {
             seen.add(key);
             owned.descendants.push(identity);
         }
-        if (snapshot.complete)
-            owned.lastSnapshotComplete = true;
-        else if (!owned.exited)
+        if (snapshot.complete && (snapshot.root !== undefined || previousRoot !== undefined)) {
+            if (!owned.snapshotIncomplete)
+                owned.lastSnapshotComplete = true;
+        }
+        else {
+            owned.snapshotIncomplete = true;
             owned.lastSnapshotComplete = false;
+        }
     })().finally(() => {
         owned.refreshPromise = undefined;
     });
@@ -680,7 +696,7 @@ async function captureDescendantIdentities(childPid) {
         const snapshot = await Promise.race([
             Promise.all([
                 collectDescendantIdentities(childPid),
-                readProcessIdentity(childPid),
+                probeProcessIdentity(childPid),
             ]),
             new Promise((resolve) => {
                 timer = setTimeout(() => resolve(null), DESCENDANT_SNAPSHOT_TIMEOUT_MS);
@@ -688,7 +704,7 @@ async function captureDescendantIdentities(childPid) {
         ]);
         if (snapshot === null)
             return { identities: [], complete: false };
-        const [collected, root] = snapshot;
+        const [collected, rootProbe] = snapshot;
         const identities = [];
         const seen = new Set();
         for (const identity of collected) {
@@ -704,10 +720,7 @@ async function captureDescendantIdentities(childPid) {
                 identities.push({ ...identity });
             }
         }
-        const rootState = root?.state.trim().toUpperCase();
-        const complete = root !== undefined && rootState !== undefined &&
-            !rootState.startsWith("Z") && !rootState.startsWith("X");
-        return { identities, complete };
+        return { identities, complete: rootProbe.complete, root: rootProbe.identity };
     }
     catch {
         return { identities: [], complete: false };

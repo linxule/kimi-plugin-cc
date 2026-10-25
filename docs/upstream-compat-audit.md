@@ -22,7 +22,7 @@ The most recent worked example is the 2026-10-25 exact 2.3.2 certification; its
 local working record is `.claude/kimi-code-research/reports/2026-10-25-2.3.2-synthesis.md`.
 Plugin 2.4.1's final production smoke passed 19/19 with 125 assertions in 296.67
 seconds. Independent review is complete (Claude: no blockers; Codex: RESOLVED).
-Final repository validation passed 1,264 tests with zero failures and 16,046
+Final repository validation passed 1,268 tests with zero failures and 16,055
 assertions across 78 files, and package validation passed 224 files. Release CI
 and publication remain pending.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in

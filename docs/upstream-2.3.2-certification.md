@@ -158,7 +158,11 @@ were addressed and independently verified before the final live gate:
   proves unknown survivors produce unverified cleanup rather than false quiescence.
   A same-PID/start-token process that changes PGID also remains active and is not
   a validated signal target; its teardown reproduction returns unverified with
-  zero signals.
+  zero signals. Root loss requires a previously observed matching identity;
+  first-missing roots and actual probe errors/timeouts remain unverified. An
+  unsafe root-exit override was rejected after review reproduced an uncaptured
+  detached descendant in another PGID. Reparenting and PGID moves preserve the current verified identity for
+  revalidation rather than dropping it as an empty snapshot.
 
 A test-only prohibition on all coordinator Bash was corrected after a live
 run showed harmless `wc`/`od` verification. The substantive requirement remains
@@ -168,17 +172,18 @@ are recorded below only after they complete.
 
 ## Final production validation and publication
 
-- Final lifecycle and process regressions: **54 pass, 0 fail, 275 assertions**,
-  including real late-fork and changed-PGID evidence, timeout-cleanup success
-  and failure, cancellation during print/recovery, primary-error preservation,
-  post-mutation identity retention, and process-only uncertainty.
+- Final lifecycle and process regressions: **58 pass, 0 fail, 284 assertions**,
+  including real late-fork and changed-PGID evidence, missing-root probes,
+  timeout-cleanup success and failure, cancellation during print/recovery,
+  primary-error preservation, post-mutation identity retention, and process/group
+  uncertainty.
 - Final production-mode smoke: **19 pass, 0 fail, 125 assertions in 296.67
   seconds**, including the 15 live lanes and four offline evidence fixtures,
   with no skipped live lanes. Pursue paused at its 120-second budget without
   writes; write-swarm captured a 278-byte patch, left the user tree/HEAD clean,
   and removed its worktree. Every swarm lane used per-call child evidence.
-- Final full `bun run check`: **1,264 pass, 28 opt-in skips, 0 fail, 16,046
-  assertions across 78 files** in 274.35 seconds. Frozen dependencies and
+- Final full `bun run check`: **1,268 pass, 28 opt-in skips, 0 fail, 16,055
+  assertions across 78 files** in 274.88 seconds. Frozen dependencies and
   `bun audit` passed with no vulnerabilities.
 - Package validation: **224 files**, both compiled distributions, isolated
   hook setup/check, and unsupported-version refusal. Compiled controls passed
