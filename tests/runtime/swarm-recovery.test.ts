@@ -6,7 +6,7 @@ import path from "node:path";
 import { JobStore } from "../../runtime/job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import { probeProcessIdentity } from "../../runtime/process-tree.js";
-import { recoverLaunch, type RecoveryLaunch } from "../../runtime/swarm-recovery.js";
+import { recoverLaunch, validateRecoveryGroupMembers, type RecoveryLaunch } from "../../runtime/swarm-recovery.js";
 import { removeWorktree, resolveRepoIdentity } from "../../runtime/git.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -162,6 +162,24 @@ describe("durable swarm recovery", () => {
       store.close(); await cleanupTestPath(repo); await cleanupTestPath(root);
     }
   }, 20_000);
+
+  test("group recovery proves both Linux proc/ps identity representations", async () => {
+    const proc = { pid: 42, processGroupId: 42, startToken: "proc:123", state: "S" };
+    const ps = { ...proc, startToken: "ps:Mon Oct 26 10:00:00 2026" };
+    let proofs = 0;
+    const validate = async (ids: readonly typeof proc[]) => {
+      proofs += 1;
+      return { identities: [...ids], complete: true };
+    };
+    expect(await validateRecoveryGroupMembers([proc], [ps], validate)).toEqual([proc]);
+    expect(proofs).toBe(3);
+    await expect(validateRecoveryGroupMembers([proc], [ps], async (ids) => ({
+      identities: ids[0]?.startToken === proc.startToken ? [] : [...ids], complete: true,
+    }))).rejects.toMatchObject({ code: "SWARM_RECOVERY_REQUIRED" });
+    await expect(validateRecoveryGroupMembers([proc], [ps], async () => ({
+      identities: [], complete: false,
+    }))).rejects.toMatchObject({ code: "SWARM_RECOVERY_REQUIRED" });
+  });
 
   test("unknown spawn intent refuses instead of claiming cleanup", async () => {
     const launch: RecoveryLaunch = { kind: "web", pending: true, identities: [], quiescent: false, uncertain: false };

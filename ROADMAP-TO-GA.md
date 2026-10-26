@@ -253,8 +253,12 @@ Validation: compiled forced-kill recovery, owner/claim refusal, terminal preserv
 post-print cancellation, identity replacement and journal-failure regressions passed.
 The local full check passed 1,299 tests with 28 skipped and zero failures (16,199
 assertions); subsequent shared-flag/help cleanup passed all 36 help checks and typecheck.
-The final merge commit's CI is the authority for the exact Linux suite and Windows
-controls. Package validation covers both bundled distributions. AGENTS.md has 2,007
+The first CI run passed the Windows controls but exposed a Linux proc/ps start-token
+namespace mismatch in recovery and an existing MCP assertion that compared transient
+process state. Recovery now independently revalidates both identity representations;
+the MCP test compares stable identity and requires a live state. The focused follow-up
+passed 10 tests with 90 assertions. Final commit checks are the authority for the exact
+Linux suite and Windows controls. Package validation covers both bundled distributions. AGENTS.md has 2,007
 bytes of headroom and its 32 KiB limit is enforced in `check`. No release/version,
 certification-table or installed-hook change is part of this work.
 

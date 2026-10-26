@@ -49,6 +49,30 @@ export async function assertRecoveryOwnerGone(record) {
         throw recoveryError("The original companion is still alive. Use cancel for a running job, not recovery.");
     }
 }
+/**
+ * Linux may fall back from /proc to ps for a whole-group snapshot while targeted
+ * identity reads still use /proc. Those start tokens are different namespaces,
+ * not different processes. Prove both representations current around the known
+ * identity read; never accept a member based on PID/PGID equality alone.
+ */
+export async function validateRecoveryGroupMembers(known, members, validate = revalidateProcessIdentities) {
+    const membership = await validate(members);
+    const ownership = await validate(known);
+    const membershipAfter = await validate(membership.identities);
+    for (const proof of [membership, ownership, membershipAfter]) {
+        if (!proof.complete || proof.groupChanged?.length)
+            throw recoveryError("Process ownership or group membership is uncertain.");
+    }
+    for (const member of membershipAfter.identities) {
+        const owner = ownership.identities.find((id) => id.pid === member.pid && id.processGroupId === member.processGroupId);
+        const crossNamespace = owner && ((owner.startToken.startsWith("proc:") && member.startToken.startsWith("ps:")) ||
+            (owner.startToken.startsWith("ps:") && member.startToken.startsWith("proc:")));
+        if (!owner || (owner.startToken !== member.startToken && !crossNamespace)) {
+            throw recoveryError("An unrecorded process survives in the recorded group; refusing group cleanup.");
+        }
+    }
+    return ownership.identities;
+}
 /** Never signal an unproven group, PID replacement, or changed-PGID process. */
 export async function recoverLaunch(launch, persist, signal) {
     if (launch.quiescent)
@@ -73,14 +97,10 @@ export async function recoverLaunch(launch, persist, signal) {
         persist();
     }
     const inspect = async () => {
-        const live = await revalidateProcessIdentities(launch.identities);
         const members = await collectProcessGroupsIdentities(launch.identities.map((id) => id.processGroupId));
-        if (!live.complete || live.groupChanged?.length || members === undefined)
-            throw recoveryError("Process ownership or group membership is uncertain.");
-        if (members.some((member) => !/^[ZX]/i.test(member.state) && !launch.identities.some((id) => id.pid === member.pid && id.startToken === member.startToken && id.processGroupId === member.processGroupId))) {
-            throw recoveryError("An unrecorded process survives in the recorded group; refusing group cleanup.");
-        }
-        return live.identities;
+        if (members === undefined)
+            throw recoveryError("Process group membership is unreadable.");
+        return validateRecoveryGroupMembers(launch.identities, members);
     };
     for (const [killSignal, waitMs] of [["SIGTERM", 1500], ["SIGKILL", 500]]) {
         signal?.throwIfAborted();

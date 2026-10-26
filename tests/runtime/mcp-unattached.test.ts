@@ -170,7 +170,10 @@ describe("MCP unattached companion recovery", () => {
       const attached = new JobStore(resolvePluginPaths(fixture.env));
       try {
         expect(attached.getMcpTask(jobId)?.launch_state).toBe("attached");
-        expect(attached.getMcpTask(jobId)?.companion_identity).toBe(originalIdentity);
+        const { state: _transientState, ...stableIdentity } = JSON.parse(originalIdentity!);
+        const attachedIdentity = JSON.parse(attached.getMcpTask(jobId)!.companion_identity!);
+        expect(attachedIdentity).toMatchObject(stableIdentity);
+        expect(attachedIdentity.state).not.toMatch(/^[ZX]/i);
       } finally {
         attached.close();
       }
