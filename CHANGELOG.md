@@ -2,12 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
-## Unreleased
+## 2.4.2 — 2026-10-26
 
 - Integrate community PR #22's structured spawn-error classification, preserving contributor history. Bound the additional diagnostic message. Known argument/resource exhaustion no longer receives reinstall advice.
 - Refuse oversized Windows command lines before spawn and add a credential-free compiled-runtime Windows CI lane. This improves diagnosis, not prompt transport; issue #14 remains open for native Windows/community verification and large-review support.
-- Add durable, preview-first `recover-swarm` for exact 2.3.2 interrupted runs, with verified process ownership, pre-mutation session identity, recovery locking, explicit uncertainty refusals and patch preservation. Stop age-based deletion of abandoned worktrees. No new certification or release is implied.
+- Add durable, preview-first `recover-swarm` for exact 2.3.2 interrupted runs, with verified process ownership, pre-mutation session identity, recovery locking, explicit uncertainty refusals and patch preservation. Stop age-based deletion of abandoned worktrees. Exact CLI certification remains unchanged through 2.3.2.
 - Shorten the agent contract sheet and enforce its 32 KiB limit during `check`.
+
+Thanks to **@Nitjsefnie** for PR #22.
 
 ## 2.4.1 — 2026-10-25
 

@@ -235,7 +235,7 @@ Remaining open items: H1 prevention and filesystem-dependent write coverage; its
 
 ## Post-GA audit log
 
-**2026-10-26 — Unreleased recovery and spawn diagnostics.** Integrated contributor
+**2026-10-26 — Plugin 2.4.2: recovery and spawn diagnostics.** Integrated contributor
 PR #22 with its original commits, preserving structured process errors and bounding
 the additional message. Added a Windows UTF-16 command-line guard and a credential-free
 Windows CI lane; issue #14 remains open because argv transport and native Windows
@@ -259,8 +259,19 @@ process state. Recovery now independently revalidates both identity representati
 the MCP test compares stable identity and requires a live state. The focused follow-up
 passed 10 tests with 90 assertions. Final commit checks are the authority for the exact
 Linux suite and Windows controls. Package validation covers both bundled distributions. AGENTS.md has 2,007
-bytes of headroom and its 32 KiB limit is enforced in `check`. No release/version,
-certification-table or installed-hook change is part of this work.
+bytes of headroom and its 32 KiB limit is enforced in `check`.
+
+Release validation: frozen dependency install; exact 2.3.2 source scan (15 tests,
+92 assertions); full check (1,303 pass, 28 opt-in skips, zero failures, 16,214
+assertions); production-table exact-2.3.2 live smoke (19 pass, 125 assertions).
+The live smoke includes distinct child journals, a 278-byte child-authored patch,
+clean user worktree and out-of-root denial. The unchanged upstream source and
+plan-ON/OFF certification controls remain documented in
+[2.3.2 evidence](docs/upstream-2.3.2-certification.md); no certification row is added.
+Package validation covers 232 files and both hosts. Credentials stayed in process
+memory/environment; isolated empty homes avoided personal config and OAuth stores.
+No installed hook or CLI pin changed. Publication follows the immutable-tag and
+validated-tarball workflow in [registry releases](docs/registry-releases.md).
 
 **2026-09-26 — Registry documentation check.** Confirmed npm 2.0.7, the validated
 artifact, both isolated host setup checks, and the configured trusted publisher.

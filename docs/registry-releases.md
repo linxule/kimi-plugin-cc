@@ -6,6 +6,13 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
+Plugin **2.4.2** adds durable interrupted-swarm recovery and Windows spawn diagnostics.
+Exact CLI certification remains unchanged through **2.3.2**; this is not a new
+Windows-support or large-prompt-transport claim. See the [release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.2),
+[recovery guide](./swarm-recovery.md), and [Windows community controls](./windows-validation.md).
+Publication uses the same validated-tarball OIDC workflow below; release execution
+and registry verification are recorded in the release notes.
+
 Plugin **2.4.1** certifies exact CLI **2.3.2** for all eight operations with host-preactivated swarm sessions. [Release v2.4.1](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.1) is anchored at `06a0a47f2b34dffb8dd71e7ce93646212e74ed19`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/40236704464) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/40237085945) passed. The registry tarball has SHA-1 `77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`, contains 224 files, and matches the CI artifact byte-for-byte. Fresh installs from the CI artifact and npm registry both passed isolated setup/check for Claude Code and Codex. The earlier CI attempt 40231073897 exposed an intermittent root-exit cleanup issue; the root-continuity fix and independent review landed before tagging. Final closeout CI run 40238295139 passed.
 
 Plugin **2.4.0** preserves exact CLI **2.3.1** certification and adds the shared MCP transport. [Release v2.4.0](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.0) is anchored at `9232d1ec98465454d8d9328e439d3f31bfc53e04`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/40040084944) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/40040442610) passed. The registry tarball has SHA-1 `8243616529aa9f03f26bf4fef68c36d90e2304ae`, contains 222 files, and matches the CI artifact byte-for-byte. A fresh npm install passed isolated setup/check for both hosts.
