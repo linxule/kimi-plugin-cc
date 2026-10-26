@@ -1,3 +1,4 @@
+import { runRecoverSwarm } from "./commands/recover-swarm.js";
 import { companionHelp } from "./help.js";
 import { runModelInventory } from "./commands/models.js";
 import { runCancel } from "./commands/cancel.js";
@@ -77,6 +78,9 @@ async function main(argv) {
         case "replay":
             context.stdout.write(await runReplay(rest, context));
             return;
+        case "recover-swarm":
+            context.stdout.write(await runRecoverSwarm(rest, context));
+            return;
         case "repair-sessions":
             context.stdout.write(await runRepairSessions(rest, context));
             return;
@@ -84,7 +88,7 @@ async function main(argv) {
             await runWorker(rest, context);
             return;
         default:
-            throw new RuntimeError("INVALID_COMMAND", `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, task, ask, status, result, cancel, replay, repair-sessions.`, "companion");
+            throw new RuntimeError("INVALID_COMMAND", `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm.`, "companion");
     }
 }
 main(process.argv.slice(2)).catch((error) => {

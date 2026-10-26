@@ -29,6 +29,6 @@ export async function runStatus(argv: string[], context: CommandContext): Promis
 
     const job = await reconcileHistoricalJobProvenance(store, found);
 
-    return `${JSON.stringify({ ...job, thinking_effort_requested: job.thinking_effort ?? null, hook_escapes: parseHookEscapes(job.hook_escapes), budget_source: renderBudgetSource(job) }, null, 2)}\n`;
+    return `${JSON.stringify({ ...job, swarm_recovery: store.getSwarmRecovery(job.job_id)?.record ?? null, thinking_effort_requested: job.thinking_effort ?? null, hook_escapes: parseHookEscapes(job.hook_escapes), budget_source: renderBudgetSource(job) }, null, 2)}\n`;
   });
 }

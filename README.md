@@ -42,7 +42,7 @@ You need:
 - Node.js 22.5 or newer
 - Kimi Code CLI 2.3.2 (certified; 2.3.1 and 2.3.0 are also certified)
 
-Windows is not currently supported. Check your versions in a terminal:
+Windows is not currently supported. Contributors can help with the [no-model Windows diagnostics checks](./docs/windows-validation.md). Check your versions in a terminal:
 
 ```sh
 node --version
@@ -174,7 +174,7 @@ Use these commands to follow a task:
 | Read the result | `/kimi:result` | `$kimi-result` |
 | Cancel work | `/kimi:cancel` | `$kimi-cancel` |
 
-Without a job ID, cancel stops the latest running task for this repository. If several tasks are running, check which one you want to stop first. Use cancel rather than interrupting the app so write-swarm can save its patch.
+Without a job ID, cancel stops the latest running task for this repository. If several tasks are running, check which one you want to stop first. Use cancel rather than interrupting the app so write-swarm can save its patch. For interrupted runs created by the unreleased recovery implementation, see [preview-first swarm recovery](./docs/swarm-recovery.md); it never applies a patch or deletes abandoned work.
 
 Canceling a task does not undo changes it has already made.
 

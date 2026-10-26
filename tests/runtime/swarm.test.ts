@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { transform } from "esbuild";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, utimes } from "node:fs/promises";
 import path from "node:path";
 
-import { MAX_DURATION_MS, parseSwarmArgs } from "../../runtime/parsing.js";
+import { parseSwarmArgs } from "../../runtime/parsing.js";
 import { classifyManagedCommandFailure } from "../../runtime/kimi-errors.js";
 import {
   buildSwarmPrompt,
@@ -15,10 +15,9 @@ import {
   resolveSwarmWriteMaxConcurrency,
   SWARM_DEFAULT_MAX_CONCURRENCY,
   SWARM_WRITE_DEFAULT_MAX_CONCURRENCY,
-  WORKTREE_ORPHAN_TTL_MS,
 } from "../../runtime/commands/swarm.js";
 import { RuntimeError } from "../../runtime/errors.js";
-import { resolveRepoIdentity, removeWorktree } from "../../runtime/git.js";
+import { resolveRepoIdentity, removeWorktree, createEphemeralWorktree } from "../../runtime/git.js";
 import { JobStore, type JobRecord } from "../../runtime/job-store.js";
 import { resolvePluginPaths, type PluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
@@ -287,16 +286,31 @@ describe("runSwarm certified execution-plan gate", () => {
     }
   });
 
-  test("the orphan-sweep TTL exceeds the max --budget, so a live worktree is never reaped mid-run", () => {
-    // The sweep's liveness signal is worktree-dir mtime, frozen at creation for a
-    // run that edits only existing files. A live run lasts at most MAX_DURATION_MS
-    // (the --budget hard cap), so the TTL must exceed it or a concurrent run's
-    // sweep could force-remove a still-live worktree.
-    expect(WORKTREE_ORPHAN_TTL_MS).toBeGreaterThan(MAX_DURATION_MS);
-  });
+
 });
 
 describe("write-swarm lifecycle", () => {
+  test("a new run never age-deletes an abandoned worktree with uncaptured work", async () => {
+    const data = await createTestPluginDataRoot("swarm-orphan-data");
+    const repo = await createGitRepoFixture("swarm-orphan-repo");
+    const home = await createTestPluginDataRoot("swarm-orphan-home");
+    const env = makeMockEnv(data, path.join(data, "invocation.jsonl"), home);
+    const repoId = (await resolveRepoIdentity(repo)).repoId;
+    const orphan = path.join(resolvePluginPaths(env).worktreesDir, repoId, "swarm-write-abandoned");
+    try {
+      await mkdir(path.dirname(orphan), { recursive: true });
+      await createEphemeralWorktree(repo, "HEAD", orphan);
+      await writeFile(path.join(orphan, "uncaptured.txt"), "preserve me");
+      const old = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      await utimes(orphan, old, old);
+      await runSwarm(["--write", "empty patch"], makeContext(repo, env));
+      expect(await readFile(path.join(orphan, "uncaptured.txt"), "utf8")).toBe("preserve me");
+    } finally {
+      if (existsSync(orphan)) await removeWorktree(repo, orphan);
+      await cleanupTestPath(data); await cleanupTestPath(repo); await cleanupTestPath(home);
+    }
+  });
+
   test("successful completion preserves the write summary and removes the worktree", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("swarm-write-success-data");
     const repoRoot = await createGitRepoFixture("swarm-write-success-repo");

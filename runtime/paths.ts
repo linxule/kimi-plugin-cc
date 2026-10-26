@@ -15,7 +15,7 @@ export interface PluginPaths {
    * data dir — NEVER inside a user repo — so a throwaway worktree is isolated from
    * the user's checkout and the `git worktree add` target is always outside the
    * repo. Each run gets a `swarm-write-<jobId>` subdir; the patch is captured then
-   * the dir is removed. A startup sweep reaps orphans left by a hard kill.
+   * the dir is removed. Hard-kill orphans are retained for explicit recovery, never age-deleted.
    */
   worktreesDir: string;
   configPath: string;

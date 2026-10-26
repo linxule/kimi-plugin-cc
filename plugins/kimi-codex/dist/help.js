@@ -1,5 +1,5 @@
-import { hasHelpFlag, ASK_SUPPORTED_FLAGS, RESCUE_SUPPORTED_FLAGS, REVIEW_SUPPORTED_FLAGS, PURSUE_SUPPORTED_FLAGS, SWARM_SUPPORTED_FLAGS, JOB_LOOKUP_SUPPORTED_FLAGS, SETUP_SUPPORTED_FLAGS, REPAIR_SESSIONS_SUPPORTED_FLAGS, REPLAY_SUPPORTED_FLAGS, } from "./parsing.js";
-const SUBCOMMANDS = "setup, review, task, ask, status, result, cancel, replay, repair-sessions";
+import { hasHelpFlag, ASK_SUPPORTED_FLAGS, RESCUE_SUPPORTED_FLAGS, REVIEW_SUPPORTED_FLAGS, PURSUE_SUPPORTED_FLAGS, SWARM_SUPPORTED_FLAGS, JOB_LOOKUP_SUPPORTED_FLAGS, SETUP_SUPPORTED_FLAGS, REPAIR_SESSIONS_SUPPORTED_FLAGS, REPLAY_SUPPORTED_FLAGS, RECOVER_SWARM_SUPPORTED_FLAGS, } from "./parsing.js";
+const SUBCOMMANDS = "setup, review, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm";
 const TASK_KINDS = "rescue, challenge, pursue, swarm";
 /** Help is a dispatch-only, side-effect-free exception to normal argument parsing. */
 export function companionHelp(argv) {
@@ -33,6 +33,7 @@ export function companionHelp(argv) {
         case "cancel":
             return usage(command, "[job-id] [options]", JOB_LOOKUP_SUPPORTED_FLAGS, command === "status" ? "Show job state as JSON." : command === "result" ? "Read a terminal artifact, optionally in a JSON envelope." : "Cancel a running job; without an id, target the repository's latest running job.");
         case "replay": return usage(command, "<job-id>", REPLAY_SUPPORTED_FLAGS, "Replay a completed job's persisted stream log.");
+        case "recover-swarm": return `Usage: companion.sh recover-swarm <job-id> [${RECOVER_SWARM_SUPPORTED_FLAGS}]. Preview durable swarm recovery; --apply stops verified orphans, disables the recorded session and captures a patch. Never resumes prompts or changes terminal job outcomes.`;
         case "repair-sessions": return usage(command, "[options]", REPAIR_SESSIONS_SUPPORTED_FLAGS, "Preview session metadata repair; --apply writes, --all selects all host-owned repositories.");
         case "worker": return "Usage: companion.sh worker <ask|rescue> <job-id>. Internal detached-worker entry point; launched by ask/rescue, not manually.";
         case "mcp": return "Usage: companion.sh mcp. Run the Kimi MCP stdio server; normally launched by Claude Code or Codex plugin configuration.";

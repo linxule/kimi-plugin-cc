@@ -1,3 +1,4 @@
+import type { SwarmRecoveryRecord } from "./swarm-recovery.js";
 import { createRequire } from "node:module";
 
 import { RuntimeError, formatError } from "./errors.js";
@@ -267,6 +268,8 @@ export class JobStore {
       CREATE INDEX IF NOT EXISTS jobs_repo_updated_idx
         ON jobs (repo_id, updated_at DESC);
 
+      CREATE TABLE IF NOT EXISTS swarm_recovery (job_id TEXT PRIMARY KEY, payload TEXT NOT NULL, recovery_owner TEXT);
+
       CREATE INDEX IF NOT EXISTS jobs_repo_type_updated_idx
         ON jobs (repo_id, command_type, updated_at DESC);
 
@@ -328,6 +331,20 @@ export class JobStore {
       }
       throw translateSqliteError(error);
     }
+  }
+
+  getSwarmRecovery(jobId: string): { record: SwarmRecoveryRecord; owner: string | null } | null {
+    const row = this.db.get("SELECT payload, recovery_owner FROM swarm_recovery WHERE job_id = ?", jobId) as { payload: string; recovery_owner: string | null } | undefined;
+    return row ? { record: JSON.parse(row.payload) as SwarmRecoveryRecord, owner: row.recovery_owner } : null;
+  }
+
+  saveSwarmRecovery(jobId: string, record: SwarmRecoveryRecord): void {
+    this.db.run("INSERT INTO swarm_recovery (job_id, payload) VALUES (?, ?) ON CONFLICT(job_id) DO UPDATE SET payload = excluded.payload", [jobId, JSON.stringify(record)]);
+  }
+
+  claimSwarmRecovery(jobId: string, expected: string | null, owner: string | null): boolean {
+    this.db.run("UPDATE swarm_recovery SET recovery_owner = ? WHERE job_id = ? AND recovery_owner IS ?", [owner, jobId, expected]);
+    return (this.db.get("SELECT changes() AS count") as { count: number }).count === 1;
   }
 
   close(): void {

@@ -194,6 +194,17 @@ async function expectProcessInactive(pid: number): Promise<void> {
 }
 
 describe("requiresSwarmPreactivation", () => {
+  test("journal failure before profile mutation refuses activation and reaps the web child", async () => {
+    await withFixture("success", async (fixture) => {
+      await expect(preactivateSwarmSession(makeOptions(fixture, {
+        onRecoveryEvent: (event) => { if (event.kind === "session") throw new Error("journal unavailable"); },
+      }))).rejects.toBeDefined();
+      const log = await readLog(fixture);
+      expect(requests(log).some((entry) => entry.path?.endsWith("/profile"))).toBe(false);
+      for (const child of spawns(log)) expect(await readProcessIdentity(child.pid)).toBeUndefined();
+    });
+  });
+
   test("matches exact upstream 2.3.2 only", () => {
     expect(requiresSwarmPreactivation("2.3.2")).toBe(true);
     for (const version of [null, "2.3.1", "2.3.3", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {

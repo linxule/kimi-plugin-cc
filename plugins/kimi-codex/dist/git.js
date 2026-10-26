@@ -85,12 +85,13 @@ async function runGit(args, cwd) {
     }
     return result.stdout;
 }
-async function runGitAllowFailure(args, cwd) {
+async function runGitAllowFailure(args, cwd, signal) {
     try {
         const { stdout, stderr } = await execFileAsync("git", args, {
             cwd,
             env: process.env,
             maxBuffer: 10 * 1024 * 1024,
+            signal,
         });
         return { ok: true, stdout, stderr };
     }
@@ -163,11 +164,11 @@ export async function createEphemeralWorktree(repoRoot, base, worktreePath) {
  *
  * Returns the patch text (empty string if the swarm changed nothing).
  */
-export async function captureWorktreePatch(worktreePath) {
+export async function captureWorktreePatch(worktreePath, signal) {
     // Intent-to-add is required so untracked files surface in `git diff HEAD`.
     // An add -N failure aborts capture rather than returning a patch that omits
     // new files.
-    const intentToAdd = await runGitAllowFailure(["add", "-N", "--", "."], worktreePath);
+    const intentToAdd = await runGitAllowFailure(["add", "-N", "--", "."], worktreePath, signal);
     if (!intentToAdd.ok) {
         throw new RuntimeError("GIT_WORKTREE_INTENT_TO_ADD_FAILED", `git add -N (worktree capture) failed: ${intentToAdd.stderr || "unknown error"}`, "swarm.worktree", { details: { worktreePath } });
     }
@@ -176,6 +177,7 @@ export async function captureWorktreePatch(worktreePath) {
             cwd: worktreePath,
             env: process.env,
             maxBuffer: MAX_PATCH_BYTES,
+            signal,
         });
         return stdout;
     }

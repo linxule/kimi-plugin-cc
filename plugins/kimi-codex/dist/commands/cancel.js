@@ -36,6 +36,14 @@ export async function runCancel(argv, context) {
             (context.mcpCompanionIdentity === undefined || context.mcpKimiIdentity === undefined)) {
             throw new RuntimeError("MCP_CANCEL_REQUIRES_BINDING", `MCP job ${job.job_id} requires MCP job-control cancellation with recorded identities; use tasks/cancel or kimi_job_cancel.`, "mcp.cancel");
         }
+        const recovery = store.getSwarmRecovery(job.job_id)?.record;
+        if (recovery) {
+            const identity = recovery.owner;
+            const verified = identity && identity.pid === job.pid ? await revalidateProcessIdentities([identity]) : undefined;
+            if (!verified?.complete || verified.groupChanged?.length || verified.identities.length !== 1) {
+                throw new RuntimeError("SWARM_RECOVERY_REQUIRED", `Recorded swarm ownership is no longer live or verifiable. Preview companion.sh recover-swarm ${job.job_id}; no process was signalled.`, "cancel.identity");
+            }
+        }
         if (job.pid === null && job.kimi_pid === null) {
             throw new RuntimeError("CANCEL_NOT_SUPPORTED", `Job ${job.job_id} does not have a recorded process id to cancel.`, "cancel.runtime");
         }
@@ -75,7 +83,10 @@ export async function runCancel(argv, context) {
         }
         await assertMcpCompanionIdentity(job, context.mcpCompanionIdentity);
         await assertMcpKimiIdentity(job, context.mcpKimiIdentity);
-        signalJobProcesses(job, "SIGTERM");
+        if (recovery)
+            await assertMcpCompanionIdentity(job, recovery.owner);
+        // The live swarm owner owns child teardown, including web phases after print exit.
+        signalJobProcesses(job, "SIGTERM", { companion: true, kimi: !recovery });
         const cancelled = await waitForCancellation(paths, job.job_id);
         if (cancelled) {
             return `${JSON.stringify({
@@ -84,10 +95,10 @@ export async function runCancel(argv, context) {
                 message: "Cancellation completed.",
             }, null, 2)}\n`;
         }
-        const companionMatches = await assertMcpCompanionIdentity(job, context.mcpCompanionIdentity, true);
+        const companionMatches = await assertMcpCompanionIdentity(job, recovery ? recovery.owner : context.mcpCompanionIdentity, true);
         const kimiMatches = await assertMcpKimiIdentity(job, context.mcpKimiIdentity, true);
         if (companionMatches || kimiMatches) {
-            signalJobProcesses(job, "SIGKILL", { companion: companionMatches, kimi: kimiMatches });
+            signalJobProcesses(job, "SIGKILL", { companion: companionMatches, kimi: !recovery && kimiMatches });
         }
         await withJobStore(paths, async (forcedStore) => {
             const current = forcedStore.getJob(job.job_id);

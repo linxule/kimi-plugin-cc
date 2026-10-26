@@ -1,5 +1,8 @@
+import { resolveKimiHome } from "../kimi-home.js";
+import { probeProcessIdentity } from "../process-tree.js";
+import { recordRecoveryEvent, finishRecoveryRecord, type SwarmRecoveryRecord } from "../swarm-recovery.js";
 import { allocateJobId } from "../job-id.js";
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
@@ -22,7 +25,6 @@ import {
   createEphemeralWorktree,
   hasBornHead,
   isWorkingTreeDirty,
-  pruneWorktrees,
   removeWorktree,
   resolveRepoIdentity,
   type RepoIdentity,
@@ -33,7 +35,7 @@ import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_SWARM_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
-import { MAX_DURATION_MS, parseSwarmArgs, type SwarmArgs } from "../parsing.js";
+import { parseSwarmArgs, type SwarmArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import {
@@ -58,23 +60,6 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
 const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
-/**
- * Orphaned write-swarm worktrees older than this are reaped by the startup sweep.
- * Every normal run removes its own worktree in a finally; orphans can follow a
- * hard kill or failed cleanup.
- *
- * The sweep's only liveness signal is the worktree dir's mtime, which is frozen
- * at `git worktree add` time when a run edits only EXISTING files (in-place edits
- * never bump the containing dir's mtime). A live run can therefore look "idle" for
- * its entire wall-clock life. So the TTL MUST exceed the longest a run can live —
- * the hard `--budget` ceiling, `MAX_DURATION_MS` (24h) — or a concurrent run's
- * sweep could `git worktree remove --force` a still-live worktree out from under
- * its owner (ENOENT writes, lost patch). The +2h margin covers budget-expiry
- * teardown (AbortController fires → the finally removes the worktree well within
- * it). Orphans are still reaped, just after this longer, provably-safe delay.
- */
-export const WORKTREE_ORPHAN_TTL_MS = MAX_DURATION_MS + 2 * 60 * 60 * 1000;
-
 /**
  * Default concurrency setting when the user passes no `--max-concurrency`.
  * The plugin always exports KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; kimi-code
@@ -326,7 +311,7 @@ async function runWriteSwarm(
         "swarm.precondition",
       );
     }
-    await sweepStaleWorktrees(paths, repoIdentity);
+    // Abandoned trees are recovery evidence, never age-based garbage.
     if (await isWorkingTreeDirty(context.cwd)) {
       context.stderr.write(
         "[kimi-plugin-cc] /kimi:swarm --write bases its worktree on HEAD — your uncommitted changes are NOT visible to the swarm. Commit or stash them first if the swarm needs them.\n",
@@ -465,35 +450,6 @@ function assertWriteSwarmPreconditions(repoIdentity: RepoIdentity): void {
 }
 
 /**
- * Reap orphaned write-swarm worktrees from prior crashed runs. Normal runs remove
- * their own worktree in a finally; orphans can follow hard kills or failed cleanup.
- * Prune stale admin entries (current repo), then force-remove on-disk worktree
- * dirs older than the TTL. Best-effort — never blocks the run.
- */
-async function sweepStaleWorktrees(paths: PluginPaths, repoIdentity: RepoIdentity): Promise<void> {
-  await pruneWorktrees(repoIdentity.repoRoot);
-  // Only sweep THIS repo's namespaced subdir, so we never `rm` a worktree that a
-  // different repo still considers live (and never leave that repo a dangling
-  // admin entry). repoId is the realpath-stable hash from resolveRepoIdentity.
-  const repoWorktreesDir = path.join(paths.worktreesDir, repoIdentity.repoId);
-  const entries = await readdir(repoWorktreesDir, { withFileTypes: true }).catch(() => null);
-  if (entries === null) return; // not created yet — nothing to sweep.
-  const now = Date.now();
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith("swarm-write-")) continue;
-    const full = path.join(repoWorktreesDir, entry.name);
-    try {
-      const st = await stat(full);
-      if (now - st.mtimeMs > WORKTREE_ORPHAN_TTL_MS) {
-        await removeWorktree(repoIdentity.repoRoot, full);
-      }
-    } catch {
-      // best-effort per entry
-    }
-  }
-}
-
-/**
  * Capture the worktree change set as a `.patch` artifact (write mode). Returns
  * the artifact path + size, or null on capture failure. Called on EVERY terminal
  * path so partial work survives a cancel/budget-expiry.
@@ -596,6 +552,7 @@ async function executeSwarmJob(
   let cleanupAttempted = false;
   let cleanupFailure: RuntimeError | undefined;
   let finalText: string | undefined;
+  let recovery: SwarmRecoveryRecord | undefined;
   const commandLabel = writeMode ? "swarm-write" : "swarm";
   const recoveryCleanupTimeoutMs = 2_000;
   const cleanupSignal = (timeoutMs: number) => AbortSignal.any([
@@ -629,6 +586,14 @@ async function executeSwarmJob(
 
   try {
     const executionPlan = executionPlanFromPersisted(job);
+    if (requiresSwarmPreactivation(executionPlan.kimiVersion)) {
+      const owner = await probeProcessIdentity(process.pid);
+      recovery = { schema: 1, jobId: job.job_id, ownerPid: process.pid, owner: owner.identity ?? null,
+        kimiHome: resolveKimiHome(context.env, writeMode?.spawnCwd ?? job.cwd),
+        cwd: writeMode?.spawnCwd ?? job.cwd, workspaceRoot: writeMode?.workspaceRoot ?? null,
+        launches: [], session: null, sessionDirty: false, complete: false, patchPath: null };
+      store.saveSwarmRecovery(job.job_id, recovery);
+    }
     activationOptions = {
       cwd: writeMode?.spawnCwd ?? job.cwd,
       env: context.env,
@@ -641,6 +606,7 @@ async function executeSwarmJob(
       swarmMaxConcurrency: maxConcurrency,
       trustedWorkspaceRoot: writeMode?.workspaceRoot,
       expectedVersion: executionPlan.kimiVersion ?? undefined,
+      onRecoveryEvent: recovery ? (event) => recordRecoveryEvent(store, recovery!, event) : undefined,
     };
 
     if (requiresSwarmPreactivation(executionPlan.kimiVersion)) {
@@ -714,6 +680,7 @@ async function executeSwarmJob(
     const promptBudgetMs = budgetDeadline - Date.now();
     if (promptBudgetMs <= 0) throw new ResponseTimeoutError(budgetMs, "swarm.prompt", commandLabel);
     store.updateRunningJob(job.job_id, { phase: "turn-running" });
+    if (recovery) recordRecoveryEvent(store, recovery, { kind: "print-spawn" });
     const result = await runCliPromptWithBudget(
       {
         cwd: activationOptions.cwd,
@@ -729,13 +696,20 @@ async function executeSwarmJob(
         thinkingEffort: job.thinking_effort ?? undefined,
         resumeSessionId: preactivated?.sessionId,
         logPath: job.stream_log_path,
-        onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
+        onSpawn: async (pid) => {
+          store.updateRunningJob(job.job_id, { kimi_pid: pid });
+          if (recovery) {
+            const probe = await probeProcessIdentity(pid);
+            recordRecoveryEvent(store, recovery, { kind: "print-processes", identities: probe.identity ? [probe.identity] : [], complete: probe.complete });
+          }
+        },
         signal: handlers.signal,
       },
       promptBudgetMs,
       "swarm.prompt",
     );
 
+    if (recovery) recordRecoveryEvent(store, recovery, { kind: "print-exit" });
     store.updateRunningJob(job.job_id, observedExecutionFields(result));
     finalText = reassembleProseFromRecords(result.records);
     let resultError: unknown;
@@ -802,6 +776,7 @@ async function executeSwarmJob(
           { details: { worktreePath: writeMode.workspaceRoot } },
         );
       }
+      if (recovery) recovery.patchPath = captured.path;
       finalText = `${renderWriteSwarmHeader(captured)}\n\n---\n\n${prose}`.trimEnd();
     }
     const rendered = renderManagedJobOutput(job, finalText);
@@ -829,6 +804,7 @@ async function executeSwarmJob(
       throw new RuntimeError("SWARM_CANCELLED", "Swarm cancelled after artifact write.", "swarm.runtime");
     }
 
+    if (recovery) finishRecoveryRecord(store, recovery);
     return (
       store.markCompleted(job.job_id, {
         summary: `[${writeMode ? "swarm-write" : "swarm"}] ${shorten(objective, SWARM_SUMMARY_MAX)}`,
@@ -868,6 +844,7 @@ async function executeSwarmJob(
         writeMode.onPatchCaptureFailure,
       );
       captureFailed = captured === null;
+      if (recovery && captured) recovery.patchPath = captured.path;
       if (captured && !captured.empty) {
         context.stderr.write(
           `[kimi-plugin-cc] swarm-write run ended early; partial patch captured at ${captured.path}.\n`,
@@ -935,7 +912,17 @@ async function executeSwarmJob(
     return await markJobFailed(store, paths, job, withRecovery, "Swarm failed.", { phase: "failed" });
   } finally {
     handlers.dispose();
-    store.close();
+    try {
+      if (recovery) finishRecoveryRecord(store, recovery);
+      if (recovery && !recovery.complete) {
+        writeMode?.onPatchCaptureFailure?.();
+        context.stderr.write(`[kimi-plugin-cc] recovery record retained: companion.sh recover-swarm ${job.job_id} (preview).\n`);
+      }
+    } catch (error) {
+      // A failed final journal commit cannot authorize removal of recovery evidence.
+      writeMode?.onPatchCaptureFailure?.();
+      throw error;
+    } finally { store.close(); }
   }
 }
 

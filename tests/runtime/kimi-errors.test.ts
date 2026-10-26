@@ -4,10 +4,27 @@ import { RuntimeError } from "../../runtime/errors.js";
 import { classifyManagedCommandFailure, classifySetupFailure, summarizeKimiAvailabilityWarning } from "../../runtime/kimi-errors.js";
 
 describe("classifyManagedCommandFailure", () => {
+  test("the added structured spawn message stays bounded", () => {
+    const error = new RuntimeError("CLI_PROCESS_ERROR", "launch failed", "cli-client.spawn", {
+      details: { spawn_code: "E2BIG", spawn_message: "x".repeat(20_000) + "tail" },
+    });
+    const result = classifyManagedCommandFailure(error, "review", "job") as RuntimeError;
+    expect((result.details.spawn_message as string).length).toBeLessThanOrEqual(2001);
+    expect(result.details.spawn_message).toEndWith("tail");
+  });
+
   test("returns the original error when classification does not recognize it", () => {
     const original = new Error("something unrelated");
     const result = classifyManagedCommandFailure(original, "rescue", "job-xyz");
     expect(result).toBe(original);
+  });
+
+  test("leaves unrelated RuntimeErrors with spawn details unclassified", () => {
+    const original = new RuntimeError("CLI_SPAWN_CALLBACK_FAILED", "spawn callback failed", "cli-client.spawn", {
+      details: { spawn_code: "E2BIG" },
+    });
+    expect(classifySetupFailure(original)).toBeNull();
+    expect(classifyManagedCommandFailure(original, "review", "job-xyz")).toBe(original);
   });
 
   test("collapses to `${commandType}.runtime` stage by default", () => {
@@ -36,7 +53,7 @@ describe("classifyManagedCommandFailure", () => {
     expect((result as RuntimeError).stage).toBe("rescue.initialize");
   });
 
-  test("preserveStage preserves cli-client.spawn when CLI_SPAWN_FAILED is the inner cause", () => {
+  test("opaque CLI_SPAWN_FAILED retains binary-unavailable compatibility and its spawn stage", () => {
     const inner = new RuntimeError(
       "CLI_SPAWN_FAILED",
       "Failed to spawn kimi.",
@@ -48,6 +65,41 @@ describe("classifyManagedCommandFailure", () => {
     expect(result).toBeInstanceOf(RuntimeError);
     expect((result as RuntimeError).code).toBe("RESCUE_KIMI_BINARY_UNAVAILABLE");
     expect((result as RuntimeError).stage).toBe("cli-client.spawn");
+  });
+
+  for (const code of ["CLI_SPAWN_FAILED", "CLI_PROCESS_ERROR"]) {
+    test.each(["E2BIG", "ENOMEM", "EMFILE"])(`${code} preserves non-executable failure %s`, (spawnCode) => {
+      const inner = new RuntimeError(code, "process launch failed", "cli-client.spawn", {
+        details: { spawn_code: spawnCode, spawn_errno: -7, spawn_message: "system launch failure" },
+      });
+      const classification = classifySetupFailure(inner)!;
+      expect(classification.kind).toBe("startup_failed");
+      expect(classification.nextStep).toBe("Check the underlying process error; shorten the prompt or environment if an argument-size limit was exceeded, then retry.");
+      const result = classifyManagedCommandFailure(inner, "review", "job-xyz") as RuntimeError;
+      expect(result.code).toBe("REVIEW_KIMI_STARTUP_FAILED");
+      expect(result.details).toMatchObject(inner.details);
+    });
+
+    test.each(["ENOENT", "EACCES", "ENOEXEC"])(`${code} retains the install remedy for %s`, (spawnCode) => {
+      const inner = new RuntimeError(code, "process launch failed", "cli-client.spawn", {
+        details: { spawn_code: spawnCode },
+      });
+      expect(classifySetupFailure(inner)?.nextStep).toBe("Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.");
+      const result = classifyManagedCommandFailure(inner, "review", "job-xyz") as RuntimeError;
+      expect(result.code).toBe("REVIEW_KIMI_BINARY_UNAVAILABLE");
+    });
+  }
+
+  test("legacy async ENOENT without structured cause retains the install remedy", () => {
+    const inner = new RuntimeError("CLI_PROCESS_ERROR", "spawn kimi ENOENT", "cli-client.process");
+    expect(classifySetupFailure(inner)?.nextStep).toBe("Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.");
+    expect((classifyManagedCommandFailure(inner, "review", "job-xyz") as RuntimeError).code).toBe("REVIEW_KIMI_BINARY_UNAVAILABLE");
+  });
+
+  test("opaque async process errors retain health-check advice", () => {
+    const inner = new RuntimeError("CLI_PROCESS_ERROR", "process error", "cli-client.process");
+    expect(classifySetupFailure(inner)?.nextStep).toBe("Run `/kimi:setup` to verify local Kimi health, then retry.");
+    expect((classifyManagedCommandFailure(inner, "review", "job-xyz") as RuntimeError).code).toBe("REVIEW_KIMI_STARTUP_FAILED");
   });
 
   test("preserveStage only kicks in when the inner error is a RuntimeError", () => {

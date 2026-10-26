@@ -48,3 +48,18 @@ jobs:
 
       - name: Check npm package installation
         run: bun run check:package
+
+  windows-spawn:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc -p tsconfig.build.json
+      - name: Compiled Windows spawn and large-prompt controls (no model calls)
+        run: node --test tests/windows/spawn-preflight.mjs

@@ -18,6 +18,7 @@ export const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|me
 export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>";
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
 export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags)";
+export const RECOVER_SWARM_SUPPORTED_FLAGS = "--apply";
 export const REPAIR_SESSIONS_SUPPORTED_FLAGS = "--apply, --all";
 export const REPLAY_SUPPORTED_FLAGS = "none (one job-id required)";
 /** Validate syntax only; upstream per-model supportEfforts remains authoritative. */

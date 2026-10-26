@@ -39,6 +39,7 @@ export async function preactivateSwarmSession(options) {
         await verifyMeta(web, prepared.expectedVersion, options.signal, failureCode);
         const model = await resolveProfileModel(web, options, failureCode);
         identity = await createSession(web, options, failureCode);
+        options.onRecoveryEvent?.({ kind: "session", ...identity });
         profileMutationAttempted = true;
         await postSwarmProfile(web, identity, true, model, options.signal, failureCode);
         await verifySwarmStatus(web, identity, true, model, options.signal, failureCode);
@@ -88,6 +89,7 @@ export async function deactivateSwarmSession(options) {
         await verifySwarmStatus(web, options, false, undefined, options.signal, failureCode);
         await shutdownWeb(web, options.signal, failureCode);
         await requireSwarmJournal(prepared.kimiHome, options, "exit", options.signal, failureCode);
+        options.onRecoveryEvent?.({ kind: "disabled" });
         throwIfAborted(options.signal, failureCode, "swarm-deactivation.complete");
     }
     catch (error) {
@@ -144,6 +146,7 @@ async function startWebChild(options, env, failureCode) {
         "error",
     ];
     let child;
+    options.onRecoveryEvent?.({ kind: "web-spawn" });
     try {
         child = spawn(options.command, args, {
             cwd: options.cwd,
@@ -153,6 +156,7 @@ async function startWebChild(options, env, failureCode) {
         });
     }
     catch {
+        options.onRecoveryEvent?.({ kind: "web-exit" });
         throw failure(failureCode, "swarm-activation.spawn", "Failed to spawn the Kimi web lifecycle process.");
     }
     let exited = false;
@@ -184,6 +188,7 @@ async function startWebChild(options, env, failureCode) {
         child,
         closePromise,
         descendants: [],
+        onRecoveryEvent: options.onRecoveryEvent,
         trackingStopped: false,
         lastSnapshotComplete: false,
         snapshotIncomplete: false,
@@ -198,6 +203,8 @@ async function startWebChild(options, env, failureCode) {
     try {
         const ready = await waitForReadyLine(owned, options.signal, failureCode);
         await refreshOwnedDescendants(owned);
+        if (owned.recoveryFailed)
+            throw failure(failureCode, "swarm-activation.recovery", "Cannot persist web ownership; refusing session mutation.");
         return Object.assign(owned, ready);
     }
     catch (error) {
@@ -610,12 +617,26 @@ async function refreshOwnedDescendants(owned) {
             owned.snapshotIncomplete = true;
             owned.lastSnapshotComplete = false;
         }
+        try {
+            owned.onRecoveryEvent?.({ kind: "web-processes", identities: [...(owned.rootIdentity ? [owned.rootIdentity] : []), ...owned.descendants], complete: owned.lastSnapshotComplete });
+        }
+        catch {
+            owned.recoveryFailed = true;
+        }
     })().finally(() => {
         owned.refreshPromise = undefined;
     });
     return await owned.refreshPromise;
 }
 async function teardownOwnedChild(owned) {
+    const quiescent = await teardownOwnedChildInner(owned);
+    if (quiescent && !owned.recoveryFailed) {
+        owned.onRecoveryEvent?.({ kind: "web-exit" });
+        return true;
+    }
+    return false;
+}
+async function teardownOwnedChildInner(owned) {
     await stopDescendantTracking(owned);
     const childPid = owned.child.pid;
     if (childPid === undefined)

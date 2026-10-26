@@ -7,14 +7,15 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "check": "bun run build && bun run check:surfaces && bunx tsc --noEmit && bun test && git diff --exit-code -- dist plugins/kimi-codex && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist plugins/kimi-codex)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked dist/codex files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
+    "check": "bun run build && bun run check:contracts && bun run check:surfaces && bunx tsc --noEmit && bun test && git diff --exit-code -- dist plugins/kimi-codex && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist plugins/kimi-codex)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked dist/codex files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
     "check:surfaces": "bun run scripts/generate-surfaces.ts --check",
     "generate:surfaces": "bun run scripts/generate-surfaces.ts",
     "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && mkdir -p dist/vendor/shell-quote dist/vendor/smol-toml && cp runtime/vendor/shell-quote/LICENSE dist/vendor/shell-quote/LICENSE && cp runtime/vendor/smol-toml/*.js runtime/vendor/smol-toml/LICENSE dist/vendor/smol-toml/ && echo '{\"type\":\"module\"}' > dist/package.json",
     "companion": "node --import tsx runtime/companion.ts",
     "test": "bun test",
     "smoke:real": "KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts --path-ignore-patterns '**/worktrees/**'",
-    "check:package": "node scripts/check-package.mjs"
+    "check:package": "node scripts/check-package.mjs",
+    "check:contracts": "node scripts/check-contract-size.mjs"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
@@ -60,6 +61,8 @@
     "scripts/companion.sh",
     "scripts/review-gate-hook.sh",
     "docs/safety.md",
+    "docs/swarm-recovery.md",
+    "docs/windows-validation.md",
     "docs/migration.md",
     "docs/models.md",
     "docs/session-visibility.md",

@@ -1,3 +1,4 @@
+import { recordRecoveryEvent, finishRecoveryRecord } from "../../runtime/swarm-recovery.js";
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile } from "node:fs/promises";
@@ -152,7 +153,7 @@ function printEntries(entries: readonly LogEntry[]): LogEntry[] {
 
 async function runSwarmFault(
   activationError: RuntimeError,
-  options: { write?: boolean; budgetMs?: number; deactivate?: () => Promise<void> } = {},
+  options: { write?: boolean; budgetMs?: number; deactivate?: () => Promise<void>; finalizeFailure?: boolean } = {},
 ): Promise<{ result: any; retained: boolean; deactivations: number }> {
   const source = await readFile(path.join(process.cwd(), "runtime/commands/swarm.ts"), "utf8");
   const code = new Bun.Transpiler({ loader: "ts" }).transformSync(
@@ -164,6 +165,10 @@ async function runSwarmFault(
   let deactivations = 0;
   const bindings = {
     RuntimeError,
+    recordRecoveryEvent,
+    finishRecoveryRecord: options.finalizeFailure ? () => { throw new Error("journal finalization failed"); } : finishRecoveryRecord,
+    probeProcessIdentity: async () => ({ complete: true, identity: undefined }),
+    resolveKimiHome: () => "/virtual/home",
     ResponseTimeoutError: class extends RuntimeError {
       constructor(budgetMs: number, stage: string) {
         super("RESPONSE_TIMEOUT", `${stage} timed out`, stage, { details: { budget_ms: budgetMs } });
@@ -174,6 +179,7 @@ async function runSwarmFault(
     JobStore: class {
       getJob() { return { ...job }; }
       updateRunningJob() {}
+      saveSwarmRecovery() {}
       close() {}
     },
     createCliCancellationHandlers: () => ({
@@ -209,7 +215,7 @@ async function runSwarmFault(
           onPatchCaptureFailure() { retained = true; },
         }
       : undefined,
-  );
+  ).catch((error: unknown) => ({ error }));
   return { result, retained, deactivations };
 }
 
@@ -592,6 +598,15 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       expect(printEntries(log)).toHaveLength(1);
     });
   }, 20_000);
+
+  test("a failed final journal commit cannot discard the write worktree", async () => {
+    const { result, retained } = await runSwarmFault(
+      new RuntimeError("SWARM_ACTIVATION_FAILED", "failed before mutation", "swarm.activation"),
+      { write: true, finalizeFailure: true },
+    );
+    expect(retained).toBe(true);
+    expect(result.error.message).toBe("journal finalization failed");
+  });
 
   test("routes process-only cleanup uncertainty to worktree retention without a session id", async () => {
     const { result, retained, deactivations } = await runSwarmFault(

@@ -1,3 +1,4 @@
+import type { SwarmRecoveryEvent } from "./swarm-recovery.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { open } from "node:fs/promises";
@@ -47,6 +48,8 @@ export interface SwarmActivationOptions extends CliClientEnvironmentOptions {
   readonly model?: string;
   readonly signal?: AbortSignal;
   readonly expectedVersion?: string;
+  /** Synchronous write-ahead checkpoints; failures prevent further mutation. */
+  readonly onRecoveryEvent?: (event: SwarmRecoveryEvent) => void;
 }
 
 export interface SwarmSessionIdentity {
@@ -78,6 +81,8 @@ interface OwnedWebChild {
   snapshotIncomplete: boolean;
   rootIdentity?: ProcessIdentity;
   cleanupSummary?: string;
+  recoveryFailed?: boolean;
+  onRecoveryEvent?: (event: SwarmRecoveryEvent) => void;
 }
 
 interface ReadyWebChild extends OwnedWebChild {
@@ -107,6 +112,7 @@ export async function preactivateSwarmSession(
     await verifyMeta(web, prepared.expectedVersion, options.signal, failureCode);
     const model = await resolveProfileModel(web, options, failureCode);
     identity = await createSession(web, options, failureCode);
+    options.onRecoveryEvent?.({ kind: "session", ...identity });
     profileMutationAttempted = true;
     await postSwarmProfile(web, identity, true, model, options.signal, failureCode);
     await verifySwarmStatus(web, identity, true, model, options.signal, failureCode);
@@ -193,6 +199,7 @@ export async function deactivateSwarmSession(
       options.signal,
       failureCode,
     );
+    options.onRecoveryEvent?.({ kind: "disabled" });
     throwIfAborted(options.signal, failureCode, "swarm-deactivation.complete");
   } catch (error) {
     const primary = asSafeFailure(error, failureCode, "swarm-deactivation");
@@ -284,6 +291,7 @@ async function startWebChild(
     "error",
   ];
   let child: ChildProcessWithoutNullStreams;
+  options.onRecoveryEvent?.({ kind: "web-spawn" });
   try {
     child = spawn(options.command, args, {
       cwd: options.cwd,
@@ -292,6 +300,7 @@ async function startWebChild(
       detached: process.platform !== "win32",
     });
   } catch {
+    options.onRecoveryEvent?.({ kind: "web-exit" });
     throw failure(
       failureCode,
       "swarm-activation.spawn",
@@ -328,6 +337,7 @@ async function startWebChild(
     child,
     closePromise,
     descendants: [],
+    onRecoveryEvent: options.onRecoveryEvent,
     trackingStopped: false,
     lastSnapshotComplete: false,
     snapshotIncomplete: false,
@@ -343,6 +353,7 @@ async function startWebChild(
   try {
     const ready = await waitForReadyLine(owned, options.signal, failureCode);
     await refreshOwnedDescendants(owned);
+    if (owned.recoveryFailed) throw failure(failureCode, "swarm-activation.recovery", "Cannot persist web ownership; refusing session mutation.");
     return Object.assign(owned, ready);
   } catch (error) {
     const primary = asSafeFailure(error, failureCode, "swarm-activation.ready");
@@ -915,6 +926,11 @@ async function refreshOwnedDescendants(owned: OwnedWebChild): Promise<void> {
       owned.snapshotIncomplete = true;
       owned.lastSnapshotComplete = false;
     }
+    try {
+      owned.onRecoveryEvent?.({ kind: "web-processes", identities: [...(owned.rootIdentity ? [owned.rootIdentity] : []), ...owned.descendants], complete: owned.lastSnapshotComplete });
+    } catch {
+      owned.recoveryFailed = true;
+    }
   })().finally(() => {
     owned.refreshPromise = undefined;
   });
@@ -922,6 +938,15 @@ async function refreshOwnedDescendants(owned: OwnedWebChild): Promise<void> {
 }
 
 async function teardownOwnedChild(owned: OwnedWebChild): Promise<boolean> {
+  const quiescent = await teardownOwnedChildInner(owned);
+  if (quiescent && !owned.recoveryFailed) {
+    owned.onRecoveryEvent?.({ kind: "web-exit" });
+    return true;
+  }
+  return false;
+}
+
+async function teardownOwnedChildInner(owned: OwnedWebChild): Promise<boolean> {
   await stopDescendantTracking(owned);
   const childPid = owned.child.pid;
   if (childPid === undefined) return true;

@@ -85,6 +85,9 @@ export async function sweepStaleJobs(store, paths) {
     for (const job of store.listRunningJobsWithProcessHints()) {
         if (store.getMcpTask(job.job_id))
             continue;
+        // Recovery owns orphaned swarm resources; PID-only sweeping must not signal replacements.
+        if (store.getSwarmRecovery(job.job_id))
+            continue;
         if (!isStaleEnoughToSweep(job)) {
             continue;
         }

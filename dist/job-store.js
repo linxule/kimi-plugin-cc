@@ -122,6 +122,8 @@ export class JobStore {
       CREATE INDEX IF NOT EXISTS jobs_repo_updated_idx
         ON jobs (repo_id, updated_at DESC);
 
+      CREATE TABLE IF NOT EXISTS swarm_recovery (job_id TEXT PRIMARY KEY, payload TEXT NOT NULL, recovery_owner TEXT);
+
       CREATE INDEX IF NOT EXISTS jobs_repo_type_updated_idx
         ON jobs (repo_id, command_type, updated_at DESC);
 
@@ -185,6 +187,17 @@ export class JobStore {
             }
             throw translateSqliteError(error);
         }
+    }
+    getSwarmRecovery(jobId) {
+        const row = this.db.get("SELECT payload, recovery_owner FROM swarm_recovery WHERE job_id = ?", jobId);
+        return row ? { record: JSON.parse(row.payload), owner: row.recovery_owner } : null;
+    }
+    saveSwarmRecovery(jobId, record) {
+        this.db.run("INSERT INTO swarm_recovery (job_id, payload) VALUES (?, ?) ON CONFLICT(job_id) DO UPDATE SET payload = excluded.payload", [jobId, JSON.stringify(record)]);
+    }
+    claimSwarmRecovery(jobId, expected, owner) {
+        this.db.run("UPDATE swarm_recovery SET recovery_owner = ? WHERE job_id = ? AND recovery_owner IS ?", [owner, jobId, expected]);
+        return this.db.get("SELECT changes() AS count").count === 1;
     }
     close() {
         this.db.close();

@@ -125,3 +125,7 @@ Billing and access depend on the account behind the key. The workflow references
 Dependabot checks the Bun manifest, lockfile, and GitHub Actions weekly. Updates require review; automatic merge and release are not configured.
 
 The vendored runtime parsers are outside `bun audit` coverage. Review [TOML parser provenance](../runtime/vendor/smol-toml/README.md) and [shell parser provenance](../runtime/vendor/shell-quote/README.md) when an advisory affects them. Parser regressions cover source, compiled output, and the Codex runtime mirror.
+
+## Windows spawn controls
+
+The `windows-spawn` CI job compiles TypeScript on `windows-latest` and runs `node --test tests/windows/spawn-preflight.mjs` with Node 22. It checks UTF-16/quoting bounds, a real short Node spawn and refusal of a 103 KB prompt through the emitted CLI client before spawn. It uses no credentials, Kimi binary or model calls. This is not native Kimi, Git Bash or full Windows lifecycle certification; community reproduction of issue #14 remains welcome; see [the validation checklist](windows-validation.md). The normal `check` also enforces the AGENTS.md size limit.

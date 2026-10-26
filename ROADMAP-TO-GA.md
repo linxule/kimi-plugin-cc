@@ -235,6 +235,29 @@ Remaining open items: H1 prevention and filesystem-dependent write coverage; its
 
 ## Post-GA audit log
 
+**2026-10-26 — Unreleased recovery and spawn diagnostics.** Integrated contributor
+PR #22 with its original commits, preserving structured process errors and bounding
+the additional message. Added a Windows UTF-16 command-line guard and a credential-free
+Windows CI lane; issue #14 remains open because argv transport and native Windows
+support are not resolved. See [community validation](docs/windows-validation.md).
+
+Exact CLI 2.3.2 swarm runs now journal launch intent/identity and pre-mutation session
+ownership. Preview/apply recovery validates ownership, serializes attempts, refuses
+uncertainty, disables the recorded session and captures retained work without applying
+or deleting it. Terminal outcomes stay immutable; abandoned running jobs become failed.
+Age-based orphan deletion is removed. A kill before identity persistence remains a
+manual-inspection gap; no supervisor guarantee or Windows process recovery is claimed.
+See [recovery mechanics](docs/swarm-recovery.md).
+
+Validation: compiled forced-kill recovery, owner/claim refusal, terminal preservation,
+post-print cancellation, identity replacement and journal-failure regressions passed.
+The local full check passed 1,299 tests with 28 skipped and zero failures (16,199
+assertions); subsequent shared-flag/help cleanup passed all 36 help checks and typecheck.
+The final merge commit's CI is the authority for the exact Linux suite and Windows
+controls. Package validation covers both bundled distributions. AGENTS.md has 2,007
+bytes of headroom and its 32 KiB limit is enforced in `check`. No release/version,
+certification-table or installed-hook change is part of this work.
+
 **2026-09-26 — Registry documentation check.** Confirmed npm 2.0.7, the validated
 artifact, both isolated host setup checks, and the configured trusted publisher.
 Updated the multilingual README, current compatibility guide, contributor
