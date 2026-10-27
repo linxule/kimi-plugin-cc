@@ -25,7 +25,7 @@ import {
   type ProcessIdentity,
 } from "./process-tree.js";
 
-const PREACTIVATION_VERSION = "2.3.2";
+const PREACTIVATION_VERSIONS: readonly string[] = ["2.3.2", "2.3.3"];
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -94,7 +94,7 @@ type FailureCode = "SWARM_ACTIVATION_FAILED" | "SWARM_SESSION_CLEANUP_FAILED";
 type SwarmJournalState = "missing" | "unreadable" | "enter" | "exit" | "other";
 
 export function requiresSwarmPreactivation(version: string | null): boolean {
-  return version === PREACTIVATION_VERSION;
+  return version !== null && PREACTIVATION_VERSIONS.includes(version);
 }
 
 export async function preactivateSwarmSession(
@@ -254,7 +254,7 @@ async function prepareWebSpawn(
     throw failure(
       failureCode,
       "swarm-activation.version",
-      `Swarm web preactivation requires exact kimi-code ${PREACTIVATION_VERSION}.`,
+      `Swarm web preactivation requires exact kimi-code ${PREACTIVATION_VERSIONS.join(" or ")}.`,
     );
   }
 

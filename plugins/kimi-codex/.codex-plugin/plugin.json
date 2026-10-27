@@ -1,6 +1,6 @@
 {
   "name": "kimi",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "description": "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP job controls through the local Kimi Code CLI.",
   "author": {
     "name": "linxule"

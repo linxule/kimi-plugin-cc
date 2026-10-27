@@ -2,6 +2,12 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.4.3 — 2026-10-27
+
+- Certify exact kimi-code 2.3.3 for all eight native-v2 operations after exact-source review, plan and swarm controls, and candidate/production smoke. See [evidence](docs/upstream-2.3.3-certification.md).
+- Add only the reviewed 2.3.3 activation and hook-schema entries. Preserve no-plan enforcement, workspace confinement, concurrency, bounded cleanup and durable recovery; legacy-v1 remains capped at 0.41.x.
+- Expand the compatibility audit to cover the web activation server explicitly, and refresh current compatibility/status documentation without changing installed hosts.
+
 ## 2.4.2 — 2026-10-26
 
 - Integrate community PR #22's structured spawn-error classification, preserving contributor history. Bound the additional diagnostic message. Known argument/resource exhaustion no longer receives reinstall advice.

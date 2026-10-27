@@ -1,11 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
 **Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields)
-**Current capability (plugin 2.4.1, published):** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1` and `2.3.2` for every operation under the §2 construction. `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
+**Current capability (plugin 2.4.3):** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2` and `2.3.3` for every operation under the §2 construction. `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
 
-Plugin 2.4.1 certifies exact 2.3.2 with host-preactivated swarm sessions. Publication does not update installed hosts. Evidence: [certification record](upstream-2.3.2-certification.md). Plugin 2.3.1 added CLI 2.3.1 certification; plugin 2.4.0 preserved it while adding MCP transport.
+Plugin 2.4.3 certifies exact 2.3.3 with host-preactivated swarm sessions. Publication does not update installed hosts. Evidence: [certification record](upstream-2.3.3-certification.md). Plugin 2.3.1 added CLI 2.3.1 certification; plugin 2.4.0 preserved it while adding MCP transport.
 
 Exact 2.1.0/2.1.1 evidence: [certification record](upstream-2.1-certification.md).
 The known active-plan bypass remains; only the no-plan construction is
@@ -144,7 +144,7 @@ expanded production capability requires a separately authorized release.
 
 | Engine | Operation | Production state |
 |---|---|---|
-| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
+| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
 | `legacy-v1` | review, challenge, ask, rescue, review_gate | certified within `KIMI_TESTED_MINORS` (≤ 0.41) for an explicitly pinned binary |
 | `legacy-v1` | pursue / swarm / swarm-write | certified from kimi-code 0.8 / 0.12 / 0.18 within `KIMI_TESTED_MINORS` |
 
@@ -183,7 +183,7 @@ the plan additionally persists `safety_profile = "native-v2-no-plan/1"`, which
 the preflight re-validates at the final spawn boundary. Every spawn exports
 `KIMI_CODE_NO_AUTO_UPDATE=1` and an absolute `KIMI_CODE_HOME`.
 
-Exact 2.3.2 swarm activation is a same-job, plugin-owned fresh session, not an
+Exact 2.3.2 and 2.3.3 swarm activation is a same-job, plugin-owned fresh session, not an
 arbitrary user resume. Authenticated loopback `/meta` supplies activation-time
 backend/version evidence but never replaces the print marker. The job records
 `kimi_session_id_source = "preactivated"` before model spawn; the returned print

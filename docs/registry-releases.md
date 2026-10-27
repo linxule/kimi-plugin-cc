@@ -6,6 +6,12 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
+Plugin **2.4.3** adds exact CLI **2.3.3** certification for all eight operations,
+with the existing host-preactivated swarm lifecycle and durable recovery.
+See the [certification record](./upstream-2.3.3-certification.md).
+Release execution and registry verification are recorded in the release notes;
+publication uses the same validated-tarball OIDC workflow below.
+
 Plugin **2.4.2** adds durable interrupted-swarm recovery and Windows spawn diagnostics.
 Exact CLI certification remains unchanged through **2.3.2**; this is not a new
 Windows-support or large-prompt-transport claim. See the [release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.2),

@@ -2,7 +2,7 @@
 
 Normal stop: use `scripts/companion.sh cancel` for a shell-owned run, or the MCP job cancel tool for an MCP-owned run. A hard kill cannot execute cleanup. Cancellation still starts no fresh cleanup server.
 
-For exact CLI 2.3.2 swarm runs created by this runtime, status includes a durable `swarm_recovery` record. It contains the resolved home/workspace, companion identity, launch intent, verified process identities and session identity. It never contains the web authentication token, credentials, prompt or config contents. Session identity is committed before the request enabling swarm mode.
+For exact CLI 2.3.2 and 2.3.3 swarm runs created by this runtime, status includes a durable `swarm_recovery` record. It contains the resolved home/workspace, companion identity, launch intent, verified process identities and session identity. It never contains the web authentication token, credentials, prompt or config contents. Session identity is committed before the request enabling swarm mode.
 
 ## Preview, then recover
 

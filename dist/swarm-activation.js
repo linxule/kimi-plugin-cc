@@ -9,7 +9,7 @@ import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } 
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
-const PREACTIVATION_VERSION = "2.3.2";
+const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3"];
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -25,7 +25,7 @@ const ESCALATION_MS = 1_500;
 const POST_KILL_QUIESCENCE_MS = 500;
 const ENV_MODEL_ALIAS = "__kimi_env_model__";
 export function requiresSwarmPreactivation(version) {
-    return version === PREACTIVATION_VERSION;
+    return version !== null && PREACTIVATION_VERSIONS.includes(version);
 }
 export async function preactivateSwarmSession(options) {
     const failureCode = "SWARM_ACTIVATION_FAILED";
@@ -116,7 +116,7 @@ async function prepareWebSpawn(options, failureCode) {
     }
     const expectedVersion = options.expectedVersion ?? options.executionPlan.kimiVersion;
     if (expectedVersion === null || !requiresSwarmPreactivation(expectedVersion)) {
-        throw failure(failureCode, "swarm-activation.version", `Swarm web preactivation requires exact kimi-code ${PREACTIVATION_VERSION}.`);
+        throw failure(failureCode, "swarm-activation.version", `Swarm web preactivation requires exact kimi-code ${PREACTIVATION_VERSIONS.join(" or ")}.`);
     }
     const kimiHome = resolveKimiHome(options.env, options.cwd);
     if (options.executionPlan.intendedEngine === "native-v2") {

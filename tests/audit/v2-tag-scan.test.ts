@@ -416,6 +416,39 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
     [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
       "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
   },
+  // 2.3.3: exact-tag construction/schema files are byte-identical to 2.3.2.
+  "2.3.3": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "d4cdf4d4dc3fd0fb761f21ffbe9bfa0b6f313243fcbf7e259e2aa7090c4f0fc6",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "ef981d83e607f0427f77a0fc89e4c03d301116b01ac5f0c33bb68ea955749455",
+    [`${CORE}/features/plan/planService.ts`]:
+      "1d3526543839a78820e6a2e21f746c311e3034812f479233a4462a2a4fe5fc4d",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "318b67bece05963fa703cf29d64c43db229a0443a2402b433ae61798db469f4c",
+    [`${CORE}/state/state.ts`]:
+      "f473464f22800937ef85a0eb9f4ddd16a8041277eeb4c35b55f4bca6ac52255b",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "5fc805219ac755c7f155695f783b553088aab90a1ed44aa8f3d59e2926204dde",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "9a66326ad86186815cc63935e36584a2d1f2ee6cb9c73f303a083536f74a3316",
+    [`${CORE}/wire/record.ts`]:
+      "8b9eead225a5120d5dccd829cb900cd31fe2262ac0771bff4983043bb6f55056",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "843b09947cb7b3bc91cb8bf8216c10d00baba4fcd268b34b174c57b9ea04c533",
+    [`${CLI}/cli/v2/run-v2-print.ts`]:
+      "cd4c6c8274cf85720d63e403604108a340acc47bb95d082f6c466f20901457ec",
+    [`${CORE}/app/sessionManager/sessionLookup.ts`]:
+      "7932bc912e29f4cb0d04834e60a79d8ef7f7a56591085c4357d86bf56fcce5fc",
+    [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
+      "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
+  },
 };
 
 /**

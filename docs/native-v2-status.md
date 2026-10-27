@@ -1,49 +1,47 @@
-# Native v2 status — 2026-10-25
+# Native v2 status — 2026-10-27
 
-Plugin 2.4.1 certifies exact CLI 2.3.2
-(`b8dd3a134060c6e80ba4a1659335cd63b68483f2`) for all eight operations under the
-unchanged no-plan construction, alongside certified 0.42.0, 0.43.0, 0.43.1,
-2.0.0–2.0.2, 2.1.0, 2.1.1, 2.2.0, 2.3.0 and 2.3.1. The exact-tag scan passed 15
-tests with 92 assertions, the non-vacuous plan controls passed, the hardened
-candidate matrix passed 15/15 with 115 assertions, and the final production
-matrix passed 19/19 with 125 assertions in 296.67 seconds. Independent review,
-repository validation and package validation also passed. Release CI run
-40236704464, publish run 40237085945, and closeout CI run 40238295139 passed.
+Plugin 2.4.3 adds exact CLI 2.3.3
+(`ec495f0cb00f6db9a9118bf979112886f4264a41`) for all eight operations under the
+unchanged no-plan construction. Earlier certified versions remain supported;
+the [runtime table](../runtime/kimi-engine.ts) is the exact routing authority.
+Legacy-v1 remains limited to pinned binaries through 0.41.x.
 
-Upstream 2.3.2 removes model-started `AgentSwarm` from fresh print sessions. For
-versions that require activation (currently exact 2.3.2), the plugin runs the
-planned CLI through short-lived, authenticated loopback
-`web --no-open --host 127.0.0.1 --port 0 --log-level error` lifecycles before and
-after one ordinary `kimi -p -r` prompt runner. Activation creates and verifies a
-session with the selected model, auto permission and `swarm_mode:true`; cleanup
-disables it and verifies `swarm_mode.exit`. The ready token remains in memory and
-out of logs, activation is inside the finite job budget, the returned print
-session must match the `preactivated` session id, and cleanup failure prevents
-success. Older certified versions continue to use direct `kimi -p`; this is not a
-full RPC transport or a model-self-activation workaround. MCP uses the same
-`runSwarm` implementation.
+Four independent source reviews, the exact-tag scan (15 tests, 92 assertions),
+plan-ON/OFF controls, and direct-OFF/preactivated-ON swarm controls passed.
+The candidate matrix passed 19 tests and 125 assertions with no failures or
+skips. The final production matrix also passed 19/125 without skips in 312.83
+seconds (278-byte child-authored patch, clean user tree and removed worktree).
+The final isolated full check passed 1,306 tests with 28 expected opt-in skips
+and zero failures; package validation passed 232 files. Release evidence is in the
+[2.3.3 evidence record](upstream-2.3.3-certification.md).
 
-The initial 15/15 candidate smoke with 84 assertions was rejected as vacuous for
-swarm: a direct OFF control produced zero child journals. The hardened matrix
-instead requires distinct child journals, assigned Write attempts and results,
-and child-authored patches. Targeted OFF/ON controls prove the activation path.
-Final lifecycle and process tests passed 58/58 with 284 assertions, engine and
-setup tests 97/97 with 1,305 assertions, focused runtime tests 142/142, recovery
-tests 41/41, and the compiled survivor lifecycle passed with two inactive
-descendants. The final production-mode run passed 19/19 with 125 assertions in
-296.67 seconds. The final full `bun run check` passed 1,268 tests with zero
-failures and 16,055 assertions across 78 files. Package validation passed 224
-files. Independent review is complete: Claude reports no blockers and Codex
-returned RESOLVED. Release commit `06a0a47f2b34dffb8dd71e7ce93646212e74ed19`
-passed CI run 40236704464; annotated `v2.4.1` and publish run 40237085945 are
-live. npm `latest` is 2.4.1 with 224 files and SHA-1
-`77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`, byte-identical to the CI artifact;
-fresh registry and artifact installs passed both host setup/checks. Final
-closeout CI run 40238295139 passed; certification does not update installed hosts.
+Exact CLI 2.3.2 and 2.3.3 require host-preactivated swarm sessions. Short-lived,
+authenticated loopback web lifecycles activate and deactivate a same-job
+session around one ordinary `kimi -p -r` prompt runner. Model, auto permission,
+plan OFF, version and session identity are verified; the token stays in memory.
+Activation consumes the finite job budget. Cleanup must verify deactivation
+and process quiescence; uncertainty prevents success and preserves diagnostics
+and the write worktree. Durable recovery remains preview-first and cannot
+change a terminal job outcome. Older certified versions use direct print.
 
-Plugin and CLI versions advance independently. Plugin 2.4.1 certifies exact CLI
-2.3.2; their nearby numbers do not imply version alignment. Publication does not
-update installed hosts or the operator's CLI pin.
+Swarm evidence requires distinct child journals and each assigned Write/Edit
+path correlated with its own toolCallId/result. A tool-call record, exit 0,
+aggregate denial or coordinator-only patch is insufficient. The exact 2.3.3
+OFF control created no children; ON produced two children with managed denials
+and verified deactivation. Candidate write-swarm captured a 306-byte patch,
+left the user tree clean, and removed the worktree.
+
+The plan-file bypass remains present upstream; every no-plan closure stays in
+force. Stream records still lack execution outcomes, and session hints remain
+late, so detection ambiguity and timeout recovery are unchanged. Publication
+does not update installed hosts or the operator's CLI pin. Plugin and CLI
+versions advance independently; their numbers are not certification evidence.
+
+> **2.3.2 (certified 2026-10-25, plugin 2.4.1; retained by 2.4.2):** this release
+> introduced the bounded host activation lifecycle and child-attributed swarm
+> proof. The initial superficially green swarm run was rejected as vacuous;
+> the hardened candidate and final production gates passed before publication.
+> See [the complete historical record](upstream-2.3.2-certification.md).
 
 > **2.3.1 (certified 2026-10-23, plugin 2.3.1; retained by 2.4.0):** the exact
 > tag scan, plan-ON/OFF controls and full candidate smoke passed (15/15, no

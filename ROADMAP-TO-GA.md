@@ -1,14 +1,14 @@
 # Roadmap
 
-Current direction for plugin 2.4.1 and exact Kimi Code CLI 2.3.2 certification, updated 2026-10-25. The annotated v2.4.1 tag and npm release are published; closeout CI run 40238295139 passed. The original filename is retained so existing links keep working.
+Current direction for plugin 2.4.3 and exact Kimi Code CLI 2.3.3 certification, updated 2026-10-27. The original filename is retained so existing links keep working. Release validation and publication evidence live in the [certification record](docs/upstream-2.3.3-certification.md) and release notes.
 
 For installation, start with the [multilingual README](./README.md). For release details, see the [changelog](./CHANGELOG.md). The exact compatibility table lives in [runtime/kimi-engine.ts](./runtime/kimi-engine.ts); the standing safety contracts live in [AGENTS.md](./AGENTS.md) and [docs/invariants.md](./docs/invariants.md).
 
 ## Where the project stands
 
-The plugin supports **Claude Code and Codex** through the same subprocess-first runtime. Each job retains one ordinary `kimi -p` prompt runner. On versions requiring swarm activation (currently exact 2.3.2), short-lived authenticated loopback `kimi web` processes activate and deactivate the same-job session around that runner; this is not a full RPC transport. The native-v2 safety model keeps plan mode unreachable in plugin-managed sessions and checks compatibility before spawning Kimi.
+The plugin supports **Claude Code and Codex** through the same subprocess-first runtime. Each job retains one ordinary `kimi -p` prompt runner. On versions requiring swarm activation (currently exact 2.3.2 and 2.3.3), short-lived authenticated loopback `kimi web` processes activate and deactivate the same-job session around that runner; this is not a full RPC transport. The native-v2 safety model keeps plan mode unreachable in plugin-managed sessions and checks compatibility before spawning Kimi.
 
-Plugin 2.4.1 certifies exact kimi-code 2.3.2 for all eight operations, alongside the certified versions through 2.3.1 (the table lives in `runtime/kimi-engine.ts`). The hardened candidate matrix passed 15/15 with 115 assertions, the final production matrix passed 19/19 with 125 assertions in 296.67 seconds, final repository validation passed 1,268 tests with zero failures and 16,055 assertions across 78 files, and package validation passed 224 files. Independent review is complete. Release commit `06a0a47f2b34dffb8dd71e7ce93646212e74ed19` passed CI run 40236704464; annotated `v2.4.1` and publish run 40237085945 are live. npm `latest` is 2.4.1 with 224 files and SHA-1 `77fe6daaa0f23750cc9b5d857bdbdd5107a7d4ce`, byte-identical to the CI artifact; fresh registry and artifact installs passed both host setup/checks. Final closeout CI run 40238295139 passed ([current status](./docs/native-v2-status.md)). Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release; 2.4.1 preparing 2.3.2 is not a version-alignment claim, and the number alone is never certification evidence.
+Plugin 2.4.3 adds exact kimi-code 2.3.3 for all eight operations, alongside every previously certified version. Four source reviews, the exact-tag scan, non-vacuous plan/swarm controls and the full candidate matrix passed. Final production and release gates are recorded in [current status](docs/native-v2-status.md) and the [evidence record](docs/upstream-2.3.3-certification.md). Plugin versions advance independently using ordinary SemVer; no version number substitutes for certification evidence.
 
 | Available now | What that means for users |
 | --- | --- |
@@ -44,7 +44,7 @@ These are maintenance commitments and open investigations, not promised release 
 - **No automatic application of swarm patches or Git commits:** the user or host owns those decisions.
 - **No hidden model substitution or credential collection in chat:** provider setup stays in native Kimi; per-task model selection leaves the saved default alone.
 - **No plan-mode workaround:** use the certified runtime path and fix the reported configuration or version mismatch.
-- **No general RPC or model-activation workaround:** one ordinary print runner remains the model path. Exact 2.3.2 swarm uses only authenticated loopback activation/deactivation; activation shares the existing job budget, and verified cleanup is required for success.
+- **No general RPC or model-activation workaround:** one ordinary print runner remains the model path. Exact 2.3.2 and 2.3.3 swarm uses only authenticated loopback activation/deactivation; activation shares the existing job budget, and verified cleanup is required for success.
 - **Real model tests remain opt-in:** local certification and manual CI smoke use an authenticated account and incur model usage. The ordinary CI build/test gate runs without provider credentials. Enabling per-push paid smoke is a cost decision, not an unfinished implementation (H7).
 
 ## How work ships
@@ -234,6 +234,9 @@ Remaining open items: H1 prevention and filesystem-dependent write coverage; its
 </details>
 
 ## Post-GA audit log
+
+**2026-10-27 — Plugin 2.4.3: exact CLI 2.3.3 certification.** Four independent source reviews, the 15-test/92-assertion exact-tag scan, plan-ON/OFF controls and direct-OFF/preactivated-ON swarm controls passed. The candidate matrix passed 19 tests and 125 assertions without failures or skips; child-authored write-swarm produced a 306-byte patch with a clean user tree and removed worktree. Add only exact 2.3.3 to the production, activation and reviewed hook-schema tables. No-plan closures, permissions, concurrency, lifecycle/recovery ownership and the legacy 0.41.x boundary stay unchanged. KAP UI configuration changed outside the monitor's original six scopes; activation endpoints remain unchanged, and the audit playbook now includes their server/CLI dependency surface. Final production validation and publication are recorded in the [2.3.3 evidence](docs/upstream-2.3.3-certification.md) and release notes; installed hosts are unchanged.
+
 
 **2026-10-26 — Plugin 2.4.2: recovery and spawn diagnostics.** Integrated contributor
 PR #22 with its original commits, preserving structured process errors and bounding
