@@ -1,36 +1,47 @@
-# Native v2 status — 2026-10-27
+# Native v2 status — 2026-10-29
 
-Plugin 2.4.3 adds exact CLI 2.3.3
-(`ec495f0cb00f6db9a9118bf979112886f4264a41`) for all eight operations under the
-unchanged no-plan construction. Earlier certified versions remain supported;
-the [runtime table](../runtime/kimi-engine.ts) is the exact routing authority.
-Legacy-v1 remains limited to pinned binaries through 0.41.x.
+Plugin 2.4.4 certifies exact CLI 2.4.0 for all eight operations
+(`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`). Both expanded matrices and the
+final clean repository/package gates passed, including real rescue and
+deterministic Bash.cwd evidence. Independent code review returned APPROVE and
+documentation closeout found no remaining blocker. Earlier certified versions
+remain supported; the [runtime table](../runtime/kimi-engine.ts) is the exact
+routing authority. Legacy-v1 remains limited to pinned binaries through 0.41.x.
 
-Four independent source reviews, the exact-tag scan (15 tests, 92 assertions),
-plan-ON/OFF controls, and direct-OFF/preactivated-ON swarm controls passed.
-The candidate matrix passed 19 tests and 125 assertions with no failures or
-skips. The final production matrix also passed 19/125 without skips in 312.83
-seconds (278-byte child-authored patch, clean user tree and removed worktree).
-The final isolated full check passed 1,306 tests with 28 expected opt-in skips
-and zero failures; package validation passed 232 files. Release evidence is in the
-[2.3.3 evidence record](upstream-2.3.3-certification.md).
+The exact-tag scan passed 15 tests and 96 assertions. Revised plan-ON/OFF
+controls and direct-OFF/preactivated-ON swarm controls passed. The expanded
+candidate matrix passed 21 tests and 154 assertions without skips in 440.82
+seconds; production-table mode also passed 21/154 without skips in 431.51
+seconds. Both write-swarm runs captured a 278-byte child-authored patch, left
+the user tree clean, and removed the worktree. The final full check passed 1,312
+tests with 30 expected opt-in skips, zero failures and 16,838 assertions across
+79 files in 306.75 seconds. Clean package validation passed 232 files. A
+243-file package containing 11 ignored sync-conflict copies was rejected, and
+the strengthened package gate now refuses that class. Independent review is
+recorded in the [2.4.0 evidence record](upstream-2.4.0-certification.md).
 
-Exact CLI 2.3.2 and 2.3.3 require host-preactivated swarm sessions. Short-lived,
-authenticated loopback web lifecycles activate and deactivate a same-job
-session around one ordinary `kimi -p -r` prompt runner. Model, auto permission,
-plan OFF, version and session identity are verified; the token stays in memory.
-Activation consumes the finite job budget. Cleanup must verify deactivation
-and process quiescence; uncertainty prevents success and preserves diagnostics
-and the write worktree. Durable recovery remains preview-first and cannot
-change a terminal job outcome. Older certified versions use direct print.
+Exact CLI 2.3.2, 2.3.3 and 2.4.0 require host-preactivated swarm sessions.
+Short-lived, authenticated loopback web lifecycles activate and deactivate a
+same-job session around one ordinary `kimi -p -r` prompt runner. Model, auto
+permission, plan OFF, version and session identity are verified; the token
+stays in memory. The lifecycle sets `KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to
+prevent ambient idle-session reclamation. Activation consumes the finite job
+budget. Graceful shutdown
+has a bounded 15-second allowance because exact 2.4.0 exceeded the previous
+5-second bound and exited cleanly in 6.743 seconds. Cleanup must verify
+deactivation and process quiescence; uncertainty prevents success and preserves
+diagnostics and the write worktree. Durable recovery remains preview-first and
+cannot change a terminal job outcome. Older certified versions use direct print.
 
 Swarm evidence requires distinct child journals and each assigned Write/Edit
 path correlated with its own toolCallId/result. A tool-call record, exit 0,
-aggregate denial or coordinator-only patch is insufficient. The exact 2.3.3
+aggregate denial or coordinator-only patch is insufficient. The exact 2.4.0
 OFF control created no children; ON produced two children with managed denials
-and verified deactivation. Candidate write-swarm captured a 306-byte patch,
-left the user tree clean, and removed the worktree.
+and verified deactivation.
 
+Exact 2.4.0 removes EnterPlanMode and cancels default plan mode on fresh print;
+a deterministic forced call rejects before the hook with no plan state. Resumed
+plan sessions remain possible, so every-agent journal refusal stays mandatory.
 The plan-file bypass remains present upstream; every no-plan closure stays in
 force. Stream records still lack execution outcomes, and session hints remain
 late, so detection ambiguity and timeout recovery are unchanged. Publication

@@ -36,8 +36,10 @@ try {
   const archive = path.join(destination, `${pkg.name}-${pkg.version}.tgz`);
   const files = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
   const allowed = /^(?:package\/(?:package\.json|\.mcp\.json|README\.md|LICENSE|CHANGELOG\.md)|package\/(?:\.claude-plugin|\.agents\/plugins|agents|commands|hooks|dist|plugins\/kimi-codex|docs)\/|package\/scripts\/(?:companion|review-gate-hook)\.sh$)/;
+  const syncConflictCopy = /(?:^|\/)[^/]* [0-9]+(?:\.[^/]*)?(?:\/|$)/;
   for (const file of files) {
     assert(!file.split('/').includes('..'), file);
+    assert(!syncConflictCopy.test(file), `Unexpected sync-conflict copy: ${file}`);
     assert(allowed.test(file), `Unexpected published file: ${file}`);
     assert(!file.includes('node_modules') && !file.endsWith('.map'), file);
   }

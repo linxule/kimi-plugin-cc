@@ -835,8 +835,8 @@ describe("setup managed-block installer", () => {
   });
 
   test.each(["PermissionRequest", "PermissionResult", "Interrupt"].flatMap((event) =>
-    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3"].map((version) => [event, version] as const)))(
-    "exact 2.0.0/2.0.1/2.0.2/2.1.0/2.1.1/2.2.0/2.3.0/2.3.1/2.3.2/2.3.3 schemas accept %s (setup %s) but refuse unreviewed versions",
+    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0"].map((version) => [event, version] as const)))(
+    "exact reviewed 2.x schemas accept %s (setup %s) but refuse unreviewed versions",
     async (event, setupVersion) => {
       const contents = `[[hooks]]\nevent = "${event}"\ncommand = "foreign-hook"\n`;
       expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 0, version: "2.0.0" }).valid).toBe(true);
@@ -849,7 +849,12 @@ describe("setup managed-block installer", () => {
       expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 1, version: "2.3.1" }).valid).toBe(true);
       expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 2, version: "2.3.2" }).valid).toBe(true);
       expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 3, version: "2.3.3" }).valid).toBe(true);
+      expect(validateKimiHookSet(contents, { major: 2, minor: 4, patch: 0, version: "2.4.0" }).valid).toBe(true);
       for (const version of [
+        { major: 2, minor: 4, patch: 1, version: "2.4.1" },
+        { major: 2, minor: 4, patch: 0, version: "2.4.0-rc.1" },
+        { major: 2, minor: 4, patch: 0, version: "2.4.0+unreviewed" },
+        { major: 2, minor: 3, patch: 0, version: "2.4.0" },
         { major: 2, minor: 3, patch: 4, version: "2.3.4" },
         { major: 2, minor: 3, patch: 3, version: "2.3.3-rc.1" },
         { major: 2, minor: 3, patch: 3, version: "2.3.3+unreviewed" },

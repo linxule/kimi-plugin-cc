@@ -449,6 +449,41 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
     [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
       "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
   },
+  // 2.4.0: plan entry is main-agent-only and the EnterPlanMode tool is removed.
+  // Fresh print cancels the configured default; resume still replays the same
+  // wire journal. Mutable replay is used by context memory, not plan state.
+  "2.4.0": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "d4cdf4d4dc3fd0fb761f21ffbe9bfa0b6f313243fcbf7e259e2aa7090c4f0fc6",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "ef981d83e607f0427f77a0fc89e4c03d301116b01ac5f0c33bb68ea955749455",
+    [`${CORE}/features/plan/planService.ts`]:
+      "10c2cc7bf29bab9b810aa55f3ee0ca36d7a8f2947e99aadaaa1b3fec2603fe8b",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "5a98a1f4ca9f14ae1e3f967c66943045f8e389e9379e06fd88863d44a41884da",
+    [`${CORE}/state/state.ts`]:
+      "736bd13f41d245b519ddce795bbf5ea6847016ed244c58f0b14d603d548a4f41",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "074d63a1a1be9d361abf3c46656415a1be1517a9a8237df34a6cc24ce9864cef",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "e92bc7c0d2d9428c810a9fb44ce2a8217ae7dfed906fbf00b59a3f3cd18bcbde",
+    [`${CORE}/wire/record.ts`]:
+      "8b9eead225a5120d5dccd829cb900cd31fe2262ac0771bff4983043bb6f55056",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "843b09947cb7b3bc91cb8bf8216c10d00baba4fcd268b34b174c57b9ea04c533",
+    [`${CLI}/cli/v2/run-v2-print.ts`]:
+      "b378a1dd32b1b0acd42f2f544d10ffbd5afeab1f8482e4125988c7a716c180d3",
+    [`${CORE}/app/sessionManager/sessionLookup.ts`]:
+      "d4a087aa8364e1ca1b9c7b2324956d06495c8c54c880c2a767a27560c676129d",
+    [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
+      "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
+  },
 };
 
 /**
@@ -542,7 +577,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(allowIndex).toBeGreaterThan(gateIndex);
   });
 
-  test("plan mode can only be entered from the three audited call sites", () => {
+  test("plan service entry callers match the exact audited tool surface", () => {
     expect(filesContaining([CORE, CLI, KAP], "new PlanModeEnter(")).toEqual([
       `${CORE}/features/plan/planService.ts`,
     ]);
@@ -550,10 +585,15 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      `${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`,
+      ...(upstreamVersion() === "2.4.0"
+        ? []
+        : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
+    if (upstreamVersion() === "2.4.0") {
+      expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
+    }
   });
 
   test("default_plan_mode is a plain optional boolean with default false and no env binding", () => {
@@ -583,6 +623,11 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
+    if (upstreamVersion() === "2.4.0") {
+      expect(runner).toContain("plan.cancel();");
+      expect(runner).toContain("await notePlanMode(agent, opts.session);");
+      expect(runner).toContain("default_plan_mode is not applied in print mode");
+    }
   });
 
   test("every tool execution passes the single before-execute emitter", () => {

@@ -9,10 +9,11 @@ import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } 
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
-const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3"];
+const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3", "2.4.0"];
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
-const SHUTDOWN_TIMEOUT_MS = 5_000;
+// Exact 2.4.0 can take longer than 5s to drain session/workspace lifecycle work.
+const SHUTDOWN_TIMEOUT_MS = 15_000;
 const JOURNAL_TIMEOUT_MS = 2_000;
 const JOURNAL_POLL_MS = 50;
 const READY_LINE_MAX_CHARS = 65_536;

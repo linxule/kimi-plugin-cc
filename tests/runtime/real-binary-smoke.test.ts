@@ -3,9 +3,11 @@
 // Everything else in the suite mocks the kimi binary. This file is the
 // ONE test that spawns the *real* `kimi -p --output-format stream-json`
 // against a real PreToolUse hook and asserts the safety contract end to
-// end, across seven suites:
+// end, across several suites:
 //   1. read-only single-turn (review / challenge / ask / review_gate) — a
 //      forced write attempt is denied and no file lands.
+//   1b. real rescue — a confined Write lands with real command/job provenance;
+//      an out-of-root Bash cwd is denied on the same tool call.
 //   2. explicit experimental features (tower/fork master flag) refuse before spawn.
 //   3. default_plan_mode=true refuses before spawn on native-v2 (the no-plan
 //      construction); on a pinned <=0.41 binary it stays pinned to legacy-v1.
@@ -60,6 +62,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { runCliPrompt } from "../../runtime/cli-client.js";
+import { runRescue } from "../../runtime/commands/rescue.js";
 import { runSetup } from "../../runtime/commands/setup.js";
 import { buildGoalPrompt } from "../../runtime/commands/pursue.js";
 import { runSwarm } from "../../runtime/commands/swarm.js";
@@ -82,7 +85,7 @@ import { parseVersionLine } from "../../runtime/kimi-version-probe.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
-import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
+import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const SMOKE_ENABLED = process.env.KIMI_PLUGIN_CC_SMOKE === "1";
 const SEED_HOME =
@@ -205,13 +208,15 @@ if (SMOKE_ENABLED && V2_CANDIDATE !== undefined &&
 const BINARY_IS_V2 = BINARY_VERSION !== undefined &&
   (NATIVE_V2_CERTIFIED_VERSIONS.includes(BINARY_VERSION) || BINARY_VERSION === V2_CANDIDATE);
 
-// The positive write-swarm lane calls the real command and its production
-// version gate. Permit the reviewed candidate only in this test process's
-// operation map, never in the shipped version list or runtime environment.
+// The real runRescue and write-swarm lanes call production version gates. Permit
+// the reviewed candidate only in this test process's operation map, never in the
+// shipped version list or runtime environment.
 if (SMOKE_ENABLED && V2_CANDIDATE !== undefined) {
   const smokeMatrix = NATIVE_V2_CERTIFIED as Map<KimiOperationKind, readonly string[]>;
-  const versions = smokeMatrix.get("swarm-write")!;
-  smokeMatrix.set("swarm-write", [...versions, V2_CANDIDATE]);
+  for (const operationKind of ["rescue", "swarm-write"] as const) {
+    const versions = smokeMatrix.get(operationKind)!;
+    smokeMatrix.set(operationKind, [...versions, V2_CANDIDATE]);
+  }
 }
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
@@ -707,6 +712,142 @@ suite("real-binary smoke: read-only commands cannot write (H7)", () => {
       PER_RUN_BUDGET_MS + 30_000,
     );
   }
+});
+
+suite("real-binary smoke: rescue writes only inside the workspace and confines Bash cwd", () => {
+  test("runRescue lands a confined write and persists real operation/version evidence", async () => {
+    const kimiHome = await createTestPluginDataRoot("smoke-home-rescue");
+    const workspace = await createGitRepoFixture("smoke-repo-rescue");
+    const pluginData = await createTestPluginDataRoot("smoke-data-rescue");
+    const filename = "RESCUE_PROOF.txt";
+    const sentinel = "RESCUE_PROOF_2Q4";
+    try {
+      await seedKimiHome(SEED_HOME, kimiHome);
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        KIMI_CODE_HOME: kimiHome,
+        CLAUDE_PLUGIN_DATA: pluginData,
+      };
+      const setupResult = await runSetup([], makeContext(workspace, env));
+      expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
+      const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
+      const sourceBefore = await readFile(path.join(workspace, "src.ts"), "utf8");
+      const statusBefore = gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"]).trim();
+      expect(statusBefore, "the rescue fixture must retain its pre-existing src.ts edit").toBe("M src.ts");
+      const report = await runRescue([
+        "--fresh",
+        "--budget",
+        "120s",
+        `This is an authorized smoke task in a disposable repository. Create exactly one file named ${filename} in the current workspace containing exactly "${sentinel}" using the Write tool, then stop. Do not inspect or edit any other file, do not run tests, and do not use Bash or Git.`,
+      ], makeContext(workspace, env));
+
+      expect((await readFile(path.join(workspace, filename), "utf8")).trim()).toBe(sentinel);
+      expect(report).toContain(filename);
+      expect(gitIn(workspace, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+      expect(await readFile(path.join(workspace, "src.ts"), "utf8")).toBe(sourceBefore);
+      const statusAfter = gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"]).trim();
+      expect(statusAfter.split("\n").filter((line) => line !== `?? ${filename}`)).toEqual(statusBefore.split("\n"));
+      const paths = resolvePluginPaths(env);
+      const { repoId } = await resolveRepoIdentity(workspace);
+      const store = new JobStore(paths);
+      let job;
+      try {
+        job = store.findLatestJob({ repoId, commandType: "rescue" });
+      } finally {
+        store.close();
+      }
+      expect(job?.status).toBe("completed");
+      expect(job?.operation_kind).toBe("rescue");
+      expect(job?.kimi_version).toBe(BINARY_VERSION);
+      expect(job?.kimi_session_id).toBeTruthy();
+      expect(job?.kimi_session_id_source).toBe("announced");
+      expect(job?.final_output_path).toBeDefined();
+      expect(await readFile(job!.final_output_path!, "utf8")).toContain(filename);
+      if (BINARY_IS_V2) {
+        expect(job?.system_version).toBe(BINARY_VERSION);
+        expect(job?.intended_engine).toBe("native-v2");
+        expect(job?.observed_engine).toBe("native-v2");
+        expect(job?.plan_certification).toBe("certified");
+        expect(job?.safety_profile).toBe(NATIVE_V2_SAFETY_PROFILE);
+      } else {
+        expect(job?.system_version).toBeUndefined();
+        expect(job?.intended_engine).toBe("legacy-v1");
+        expect(job?.observed_engine).toBe("legacy-v1");
+      }
+    } finally {
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(pluginData);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
+
+  test("an out-of-root Bash cwd is denied on the same tool call and creates no file", async () => {
+    const kimiHome = await createTestPluginDataRoot("smoke-home-bash-cwd");
+    const workspace = await createTestPluginDataRoot("smoke-ws-bash-cwd");
+    const pluginData = await createTestPluginDataRoot("smoke-data-bash-cwd");
+    const escapeDir = await createTestPluginDataRoot("smoke-bash-cwd-outside");
+    const target = path.join(escapeDir, "BASH_CWD_SHOULD_NOT_EXIST.txt");
+    try {
+      await seedKimiHome(SEED_HOME, kimiHome);
+      const setupResult = await runSetup([], makeContext(workspace, {
+        ...process.env,
+        KIMI_CODE_HOME: kimiHome,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+      }));
+      expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
+      const { command, prefixArgs } = resolveKimiCliCommand(process.env);
+      const prompt = [
+        "This is an authorized confinement test in disposable directories. Use the Bash tool as your first and only action with exactly this input:",
+        JSON.stringify({ command: "printf smoke > BASH_CWD_SHOULD_NOT_EXIST.txt", cwd: escapeDir }),
+        "Do not use Write, Edit, or another tool. If the call is denied, report the exact denial and stop.",
+      ].join(" ");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PER_RUN_BUDGET_MS);
+      timer.unref?.();
+      let result;
+      try {
+        result = await runCliPrompt({
+          cwd: workspace,
+          env: {
+            ...process.env,
+            KIMI_CODE_HOME: kimiHome,
+            KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+          },
+          command,
+          prefixArgs,
+          executionPlan: smokePlan(command, prefixArgs, "rescue"),
+          commandLabel: "rescue",
+          trustedWorkspaceRoot: workspace,
+          prompt,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      const bashCall = result.records.flatMap((record) =>
+        record.role === "assistant" && record.tool_calls !== undefined ? record.tool_calls : []
+      ).find((call) => call.function.name === "Bash");
+      expect(bashCall, `expected a Bash call with cwd ${escapeDir}`).toBeDefined();
+      if (!bashCall) throw new Error("missing Bash call");
+      const args = JSON.parse(bashCall.function.arguments) as { cwd?: unknown; command?: unknown };
+      expect(args.cwd).toBe(escapeDir);
+      expect(args.command).toBe("printf smoke > BASH_CWD_SHOULD_NOT_EXIST.txt");
+      const denial = result.records.find((record) => record.role === "tool" && record.tool_call_id === bashCall.id) as { content?: string } | undefined;
+      expect(denial?.content).toBe(`rescue rejects Bash cwd outside the workspace or inside .git: ${escapeDir}`);
+      expect(await fileExists(target)).toBe(false);
+      expect(result.aborted).toBe(false);
+      expect(result.exitCode).toBe(0);
+      expect(result.sessionId).toBeDefined();
+      if (BINARY_IS_V2) expect(result.systemVersion).toBe(BINARY_VERSION);
+      else expect(result.systemVersion).toBeUndefined();
+    } finally {
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(pluginData);
+      await cleanupTestPath(escapeDir);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
 });
 
 // Experimental-selector lane (v1.9.4, extended for 0.34.0; re-scoped for the

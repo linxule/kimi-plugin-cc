@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { formatError, RuntimeError } from "../../runtime/errors.js";
+import { buildKimiCliEnvironment } from "../../runtime/cli-client.js";
 import type { KimiExecutionPlan, KimiOperationKind } from "../../runtime/kimi-engine.js";
 import { readProcessIdentity } from "../../runtime/process-tree.js";
 import {
@@ -208,9 +209,19 @@ describe("requiresSwarmPreactivation", () => {
   test("matches only exact upstream versions with reviewed activation", () => {
     expect(requiresSwarmPreactivation("2.3.2")).toBe(true);
     expect(requiresSwarmPreactivation("2.3.3")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.0", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.4.0")).toBe(true);
+    for (const version of [null, "2.3.1", "2.3.4", "2.4.1", "2.4.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
+  });
+
+  test("plugin-owned lifecycle disables ambient idle session reclamation", async () => {
+    await withFixture("success", async (fixture) => {
+      fixture.env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS = "1";
+      const env = buildKimiCliEnvironment(makeOptions(fixture));
+      expect(env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS).toBe("0");
+      expect(fixture.env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS).toBe("1");
+    });
   });
 });
 
@@ -275,6 +286,31 @@ describe("swarm web lifecycle", () => {
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
     });
   }, 15_000);
+
+  test("a clean shutdown beyond the old 5-second bound succeeds within 15 seconds", async () => {
+    await withFixture("success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_SHUTDOWN_DELAY_MS = "6000";
+      const options = makeOptions(fixture);
+      const identity = await preactivateSwarmSession(options);
+      expect(identity).toEqual({ sessionId: "session_mock", workspaceId: "wd_mock" });
+      await deactivateSwarmSession({ ...options, ...identity });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+    });
+  }, 20_000);
+
+  test("a shutdown beyond 15 seconds fails with bounded teardown", async () => {
+    await withFixture("success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_SHUTDOWN_DELAY_MS = "16000";
+      await expect(preactivateSwarmSession(makeOptions(fixture))).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.shutdown",
+        details: { timeout_ms: 15_000 },
+      });
+      for (const child of spawns(await readLog(fixture))) {
+        expect(await readProcessIdentity(child.pid)).toBeUndefined();
+      }
+    });
+  }, 25_000);
 
   test("uses the redacted config projection's default_model only when no override is in effect", async () => {
     await withFixture("success", async (fixture) => {

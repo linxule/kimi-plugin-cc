@@ -21,6 +21,7 @@ const statusDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_STATUS_DELAY_MS 
 const deactivateStatusDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS ?? "0", 10);
 const createSessionDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_CREATE_SESSION_DELAY_MS ?? "0", 10);
 const printDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_PRINT_DELAY_MS ?? "0", 10);
+const shutdownDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_SHUTDOWN_DELAY_MS ?? "10", 10);
 const logPath = process.env.MOCK_KIMI_WEB_LOG;
 const sessionId = "session_mock";
 const workspaceId = "wd_mock";
@@ -197,7 +198,7 @@ async function handle(req, res) {
 
   if (method === "POST" && url.pathname === "/api/v1/shutdown") {
     send(res, { ok: true });
-    setTimeout(() => shutdown(0), 10);
+    setTimeout(() => shutdown(0), shutdownDelayMs);
     return;
   }
 

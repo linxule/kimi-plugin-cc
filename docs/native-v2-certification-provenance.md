@@ -1,11 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
-**Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields)
-**Current capability (plugin 2.4.3):** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2` and `2.3.3` for every operation under the §2 construction. `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
+**Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields); 2026-10-29 (§2/§3 exact 2.4.0 plan controls; §4/§5 capability matrix and lifecycle provenance)
+**Current capability (plugin 2.4.4):** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3` and `2.4.0` for every operation under the §2 construction. `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
 
-Plugin 2.4.3 certifies exact 2.3.3 with host-preactivated swarm sessions. Publication does not update installed hosts. Evidence: [certification record](upstream-2.3.3-certification.md). Plugin 2.3.1 added CLI 2.3.1 certification; plugin 2.4.0 preserved it while adding MCP transport.
+Plugin 2.4.4 certifies exact 2.4.0 with host-preactivated swarm sessions. Publication does not update installed hosts. Evidence: [certification record](upstream-2.4.0-certification.md). Plugin 2.4.3 added CLI 2.3.3 certification; plugin 2.4.0 preserved CLI 2.3.1 while adding MCP transport.
 
 Exact 2.1.0/2.1.1 evidence: [certification record](upstream-2.1-certification.md).
 The known active-plan bypass remains; only the no-plan construction is
@@ -58,15 +58,20 @@ later certified tag:
 2. Every route by which plan mode can become active in a `kimi -p` session is
    enumerated, and each is either unreachable from the plugin's spawn or closed
    by the plugin before spawn: the `default_plan_mode` config key under every spelling upstream normalizes to `defaultPlanMode` (pre-spawn
-   parse of the same file, `runtime/native-v2-preflight.ts`), the
-   `EnterPlanMode`/`ExitPlanMode` tools (managed hook deny), and restored plan
-   state (own native-v2 lineage only, raw journal scan of every agent journal).
+   parse of the same file, `runtime/native-v2-preflight.ts`; exact 2.4.0 also cancels
+   that default on fresh print), the `EnterPlanMode`/`ExitPlanMode` tools (managed
+   hook deny; exact 2.4.0 removes EnterPlanMode, so a forced call rejects before the
+   hook while the deny policy remains), and restored plan state (own native-v2
+   lineage only, raw journal scan of every agent journal).
 3. Every tool execution passes the executor path that fires the external hook,
    including subagent, swarm, and MCP tools; a hook veto beats every approve.
 4. A live control on the exact binary shows the plan-file write bypassing the
    hook when plan mode IS armed (proving the refusals are load-bearing), and
-   the managed hook denying an ordinary write and an `EnterPlanMode` attempt
-   when it is not.
+   the managed hook denying an ordinary write when it is not. Through 2.3.3 a
+   separate EnterPlanMode attempt must also reach that deny hook. On exact 2.4.0,
+   where the tool is removed, a deterministic forced call must instead return
+   `Tool "EnterPlanMode" not found` on the same call ID before any hook call,
+   with no plan-enter journal or plan file.
 
 Under Basis B the headline claim is: *every executed tool call in a
 plugin-managed session passes the managed hook, and the engine's sole final
@@ -117,19 +122,26 @@ safety profile:
    seam, not a production capability row or a wider minor-version range.
 3. **Non-vacuous no-plan controls:** with plan mode ON, the exact plan-file
    Write must still bypass the deny hook, proving the refusal is load-bearing.
-   With plan mode OFF, separate ordinary Write and EnterPlanMode attempts must
-   reach the deny hook. The plugin refuses default-plan config and plan-tainted
-   resume journals before spawn. A green test without its precondition is not
-   evidence. If the ON bypass disappears, re-audit the upstream ordering fix
-   instead of silently keeping the old certification basis.
+   With plan mode OFF, an ordinary Write must reach the deny hook. Through 2.3.3,
+   a separate EnterPlanMode attempt must also reach it. Exact 2.4.0 removes that
+   tool, so the corresponding control must force a raw EnterPlanMode call and
+   prove `Tool "EnterPlanMode" not found` on the same call ID before any hook
+   call, with no plan-enter journal or plan file. The plugin refuses default-plan
+   config and plan-tainted resume journals before spawn. A green test without its
+   precondition is not evidence. If the ON bypass disappears, re-audit the
+   upstream ordering fix instead of silently keeping the old certification basis.
 4. **Operation smoke:** a temp-installed exact binary runs the real operation
    through `KIMI_PLUGIN_CC_KIMI_BIN` and `bun run smoke:real`. Read-only,
    write-confinement, cancellation, budgets, concurrency, session-id capture,
-   and output semantics must remain unchanged. For swarm, require distinct
-   child journals and correlate each assigned Write/Edit `path` and `toolCallId`
-   with its own result; unrelated denials and coordinator-only patches are not
-   evidence. Versions requiring activation also need direct-OFF/preactivated-ON
-   controls.
+   and output semantics must remain unchanged. Rescue itself must land a
+   confined sentinel write and persist `operation_kind: "rescue"`, exact version,
+   engine, session, and completed artifact evidence; pursue's rescue hook label
+   and swarm-write's rescue lineage are not substitutes. A deterministic Bash
+   attempt with absolute out-of-root `cwd` must return the managed denial on the
+   same call and create no target. For swarm, require distinct child journals
+   and correlate each assigned Write/Edit `path` and `toolCallId` with its own
+   result; unrelated denials and coordinator-only patches are not evidence.
+   Versions requiring activation also need direct-OFF/preactivated-ON controls.
 5. **Resume compatibility:** fresh and resumed cases use engine-sticky lineage.
    Native-v2-touched protocol-1.5 sessions never silently fall back to v1; v1
    protocol-1.4 sessions move only through an explicitly certified transition.
@@ -144,7 +156,7 @@ expanded production capability requires a separately authorized release.
 
 | Engine | Operation | Production state |
 |---|---|---|
-| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
+| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
 | `legacy-v1` | review, challenge, ask, rescue, review_gate | certified within `KIMI_TESTED_MINORS` (≤ 0.41) for an explicitly pinned binary |
 | `legacy-v1` | pursue / swarm / swarm-write | certified from kimi-code 0.8 / 0.12 / 0.18 within `KIMI_TESTED_MINORS` |
 
@@ -183,12 +195,15 @@ the plan additionally persists `safety_profile = "native-v2-no-plan/1"`, which
 the preflight re-validates at the final spawn boundary. Every spawn exports
 `KIMI_CODE_NO_AUTO_UPDATE=1` and an absolute `KIMI_CODE_HOME`.
 
-Exact 2.3.2 and 2.3.3 swarm activation is a same-job, plugin-owned fresh session, not an
+Exact 2.3.2, 2.3.3 and 2.4.0 swarm activation is a same-job, plugin-owned fresh session, not an
 arbitrary user resume. Authenticated loopback `/meta` supplies activation-time
-backend/version evidence but never replaces the print marker. The job records
-`kimi_session_id_source = "preactivated"` before model spawn; the returned print
-session must match that ID and the source survives timeout metadata. The final
-no-plan journal scan still applies before the resumed print spawn.
+backend/version evidence but never replaces the print marker. The lifecycle exports
+`KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to disable ambient idle-session reclamation.
+The job records `kimi_session_id_source = "preactivated"` before model spawn; the returned print
+session must match that ID and the source survives timeout metadata. Graceful
+shutdown has a bounded 15-second allowance; other REST, cancellation, identity
+and kill/quiescence bounds remain enforced. The final no-plan journal scan still
+applies before the resumed print spawn.
 
 `KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1` produces a visible `test-bypass` plan with
 `kimi_version=null`; it is a test/smoke seam, not production certification. A

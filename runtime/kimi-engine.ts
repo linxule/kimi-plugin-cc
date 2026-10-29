@@ -115,6 +115,7 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
   "2.3.1",
   "2.3.2",
   "2.3.3",
+  "2.4.0",
 ]);
 
 /** Per-operation native-v2 certification. One green operation never certifies another. */

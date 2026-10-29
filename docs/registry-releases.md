@@ -6,9 +6,9 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-Plugin **2.4.3** adds exact CLI **2.3.3** certification for all eight operations,
+Plugin **2.4.4** adds exact CLI **2.4.0** certification for all eight operations,
 with the existing host-preactivated swarm lifecycle and durable recovery.
-See the [certification record](./upstream-2.3.3-certification.md).
+See the [certification record](./upstream-2.4.0-certification.md).
 Release execution and registry verification are recorded in the release notes;
 publication uses the same validated-tarball OIDC workflow below.
 
@@ -93,11 +93,12 @@ bun run check
 bun run check:package .tmp/npm
 ```
 
-The package check inspects the actual tarball, verifies runtime copies and
-vendored licenses, and installs/checks the safety hook in isolated homes for
-both hosts. It also exercises unsupported-version refusal using a fake CLI and
-modern MCP discovery plus legacy initialization on both extracted compiled
-distributions. It does not invoke a model or read the maintainer's Kimi configuration.
+The package check inspects the actual tarball, rejects sync-conflict copies in
+any path component, verifies runtime copies and vendored licenses, and
+installs/checks the safety hook in isolated homes for both hosts. It also
+exercises unsupported-version refusal using a fake CLI and modern MCP discovery
+plus legacy initialization on both extracted compiled distributions. It does
+not invoke a model or read the maintainer's Kimi configuration.
 
 ## First publication (completed bootstrap reference)
 

@@ -2,6 +2,13 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.4.4 — 2026-10-29
+
+- Certify exact kimi-code 2.4.0 for all eight native-v2 operations after exact-source review, revised plan and swarm controls, and candidate/production smoke. See [evidence](docs/upstream-2.4.0-certification.md).
+- Adapt certification to removed EnterPlanMode and fresh-print default-plan cancellation without relaxing config, hook-deny, or journal-taint closures. Add only the reviewed 2.4.0 activation and hook-schema entries.
+- Allow a bounded 15 seconds for graceful web shutdown after exact 2.4.0 exceeded the prior 5-second bound and exited cleanly in 6.743 seconds. Disable ambient idle-session reclamation for plugin-owned lifecycle processes. Preserve cleanup verification, process identity, durable recovery, workspace confinement, concurrency, and the legacy-v1 0.41.x boundary.
+- Reject ignored sync-conflict copies during package validation so local generated debris cannot silently enter the npm archive.
+
 ## 2.4.3 — 2026-10-27
 
 - Certify exact kimi-code 2.3.3 for all eight native-v2 operations after exact-source review, plan and swarm controls, and candidate/production smoke. See [evidence](docs/upstream-2.3.3-certification.md).
