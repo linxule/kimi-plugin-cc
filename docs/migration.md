@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-Plugin 2.4.4 certifies Kimi Code CLI 2.4.0 for all eight operations, alongside exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, and `2.3.3`. Later patches and minor releases are not accepted automatically. The npm distribution adds an installation channel; it does not change this compatibility table.
+Plugin 2.4.5 certifies Kimi Code CLI 2.4.1 for all eight operations, alongside exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, and `2.4.0`. Later patches and minor releases are not accepted automatically. The npm distribution adds an installation channel; it does not change this compatibility table.
 
 Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS`, through 0.41.x, subject to each operation's minimum version. The [runtime table](../runtime/kimi-engine.ts) is the authority.
 
@@ -8,11 +8,11 @@ Use the [README installation and update steps](../README.md) for Claude Code or 
 
 ## Plugin versions and upgrades
 
-Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Plugin 2.4.4 certifies exact CLI 2.4.0; the nearby numbers do not imply version alignment. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
+Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Plugin 2.4.5 certifies exact CLI 2.4.1; the nearby numbers do not imply version alignment. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
 
-## CLI 2.3.2, 2.3.3 and 2.4.0 swarm activation
+## CLI 2.3.2, 2.3.3, 2.4.0 and 2.4.1 swarm activation
 
-Upstream 2.3.2 removes model self-activation of `AgentSwarm` in fresh print sessions. On exact 2.3.2, 2.3.3 and 2.4.0, swarm commands and MCP calls use the same `runSwarm` lifecycle:
+Upstream 2.3.2 removes model self-activation of `AgentSwarm` in fresh print sessions. On exact 2.3.2, 2.3.3, 2.4.0 and 2.4.1, swarm commands and MCP calls use the same `runSwarm` lifecycle:
 
 1. A short-lived `web --no-open --host 127.0.0.1 --port 0 --log-level error` process uses authenticated loopback routes to verify the exact v2 server, choose the explicit or configured default model, create a session, bind the model and auto permission, enable and verify `swarm_mode`, and shut down. The child environment sets `KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to disable ambient idle-session reclamation.
 2. One ordinary `kimi -p -r` prompt runner resumes that session. Its recorded session-id source is `preactivated`, and the returned print session must match it.

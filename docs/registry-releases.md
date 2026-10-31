@@ -6,9 +6,9 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-Plugin **2.4.4** adds exact CLI **2.4.0** certification for all eight operations,
+Plugin **2.4.5** adds exact CLI **2.4.1** certification for all eight operations,
 with the existing host-preactivated swarm lifecycle and durable recovery.
-See the [certification record](./upstream-2.4.0-certification.md).
+See the [certification record](./upstream-2.4.1-certification.md).
 Release execution and registry verification are recorded in the release notes;
 publication uses the same validated-tarball OIDC workflow below.
 

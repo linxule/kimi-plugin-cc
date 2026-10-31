@@ -68,7 +68,7 @@ describe("kimi execution plan", () => {
   });
 
   test("native-v2 certifies only the exact per-operation version set, under the no-plan profile", async () => {
-    expect(NATIVE_V2_CERTIFIED_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0"]);
+    expect(NATIVE_V2_CERTIFIED_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1"]);
     expect([...NATIVE_V2_CERTIFIED.keys()].sort()).toEqual(
       ["ask", "challenge", "pursue", "rescue", "review", "review_gate", "swarm", "swarm-write"],
     );
@@ -111,7 +111,7 @@ describe("kimi execution plan", () => {
         }),
       ).resolves.toMatchObject({ intendedEngine: "native-v2", kimiVersion: "0.42.0" });
 
-      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0"]) {
+      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           const majorTwo = await prepareKimiExecutionPlan({
             operationKind,
@@ -126,28 +126,30 @@ describe("kimi execution plan", () => {
         }
       }
 
-      for (const version of ["0.41.0", "0.42.1", "0.43.2", "2.0.3", "2.1.2", "2.2.1", "2.3.4", "2.3.3-rc.1", "2.3.3+unreviewed", "2.4.1", "2.4.0-rc.1", "2.4.0+unreviewed", "2.3.0-rc.1", "2.3.0+unreviewed", "2.2.0-rc.1", "2.2.0+unreviewed", "2.1.0-rc.1", "2.1.1+unreviewed", "2.0.2-rc.1", "2.0.2+unreviewed"]) {
-        await expect(
-          prepareKimiExecutionPlan({
-            operationKind: "review",
-            cwd,
-            env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version },
-            intendedEngine: "native-v2",
-          }),
-        ).rejects.toMatchObject({
-          code: "KIMI_CAPABILITY_NOT_CERTIFIED",
-          details: {
-            refusal_kind: "v2-version-not-certified",
-            intended_engine: "native-v2",
-            kimi_version: version,
-            retryable_after_setup: false,
-          },
-        });
+      for (const version of ["0.41.0", "0.42.1", "0.43.2", "2.0.3", "2.1.2", "2.2.1", "2.3.4", "2.3.3-rc.1", "2.3.3+unreviewed", "2.4.2", "2.4.1-rc.1", "2.4.1+unreviewed", "2.4.0-rc.1", "2.4.0+unreviewed", "2.3.0-rc.1", "2.3.0+unreviewed", "2.2.0-rc.1", "2.2.0+unreviewed", "2.1.0-rc.1", "2.1.1+unreviewed", "2.0.2-rc.1", "2.0.2+unreviewed"]) {
+        for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
+          await expect(
+            prepareKimiExecutionPlan({
+              operationKind,
+              cwd,
+              env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version },
+              intendedEngine: "native-v2",
+            }),
+          ).rejects.toMatchObject({
+            code: "KIMI_CAPABILITY_NOT_CERTIFIED",
+            details: {
+              refusal_kind: "v2-version-not-certified",
+              intended_engine: "native-v2",
+              kimi_version: version,
+              retryable_after_setup: false,
+            },
+          });
+        }
       }
     } finally {
       await cleanupTestPath(cwd);
     }
-  });
+  }, 30_000);
 
   test("native-v2 plans refuse pre-spawn when default_plan_mode is configured", async () => {
     const cwd = await createTestPluginDataRoot("kimi-engine-v2-planmode");

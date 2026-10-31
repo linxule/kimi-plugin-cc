@@ -210,7 +210,8 @@ describe("requiresSwarmPreactivation", () => {
     expect(requiresSwarmPreactivation("2.3.2")).toBe(true);
     expect(requiresSwarmPreactivation("2.3.3")).toBe(true);
     expect(requiresSwarmPreactivation("2.4.0")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.1", "2.4.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.4.1")).toBe(true);
+    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.4.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
   });

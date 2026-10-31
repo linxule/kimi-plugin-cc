@@ -1,52 +1,57 @@
-# Native v2 status — 2026-10-29
+# Native v2 status — 2026-10-31
 
-Plugin 2.4.4 certifies exact CLI 2.4.0 for all eight operations
-(`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`). Both expanded matrices and the
-final clean repository/package gates passed, including real rescue and
-deterministic Bash.cwd evidence. Independent code review returned APPROVE and
-documentation closeout found no remaining blocker. Earlier certified versions
-remain supported; the [runtime table](../runtime/kimi-engine.ts) is the exact
-routing authority. Legacy-v1 remains limited to pinned binaries through 0.41.x.
+Plugin 2.4.5 certifies exact CLI 2.4.1 for all eight operations
+(`2c73f3f50af4fa7f2540ca0d2e33b07a1408e3a7`). The exact source gate,
+non-vacuous controls, and both expanded matrices passed, including real rescue
+and deterministic Bash.cwd evidence. Earlier certified versions remain
+supported; the [runtime table](../runtime/kimi-engine.ts) is the exact routing
+authority. Legacy-v1 remains limited to pinned binaries through 0.41.x.
 
-The exact-tag scan passed 15 tests and 96 assertions. Revised plan-ON/OFF
-controls and direct-OFF/preactivated-ON swarm controls passed. The expanded
-candidate matrix passed 21 tests and 154 assertions without skips in 440.82
-seconds; production-table mode also passed 21/154 without skips in 431.51
-seconds. Both write-swarm runs captured a 278-byte child-authored patch, left
-the user tree clean, and removed the worktree. The final full check passed 1,312
-tests with 30 expected opt-in skips, zero failures and 16,838 assertions across
-79 files in 306.75 seconds. Clean package validation passed 232 files. A
-243-file package containing 11 ignored sync-conflict copies was rejected, and
-the strengthened package gate now refuses that class. Independent review is
-recorded in the [2.4.0 evidence record](upstream-2.4.0-certification.md).
+The exact-tag scan passed 15 tests and 96 assertions. Plan-ON/OFF, forced
+removed-tool, and direct-OFF/preactivated-ON swarm controls passed. The expanded
+candidate matrix passed 21 tests and 154 assertions without skips in 410.84
+seconds; production-table mode passed 21/154 without skips in 453.88 seconds.
+Both initial write-swarm runs captured a 278-byte child-authored patch, left the
+user tree clean, and removed the worktree. Candidate and production goal controls
+ran eight and twelve turns without any of the three goal files. Earlier review
+iterations are retained, but their Bash-inclusive goal evidence is superseded
+and not accepted for certification. The final prefix-hardened production matrix
+passed 24 tests and 167 assertions in 440.66 seconds, with same-call Write
+denials marked `isError: true` in all seven call-derived turn IDs and the whole
+workspace empty at settlement. The literal standard `bun run check` passed
+1,318 tests with 30 expected opt-in skips, zero failures and 17,319 assertions
+across 79 files in 358.83 seconds after earlier timing-sensitive attempts. Codex's
+final targeted re-review returned APPROVE. Clean package validation passed 233 files
+and includes this certification record.
 
-Exact CLI 2.3.2, 2.3.3 and 2.4.0 require host-preactivated swarm sessions.
+Exact CLI 2.3.2, 2.3.3, 2.4.0 and 2.4.1 require host-preactivated swarm sessions.
 Short-lived, authenticated loopback web lifecycles activate and deactivate a
 same-job session around one ordinary `kimi -p -r` prompt runner. Model, auto
-permission, plan OFF, version and session identity are verified; the token
-stays in memory. The lifecycle sets `KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to
-prevent ambient idle-session reclamation. Activation consumes the finite job
-budget. Graceful shutdown
-has a bounded 15-second allowance because exact 2.4.0 exceeded the previous
-5-second bound and exited cleanly in 6.743 seconds. Cleanup must verify
+permission, plan OFF, version and session identity are verified; the token stays
+in memory and the lifecycle disables ambient idle-session reclamation. Activation
+consumes the finite job budget. Graceful shutdown retains the bounded 15-second
+allowance introduced after exact 2.4.0's 6.743-second clean exit; exact 2.4.1's
+plan-arming lifecycle exited cleanly in 5.638 seconds. Cleanup must verify
 deactivation and process quiescence; uncertainty prevents success and preserves
 diagnostics and the write worktree. Durable recovery remains preview-first and
 cannot change a terminal job outcome. Older certified versions use direct print.
 
 Swarm evidence requires distinct child journals and each assigned Write/Edit
 path correlated with its own toolCallId/result. A tool-call record, exit 0,
-aggregate denial or coordinator-only patch is insufficient. The exact 2.4.0
-OFF control created no children; ON produced two children with managed denials
-and verified deactivation.
+aggregate denial or coordinator-only patch is insufficient. The exact 2.4.1 OFF
+control created no children; ON produced two children with managed denials and
+verified deactivation, including with parent idle reclamation set to 1 ms.
 
-Exact 2.4.0 removes EnterPlanMode and cancels default plan mode on fresh print;
-a deterministic forced call rejects before the hook with no plan state. Resumed
-plan sessions remain possible, so every-agent journal refusal stays mandatory.
-The plan-file bypass remains present upstream; every no-plan closure stays in
-force. Stream records still lack execution outcomes, and session hints remain
-late, so detection ambiguity and timeout recovery are unchanged. Publication
-does not update installed hosts or the operator's CLI pin. Plugin and CLI
-versions advance independently; their numbers are not certification evidence.
+Exact 2.4.0 and 2.4.1 remove EnterPlanMode and cancel default plan mode on fresh
+print; a deterministic forced call rejects before the hook with no plan state.
+Resumed plan sessions remain possible, so every-agent journal refusal stays
+mandatory. Exact 2.4.1 wrote a 1,831-byte plan file without a plan-Write hook
+while ordinary tools remained denied, proving the plan-file bypass and every
+no-plan closure remain load-bearing. Stream records still lack execution
+outcomes, and session hints remain late, so detection ambiguity and timeout
+recovery are unchanged. Publication does not update installed hosts or the
+operator's CLI pin. Plugin and CLI versions advance independently; their numbers
+are not certification evidence.
 
 > **2.3.2 (certified 2026-10-25, plugin 2.4.1; retained by 2.4.2):** this release
 > introduced the bounded host activation lifecycle and child-attributed swarm
