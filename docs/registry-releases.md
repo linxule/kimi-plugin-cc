@@ -6,11 +6,7 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-Plugin **2.4.5** adds exact CLI **2.4.1** certification for all eight operations,
-with the existing host-preactivated swarm lifecycle and durable recovery.
-See the [certification record](./upstream-2.4.1-certification.md).
-Release execution and registry verification are recorded in the release notes;
-publication uses the same validated-tarball OIDC workflow below.
+Plugin **2.4.5** certifies exact CLI **2.4.1** for all eight operations with host-preactivated swarm sessions. [Release v2.4.5](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.5) is anchored at `de8c195c2986443a088b674717133b164d2e4ef2`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/41226096281) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/41226438326) passed. The registry tarball has SHA-1 `39f97a6de4b26ad51ac77305054682fcd5cd0164`, contains 233 files, and matches the CI artifact byte-for-byte. Fresh registry installs passed setup/check and unsupported-version refusal for both Claude Code and Codex, and both compiled mirrors are byte-identical to the release checkout. See the [certification record](./upstream-2.4.1-certification.md) and structured verification at `.claude/kimi-code-research/release-2.4.5/registry-verification.json`.
 
 Plugin **2.4.2** adds durable interrupted-swarm recovery and Windows spawn diagnostics.
 Exact CLI certification remains unchanged through **2.3.2**; this is not a new

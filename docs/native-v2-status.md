@@ -7,6 +7,8 @@ and deterministic Bash.cwd evidence. Earlier certified versions remain
 supported; the [runtime table](../runtime/kimi-engine.ts) is the exact routing
 authority. Legacy-v1 remains limited to pinned binaries through 0.41.x.
 
+[Plugin 2.4.5 is published](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.5) at commit `de8c195c2986443a088b674717133b164d2e4ef2`. Release CI 41226096281 and publish workflow 41226438326 passed. The npm tarball has SHA-1 `39f97a6de4b26ad51ac77305054682fcd5cd0164`, contains 233 files, matches the CI artifact, and passed fresh isolated setup/check and version refusal for both hosts. Installed hosts and operator CLI pins remain unchanged.
+
 The exact-tag scan passed 15 tests and 96 assertions. Plan-ON/OFF, forced
 removed-tool, and direct-OFF/preactivated-ON swarm controls passed. The expanded
 candidate matrix passed 21 tests and 154 assertions without skips in 410.84
