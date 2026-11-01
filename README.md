@@ -109,6 +109,8 @@ dsh plugin --profile web add ./plugins/kimi-dsh
 
 For the published npm bundle, run `dsh plugin --profile web add kimi-plugin-cc` instead.
 
+For DSH Discover, enable **Custom plugin indexes** and add `https://raw.githubusercontent.com/linxule/kimi-plugin-cc/main/dsh/index.json` as an index source.
+
 Restart DSH when requested, then run `/kimi-setup` and `/kimi-setup --check`. Ask DSH to use one of the seven tools with a self-contained task. Job controls are `/kimi-status`, `/kimi-result`, and `/kimi-cancel`. `/kimi-setup --models` lists configured models, and `/kimi-setup --uninstall` removes only the DSH hook.
 
 DSH requires Node.js 24.9 or newer and DSH `>=0.2.1-rc.5 <0.3.0`. See the [DSH bundle guide](./plugins/kimi-dsh/README.md) for profile-level model, thinking, budget, review-base, and other configuration.
@@ -337,9 +339,25 @@ codex plugin add kimi@kimi-marketplace
 
 如果同时使用 Claude Code 和 Codex，请分别运行 setup。两个应用各有自己的钩子，共用一份 Kimi 配置。
 
+## 在 DeepSeek Harness（DSH）中安装
+
+DSH 与其他宿主一样提供七类操作：`kimi_ask`、`kimi_review`、`kimi_challenge`、`kimi_rescue`、`kimi_pursue`、`kimi_swarm` 和 `kimi_swarm_write`。它们使用同一套 companion 运行时、安全钩子、任务记录、预算和产物。Rescue 和 pursue 会修改所选工作区；swarm-write 只返回补丁，不会应用或提交它。
+
+从此仓库检出安装：
+
+```sh
+dsh plugin --profile web add ./plugins/kimi-dsh
+```
+
+从已发布的根包安装时，改为运行 `dsh plugin --profile web add kimi-plugin-cc`。
+
+按提示重启 DSH，然后运行 `/kimi-setup` 和 `/kimi-setup --check`。让 DSH 使用上述任一工具，并提供独立完整的任务。任务控制命令为 `/kimi-status`、`/kimi-result` 和 `/kimi-cancel`。`/kimi-setup --models` 列出已配置模型，`/kimi-setup --uninstall` 只移除 DSH 自己的钩子。
+
+DSH 需要 Node.js 24.9 或更高版本，以及 DSH `>=0.2.1-rc.5 <0.3.0`。配置模型、思考强度、预算、review base 等选项，请参阅 [DSH 指南](./plugins/kimi-dsh/README.md)。
+
 ## npm 分发（可选）
 
-完整插件也已发布到 [npm，包名为 `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc)，包含 Claude Code 和 Codex 的预编译运行时，无需 Bun 或构建步骤。默认仍推荐上方的插件市场安装方式。需要通过 npm 安装本地 Claude Code 插件时，请参照 [npm 安装步骤](#npm-distribution-optional)。每个应用只加载一份插件；npm 不提供 `npx kimi-plugin-cc` 命令。Codex 用户继续使用上方的 GitHub 插件市场命令。
+完整插件也已发布到 [npm，包名为 `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc)，包含 Claude Code、Codex 和 DSH 的预编译运行时，无需 Bun 或构建步骤。默认仍推荐上方的插件市场安装方式。需要通过 npm 安装本地 Claude Code 插件时，请参照 [npm 安装步骤](#npm-distribution-optional)。每个应用只加载一份插件；npm 不提供 `npx kimi-plugin-cc` 命令。Codex 用户继续使用上方的 GitHub 插件市场命令。
 
 ## 选择任务
 
@@ -536,9 +554,25 @@ Utilise $kimi-ask pour expliquer le fonctionnement du point d'entrée principal 
 
 Si vous utilisez Claude Code et Codex, lancez setup dans chaque application. Chacune possède son propre hook dans la configuration Kimi commune.
 
+## Installer dans DeepSeek Harness (DSH)
+
+DSH propose les sept mêmes opérations que les autres hôtes : `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm` et `kimi_swarm_write`. Elles utilisent le même runtime companion, les mêmes hooks de sécurité, jobs, budgets et artefacts. Rescue et pursue modifient l'espace de travail sélectionné ; swarm-write renvoie un patch sans l'appliquer ni le committer.
+
+Depuis une copie de ce dépôt, exécutez :
+
+```sh
+dsh plugin --profile web add ./plugins/kimi-dsh
+```
+
+Pour installer le paquet racine publié, exécutez plutôt `dsh plugin --profile web add kimi-plugin-cc`.
+
+Redémarrez DSH si demandé, puis lancez `/kimi-setup` et `/kimi-setup --check`. Demandez à DSH d'utiliser l'un des sept outils avec une tâche autonome. Les contrôles sont `/kimi-status`, `/kimi-result` et `/kimi-cancel`. `/kimi-setup --models` liste les modèles configurés, et `/kimi-setup --uninstall` supprime uniquement le hook DSH.
+
+DSH requiert Node.js 24.9 ou supérieur et DSH `>=0.2.1-rc.5 <0.3.0`. Consultez le [guide DSH](./plugins/kimi-dsh/README.md) pour configurer le modèle, l'effort de réflexion, le budget, la base de revue et les autres options.
+
 ## Distribution npm (facultative)
 
-Le plugin complet est aussi disponible sur [npm sous le nom `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc), avec les runtimes précompilés pour Claude Code et Codex, sans Bun ni compilation. Les marketplaces ci-dessus restent le mode d'installation par défaut. Pour installer une copie locale dans Claude Code via npm, suivez les [étapes npm](#npm-distribution-optional) (en anglais). Ne chargez qu'une copie du plugin par application ; le paquet ne fournit pas de commande `npx kimi-plugin-cc`. Pour Codex, continuez à utiliser la marketplace GitHub ci-dessus.
+Le plugin complet est aussi disponible sur [npm sous le nom `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc), avec les runtimes précompilés pour Claude Code, Codex et DSH, sans Bun ni compilation. Les marketplaces ci-dessus restent le mode d'installation par défaut. Pour installer une copie locale dans Claude Code via npm, suivez les [étapes npm](#npm-distribution-optional) (en anglais). Ne chargez qu'une copie du plugin par application ; le paquet ne fournit pas de commande `npx kimi-plugin-cc`. Pour Codex, continuez à utiliser la marketplace GitHub ci-dessus.
 
 ## Choisir une tâche
 
@@ -735,9 +769,25 @@ $kimi-ask を使って、このプロジェクトのメインのエントリー�
 
 Claude Code と Codex の両方を使う場合は、それぞれで setup を実行します。共通の Kimi 設定内に、各アプリ専用のフックが作られます。
 
+## DeepSeek Harness（DSH）にインストールする
+
+DSH でも、ほかのホストと同じ 7 種類の操作を提供します：`kimi_ask`、`kimi_review`、`kimi_challenge`、`kimi_rescue`、`kimi_pursue`、`kimi_swarm`、`kimi_swarm_write`。同じ companion ランタイム、安全フック、ジョブ、予算、成果物を使用します。Rescue と pursue は選択したワークスペースを変更し、swarm-write はパッチを返すだけで、適用やコミットは行いません。
+
+このリポジトリのチェックアウトからインストールする場合：
+
+```sh
+dsh plugin --profile web add ./plugins/kimi-dsh
+```
+
+公開されているルートパッケージからインストールする場合は、代わりに `dsh plugin --profile web add kimi-plugin-cc` を実行します。
+
+案内に従って DSH を再起動したら、`/kimi-setup` と `/kimi-setup --check` を実行します。独立した内容のタスクを指定して、上記のいずれかのツールを使ってください。ジョブ制御は `/kimi-status`、`/kimi-result`、`/kimi-cancel` です。`/kimi-setup --models` で設定済みモデルを一覧でき、`/kimi-setup --uninstall` は DSH のフックだけを削除します。
+
+DSH には Node.js 24.9 以降と、DSH `>=0.2.1-rc.5 <0.3.0` が必要です。モデル、思考強度、予算、review base などの設定は [DSH ガイド](./plugins/kimi-dsh/README.md)を参照してください。
+
 ## npm 配布（任意）
 
-完全なプラグインは [npm の `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc) としても公開されています。Claude Code と Codex 向けのコンパイル済みランタイムを含み、Bun やビルド作業は不要です。通常は上記のマーケットプレイス経由でインストールしてください。npm から Claude Code 用のローカルコピーを入れる場合は、[npm のインストール手順](#npm-distribution-optional)（英語）を参照してください。各アプリで読み込むプラグインは一つにし、重複させないでください。`npx kimi-plugin-cc` コマンドはありません。Codex では引き続き上記の GitHub マーケットプレイスを使います。
+完全なプラグインは [npm の `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc) としても公開されています。Claude Code、Codex、DSH 向けのコンパイル済みランタイムを含み、Bun やビルド作業は不要です。通常は上記のマーケットプレイス経由でインストールしてください。npm から Claude Code 用のローカルコピーを入れる場合は、[npm のインストール手順](#npm-distribution-optional)（英語）を参照してください。各アプリで読み込むプラグインは一つにし、重複させないでください。`npx kimi-plugin-cc` コマンドはありません。Codex では引き続き上記の GitHub マーケットプレイスを使います。
 
 ## タスクを選ぶ
 

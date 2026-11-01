@@ -244,6 +244,8 @@ dsh plugin --profile web add ./plugins/kimi-dsh
 
 For another DSH profile, replace \`web\` with its name. To install the published root package instead, run \`dsh plugin --profile web add kimi-plugin-cc\`.
 
+For DSH Discover, enable **Custom plugin indexes** and add \`https://raw.githubusercontent.com/linxule/kimi-plugin-cc/main/dsh/index.json\` as an index source.
+
 Restart when requested, then run \`/kimi-setup\`. Setup is explicit: installing or enabling the bundle does not modify Kimi configuration. Delegation refuses to start when the DSH managed hook is missing or invalid.
 
 Useful setup commands:

@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Kimi for DeepSeek Harness",
+    "zh": "Kimi 用于 DeepSeek Harness"
+  },
+  "description": {
+    "en": "Kimi Code subagents and workflows for DeepSeek Harness, backed by the kimi-plugin-cc companion runtime.",
+    "zh": "由 kimi-plugin-cc companion 运行时支持的 DeepSeek Harness Kimi Code 子代理与工作流。"
+  },
+  "metadata": {
+    "categories": {
+      "agents-orchestration": {
+        "title": {
+          "en": "Agents & Orchestration",
+          "zh": "代理与编排"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "kimi-plugin-cc",
+      "title": {
+        "en": "Kimi for Claude Code, Codex, and DeepSeek Harness",
+        "zh": "Kimi 用于 Claude Code、Codex 和 DeepSeek Harness"
+      },
+      "description": {
+        "en": "All seven Kimi ask, review, challenge, rescue, pursue, swarm, and swarm-write operations through the local Kimi Code CLI, with managed hooks, jobs, budgets, and artifacts.",
+        "zh": "通过本地 Kimi Code CLI 提供全部七类 Kimi ask、review、challenge、rescue、pursue、swarm 和 swarm-write 操作，包含托管钩子、任务、预算和产物。"
+      },
+      "author": "Xule Lin",
+      "homepage": "https://github.com/linxule/kimi-plugin-cc#readme",
+      "repository": {
+        "url": "https://github.com/linxule/kimi-plugin-cc"
+      },
+      "metadata": {
+        "category": "agents-orchestration"
+      },
+      "versions": [
+        {
+          "version": "2.5.1",
+          "publishTimestamp": 1793554059,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.5 <0.3.0"
+          }
+        }
+      ]
+    }
+  ]
+}
