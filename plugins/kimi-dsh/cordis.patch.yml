@@ -1,6 +1,6 @@
 - insert:
     - id: kimi-plugin-cc
-      name: 'dsh-kimi-plugin-cc'
+      name: 'kimi-plugin-cc'
     - id: tool-kimi-ask
       name: '@deepseek-ai/dsh-tool-subagent'
       config:

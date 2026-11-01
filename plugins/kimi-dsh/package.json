@@ -1,6 +1,6 @@
 {
-  "name": "dsh-kimi-plugin-cc",
-  "version": "2.5.0",
+  "name": "kimi-plugin-cc",
+  "version": "2.5.1",
   "description": "Kimi Code subagents for DeepSeek Harness: all seven ask, review, challenge, rescue, pursue, swarm, and swarm-write operations through the kimi-plugin-cc companion runtime.",
   "type": "module",
   "main": "dist/dsh/index.js",
@@ -40,10 +40,6 @@
     "@deepseek-ai/schemastery": "~3.18.5"
   },
   "license": "Apache-2.0",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/linxule/kimi-plugin-cc.git",

@@ -1,10 +1,17 @@
 {
   "name": "kimi-plugin-cc",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Kimi for Claude Code, Codex, and DeepSeek Harness: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP tools through the local Kimi Code CLI.",
   "type": "module",
+  "main": "dist/dsh/index.js",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.5.0",
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./plugins/kimi-dsh/cordis.patch.yml"
+    }
   },
   "scripts": {
     "check": "bun run build && bun run check:contracts && bun run check:surfaces && bunx tsc --noEmit && bun test && git diff --exit-code -- dist plugins/kimi-codex plugins/kimi-dsh && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist plugins/kimi-codex plugins/kimi-dsh)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked dist/codex/dsh files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
@@ -19,22 +26,32 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-brand": "0.2.1-rc.5",
     "@deepseek-ai/dsh-commands": "0.2.1-rc.5",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.5",
     "@deepseek-ai/dsh-session": "0.2.1-rc.5",
     "@deepseek-ai/dsh-subagent": "0.2.1-rc.5",
     "@deepseek-ai/dsh-subprocess": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-tool-subagent": "0.2.1-rc.5",
     "@deepseek-ai/dsh-working-directory": "0.2.1-rc.5",
-    "@deepseek-ai/schemastery": "3.18.5",
     "@types/bun": "^1.4.2",
     "@types/node": "^26.5.1",
     "smol-toml": "1.9.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-tool-subagent": "0.2.1-rc.5",
+    "@deepseek-ai/schemastery": "3.18.5"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-commands": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-session": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-subagent": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-subprocess": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-working-directory": ">=0.2.1-rc.5 <0.3.0"
+  },
   "overrides": {
     "zod": "^4.6.6",
     "undici": "^8.12.2"

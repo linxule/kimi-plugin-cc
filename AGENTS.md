@@ -4,7 +4,7 @@ Project context for coding agents. This is the **contract sheet**: standing rule
 
 ## Quick reference
 
-- **Version**: 2.5.0 (kimi-code, subprocess transport, **native agent-core-v2**).
+- **Version**: 2.5.1 (kimi-code, subprocess transport, **native agent-core-v2**).
 - **Native-v2 safety** (§1): every executed tool passes managed PreToolUse; the chain-breaking plan-file allow is NEVER armed. Preserve all four closures: same-child-home preflight rejects every normalized `default_plan_mode` spelling; Enter/ExitPlanMode is denied for every label; resume requires proven native-v2 lineage and every-agent raw journal plan-taint scans; unsafe experimental selectors are refused. Require the exact-version first-line marker, validate Bash.cwd against the trusted root, and require source, plan-ON control, and per-operation smoke evidence for every certification row. Legacy-v1 never gains 0.42. Full rules and evidence: [docs/invariants.md §1](docs/invariants.md) and [certification provenance](docs/native-v2-certification-provenance.md).
 - **Hook-pin durability** (§1): canonical hook commands avoid version-stamped Node tokens; `process.argv0` is eligible only when absolute and realpath-identical. `verifyHookInstalled` fail-closed checks the parsed-back Node token with `access(X_OK)`. Re-pin recovery happens only when `retryable_after_setup` is literally true and setup exits 0, then retry ONCE. `node-bin-not-executable` has a different remedy; in-verifier auto-repin is rejected.
 - **Test discipline** (§1): detached-worker enforcement tests use a real node subprocess through a symlink, without `KIMI_PLUGIN_CC_NODE_BIN` or `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK`. Host-dependent smoke asserts its precondition; never test the never-armed plan-file allow as though it were active.
@@ -32,7 +32,7 @@ plugins/kimi-codex/ GENERATED self-contained Codex root; never hand-edit:
   ├── scripts/                    Byte-mirrored shell entry points (0755)
   └── dist/                       Byte-mirror of compiled runtime
 plugins/kimi-dsh/   GENERATED self-contained DeepSeek Harness bundle; never hand-edit:
-  ├── package.json                Independent npm/DSH manifest with bounded engines
+  ├── package.json                Nested DSH bundle manifest with bounded engines
   ├── cordis.patch.yml           Native seven-operation provider composition
   ├── scripts/                    Byte-mirrored shell entry points (0755)
   └── dist/                       Byte-mirror of compiled runtime

@@ -1,4 +1,4 @@
-# dsh-kimi-plugin-cc
+# kimi-plugin-cc for DeepSeek Harness
 
 Kimi Code subagents for DeepSeek Harness (DSH), backed by the same companion runtime as the Claude Code and Codex plugins.
 
@@ -32,7 +32,7 @@ From this repository checkout:
 dsh plugin --profile web add ./plugins/kimi-dsh
 ```
 
-For another DSH profile, replace `web` with its name. To install the published npm bundle instead, run `dsh plugin --profile web add dsh-kimi-plugin-cc`.
+For another DSH profile, replace `web` with its name. To install the published root package instead, run `dsh plugin --profile web add kimi-plugin-cc`.
 
 Restart when requested, then run `/kimi-setup`. Setup is explicit: installing or enabling the bundle does not modify Kimi configuration. Delegation refuses to start when the DSH managed hook is missing or invalid.
 

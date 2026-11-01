@@ -107,7 +107,7 @@ From this repository checkout, run:
 dsh plugin --profile web add ./plugins/kimi-dsh
 ```
 
-For the published npm bundle, run `dsh plugin --profile web add dsh-kimi-plugin-cc` instead.
+For the published npm bundle, run `dsh plugin --profile web add kimi-plugin-cc` instead.
 
 Restart DSH when requested, then run `/kimi-setup` and `/kimi-setup --check`. Ask DSH to use one of the seven tools with a self-contained task. Job controls are `/kimi-status`, `/kimi-result`, and `/kimi-cancel`. `/kimi-setup --models` lists configured models, and `/kimi-setup --uninstall` removes only the DSH hook.
 
@@ -121,10 +121,10 @@ Codex. Published releases are also available as
 all three compiled plugin distributions. No Bun, TypeScript, or install scripts are
 needed to use the package. Kimi Code CLI and Node are still prerequisites.
 
-For an explicitly versioned local Claude Code plugin, this example pins the 2.5.0 package:
+For an explicitly versioned local Claude Code plugin, this example pins the 2.5.1 package:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.5.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.5.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 

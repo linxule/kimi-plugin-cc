@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const plugin = path.join(repo, 'plugins/kimi-dsh');
+const plugin = repo;
 const pkg = JSON.parse(readFileSync(path.join(plugin, 'package.json'), 'utf8'));
 const destination = process.argv[2] ? path.resolve(process.argv[2]) : mkdtempSync(path.join(os.tmpdir(), 'dsh-package-artifact-'));
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'dsh-package-check-'));
@@ -86,7 +86,7 @@ try {
   });
   const archive = path.join(destination, `${pkg.name}-${pkg.version}.tgz`);
   const files = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
-  const allowed = /^package\/(?:package\.json|README\.md|LICENSE|cordis\.patch\.yml|(?:dist|scripts)\/)/;
+  const allowed = /^(?:package\/(?:package\.json|\.mcp\.json|README\.md|LICENSE|CHANGELOG\.md)|package\/(?:\.claude-plugin|\.agents\/plugins|agents|commands|hooks|dist|plugins\/kimi-codex|plugins\/kimi-dsh|docs)\/|package\/scripts\/(?:companion|review-gate-hook)\.sh$)/;
   const syncConflictCopy = /(?:^|\/)[^/]* [0-9]+(?:\.[^/]*)?(?:\/|$)/;
   for (const file of files) {
     assert(!file.split('/').includes('..'), file);
@@ -95,7 +95,7 @@ try {
     assert(!file.includes('node_modules') && !file.endsWith('.map'), file);
   }
   execFileSync('tar', ['-xzf', archive, '-C', scratch]);
-  for (const file of ['package.json', 'cordis.patch.yml', 'dist/dsh/index.js', 'dist/companion.js']) {
+  for (const file of ['package.json', 'plugins/kimi-dsh/cordis.patch.yml', 'dist/dsh/index.js', 'dist/companion.js']) {
     assert(readFileSync(path.join(scratch, 'package', file)).length > 0, file);
   }
 

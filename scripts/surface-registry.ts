@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "aaba30da927727523435552957ae42e3e2edcd418511a2e35f5cd26b0a291629" },
-  { path: ".claude-plugin/marketplace.json", sha256: "a66e274c185e1cf89ea74b417c33603814d2b5eda7384cb378757570c123e407" },
+  { path: ".claude-plugin/plugin.json", sha256: "69dd961a012bb7880b0a13b1a92f8cd124ef53ceecd5c96b34f9ff51e293b511" },
+  { path: ".claude-plugin/marketplace.json", sha256: "e58409ccf4f8f926e825af2d6ff247fc30b3e87ce875ac052c505f1130069875" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
   { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
@@ -139,7 +139,7 @@ export const CODEX_MARKETPLACE = {
 } as const;
 
 export const DSH_PLUGIN_SUBDIR = "plugins/kimi-dsh";
-export const DSH_PLUGIN_PACKAGE_NAME = "dsh-kimi-plugin-cc";
+export const DSH_PLUGIN_PACKAGE_NAME = "kimi-plugin-cc";
 export const DSH_VERSION_RANGE = ">=0.2.1-rc.5 <0.3.0";
 
 export const DSH_PLUGIN_MANIFEST = {
@@ -184,10 +184,6 @@ export const DSH_PLUGIN_MANIFEST = {
     "@deepseek-ai/schemastery": "~3.18.5",
   },
   license: "Apache-2.0",
-  publishConfig: {
-    access: "public",
-    registry: "https://registry.npmjs.org/",
-  },
   repository: {
     type: "git",
     url: "git+https://github.com/linxule/kimi-plugin-cc.git",
@@ -212,7 +208,7 @@ export const DSH_BUNDLE_PATCH = [
   "",
 ].join("\n");
 
-export const DSH_README = `# dsh-kimi-plugin-cc
+export const DSH_README = `# kimi-plugin-cc for DeepSeek Harness
 
 Kimi Code subagents for DeepSeek Harness (DSH), backed by the same companion runtime as the Claude Code and Codex plugins.
 
@@ -246,7 +242,7 @@ From this repository checkout:
 dsh plugin --profile web add ./plugins/kimi-dsh
 \`\`\`
 
-For another DSH profile, replace \`web\` with its name. To install the published npm bundle instead, run \`dsh plugin --profile web add dsh-kimi-plugin-cc\`.
+For another DSH profile, replace \`web\` with its name. To install the published root package instead, run \`dsh plugin --profile web add kimi-plugin-cc\`.
 
 Restart when requested, then run \`/kimi-setup\`. Setup is explicit: installing or enabling the bundle does not modify Kimi configuration. Delegation refuses to start when the DSH managed hook is missing or invalid.
 
