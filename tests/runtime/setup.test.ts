@@ -143,20 +143,57 @@ describe("setup managed-block installer", () => {
     expect(contents).not.toContain("/stale/path/approval-hook.js");
   });
 
-  test("install refuses on orphaned BEGIN without END", async () => {
+  test("install removes an orphaned legacy BEGIN without deleting surrounding content", async () => {
     const { env, configPath } = await makeCase("install-orphan-begin");
-    await writeFile(configPath, "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===\n", "utf8");
-    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({
-      code: "SETUP_ORPHAN_MARKERS",
-    });
+    await writeFile(configPath, "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===\nuser_setting = true\n", "utf8");
+    const result = await runSetup([], makeContext(env));
+    expect(result.warnings.join("\n")).toContain("orphaned managed marker");
+    expect(await readFile(configPath, "utf8")).toContain("user_setting = true");
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
   });
 
-  test("install refuses on orphaned END without BEGIN", async () => {
+  test("install repairs an orphaned legacy END", async () => {
     const { env, configPath } = await makeCase("install-orphan-end");
     await writeFile(configPath, "# === END kimi-plugin-cc-managed ===\n", "utf8");
-    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({
-      code: "SETUP_ORPHAN_MARKERS",
-    });
+    const result = await runSetup([], makeContext(env));
+    expect(result.probe).toBe("ok");
+    expect(result.warnings.join("\n")).toContain("orphaned managed marker");
+  });
+
+  test("install repairs a partially rewritten hooks array without touching another host", async () => {
+    const { env, configPath } = await makeCase("partial-hooks-rewrite");
+    const foreign = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
+    const own = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+    const seeded = [
+      "[[hooks]]", 'event = "PreToolUse"', `command = "'${process.execPath}' '${foreign}'"`, "timeout = 15", "",
+      "[[hooks]]", 'event = "PreToolUse"', `command = "'${process.execPath}' '${own}'"`, "timeout = 15",
+      "# === END kimi-plugin-cc-managed:codex ===", "", "[user_settings]", "keep = true", "",
+    ].join("\n");
+    await writeFile(configPath, seeded, "utf8");
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+    const result = await runSetup([], makeContext(codexEnv));
+    const after = await readFile(configPath, "utf8");
+    expect(result.probe).toBe("ok");
+    expect(after).toContain(`command = "'${process.execPath}' '${foreign}'"`);
+    expect(after).not.toContain(own);
+    expect(after).toContain("[user_settings]\nkeep = true");
+    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+  });
+
+  test("mismatched host markers never let setup consume another host's content", async () => {
+    const { env, configPath } = await makeCase("mismatched-host-markers");
+    const seeded = '# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\nuser_setting = true\n# === END kimi-plugin-cc-managed:codex ===\n';
+    await writeFile(configPath, seeded, "utf8");
+    await expect(runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }))).rejects.toMatchObject({ code: "SETUP_ORPHAN_MARKERS" });
+    expect(await readFile(configPath, "utf8")).toBe(seeded);
+  });
+
+  test("orphan repair does not write when the hooks schema is invalid", async () => {
+    const { env, configPath } = await makeCase("orphan-invalid-hook");
+    const seeded = '[[hooks]]\nevent = "PreToolUse"\ncommand = "some-hook"\nunknown_field = true\n# === END kimi-plugin-cc-managed:codex ===\n';
+    await writeFile(configPath, seeded, "utf8");
+    await expect(runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }))).rejects.toMatchObject({ code: "SETUP_INVALID_HOOKS_CONFIG" });
+    expect(await readFile(configPath, "utf8")).toBe(seeded);
   });
 
   test("uninstall removes only the managed block, preserving user content", async () => {

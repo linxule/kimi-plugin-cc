@@ -9,7 +9,8 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // absolute Node path avoids PATH dependence under sanitized launches. Setup
 // probes the hook directly with resolveNodeBinary and through `/bin/sh -c`
 // using the exact installed command bytes. It also warns about broad permission
-// denies and refuses duplicate, orphaned, or malformed managed blocks.
+// denies, repairs owned orphan marker comments, and refuses remaining
+// duplicate, orphaned, or malformed managed blocks.
 //
 // Subcommands: install (default), --check, --uninstall [--all], and
 // --enable-review-gate/--disable-review-gate.
@@ -119,7 +120,11 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
     const mutation = await withKimiConfigLock(configPath, async () => {
         const original = await readConfigSafe(configPath);
         const lineEnding = detectLineEnding(original);
-        const inlineHooks = normalizeTopLevelInlineHooks(original, lineEnding);
+        const repaired = removeOwnedOrphanMarkers(original, hostId, lineEnding);
+        if (repaired.count > 0) {
+            warnings.push(`Removed ${repaired.count} orphaned managed marker comment(s) for this host; surrounding config was preserved.`);
+        }
+        const inlineHooks = normalizeTopLevelInlineHooks(repaired.contents, lineEnding);
         if (inlineHooks.found) {
             // Validate before normalizing so an invalid inline entry is reported
             // against the user's original bytes and the config remains untouched.
@@ -145,7 +150,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         if (state.kind === "orphan") {
             throw new RuntimeError("SETUP_ORPHAN_MARKERS", [
                 `kimi-code config at ${configPath} contains an orphaned ${state.detail} marker.`,
-                "Run `/kimi:setup --uninstall` to clean up, then re-run `/kimi:setup`.",
+                "An orphan marker owned by another host must be repaired using that host's setup, or inspected manually.",
             ].join(" "), "setup.install", { details: { configPath, orphan: state.detail } });
         }
         if (state.kind === "duplicate") {
@@ -536,6 +541,42 @@ function splitPreservingEnding(contents) {
     // pass the desired line ending).
     return contents.split("\n").map((line) => line.replace(/\r$/, ""));
 }
+// A partial upstream hooks-array rewrite can leave one marker comment behind.
+// Remove only unpaired markers owned by this host (or legacy markers), never
+// the intervening content. The normal full-file validation still gates writes.
+function removeOwnedOrphanMarkers(contents, hostId, lineEnding) {
+    const lines = splitPreservingEnding(contents);
+    const orphans = [];
+    let open = null;
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i].trim();
+        const begin = MARKERS.BEGIN_LINE_RE.exec(line);
+        if (begin !== null) {
+            if (open !== null)
+                orphans.push(open);
+            open = { index: i, host: begin[1]?.toLowerCase() ?? null };
+        }
+        else {
+            const end = MARKERS.END_LINE_RE.exec(line);
+            if (end === null)
+                continue;
+            const endMarker = { index: i, host: end[1]?.toLowerCase() ?? null };
+            if (open === null)
+                orphans.push(endMarker);
+            else {
+                if (open.host !== endMarker.host)
+                    orphans.push(open, endMarker);
+                open = null;
+            }
+        }
+    }
+    if (open !== null)
+        orphans.push(open);
+    const remove = new Set(orphans.filter((marker) => marker.host === null || marker.host === hostId).map((marker) => marker.index));
+    return remove.size === 0
+        ? { contents, count: 0 }
+        : { contents: lines.filter((_, index) => !remove.has(index)).join(lineEnding), count: remove.size };
+}
 /**
  * Remove managed blocks owned by `currentHost`, or every host with `removeAll`.
  * Ownership comes from the marker suffix or a legacy command's derived host.
@@ -579,8 +620,10 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
                     // Two BEGINs in a row — the outer one is an orphan.
                     break;
                 }
-                if (MARKERS.END_LINE_RE.test(nextTrimmed)) {
-                    endIdx = j;
+                const end = MARKERS.END_LINE_RE.exec(nextTrimmed);
+                if (end !== null) {
+                    if ((end[1]?.toLowerCase() ?? null) === beginHost)
+                        endIdx = j;
                     break;
                 }
                 const decoded = decodeManagedCommandLine(nextTrimmed);

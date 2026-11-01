@@ -126,7 +126,7 @@ function findMarkers(lines: string[]): MarkerHit[] {
 
 /**
  * Pair BEGIN/END markers into well-formed blocks. Return the first orphan
- * (BEGIN-without-END or END-without-BEGIN); either is a hard error for install.
+ * (BEGIN-without-END or END-without-BEGIN); verification fails closed on either.
  */
 function pairBlocks(
   lines: string[],
@@ -145,6 +145,7 @@ function pairBlocks(
     }
     // end
     if (open === null) return { orphan: "END-without-BEGIN" };
+    if (open.hostId !== marker.hostId) return { orphan: "BEGIN-without-END" };
     const body = validateBlockBody(lines.slice(open.index + 1, marker.index));
     blocks.push({
       hostId: open.hostId,
