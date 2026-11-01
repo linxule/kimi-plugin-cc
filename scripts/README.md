@@ -7,8 +7,9 @@ The shell entry points run the compiled Node runtime while preserving the caller
 | `companion.sh` | Launch `dist/companion.js` for commands, skills, and the MCP stdio server |
 | `review-gate-hook.sh` | Launch the optional Claude Code Stop hook |
 | `surface-registry.ts` | Define Codex and DSH surfaces and lock Claude surface hashes |
-| `generate-surfaces.ts` | Generate Codex and DSH manifests, composition, skills, scripts, and runtime mirrors |
-| `check-package.mjs` | Validate the packed plugin, reject sync-conflict copies, and exercise isolated host, MCP, and version gates |
+| `generate-surfaces.ts` | Generate Codex and DSH manifests, composition, skills, scripts, runtime mirrors, and the DSH Discover index |
+| `check-package.mjs` | Validate the packed root plugin and exercise isolated host, MCP, and version gates |
+| `check-dsh-package.mjs` | Install the root artifact into isolated DSH, verify all seven tools, and boot the Web host |
 | `smoke-rescue-drift.sh` | Run an opt-in live rescue check after CLI changes |
 | `audit-subscription-routing.ts` | Offline, exact-source counterexamples to atomic regional routing in CLI 2.0.1 |
 | `audit-subscription-recovery.ts` | Offline, exact-source evidence that terminal quota/recovery metadata is unavailable |

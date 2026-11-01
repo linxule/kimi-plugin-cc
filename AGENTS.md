@@ -121,6 +121,7 @@ Plugin versions use ordinary SemVer and may align with the certified kimi-code v
 `runtime/version.ts` is the SINGLE version source; `scripts/surface-registry.ts` propagates it to Codex and DSH manifests. A version bump touches:
 
 - `runtime/version.ts`, `package.json`, `.claude-plugin/plugin.json`, and `.claude-plugin/marketplace.json`; re-pin both manifest hashes in `CLAUDE_SURFACE_HASHES`.
+- `scripts/surface-registry.ts`: update `DSH_PUBLISH_TIMESTAMP` with the actual publication time; `generate:surfaces` refreshes `dsh/index.json` and its test checks version/timestamp/range.
 - `AGENTS.md`: bump the version and REPLACE any changed standing contract in present tense; what a release did belongs in `CHANGELOG.md` or the ROADMAP audit log, mechanics in `docs/invariants.md`.
 - `CHANGELOG.md`: add a version section for releases, not docs-only compatibility checkups.
 - Run `bun run build && bun run generate:surfaces` and stage all three distributions.

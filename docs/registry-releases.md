@@ -80,9 +80,11 @@ file at the tag, so fixes to `publish.yml` reach an existing tag only through
 ## Validation
 
 Use the repository's normal version bump and generated-surface procedure in
-AGENTS.md. Keep plugin and npm versions identical. Certification for new Kimi
-Code versions still requires the source audit and real-binary controls; adding
-a registry channel does not certify another CLI version.
+AGENTS.md. Keep plugin and npm versions identical, and update
+`DSH_PUBLISH_TIMESTAMP` with the actual publication time so the generated DSH
+Discover index stays current. Certification for new Kimi Code versions still
+requires the source audit and real-binary controls; adding a registry channel
+does not certify another CLI version.
 
 ```sh
 bun install --frozen-lockfile

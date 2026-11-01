@@ -120,6 +120,16 @@ Store CI credentials in GitHub Actions secrets. The workflow uses the API enviro
 
 Billing and access depend on the account behind the key. The workflow references secret names; never commit their values. Dispatching a run can make paid model calls.
 
+## DSH host smoke and release maintenance
+
+`node scripts/check-dsh-package.mjs [destination]` packs the root npm artifact, installs it into an isolated DSH home, verifies all seven tools in the composed config, and boots the Web host. It uses no model calls or maintainer Kimi configuration. Set `KIMI_DSH_TEST_BIN` to an alternate DSH binary when checking another Harness release; verify the current supported release and the latest prerelease before widening `engines.dsh`.
+
+For live DSH integration smoke, use `tests/helpers/dsh-live-mock-package` with `tests/helpers/dsh-live.patch.yml`. Install that mock and the bundle into an isolated DSH profile, install the DSH-managed hook through the normal sanitized setup path, and use an isolated Kimi home with an authorized authentication route. The scripted parent makes real DSH tool calls while the actual Kimi CLI executes, so no parent-provider credential is needed. `DSH_MOCK_TOOL`, `DSH_MOCK_DESCRIPTION`, and `DSH_MOCK_PROMPT` select the operation and task; `dsh --profile headless --patch tests/helpers/dsh-live.patch.yml 'Delegate the task'` runs it.
+
+Required scenarios for a host-parity change are: `kimi_ask` returns `4`; a write attempt through the read-only tool is denied and creates no file; `kimi_rescue` writes only the requested marker; and `kimi_swarm_write` returns a valid disjoint-target patch without applying it or placing target files in the real workspace. Inspect the persisted result, marker, and patch rather than relying only on the parent's completion text. Run these sequentially, keep all test state in throwaway homes, and clean up interrupted processes and worktrees.
+
+Every release also updates `DSH_PUBLISH_TIMESTAMP` in `scripts/surface-registry.ts`, regenerates `dsh/index.json`, and validates the version/timestamp/engine assertions in `tests/runtime/dsh-surfaces.test.ts`. This keeps the DSH Discover entry aligned with the published package.
+
 ## Dependency maintenance
 
 Dependabot checks the Bun manifest, lockfile, and GitHub Actions weekly. Updates require review; automatic merge and release are not configured.

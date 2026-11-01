@@ -10,9 +10,11 @@ import {
 } from "../../scripts/generate-surfaces.js";
 import {
   DSH_BUNDLE_PATCH,
+  DSH_DISCOVERY_INDEX,
   DSH_OPERATION_NAMES,
   DSH_PLUGIN_MANIFEST,
   DSH_PLUGIN_SUBDIR,
+  DSH_PUBLISH_TIMESTAMP,
   DSH_VERSION_RANGE,
 } from "../../scripts/surface-registry.js";
 import { DSH_COMPANION_OPERATIONS } from "../../runtime/dsh/companion.js";
@@ -69,10 +71,19 @@ describe("DSH generated surface", () => {
     expect(provider).not.toHaveProperty("default");
   });
 
-  test("generated files stay inside the self-contained DSH package", () => {
+  test("generated files stay inside the self-contained DSH package or the discovery index", () => {
     for (const file of generatedDshSurfaceFiles()) {
-      expect(file.path.startsWith(`${DSH_PLUGIN_SUBDIR}/`)).toBe(true);
+      expect(file.path.startsWith(`${DSH_PLUGIN_SUBDIR}/`) || file.path === "dsh/index.json").toBe(true);
       expect(file.path).not.toContain("..");
     }
+  });
+
+  test("discovery index carries the current release metadata", async () => {
+    const index = JSON.parse(await readFile(path.join(repoRoot, "dsh/index.json"), "utf8")) as typeof DSH_DISCOVERY_INDEX;
+    expect(index).toEqual(DSH_DISCOVERY_INDEX);
+    expect(index.plugins[0].versions[0].version).toBe(KIMI_PLUGIN_CC_VERSION);
+    expect(index.plugins[0].versions[0].publishTimestamp).toBe(DSH_PUBLISH_TIMESTAMP);
+    expect(index.plugins[0].versions[0].engines.dsh).toBe(DSH_VERSION_RANGE);
+    expect(index.plugins[0].name).toBe("kimi-plugin-cc");
   });
 });

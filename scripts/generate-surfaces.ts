@@ -13,6 +13,7 @@ import {
   CODEX_PLUGIN_SUBDIR,
   CODEX_SKILLS,
   DSH_BUNDLE_PATCH,
+  DSH_DISCOVERY_INDEX,
   DSH_PLUGIN_MANIFEST,
   DSH_PLUGIN_SUBDIR,
   DSH_README,
@@ -106,6 +107,10 @@ export function generatedDshSurfaceFiles(): GeneratedFile[] {
     {
       path: `${DSH_PLUGIN_SUBDIR}/README.md`,
       content: DSH_README,
+    },
+    {
+      path: "dsh/index.json",
+      content: `${JSON.stringify(DSH_DISCOVERY_INDEX, null, 2)}\n`,
     },
   ];
 }

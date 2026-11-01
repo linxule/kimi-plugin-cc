@@ -292,6 +292,63 @@ Host identity, workspace, hook path, Node binary, and bypass variables are provi
 - Rescue and pursue edit the real selected workspace. Swarm-write works from born HEAD in a temporary worktree, excludes uncommitted changes, and returns a patch without applying or committing it.
 `;
 
+export const DSH_PUBLISH_TIMESTAMP = 1793554059;
+
+export const DSH_DISCOVERY_INDEX = {
+  format: 1,
+  title: {
+    en: "Kimi for DeepSeek Harness",
+    zh: "Kimi 用于 DeepSeek Harness",
+  },
+  description: {
+    en: "Kimi Code subagents and workflows for DeepSeek Harness, backed by the kimi-plugin-cc companion runtime.",
+    zh: "由 kimi-plugin-cc companion 运行时支持的 DeepSeek Harness Kimi Code 子代理与工作流。",
+  },
+  metadata: {
+    categories: {
+      "agents-orchestration": {
+        title: {
+          en: "Agents & Orchestration",
+          zh: "代理与编排",
+        },
+      },
+    },
+  },
+  plugins: [
+    {
+      name: DSH_PLUGIN_PACKAGE_NAME,
+      title: {
+        en: "Kimi for Claude Code, Codex, and DeepSeek Harness",
+        zh: "Kimi 用于 Claude Code、Codex 和 DeepSeek Harness",
+      },
+      description: {
+        en: "All seven Kimi ask, review, challenge, rescue, pursue, swarm, and swarm-write operations through the local Kimi Code CLI, with managed hooks, jobs, budgets, and artifacts.",
+        zh: "通过本地 Kimi Code CLI 提供全部七类 Kimi ask、review、challenge、rescue、pursue、swarm 和 swarm-write 操作，包含托管钩子、任务、预算和产物。",
+      },
+      author: "Xule Lin",
+      homepage: "https://github.com/linxule/kimi-plugin-cc#readme",
+      repository: {
+        url: "https://github.com/linxule/kimi-plugin-cc",
+      },
+      metadata: {
+        category: "agents-orchestration",
+      },
+      versions: [
+        {
+          version: PLUGIN_VERSION,
+          publishTimestamp: DSH_PUBLISH_TIMESTAMP,
+          source: {
+            type: "npm",
+          },
+          engines: {
+            dsh: DSH_VERSION_RANGE,
+          },
+        },
+      ],
+    },
+  ],
+} as const;
+
 const MODEL_SELECTION_GUIDANCE = [
   "Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). Preserve `--thinking <effort>` or `--thinking=<effort>`; `--no-thinking` is rejected, use `--thinking off`. Omission preserves ambient operator env; resumes do not inherit previous job effort. Status and `result --json` report `thinking_effort_requested`, not observed effort.",
   "A `hook_escapes` array in `result <jobId> --json` (or a `safety hook notice` on stderr) is detection evidence, not a failure: a policy-denied tool call came back as something other than the managed hook's denial — an upstream pre-hook rejection, another hook blocking first, or hook drift. Surface it to the user and suggest /kimi:setup --check; never treat the job as failed or retry on its own.",
