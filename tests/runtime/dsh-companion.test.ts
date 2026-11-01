@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import path from "node:path";
 
 import type { ContentBlock } from "@deepseek-ai/dsh-llm";
+import type { Context } from "@deepseek-ai/cordis";
 import type { SubagentStartRequest } from "@deepseek-ai/dsh-subagent";
 import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from "@deepseek-ai/dsh-subprocess";
 
@@ -14,7 +15,8 @@ import {
   startCompanionRun,
   type DshCompanionSpec,
 } from "../../runtime/dsh/companion.js";
-import { defaultDshDataRoot } from "../../runtime/dsh/index.js";
+import { apply, defaultDshDataRoot } from "../../runtime/dsh/index.js";
+import { preferStableNodePath } from "../../runtime/hooks/install-paths.js";
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..");
 
@@ -82,6 +84,32 @@ function request(signal = new AbortController().signal): SubagentStartRequest {
 }
 
 describe("DSH companion argument and environment boundaries", () => {
+  test("rejects unsafe short disposal grace periods", () => {
+    expect(() => apply({} as Context, { dataRoot: "/tmp/dsh", disposeGraceMs: 50 })).toThrow("at least 6000");
+  });
+
+  test("registers model-visible operation boundaries", () => {
+    let guidance = "";
+    const fake = {
+      subagents: { registerProvider: () => {} },
+      inject: (names: string[], fn: (ctx: unknown) => void) => {
+        if (names.includes("systemPrompt")) fn({ systemPrompt: {
+          getSectionOrder: () => 2800,
+          section: (section: { text: () => string }) => { guidance = section.text(); },
+        } });
+      },
+    };
+    apply(fake as unknown as Context, { dataRoot: "/tmp/dsh" });
+    expect(guidance).toContain("kimi_ask, kimi_review, and kimi_challenge are read-only");
+    expect(guidance).toContain("kimi_rescue and kimi_pursue can edit");
+    expect(guidance).toContain("kimi_swarm_write edits a temporary worktree");
+  });
+
+  test("pins the same stable Node path used to spawn the companion", () => {
+    const expected = preferStableNodePath(process.execPath);
+    expect(companionEnvironment("/data", "/workspace", {}).KIMI_PLUGIN_CC_NODE_BIN).toBe(expected);
+    expect(companionArgv("ask", "question", "/plugin/dist/companion.js")[0]).toBe(expected);
+  });
   test("all seven operations map to the exact companion command with a flag terminator", () => {
     const expected = {
       ask: ["ask", "--fresh"],
@@ -174,7 +202,7 @@ describe("DSH companion lifecycle", () => {
       output: [{ type: "text", text: "answer" }],
       stopReason: "completed",
     });
-    expect(spec.spawned[0]?.argv.slice(0, 3)).toEqual([process.execPath, "/plugin/dist/companion.js", "ask"]);
+    expect(spec.spawned[0]?.argv.slice(0, 3)).toEqual([preferStableNodePath(process.execPath), "/plugin/dist/companion.js", "ask"]);
     expect(spec.spawned[0]?.cwd).toBe(repoRoot);
     await run.dispose();
     await run.dispose();

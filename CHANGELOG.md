@@ -2,11 +2,18 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## Unreleased
+
+- Preserve TOML multiline values, line endings, and foreign hook fields during setup; repair mixed-host orphan marker comments without altering foreign hooks.
+- Keep the DSH disposal grace at least 6000ms, pin a stable Node path, and expose each Kimi tool's write boundary to the model.
+- Treat DSH services and its tool adapter as host-provided peers so ordinary npm consumers do not install the harness. Require patched DSH host/profile dependencies and audit both installations before the seven-tool composition and Web-boot smoke.
+- Add an installed-consumer security gate to CI and publication; reject failed or incomplete audits as well as high/critical advisories. Upstream DSH pins remain vulnerable, so existing installations require the documented explicit overrides.
+
 ## 2.5.1 — 2026-11-01
 
 - Consolidate DSH distribution into the existing `kimi-plugin-cc` npm package and its established OIDC publication path. DSH users install the same root artifact with `dsh plugin --profile <name> add kimi-plugin-cc`; no second npm package or Trusted Publishing binding is required.
 - Declare the root DSH bundle entry, runtime dependencies, and peer compatibility directly in `package.json`, and validate root-tarball installation, seven-tool composition, and Web boot in an isolated DSH profile.
-- Pin safe transitive `zod` and `undici` versions, remove the unnecessary full DSH CLI development dependency, install pnpm explicitly in CI, and exclude dependency directories from installed-script fixtures.
+- Pin transitive `zod` and `undici` versions in the checkout lockfile, remove the unnecessary full DSH CLI development dependency, install pnpm explicitly in CI, and exclude dependency directories from installed-script fixtures. Downstream npm consumers do not inherit those overrides; see the consumer-security release gate.
 
 ## 2.5.0 — 2026-11-01
 

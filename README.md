@@ -99,6 +99,8 @@ If you use multiple hosts, run setup in each. Each app has its own hook in the s
 
 ## Install in DeepSeek Harness
 
+DSH requires patched host and profile dependencies (`zod >=4.6.6`, `undici >=8.12.2`). Follow the [host installation and audit instructions](./docs/registry-releases.md#patched-dsh-host-and-profiles) before installing this plugin.
+
 The DSH bundle provides the same seven operations as the other hosts: `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm`, and `kimi_swarm_write`. They use the same companion runtime, safety hooks, jobs, budgets, and artifacts. Rescue and pursue edit the selected workspace; swarm-write returns a patch without applying or committing it.
 
 From this repository checkout, run:
@@ -341,6 +343,8 @@ codex plugin add kimi@kimi-marketplace
 
 ## 在 DeepSeek Harness（DSH）中安装
 
+DSH 宿主及各配置所用的依赖需要修补（`zod >=4.6.6`、`undici >=8.12.2`）。安装插件前，请按[宿主安装与审计说明](./docs/registry-releases.md#patched-dsh-host-and-profiles)操作。
+
 DSH 与其他宿主一样提供七类操作：`kimi_ask`、`kimi_review`、`kimi_challenge`、`kimi_rescue`、`kimi_pursue`、`kimi_swarm` 和 `kimi_swarm_write`。它们使用同一套 companion 运行时、安全钩子、任务记录、预算和产物。Rescue 和 pursue 会修改所选工作区；swarm-write 只返回补丁，不会应用或提交它。
 
 从此仓库检出安装：
@@ -488,7 +492,9 @@ Demandez à Kimi d'expliquer du code, de faire une revue de code, de remettre en
 
 Le plugin exécute Kimi Code CLI sur votre ordinateur. Il utilise votre abonnement Kimi ou un fournisseur configuré dans Kimi. Les appels consomment votre quota d'abonnement ou sont facturés sur votre compte API. La connexion à l'application hôte ne change pas. Le fournisseur choisi reçoit les prompts et le code nécessaires à la tâche.
 
-Commencez par une question ou une revue de code. Ces modes autorisent la lecture des fichiers, mais interdisent leur modification et l'exécution de commandes shell. D'autres modes peuvent modifier des fichiers ; DSH propose les sept mêmes opérations avec les mêmes limites d'écriture. Consultez les [limites de sécurité](./docs/safety.md) avant de demander des modifications à Kimi. Voir le [guide DSH en anglais](#install-in-deepseek-harness) pour l'installation.
+Commencez par une question ou une revue de code. Ces modes autorisent la lecture des fichiers, mais interdisent leur modification et l'exécution de commandes shell. D'autres modes peuvent modifier des fichiers ; DSH nécessite des dépendances corrigées dans son installation et ses profils (`zod >=4.6.6`, `undici >=8.12.2`). Suivez les [instructions d’installation et d’audit](./docs/registry-releases.md#patched-dsh-host-and-profiles) avant d’installer ce plugin.
+
+DSH propose les sept mêmes opérations avec les mêmes limites d'écriture. Consultez les [limites de sécurité](./docs/safety.md) avant de demander des modifications à Kimi. Voir le [guide DSH en anglais](#install-in-deepseek-harness) pour l'installation.
 
 ## Préparer l'installation
 
@@ -770,6 +776,8 @@ $kimi-ask を使って、このプロジェクトのメインのエントリー�
 Claude Code と Codex の両方を使う場合は、それぞれで setup を実行します。共通の Kimi 設定内に、各アプリ専用のフックが作られます。
 
 ## DeepSeek Harness（DSH）にインストールする
+
+DSH 本体とプロファイルの依存パッケージには修正版（`zod >=4.6.6`、`undici >=8.12.2`）が必要です。プラグインのインストール前に[本体のインストールと監査の手順](./docs/registry-releases.md#patched-dsh-host-and-profiles)を確認してください。
 
 DSH でも、ほかのホストと同じ 7 種類の操作を提供します：`kimi_ask`、`kimi_review`、`kimi_challenge`、`kimi_rescue`、`kimi_pursue`、`kimi_swarm`、`kimi_swarm_write`。同じ companion ランタイム、安全フック、ジョブ、予算、成果物を使用します。Rescue と pursue は選択したワークスペースを変更し、swarm-write はパッチを返すだけで、適用やコミットは行いません。
 

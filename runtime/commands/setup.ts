@@ -9,7 +9,7 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // absolute Node path avoids PATH dependence under sanitized launches. Setup
 // probes the hook directly with resolveNodeBinary and through `/bin/sh -c`
 // using the exact installed command bytes. It also warns about broad permission
-// denies, repairs owned orphan marker comments, and refuses remaining
+// denies, repairs orphan marker comments, and refuses remaining
 // duplicate, orphaned, or malformed managed blocks.
 //
 // Subcommands: install (default), --check, --uninstall [--all], and
@@ -50,6 +50,7 @@ import {
   effectiveHost,
   evaluateInstalled,
   findUnmanagedApprovalHookBlocks,
+  markerCommentLines,
   MARKERS,
   parseManagedBlock,
   type ManagedBlockState,
@@ -63,6 +64,7 @@ import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
+import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
 
@@ -236,9 +238,10 @@ async function runInstall(
   const mutation = await withKimiConfigLock(configPath, async () => {
     const original = await readConfigSafe(configPath);
     const lineEnding = detectLineEnding(original);
-    const repaired = removeOwnedOrphanMarkers(original, hostId, lineEnding);
+    try { parseToml(original); } catch { await assertKimiHookSetValid(original, configPath, "setup.install", context.env); }
+    const repaired = removeOrphanMarkers(original);
     if (repaired.count > 0) {
-      warnings.push(`Removed ${repaired.count} orphaned managed marker comment(s) for this host; surrounding config was preserved.`);
+      warnings.push(`Removed ${repaired.count} orphaned managed marker comment(s); surrounding config was preserved.`);
     }
     const inlineHooks = normalizeTopLevelInlineHooks(repaired.contents, lineEnding);
     if (inlineHooks.found) {
@@ -263,7 +266,7 @@ async function runInstall(
     // after a config rewrite strips comments, so it must remain untouched.
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
     const { pruned, count: prunedCount, commands: prunedCommands } =
-      pruneOrphanApprovalHooks(inlineHooks.contents, lineEnding, hostId, expectedCommand);
+      pruneOrphanApprovalHooks(inlineHooks.contents, hostId, expectedCommand);
     const existing = pruned;
     if (prunedCount > 0) {
       const readorned = prunedCommands.includes(expectedCommand);
@@ -281,7 +284,7 @@ async function runInstall(
         "SETUP_ORPHAN_MARKERS",
         [
           `kimi-code config at ${configPath} contains an orphaned ${state.detail} marker.`,
-          "An orphan marker owned by another host must be repaired using that host's setup, or inspected manually.",
+          "Inspect the managed marker comments and re-run setup.",
         ].join(" "),
         "setup.install",
         { details: { configPath, orphan: state.detail } },
@@ -604,14 +607,12 @@ async function runUninstallLocked(
     hostId,
     removeAllHosts,
   );
-  const lineEnding = detectLineEnding(existing);
   // Exact current command bytes also identify this host's table when a host-id
   // override disagrees with path derivation or a dev path is outside the strict
   // ownership pattern.
   const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
   const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(
     strippedMarkers,
-    lineEnding,
     removeAllHosts ? undefined : hostId,
     expectedCommand,
   );
@@ -764,10 +765,10 @@ function spliceBlock(
   replacement: string,
   lineEnding: "\n" | "\r\n",
 ): string {
-  const lines = splitPreservingEnding(contents);
-  const before = lines.slice(0, beginLine).join(lineEnding);
-  const after = lines.slice(endLine + 1).join(lineEnding);
-  const beforeWithSep = before.endsWith(lineEnding) || before.length === 0 ? before : `${before}${lineEnding}`;
+  const lines = contents.split(/(?<=\n)/);
+  const before = lines.slice(0, beginLine).join("");
+  const after = lines.slice(endLine + 1).join("");
+  const beforeWithSep = before.endsWith("\n") || before.length === 0 ? before : `${before}${lineEnding}`;
   const replacementWithEnding = replacement.endsWith(lineEnding) ? replacement : `${replacement}${lineEnding}`;
   return `${beforeWithSep}${replacementWithEnding}${after}`;
 }
@@ -787,17 +788,17 @@ function splitPreservingEnding(contents: string): string[] {
 }
 
 // A partial upstream hooks-array rewrite can leave one marker comment behind.
-// Remove only unpaired markers owned by this host (or legacy markers), never
-// the intervening content. The normal full-file validation still gates writes.
-function removeOwnedOrphanMarkers(
+// Remove only unpaired marker comments, never the intervening content. The
+// normal full-file validation still gates writes.
+function removeOrphanMarkers(
   contents: string,
-  hostId: string,
-  lineEnding: "\n" | "\r\n",
 ): { contents: string; count: number } {
   const lines = splitPreservingEnding(contents);
   const orphans: { index: number; host: string | null }[] = [];
+  const comments = markerCommentLines(contents);
   let open: { index: number; host: string | null } | null = null;
   for (let i = 0; i < lines.length; i += 1) {
+    if (!comments.has(i)) continue;
     const line = lines[i]!.trim();
     const begin = MARKERS.BEGIN_LINE_RE.exec(line);
     if (begin !== null) {
@@ -815,10 +816,10 @@ function removeOwnedOrphanMarkers(
     }
   }
   if (open !== null) orphans.push(open);
-  const remove = new Set(orphans.filter((marker) => marker.host === null || marker.host === hostId).map((marker) => marker.index));
+  const remove = new Set(orphans.map((marker) => marker.index));
   return remove.size === 0
     ? { contents, count: 0 }
-    : { contents: lines.filter((_, index) => !remove.has(index)).join(lineEnding), count: remove.size };
+    : { contents: contents.split(/(?<=\n)/).filter((_, index) => !remove.has(index)).join(""), count: remove.size };
 }
 
 /**
@@ -835,8 +836,9 @@ function stripManagedBlocks(
   removedBlocks: number;
   orphansLeft: number[];
 } {
-  const lineEnding = detectLineEnding(contents);
   const lines = splitPreservingEnding(contents);
+  const rawLines = contents.split(/(?<=\n)/);
+  const markerLines = markerCommentLines(contents);
   const result: string[] = [];
   const orphansLeft: number[] = [];
   let removedBlocks = 0;
@@ -862,7 +864,7 @@ function stripManagedBlocks(
   while (i < lines.length) {
     const line = lines[i]!;
     const trimmed = line.trim();
-    const begin = MARKERS.BEGIN_LINE_RE.exec(trimmed);
+    const begin = markerLines.has(i) ? MARKERS.BEGIN_LINE_RE.exec(trimmed) : null;
     if (begin !== null) {
       const beginHost = begin[1]?.toLowerCase() ?? null;
       // Look ahead for the matching END, capturing the block's command en route.
@@ -870,11 +872,11 @@ function stripManagedBlocks(
       let blockCommand: string | null = null;
       for (let j = i + 1; j < lines.length; j += 1) {
         const nextTrimmed = lines[j]!.trim();
-        if (MARKERS.BEGIN_LINE_RE.test(nextTrimmed)) {
+        if (markerLines.has(j) && MARKERS.BEGIN_LINE_RE.test(nextTrimmed)) {
           // Two BEGINs in a row — the outer one is an orphan.
           break;
         }
-        const end = MARKERS.END_LINE_RE.exec(nextTrimmed);
+        const end = markerLines.has(j) ? MARKERS.END_LINE_RE.exec(nextTrimmed) : null;
         if (end !== null) {
           if ((end[1]?.toLowerCase() ?? null) === beginHost) endIdx = j;
           break;
@@ -889,7 +891,7 @@ function stripManagedBlocks(
           i += 1;
           continue;
         }
-        result.push(line);
+        result.push(rawLines[i]!);
         i += 1;
         continue;
       }
@@ -900,11 +902,11 @@ function stripManagedBlocks(
         continue;
       }
       // Another host's block — keep it verbatim.
-      for (let k = i; k <= endIdx; k += 1) result.push(lines[k]!);
+      for (let k = i; k <= endIdx; k += 1) result.push(rawLines[k]!);
       i = endIdx + 1;
       continue;
     }
-    const end = MARKERS.END_LINE_RE.exec(trimmed);
+    const end = markerLines.has(i) ? MARKERS.END_LINE_RE.exec(trimmed) : null;
     if (end !== null) {
       const endHost = end[1]?.toLowerCase() ?? null;
       // Orphan END with no preceding BEGIN: drop only this line (if ours).
@@ -913,26 +915,15 @@ function stripManagedBlocks(
         i += 1;
         continue;
       }
-      result.push(line);
+      result.push(rawLines[i]!);
       i += 1;
       continue;
     }
-    result.push(line);
+    result.push(rawLines[i]!);
     i += 1;
   }
 
-  const collapsed: string[] = [];
-  let blankRun = 0;
-  for (const line of result) {
-    if (line.length === 0) {
-      blankRun += 1;
-      if (blankRun <= 2) collapsed.push(line);
-    } else {
-      blankRun = 0;
-      collapsed.push(line);
-    }
-  }
-  return { stripped: collapsed.join(lineEnding), removedBlocks, orphansLeft };
+  return { stripped: result.join(""), removedBlocks, orphansLeft };
 }
 
 /**
@@ -950,7 +941,6 @@ function stripManagedBlocks(
  */
 function pruneOrphanApprovalHooks(
   contents: string,
-  lineEnding: "\n" | "\r\n",
   ownedBy?: string,
   alsoMatchCommand?: string,
 ): { pruned: string; count: number; commands: string[] } {
@@ -961,22 +951,10 @@ function pruneOrphanApprovalHooks(
   for (const { start, end } of ranges) {
     for (let i = start; i < end; i += 1) remove.add(i);
   }
-  const lines = splitPreservingEnding(contents);
+  const lines = contents.split(/(?<=\n)/);
   const kept = lines.filter((_, idx) => !remove.has(idx));
-
-  const collapsed: string[] = [];
-  let blankRun = 0;
-  for (const line of kept) {
-    if (line.length === 0) {
-      blankRun += 1;
-      if (blankRun <= 2) collapsed.push(line);
-    } else {
-      blankRun = 0;
-      collapsed.push(line);
-    }
-  }
   return {
-    pruned: collapsed.join(lineEnding),
+    pruned: kept.join(""),
     count: ranges.length,
     commands: ranges.map((range) => range.command),
   };

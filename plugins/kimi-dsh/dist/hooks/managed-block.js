@@ -45,10 +45,80 @@ const MATCHER_LINE_RE = /^matcher\s*=/;
 /** `timeout = <int>` — the only other key our managed [[hooks]] table emits. */
 const TIMEOUT_LINE_RE = /^timeout\s*=\s*\d+\s*$/;
 const HOOKS_TABLE_RE = /^\[\[hooks\]\]\s*$/;
+// Recognize comment lines lexically, not text inside TOML string values.
+// Whole-document parsing remains the authority for TOML validity.
+function scanTomlLines(contents) {
+    const markers = new Set();
+    const tables = new Set();
+    let state = "plain";
+    let line = 0;
+    let blankPrefix = true;
+    for (let i = 0; i < contents.length; i += 1) {
+        const c = contents[i];
+        if (c === "\n") {
+            line += 1;
+            blankPrefix = true;
+            continue;
+        }
+        const onlyWhitespaceBefore = blankPrefix;
+        if (c !== " " && c !== "\t" && c !== "\r")
+            blankPrefix = false;
+        if (state === "plain") {
+            if (c === "[" && onlyWhitespaceBefore)
+                tables.add(line);
+            if (c === "#") {
+                if (onlyWhitespaceBefore) {
+                    const end = contents.indexOf("\n", i);
+                    const comment = contents.slice(i, end < 0 ? contents.length : end).trim();
+                    if (BEGIN_LINE_RE.test(comment) || END_LINE_RE.test(comment))
+                        markers.add(line);
+                }
+                const end = contents.indexOf("\n", i);
+                if (end < 0)
+                    break;
+                i = end - 1;
+            }
+            else if (c === '"' || c === "'") {
+                const triple = contents.slice(i, i + 3) === c.repeat(3);
+                state = c === '"' ? (triple ? "multibasic" : "basic") : (triple ? "multiliteral" : "literal");
+                if (triple)
+                    i += 2;
+            }
+        }
+        else {
+            const basic = state === "basic" || state === "multibasic";
+            const quote = basic ? '"' : "'";
+            if (basic && c === "\\") {
+                if (contents[i + 1] === "\n") {
+                    line += 1;
+                    blankPrefix = true;
+                }
+                i += 1;
+                continue;
+            }
+            if (c !== quote)
+                continue;
+            if (state === "basic" || state === "literal")
+                state = "plain";
+            else if (contents.slice(i, i + 3) === quote.repeat(3)) {
+                while (contents[i + 1] === quote)
+                    i += 1;
+                state = "plain";
+            }
+        }
+    }
+    return { markers, tables };
+}
+export function markerCommentLines(contents) {
+    return scanTomlLines(contents).markers;
+}
 /** Locate every BEGIN/END marker line, in order, with its parsed host id. */
 function findMarkers(lines) {
     const hits = [];
+    const comments = markerCommentLines(lines.join("\n"));
     for (let i = 0; i < lines.length; i += 1) {
+        if (!comments.has(i))
+            continue;
         const trimmed = lines[i].trim();
         const begin = BEGIN_LINE_RE.exec(trimmed);
         if (begin !== null) {
@@ -438,13 +508,13 @@ export function evaluateInstalled(contents, expectedCommand, opts) {
  * The deletion range `[start, end)` is conservative: only the contiguous
  * non-blank body after `[[hooks]]`, stopping at a blank line, table header, or
  * managed marker so adjacent user content is preserved. A separate full-span
- * scan rejects matcher lines recognized by MATCHER_LINE_RE to avoid half-cutting
- * a table. That scan is deliberately heuristic and does not claim to recognize
- * every quoted or dotted TOML matcher spelling. `command` is decoded for the
- * caller's ownership checks.
+ * scan refuses any further TOML field before the next table, including quoted
+ * and dotted keys, so pruning cannot attach those fields to another table.
+ * `command` is decoded for the caller's ownership checks.
  */
 export function findBareApprovalHookTables(contents) {
     const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
+    const tableLines = scanTomlLines(contents).tables;
     const managed = new Set();
     const paired = pairBlocks(lines);
     if ("blocks" in paired) {
@@ -457,7 +527,7 @@ export function findBareApprovalHookTables(contents) {
     for (let i = 0; i < lines.length; i += 1) {
         if (managed.has(i))
             continue;
-        if (!HOOKS_TABLE_RE.test(lines[i].trim()))
+        if (!tableLines.has(i) || !HOOKS_TABLE_RE.test(lines[i].trim()))
             continue;
         // Collect the contiguous table body.
         let j = i + 1;
@@ -502,22 +572,16 @@ export function findBareApprovalHookTables(contents) {
             }
             j += 1;
         }
-        // A blank line does NOT end a TOML table; membership continues to the next
-        // header or EOF. The deletion range nevertheless stops at the blank to
-        // preserve adjacent user content. Scan the remaining span for matcher lines
-        // this scanner recognizes and reject the table rather than half-cutting it:
-        // matcher is schema-valid but can disable the hook at runtime. Foreign keys
-        // and other TOML spellings are handled by whole-file schema validation and
-        // the parser-based installed checks, not by this prune heuristic.
-        let matcherBeyondBody = false;
+        // Blank lines and marker comments do not end a TOML table. Never leave any
+        // field behind to be rebound to a preceding table after pruning, regardless
+        // of the field's spelling or whether it is valid for a hook.
+        let fieldBeyondBody = false;
         for (let k = j; k < lines.length; k += 1) {
             const t = lines[k].trim();
-            // The current table's TOML span ends at the next table header or a
-            // managed marker; a matcher past that point belongs to a different table.
-            if (t.startsWith("[") || BEGIN_LINE_RE.test(t) || END_LINE_RE.test(t))
+            if (tableLines.has(k))
                 break;
-            if (MATCHER_LINE_RE.test(t)) {
-                matcherBeyondBody = true;
+            if (t.length > 0 && !t.startsWith("#")) {
+                fieldBeyondBody = true;
                 break;
             }
         }
@@ -529,7 +593,7 @@ export function findBareApprovalHookTables(contents) {
             commandDecoded.length > 0 &&
             hasPreToolUseEvent &&
             !hasMatcher &&
-            !matcherBeyondBody) {
+            !fieldBeyondBody) {
             ranges.push({ start: i, end: j, command: commandDecoded });
         }
     }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { brandString } from "@deepseek-ai/dsh-brand";
 import { assertUsableCwd, settleRunResult, subprocessRunHandle, } from "@deepseek-ai/dsh-subagent";
+import { preferStableNodePath } from "../hooks/install-paths.js";
 export const DSH_COMPANION_OPERATIONS = [
     "ask",
     "review",
@@ -20,7 +21,7 @@ export function companionTextTask(prompt) {
     }
     return text;
 }
-export function companionArgv(operation, prompt, companionPath, nodeBin = process.execPath, options = {}) {
+export function companionArgv(operation, prompt, companionPath, nodeBin = preferStableNodePath(process.execPath), options = {}) {
     const command = operation === "ask" || operation === "review"
         ? [operation]
         : operation === "swarm-write"
@@ -41,7 +42,7 @@ export function companionArgv(operation, prompt, companionPath, nodeBin = proces
         prompt,
     ];
 }
-export function companionEnvironment(dataRoot, cwd, env, nodeBin = process.execPath) {
+export function companionEnvironment(dataRoot, cwd, env, nodeBin = preferStableNodePath(process.execPath)) {
     return {
         ...env,
         KIMI_PLUGIN_CC_DATA: dataRoot,
@@ -79,8 +80,9 @@ export async function startCompanionRun(request, operation, spec) {
     request.signal.addEventListener("abort", onAbort, { once: true });
     let child;
     try {
+        const nodeBin = preferStableNodePath(process.execPath);
         child = spec.spawn({
-            argv: companionArgv(operation, prompt, spec.companionPath, process.execPath, spec),
+            argv: companionArgv(operation, prompt, spec.companionPath, nodeBin, spec),
             cwd,
             stdio: {
                 stdin: "ignore",
@@ -89,7 +91,7 @@ export async function startCompanionRun(request, operation, spec) {
             },
             graceMs: spec.disposeGraceMs,
             signal: termination.signal,
-            env: companionEnvironment(spec.dataRoot, cwd, spec.env),
+            env: companionEnvironment(spec.dataRoot, cwd, spec.env, nodeBin),
         });
     }
     catch (error) {
@@ -141,8 +143,9 @@ export async function startCompanionRun(request, operation, spec) {
     });
 }
 export async function runCompanionCommand(argv, cwd, spec, signal) {
+    const nodeBin = preferStableNodePath(process.execPath);
     const child = spec.spawn({
-        argv: [process.execPath, spec.companionPath, ...argv],
+        argv: [nodeBin, spec.companionPath, ...argv],
         cwd,
         stdio: {
             stdin: "ignore",
@@ -151,7 +154,7 @@ export async function runCompanionCommand(argv, cwd, spec, signal) {
         },
         graceMs: spec.disposeGraceMs,
         signal,
-        env: companionEnvironment(spec.dataRoot, cwd, spec.env),
+        env: companionEnvironment(spec.dataRoot, cwd, spec.env, nodeBin),
     });
     try {
         const outcome = await child.done;

@@ -51,6 +51,9 @@ jobs:
       - name: Check root and DSH npm package installation
         run: bun run check:package
 
+      - name: Audit installed npm consumer dependencies
+        run: bun run check:consumer-security
+
   windows-spawn:
     runs-on: windows-latest
     steps:

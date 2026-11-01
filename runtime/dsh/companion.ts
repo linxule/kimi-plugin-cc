@@ -12,6 +12,7 @@ import {
   type SubagentStartRequest,
 } from "@deepseek-ai/dsh-subagent";
 import type { SubprocessHandle, SubprocessSpawnSpec } from "@deepseek-ai/dsh-subprocess";
+import { preferStableNodePath } from "../hooks/install-paths.js";
 
 export const DSH_COMPANION_OPERATIONS = [
   "ask",
@@ -61,7 +62,7 @@ export function companionArgv(
   operation: DshCompanionOperation,
   prompt: string,
   companionPath: string,
-  nodeBin = process.execPath,
+  nodeBin = preferStableNodePath(process.execPath),
   options: Pick<DshCompanionSpec, "model" | "thinkingEffort" | "budget" | "reviewBase"> = {},
 ): string[] {
   const command = operation === "ask" || operation === "review"
@@ -89,7 +90,7 @@ export function companionEnvironment(
   dataRoot: string,
   cwd: string,
   env: Record<string, string>,
-  nodeBin = process.execPath,
+  nodeBin = preferStableNodePath(process.execPath),
 ): NodeJS.ProcessEnv {
   return {
     ...env,
@@ -134,8 +135,9 @@ export async function startCompanionRun(
 
   let child: SubprocessHandle;
   try {
+    const nodeBin = preferStableNodePath(process.execPath);
     child = spec.spawn({
-      argv: companionArgv(operation, prompt, spec.companionPath, process.execPath, spec),
+      argv: companionArgv(operation, prompt, spec.companionPath, nodeBin, spec),
       cwd,
       stdio: {
         stdin: "ignore",
@@ -144,7 +146,7 @@ export async function startCompanionRun(
       },
       graceMs: spec.disposeGraceMs,
       signal: termination.signal,
-      env: companionEnvironment(spec.dataRoot, cwd, spec.env),
+      env: companionEnvironment(spec.dataRoot, cwd, spec.env, nodeBin),
     });
   } catch (error) {
     request.signal.removeEventListener("abort", onAbort);
@@ -202,8 +204,9 @@ export async function runCompanionCommand(
   spec: DshCompanionSpec,
   signal?: AbortSignal,
 ): Promise<DshCompanionCommandResult> {
+  const nodeBin = preferStableNodePath(process.execPath);
   const child = spec.spawn({
-    argv: [process.execPath, spec.companionPath, ...argv],
+    argv: [nodeBin, spec.companionPath, ...argv],
     cwd,
     stdio: {
       stdin: "ignore",
@@ -212,7 +215,7 @@ export async function runCompanionCommand(
     },
     graceMs: spec.disposeGraceMs,
     signal,
-    env: companionEnvironment(spec.dataRoot, cwd, spec.env),
+    env: companionEnvironment(spec.dataRoot, cwd, spec.env, nodeBin),
   });
   try {
     const outcome = await child.done;

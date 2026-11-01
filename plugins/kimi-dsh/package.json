@@ -32,11 +32,41 @@
     "@deepseek-ai/dsh-session": ">=0.2.1-rc.5 <0.3.0",
     "@deepseek-ai/dsh-subagent": ">=0.2.1-rc.5 <0.3.0",
     "@deepseek-ai/dsh-subprocess": ">=0.2.1-rc.5 <0.3.0",
-    "@deepseek-ai/dsh-working-directory": ">=0.2.1-rc.5 <0.3.0"
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-working-directory": ">=0.2.1-rc.5 <0.3.0",
+    "@deepseek-ai/dsh-tool-subagent": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-commands": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-subagent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-subprocess": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-working-directory": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-subagent": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@deepseek-ai/dsh-brand": ">=0.2.1-rc.5 <0.3.0",
-    "@deepseek-ai/dsh-tool-subagent": ">=0.2.1-rc.5 <0.3.0",
     "@deepseek-ai/schemastery": "~3.18.5"
   },
   "license": "Apache-2.0",

@@ -9,7 +9,7 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // absolute Node path avoids PATH dependence under sanitized launches. Setup
 // probes the hook directly with resolveNodeBinary and through `/bin/sh -c`
 // using the exact installed command bytes. It also warns about broad permission
-// denies, repairs owned orphan marker comments, and refuses remaining
+// denies, repairs orphan marker comments, and refuses remaining
 // duplicate, orphaned, or malformed managed blocks.
 //
 // Subcommands: install (default), --check, --uninstall [--all], and
@@ -26,12 +26,13 @@ import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKimiConfigLock, } from "../hooks/config-safety.js";
 import { buildHookShellCommand, hostIdFromHookCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
-import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, MARKERS, parseManagedBlock, } from "../hooks/managed-block.js";
+import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, markerCommentLines, MARKERS, parseManagedBlock, } from "../hooks/managed-block.js";
 import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
 import { isNativeV2CertifiedVersion } from "../kimi-engine.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
+import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
 const DEFAULT_HOOK_TIMEOUT_S = 15;
 // Probe timing. The direct script probe is local and fast; allow 5s for
@@ -120,9 +121,15 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
     const mutation = await withKimiConfigLock(configPath, async () => {
         const original = await readConfigSafe(configPath);
         const lineEnding = detectLineEnding(original);
-        const repaired = removeOwnedOrphanMarkers(original, hostId, lineEnding);
+        try {
+            parseToml(original);
+        }
+        catch {
+            await assertKimiHookSetValid(original, configPath, "setup.install", context.env);
+        }
+        const repaired = removeOrphanMarkers(original);
         if (repaired.count > 0) {
-            warnings.push(`Removed ${repaired.count} orphaned managed marker comment(s) for this host; surrounding config was preserved.`);
+            warnings.push(`Removed ${repaired.count} orphaned managed marker comment(s); surrounding config was preserved.`);
         }
         const inlineHooks = normalizeTopLevelInlineHooks(repaired.contents, lineEnding);
         if (inlineHooks.found) {
@@ -138,7 +145,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         // splice line numbers. Another host's marker-less table may be its live hook
         // after a config rewrite strips comments, so it must remain untouched.
         const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-        const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, lineEnding, hostId, expectedCommand);
+        const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, hostId, expectedCommand);
         const existing = pruned;
         if (prunedCount > 0) {
             const readorned = prunedCommands.includes(expectedCommand);
@@ -150,7 +157,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         if (state.kind === "orphan") {
             throw new RuntimeError("SETUP_ORPHAN_MARKERS", [
                 `kimi-code config at ${configPath} contains an orphaned ${state.detail} marker.`,
-                "An orphan marker owned by another host must be repaired using that host's setup, or inspected manually.",
+                "Inspect the managed marker comments and re-run setup.",
             ].join(" "), "setup.install", { details: { configPath, orphan: state.detail } });
         }
         if (state.kind === "duplicate") {
@@ -398,12 +405,11 @@ async function runUninstallLocked(configPath, hookScriptPath, hostId, removeAllH
     // other hosts' blocks and live marker-less tables remain intact. `--all` is
     // the explicit every-host sweep for all of this plugin's hook tables.
     const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(existing, hostId, removeAllHosts);
-    const lineEnding = detectLineEnding(existing);
     // Exact current command bytes also identify this host's table when a host-id
     // override disagrees with path derivation or a dev path is outside the strict
     // ownership pattern.
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-    const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, lineEnding, removeAllHosts ? undefined : hostId, expectedCommand);
+    const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, removeAllHosts ? undefined : hostId, expectedCommand);
     const changed = stripped !== existing;
     if (changed) {
         await writeConfigAtomic(configPath, stripped);
@@ -522,10 +528,10 @@ function detectLineEnding(contents) {
     return contents.includes("\r\n") ? "\r\n" : "\n";
 }
 function spliceBlock(contents, beginLine, endLine, replacement, lineEnding) {
-    const lines = splitPreservingEnding(contents);
-    const before = lines.slice(0, beginLine).join(lineEnding);
-    const after = lines.slice(endLine + 1).join(lineEnding);
-    const beforeWithSep = before.endsWith(lineEnding) || before.length === 0 ? before : `${before}${lineEnding}`;
+    const lines = contents.split(/(?<=\n)/);
+    const before = lines.slice(0, beginLine).join("");
+    const after = lines.slice(endLine + 1).join("");
+    const beforeWithSep = before.endsWith("\n") || before.length === 0 ? before : `${before}${lineEnding}`;
     const replacementWithEnding = replacement.endsWith(lineEnding) ? replacement : `${replacement}${lineEnding}`;
     return `${beforeWithSep}${replacementWithEnding}${after}`;
 }
@@ -542,13 +548,16 @@ function splitPreservingEnding(contents) {
     return contents.split("\n").map((line) => line.replace(/\r$/, ""));
 }
 // A partial upstream hooks-array rewrite can leave one marker comment behind.
-// Remove only unpaired markers owned by this host (or legacy markers), never
-// the intervening content. The normal full-file validation still gates writes.
-function removeOwnedOrphanMarkers(contents, hostId, lineEnding) {
+// Remove only unpaired marker comments, never the intervening content. The
+// normal full-file validation still gates writes.
+function removeOrphanMarkers(contents) {
     const lines = splitPreservingEnding(contents);
     const orphans = [];
+    const comments = markerCommentLines(contents);
     let open = null;
     for (let i = 0; i < lines.length; i += 1) {
+        if (!comments.has(i))
+            continue;
         const line = lines[i].trim();
         const begin = MARKERS.BEGIN_LINE_RE.exec(line);
         if (begin !== null) {
@@ -572,10 +581,10 @@ function removeOwnedOrphanMarkers(contents, hostId, lineEnding) {
     }
     if (open !== null)
         orphans.push(open);
-    const remove = new Set(orphans.filter((marker) => marker.host === null || marker.host === hostId).map((marker) => marker.index));
+    const remove = new Set(orphans.map((marker) => marker.index));
     return remove.size === 0
         ? { contents, count: 0 }
-        : { contents: lines.filter((_, index) => !remove.has(index)).join(lineEnding), count: remove.size };
+        : { contents: contents.split(/(?<=\n)/).filter((_, index) => !remove.has(index)).join(""), count: remove.size };
 }
 /**
  * Remove managed blocks owned by `currentHost`, or every host with `removeAll`.
@@ -583,8 +592,9 @@ function removeOwnedOrphanMarkers(contents, hostId, lineEnding) {
  * Orphan markers are removed individually so surrounding user content survives.
  */
 function stripManagedBlocks(contents, currentHost, removeAll) {
-    const lineEnding = detectLineEnding(contents);
     const lines = splitPreservingEnding(contents);
+    const rawLines = contents.split(/(?<=\n)/);
+    const markerLines = markerCommentLines(contents);
     const result = [];
     const orphansLeft = [];
     let removedBlocks = 0;
@@ -608,7 +618,7 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
     while (i < lines.length) {
         const line = lines[i];
         const trimmed = line.trim();
-        const begin = MARKERS.BEGIN_LINE_RE.exec(trimmed);
+        const begin = markerLines.has(i) ? MARKERS.BEGIN_LINE_RE.exec(trimmed) : null;
         if (begin !== null) {
             const beginHost = begin[1]?.toLowerCase() ?? null;
             // Look ahead for the matching END, capturing the block's command en route.
@@ -616,11 +626,11 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
             let blockCommand = null;
             for (let j = i + 1; j < lines.length; j += 1) {
                 const nextTrimmed = lines[j].trim();
-                if (MARKERS.BEGIN_LINE_RE.test(nextTrimmed)) {
+                if (markerLines.has(j) && MARKERS.BEGIN_LINE_RE.test(nextTrimmed)) {
                     // Two BEGINs in a row — the outer one is an orphan.
                     break;
                 }
-                const end = MARKERS.END_LINE_RE.exec(nextTrimmed);
+                const end = markerLines.has(j) ? MARKERS.END_LINE_RE.exec(nextTrimmed) : null;
                 if (end !== null) {
                     if ((end[1]?.toLowerCase() ?? null) === beginHost)
                         endIdx = j;
@@ -637,7 +647,7 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
                     i += 1;
                     continue;
                 }
-                result.push(line);
+                result.push(rawLines[i]);
                 i += 1;
                 continue;
             }
@@ -649,11 +659,11 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
             }
             // Another host's block — keep it verbatim.
             for (let k = i; k <= endIdx; k += 1)
-                result.push(lines[k]);
+                result.push(rawLines[k]);
             i = endIdx + 1;
             continue;
         }
-        const end = MARKERS.END_LINE_RE.exec(trimmed);
+        const end = markerLines.has(i) ? MARKERS.END_LINE_RE.exec(trimmed) : null;
         if (end !== null) {
             const endHost = end[1]?.toLowerCase() ?? null;
             // Orphan END with no preceding BEGIN: drop only this line (if ours).
@@ -662,27 +672,14 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
                 i += 1;
                 continue;
             }
-            result.push(line);
+            result.push(rawLines[i]);
             i += 1;
             continue;
         }
-        result.push(line);
+        result.push(rawLines[i]);
         i += 1;
     }
-    const collapsed = [];
-    let blankRun = 0;
-    for (const line of result) {
-        if (line.length === 0) {
-            blankRun += 1;
-            if (blankRun <= 2)
-                collapsed.push(line);
-        }
-        else {
-            blankRun = 0;
-            collapsed.push(line);
-        }
-    }
-    return { stripped: collapsed.join(lineEnding), removedBlocks, orphansLeft };
+    return { stripped: result.join(""), removedBlocks, orphansLeft };
 }
 /**
  * Remove orphaned, marker-less `[[hooks]]` tables that are unambiguously this
@@ -697,7 +694,7 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
  * host — REQUIRED for scoped install/uninstall so one host never disarms the
  * other's live (marker-stripped) hook. Omit only for `--uninstall --all`.
  */
-function pruneOrphanApprovalHooks(contents, lineEnding, ownedBy, alsoMatchCommand) {
+function pruneOrphanApprovalHooks(contents, ownedBy, alsoMatchCommand) {
     const ranges = findUnmanagedApprovalHookBlocks(contents, ownedBy, alsoMatchCommand);
     if (ranges.length === 0)
         return { pruned: contents, count: 0, commands: [] };
@@ -706,23 +703,10 @@ function pruneOrphanApprovalHooks(contents, lineEnding, ownedBy, alsoMatchComman
         for (let i = start; i < end; i += 1)
             remove.add(i);
     }
-    const lines = splitPreservingEnding(contents);
+    const lines = contents.split(/(?<=\n)/);
     const kept = lines.filter((_, idx) => !remove.has(idx));
-    const collapsed = [];
-    let blankRun = 0;
-    for (const line of kept) {
-        if (line.length === 0) {
-            blankRun += 1;
-            if (blankRun <= 2)
-                collapsed.push(line);
-        }
-        else {
-            blankRun = 0;
-            collapsed.push(line);
-        }
-    }
     return {
-        pruned: collapsed.join(lineEnding),
+        pruned: kept.join(""),
         count: ranges.length,
         commands: ranges.map((range) => range.command),
     };

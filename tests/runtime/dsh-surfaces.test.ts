@@ -50,7 +50,7 @@ describe("DSH generated surface", () => {
     expect(manifest.main).toBe("dist/dsh/index.js");
     expect(manifest.dsh.bundle.patch).toBe("./cordis.patch.yml");
     expect(manifest.engines.dsh).toBe(DSH_VERSION_RANGE);
-    expect(manifest.dependencies["@deepseek-ai/dsh-tool-subagent"]).toBe(DSH_VERSION_RANGE);
+    expect(manifest.peerDependencies["@deepseek-ai/dsh-tool-subagent"]).toBe(DSH_VERSION_RANGE);
   });
 
   test("composition and runtime expose the same seven delegation tools", () => {
@@ -60,6 +60,16 @@ describe("DSH generated surface", () => {
       expect(DSH_BUNDLE_PATCH).toContain(`toolName: kimi_${operation.replaceAll("-", "_")}`);
     }
     expect(DSH_BUNDLE_PATCH.match(/name: '@deepseek-ai\/dsh-tool-subagent'/g)).toHaveLength(7);
+  });
+
+  test("DSH peers are host-provided and do not install a harness for other hosts", async () => {
+    const root = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
+    for (const manifest of [root, DSH_PLUGIN_MANIFEST]) {
+      expect(manifest.dependencies).not.toHaveProperty("@deepseek-ai/dsh-tool-subagent");
+      for (const name of Object.keys(manifest.peerDependencies)) {
+        expect(manifest.peerDependenciesMeta[name]).toEqual({ optional: true });
+      }
+    }
   });
 
   test("compiled provider uses DSH function-plugin exports and no default export", async () => {

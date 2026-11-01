@@ -92,6 +92,7 @@ bun run build
 bun run generate:surfaces
 # Review and stage generated distributions before the drift gate.
 bun run check
+bun run check:consumer-security
 node scripts/check-package.mjs .tmp/npm
 node scripts/check-dsh-package.mjs .tmp/dsh-npm
 ```
@@ -104,6 +105,60 @@ plus legacy initialization on the extracted compiled distributions. The DSH
 check installs that same root tarball into an isolated DSH home, verifies all
 seven tools, and boots the Web host. Neither check invokes a model or reads the
 maintainer's Kimi configuration.
+
+The consumer-security gate installs the packed package into a fresh npm project
+and audits the resolved production dependency graph. DSH services and its tool
+adapter are optional peers supplied by the DSH host; ordinary npm installation
+for Claude Code or Codex does not install the harness. Optional peers still
+carry compatibility ranges when present. The gate runs in CI and release
+validation and refuses high/critical advisories, failed audits, and incomplete
+reports. The checkout's overrides do not constrain downstream npm resolution.
+
+### Patched DSH host and profiles
+
+DSH 0.2.1-rc.5 and 0.2.2-alpha.2 still pin vulnerable `zod` and `undici`
+versions. See the [upstream dependency report](https://github.com/deepseek-ai/deepseek-harness/discussions/10847).
+Use a patched DSH host installation with `zod >=4.6.6` and `undici >=8.12.2`.
+This is an explicit installation requirement; the plugin does not rewrite the
+host or profiles automatically. A profile override alone does not patch copies
+inside a separately installed DSH CLI.
+
+For example, create a dedicated npm host project (Node >=24.9), then use its
+DSH binary for plugin installation and launch:
+
+```sh
+mkdir -p ~/.local/share/kimi-dsh-host
+cd ~/.local/share/kimi-dsh-host
+npm init -y
+npm pkg set 'overrides.zod=^4.6.6' 'overrides.undici=^8.12.2'
+npm install @deepseek-ai/dsh@0.2.1-rc.5
+npm audit --omit=dev --audit-level=high
+./node_modules/.bin/dsh plugin --profile web add kimi-plugin-cc
+./node_modules/.bin/dsh plugin --profile web audit --prod --audit-level high
+./node_modules/.bin/dsh web --no-open
+```
+
+The host project is separate from `$DSH_HOME/profiles/web`. Keep using that
+project's DSH binary so the audited host is the one that runs. The commands
+above install the published plugin; use a validated local tarball when testing
+an unpublished change.
+
+If an existing profile separately installs DSH packages, its owner must also
+patch and audit that profile:
+
+```sh
+dsh plugin --profile web pkg set 'pnpm.overrides.zod=^4.6.6' 'pnpm.overrides.undici=^8.12.2'
+dsh plugin --profile web install
+dsh plugin --profile web audit --prod --audit-level high
+```
+
+Replace `web` with the intended profile, and run these commands with the patched
+host binary. Overrides affect dependency resolution and require application
+checks. The DSH package gate creates a fresh host with the declared overrides,
+audits both that host and the installed profile for high/critical advisories,
+then verifies all seven tool compositions and Web boot using that same host.
+These checks do not claim that every moderate/low advisory is fixed or that
+upstream has published a patched release.
 
 ## First publication (completed bootstrap reference)
 

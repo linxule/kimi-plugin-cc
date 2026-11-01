@@ -41,6 +41,8 @@ jobs:
         run: |
           node scripts/check-package.mjs .tmp/npm
           node scripts/check-dsh-package.mjs .tmp/dsh-install-check
+      - name: Audit installed npm consumer dependencies
+        run: bun run check:consumer-security
       - uses: actions/upload-artifact@v7
         with:
           name: npm-package

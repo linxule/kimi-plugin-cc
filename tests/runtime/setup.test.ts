@@ -28,6 +28,8 @@ import {
   validateKimiHookSetForEnvironment,
   withKimiConfigLock,
 } from "../../runtime/hooks/config-safety.js";
+import { markerCommentLines } from "../../runtime/hooks/managed-block.js";
+import { parse as parseToml } from "../../runtime/vendor/smol-toml/parse.js";
 import type { CommandContext } from "../../runtime/types.js";
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..");
@@ -69,6 +71,12 @@ function makeContext(env: NodeJS.ProcessEnv): CommandContext {
 }
 
 describe("setup managed-block installer", () => {
+  test("marker scanning stays bounded on long valid TOML lines", () => {
+    const input = `values = [\n${" ".repeat(64_000)}${"[],".repeat(64_000)}\n]\n`;
+    const start = performance.now();
+    expect(markerCommentLines(input).size).toBe(0);
+    expect(performance.now() - start).toBeLessThan(1500);
+  });
   test("install writes the block on a fresh config and probe passes", async () => {
     const { env, configPath } = await makeCase("install-fresh");
     const result = await runSetup([], makeContext(env));
@@ -180,12 +188,76 @@ describe("setup managed-block installer", () => {
     expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
   });
 
-  test("mismatched host markers never let setup consume another host's content", async () => {
+  test("mismatched host markers are repaired together without consuming content", async () => {
     const { env, configPath } = await makeCase("mismatched-host-markers");
     const seeded = '# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\nuser_setting = true\n# === END kimi-plugin-cc-managed:codex ===\n';
     await writeFile(configPath, seeded, "utf8");
-    await expect(runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }))).rejects.toMatchObject({ code: "SETUP_ORPHAN_MARKERS" });
-    expect(await readFile(configPath, "utf8")).toBe(seeded);
+    const result = await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }));
+    const after = await readFile(configPath, "utf8");
+    expect(result.probe).toBe("ok");
+    expect(after).toContain("user_setting = true");
+    expect(after).not.toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    expect((await runSetup(["--check"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }))).probe).toBe("ok");
+  });
+
+  test.each(["claude-code", "codex"])("%s repairs a partially rewritten two-host hooks array", async (host) => {
+    const { env, configPath } = await makeCase(`mismatched-hooks-${host}`);
+    const claude = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
+    const codex = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+    const table = (hook: string) => `[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${hook}'"\ntimeout = 15\n`;
+    const seeded = `# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\n${table(claude)}\n${table(codex)}# === END kimi-plugin-cc-managed:codex ===\n`;
+    await writeFile(configPath, seeded, "utf8");
+    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: host });
+    expect((await runSetup([], context)).probe).toBe("ok");
+    const after = await readFile(configPath, "utf8");
+    expect(after).toContain(host === "codex" ? table(claude) : table(codex));
+    expect(after).not.toContain(host === "codex" ? codex : claude);
+    expect((await runSetup(["--check"], context)).probe).toBe("ok");
+  });
+
+  test("orphan repair never rebinds quoted trailing fields onto another host's hook", async () => {
+    const { env, configPath } = await makeCase("orphan-foreign-matcher");
+    const claude = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
+    const codex = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+    const seeded = `# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${claude}'"\ntimeout = 15\n\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${codex}'"\ntimeout = 15\n# === END kimi-plugin-cc-managed:codex ===\n\n"matcher" = "*"\n`;
+    await writeFile(configPath, seeded, "utf8");
+    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    expect((await runSetup([], context)).probe).toBe("ok");
+    const hooks = parseToml(await readFile(configPath, "utf8")).hooks as Array<Record<string, unknown>>;
+    expect(hooks.find((hook) => String(hook.command).includes(claude))?.matcher).toBeUndefined();
+    expect(hooks.find((hook) => String(hook.command).includes(codex))?.matcher).toBe("*");
+  });
+
+  test.each(['"""', "'''"])("marker text inside TOML %s values survives install and uninstall", async (quote) => {
+    const { env, configPath } = await makeCase(`string-marker-${quote === '"""' ? 'basic' : 'literal'}`);
+    const value = `custom = ${quote}\nkeep\n# === END kimi-plugin-cc-managed:codex ===\nmore\n${quote}\n`;
+    await writeFile(configPath, value, "utf8");
+    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    expect((await runSetup([], context)).probe).toBe("ok");
+    expect(await readFile(configPath, "utf8")).toContain(value);
+    await runSetup(["--uninstall"], context);
+    expect(await readFile(configPath, "utf8")).toContain(value);
+  });
+
+  test("a hook-shaped TOML string is never pruned as a live hook table", async () => {
+    const { env, configPath } = await makeCase("string-hook-table");
+    const hook = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+    const content = `custom = '''\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${hook}'"\ntimeout = 15\n'''\n`;
+    await writeFile(configPath, content, "utf8");
+    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    expect((await runSetup([], context)).probe).toBe("ok");
+    expect(await readFile(configPath, "utf8")).toContain(content);
+  });
+
+  test.each(["install", "uninstall"])("%s preserves blank lines and mixed line endings inside TOML values", async (action) => {
+    const { env, configPath } = await makeCase(`preserve-value-${action}`);
+    const value = 'custom = """start\r\n\n\n\nend"""\n';
+    const hook = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+    const seeded = `${value}[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${hook}'"\ntimeout = 15\n# === END kimi-plugin-cc-managed:codex ===\n`;
+    await writeFile(configPath, seeded, "utf8");
+    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    await runSetup(action === "install" ? [] : ["--uninstall"], context);
+    expect(await readFile(configPath, "utf8")).toContain(value);
   });
 
   test("orphan repair does not write when the hooks schema is invalid", async () => {
@@ -1130,6 +1202,7 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
       `command = "'${process.execPath}' '${orphanHook}'"`,
       "timeout = 15",
       "",
+      "[settings]",
       "user_setting = true",
       "",
     ].join("\n");

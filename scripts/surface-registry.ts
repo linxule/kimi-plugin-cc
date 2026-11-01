@@ -176,11 +176,23 @@ export const DSH_PLUGIN_MANIFEST = {
     "@deepseek-ai/dsh-session": DSH_VERSION_RANGE,
     "@deepseek-ai/dsh-subagent": DSH_VERSION_RANGE,
     "@deepseek-ai/dsh-subprocess": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-system-prompt": DSH_VERSION_RANGE,
     "@deepseek-ai/dsh-working-directory": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-tool-subagent": DSH_VERSION_RANGE,
   },
+  peerDependenciesMeta: Object.fromEntries([
+    "@deepseek-ai/cordis",
+    "@deepseek-ai/dsh-commands",
+    "@deepseek-ai/dsh-llm",
+    "@deepseek-ai/dsh-session",
+    "@deepseek-ai/dsh-subagent",
+    "@deepseek-ai/dsh-subprocess",
+    "@deepseek-ai/dsh-system-prompt",
+    "@deepseek-ai/dsh-working-directory",
+    "@deepseek-ai/dsh-tool-subagent",
+  ].map((name) => [name, { optional: true }])),
   dependencies: {
     "@deepseek-ai/dsh-brand": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-tool-subagent": DSH_VERSION_RANGE,
     "@deepseek-ai/schemastery": "~3.18.5",
   },
   license: "Apache-2.0",
@@ -233,6 +245,7 @@ Job controls are \`/kimi-status [job-id]\`, \`/kimi-result [job-id]\`, and \`/ki
 - Node.js 24.9.0 or later.
 - DeepSeek Harness ${DSH_VERSION_RANGE}; this package is developed and composed against 0.2.1-rc.5.
 - Kimi Code CLI on \`PATH\`, authenticated and configured through Kimi. The companion's exact-version certification table remains authoritative.
+- A patched DSH host and profiles with zod >=4.6.6 and undici >=8.12.2; see [host installation and audit instructions](../../docs/registry-releases.md#patched-dsh-host-and-profiles). The plugin does not patch your host automatically.
 
 ## Install
 
@@ -273,7 +286,7 @@ The bundle's \`kimi-plugin-cc\` row accepts:
 |---|---|---|
 | \`dataRoot\` | \`$DSH_HOME/plugin-data/kimi-plugin-cc\` | Absolute companion data directory; \`KIMI_PLUGIN_CC_DATA\` overrides the derived default |
 | \`env\` | \`{}\` | Explicit child environment layered over DSH's credential-scrubbed environment |
-| \`disposeGraceMs\` | \`6000\` | Managed subprocess termination grace |
+| \`disposeGraceMs\` | \`6000\` | Managed subprocess termination grace in milliseconds; minimum 6000 |
 | \`maxOutputBytes\` | \`16777216\` | Maximum captured stdout or stderr bytes per command |
 | \`model\` | Native Kimi default | Optional configured model alias applied to every delegation |
 | \`thinkingEffort\` | Native Kimi default | Optional per-run thinking effort request |

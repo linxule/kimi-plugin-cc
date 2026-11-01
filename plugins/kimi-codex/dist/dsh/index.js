@@ -8,6 +8,12 @@ import { DSH_COMPANION_OPERATIONS, runCompanionCommand, startCompanionRun, } fro
 import { parseDurationMs } from "../parsing.js";
 export const name = "kimi-plugin-cc";
 export const inject = ["subagents", "subprocess"];
+export const DSH_TOOL_GUIDANCE = [
+    "Kimi delegation tools have different write boundaries:",
+    "kimi_ask, kimi_review, and kimi_challenge are read-only; kimi_swarm is a read-only parallel review.",
+    "kimi_rescue and kimi_pursue can edit the selected workspace; kimi_pursue continues toward a bounded goal.",
+    "kimi_swarm_write edits a temporary worktree and returns a patch without applying it.",
+].join(" ");
 const DEFAULT_DISPOSE_GRACE_MS = 6_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -50,8 +56,8 @@ function resolveConfig(config) {
     if (!path.isAbsolute(resolved.dataRoot)) {
         throw new Error("kimi-plugin-cc: dataRoot must be absolute");
     }
-    if (!Number.isFinite(resolved.disposeGraceMs) || resolved.disposeGraceMs <= 0 || resolved.disposeGraceMs > MAX_TIMER_DELAY_MS) {
-        throw new Error(`kimi-plugin-cc: disposeGraceMs must be positive, finite, and no greater than ${MAX_TIMER_DELAY_MS}`);
+    if (!Number.isFinite(resolved.disposeGraceMs) || resolved.disposeGraceMs < DEFAULT_DISPOSE_GRACE_MS || resolved.disposeGraceMs > MAX_TIMER_DELAY_MS) {
+        throw new Error(`kimi-plugin-cc: disposeGraceMs must be at least ${DEFAULT_DISPOSE_GRACE_MS} and no greater than ${MAX_TIMER_DELAY_MS}`);
     }
     if (!Number.isSafeInteger(resolved.maxOutputBytes) || resolved.maxOutputBytes <= 0) {
         throw new Error("kimi-plugin-cc: maxOutputBytes must be a positive safe integer");
@@ -105,6 +111,13 @@ export function apply(ctx, config) {
     for (const operation of DSH_COMPANION_OPERATIONS) {
         ctx.subagents.registerProvider(new KimiCompanionProvider(`kimi-${operation}`, operation, spec));
     }
+    ctx.inject(["systemPrompt"], (promptCtx) => {
+        promptCtx.systemPrompt.section({
+            name: "kimi-plugin-cc:tool-boundaries",
+            order: promptCtx.systemPrompt.getSectionOrder("TOOL_SUBAGENT"),
+            text: () => DSH_TOOL_GUIDANCE,
+        });
+    });
     ctx.inject(["commands"], (commandCtx) => {
         const execute = async (invocation, argv) => {
             const directories = commandCtx.get("workingDirectory");

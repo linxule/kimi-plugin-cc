@@ -23,6 +23,7 @@ Job controls are `/kimi-status [job-id]`, `/kimi-result [job-id]`, and `/kimi-ca
 - Node.js 24.9.0 or later.
 - DeepSeek Harness >=0.2.1-rc.5 <0.3.0; this package is developed and composed against 0.2.1-rc.5.
 - Kimi Code CLI on `PATH`, authenticated and configured through Kimi. The companion's exact-version certification table remains authoritative.
+- A patched DSH host and profiles with zod >=4.6.6 and undici >=8.12.2; see [host installation and audit instructions](../../docs/registry-releases.md#patched-dsh-host-and-profiles). The plugin does not patch your host automatically.
 
 ## Install
 
@@ -63,7 +64,7 @@ The bundle's `kimi-plugin-cc` row accepts:
 |---|---|---|
 | `dataRoot` | `$DSH_HOME/plugin-data/kimi-plugin-cc` | Absolute companion data directory; `KIMI_PLUGIN_CC_DATA` overrides the derived default |
 | `env` | `{}` | Explicit child environment layered over DSH's credential-scrubbed environment |
-| `disposeGraceMs` | `6000` | Managed subprocess termination grace |
+| `disposeGraceMs` | `6000` | Managed subprocess termination grace in milliseconds; minimum 6000 |
 | `maxOutputBytes` | `16777216` | Maximum captured stdout or stderr bytes per command |
 | `model` | Native Kimi default | Optional configured model alias applied to every delegation |
 | `thinkingEffort` | Native Kimi default | Optional per-run thinking effort request |
