@@ -285,6 +285,14 @@ describe("isOurApprovalHookCommand", () => {
     ).toBe(true);
   });
 
+  test("true for the standalone DSH package hook path", () => {
+    expect(
+      isOurApprovalHookCommand(
+        "'/usr/bin/node' '/home/u/.dsh/profiles/web/node_modules/dsh-kimi-plugin-cc/dist/hooks/approval-hook.js'",
+      ),
+    ).toBe(true);
+  });
+
   test("false for a non-canonical (bare node) command — never prunes a hand-rolled hook", () => {
     expect(isOurApprovalHookCommand("node /home/u/dist/hooks/approval-hook.js")).toBe(false);
   });

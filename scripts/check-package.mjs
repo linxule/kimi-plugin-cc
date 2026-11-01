@@ -35,7 +35,7 @@ try {
   execFileSync('bun', ['pm', 'pack', '--ignore-scripts', '--destination', destination, '--quiet'], { cwd: repo, stdio: 'pipe' });
   const archive = path.join(destination, `${pkg.name}-${pkg.version}.tgz`);
   const files = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n');
-  const allowed = /^(?:package\/(?:package\.json|\.mcp\.json|README\.md|LICENSE|CHANGELOG\.md)|package\/(?:\.claude-plugin|\.agents\/plugins|agents|commands|hooks|dist|plugins\/kimi-codex|docs)\/|package\/scripts\/(?:companion|review-gate-hook)\.sh$)/;
+  const allowed = /^(?:package\/(?:package\.json|\.mcp\.json|README\.md|LICENSE|CHANGELOG\.md)|package\/(?:\.claude-plugin|\.agents\/plugins|agents|commands|hooks|dist|plugins\/kimi-codex|plugins\/kimi-dsh|docs)\/|package\/scripts\/(?:companion|review-gate-hook)\.sh$)/;
   const syncConflictCopy = /(?:^|\/)[^/]* [0-9]+(?:\.[^/]*)?(?:\/|$)/;
   for (const file of files) {
     assert(!file.split('/').includes('..'), file);
@@ -50,6 +50,8 @@ try {
     '.agents/plugins/marketplace.json', 'hooks/hooks.json', 'dist/vendor/smol-toml/LICENSE',
     'dist/vendor/shell-quote/LICENSE', 'plugins/kimi-codex/.mcp.json',
     'plugins/kimi-codex/.codex-plugin/plugin.json',
+    'plugins/kimi-dsh/package.json', 'plugins/kimi-dsh/cordis.patch.yml',
+    'plugins/kimi-dsh/dist/dsh/index.js', 'plugins/kimi-dsh/LICENSE',
   ]) {
     assert(statSync(path.join(root, file)).isFile(), file);
   }
@@ -63,7 +65,8 @@ try {
   }
   verifyTree('dist');
   verifyTree('plugins/kimi-codex');
-  for (const [host, plugin] of [['claude', root], ['codex', path.join(root, 'plugins/kimi-codex')]]) {
+  verifyTree('plugins/kimi-dsh');
+  for (const [host, plugin] of [['claude', root], ['codex', path.join(root, 'plugins/kimi-codex')], ['dsh', path.join(root, 'plugins/kimi-dsh')]]) {
     const home = path.join(scratch, host);
     const kimiHome = path.join(home, 'kimi-home');
     mkdirSync(kimiHome, { recursive: true });
@@ -128,7 +131,7 @@ try {
     assert(!`${result.stdout}${result.stderr}`.includes('UNEXPECTED_MODEL_CALL'));
     assert.match(`${result.stdout}${result.stderr}`, /KIMI_CAPABILITY_NOT_CERTIFIED|CLI_VERSION/, `${result.stdout}\n${result.stderr}`);
   }
-  console.log(`Verified ${pkg.name}@${pkg.version}: ${files.length} files, both compiled distributions, isolated hook setup/check and version refusal`);
+  console.log(`Verified ${pkg.name}@${pkg.version}: ${files.length} files, all three compiled distributions, isolated hook setup/check and version refusal`);
   console.log(archive);
 } finally {
   rmSync(scratch, { recursive: true, force: true });

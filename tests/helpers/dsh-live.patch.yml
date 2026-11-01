@@ -1,0 +1,14 @@
+- id: agent-default-model
+  config:
+    provider: mock
+    model: mock-delegate
+- id: agent-loop
+  config:
+    agents:
+      - id: main
+        provider: mock
+        model: mock-delegate
+        cwd: !!js process.cwd()
+- insert:
+    - id: kimi-live-mock
+      name: 'dsh-kimi-live-mock'

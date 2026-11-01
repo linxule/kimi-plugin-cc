@@ -78,20 +78,23 @@ Key constraints (verified by [`runtime/hooks/managed-block.ts`](../runtime/hooks
 7. **Serialized, identity-bound setup mutations.** Install and uninstall hold a private `0o600` sibling lock across the complete read-modify-write transaction. The candidate lock is published atomically; lock reads are no-follow, nonblocking, regular-file-only, and capped at 4 KiB. Acquisition is bounded, live owners are never stolen, stale recovery is guarded by a nonrecursive recovery lease, and inode/token ownership is rechecked before config mutation or lock removal. Simultaneous Claude Code/Codex setup runs therefore cannot lose either host's block, and a replaced lock is never treated as ours. A newly created Kimi home is `0o700`; atomic config writes remain `0o600`.
 8. **Inline hook arrays are normalized before insertion.** kimi-code accepts both `hooks = [...]` and `[[hooks]]`, but appending a managed array-of-tables block after an inline assignment can produce a conflicting document. Setup converts a valid inline hook array to canonical `[[hooks]]` tables before inserting the host block and emits an explicit warning that formatting and comments inside that assignment are normalized. Surrounding config bytes are preserved.
 
-### Host scoping (Claude Code ↔ Codex share one config)
+### Host scoping (all hosts share one config)
 
 Claude Code and Codex install this plugin to **different, version-stamped
-paths** (`~/.claude/plugins/cache/…` vs `~/.codex/plugins/cache/…`) but read
-the **same** `~/.kimi-code/config.toml`. So the managed block is **host-scoped**:
+paths** (`~/.claude/plugins/cache/…` vs `~/.codex/plugins/cache/…`), while DSH
+uses its own profile package path. All read the **same**
+`~/.kimi-code/config.toml`. So the managed block is **host-scoped**:
 its marker carries a `:<host-id>` suffix, and each host owns, verifies, and
 uninstalls only its **own** block.
 
 - **Host id** (`runtime/hooks/install-paths.ts::resolveHostId`) is derived
   version-independently from the hook path: `~/.claude/…` → `claude-code`,
-  `~/.codex/…` → `codex`, else a stable `host-<sha1>` for dev checkouts. A
-  plugin upgrade *refreshes* the same host's block rather than adding a new one.
-- **No clobbering.** `/kimi:setup` (Claude) and `$kimi-setup` (Codex) each write
-  their own block and leave the other's byte-identical. Before v1.7.0 there was
+  `~/.codex/…` → `codex`, else a stable `host-<sha1>` for dev checkouts. DSH
+  explicitly pins `dsh`. A plugin upgrade *refreshes* the same host's block
+  rather than adding a new one.
+- **No clobbering.** `/kimi:setup` (Claude), `$kimi-setup` (Codex), and
+  `/kimi-setup` (DSH) each write their own block and leave the others
+  byte-identical. Before v1.7.0 there was
   a single block exact-matched to the running host, so the two hosts overwrote
   each other and the loser's write-commands refused with "hook path drift."
 - **Enforcement is redundant-safe.** kimi-code fires *every* `[[hooks]]` entry
@@ -103,8 +106,8 @@ uninstalls only its **own** block.
 - **Migration + cleanup.** A pre-v1.7.0 un-suffixed block is adopted and
   converted in place by the current host on its next `/kimi:setup`. Orphaned,
   marker-less `[[hooks]]` entries that are unambiguously our approval hook
-  (canonical command, `approval-hook.js` under a kimi-marketplace/kimi-plugin-cc
-  tree) are pruned **host-scoped** (v1.8.2): install and scoped uninstall touch
+  (canonical command, `approval-hook.js` under a kimi-marketplace/kimi-plugin-cc/
+  dsh-kimi-plugin-cc tree) are pruned **host-scoped** (v1.8.2): install and scoped uninstall touch
   only tables whose command path derives to the *current* host. `/kimi:setup
   --uninstall` removes only the current host's block (plus legacy + this host's
   orphans); `/kimi:setup --uninstall --all` removes every host's block and every
@@ -122,6 +125,16 @@ uninstalls only its **own** block.
   re-adorns the markers; the other host's marker-less table is that host's LIVE
   hook and is left byte-untouched (pre-v1.8.2, the host-blind prune here caused
   each host's setup to disarm the other after any kimi login — the "seesaw").
+
+## DeepSeek Harness providers
+
+The DSH bundle exposes the same seven operations as the other hosts: `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm`, and `kimi_swarm_write`. Each activation starts the existing companion through DSH's managed subprocess service and uses the same `kimi -p` transport, hook verification, exact-version certification, job store, and response or safety budgets. ACP is not used.
+
+Run `/kimi-setup` explicitly before delegating. Installing or enabling the bundle does not modify Kimi configuration. DSH uses host id `dsh` and `$DSH_HOME/plugin-data/kimi-plugin-cc` unless an absolute data-root override selects another store. Its provider-owned environment clears other-host roots/data, hook/script overrides, trusted roots, and verification bypasses instead of inheriting them.
+
+The parent receives only complete successful stdout. stderr remains on the host, and nonzero, empty, or truncated output becomes a bounded diagnostic rather than partial prose. Cancellation terminates the managed process range and waits for quiescence. DSH activation ids are distinct from companion job ids; use `/kimi-status`, `/kimi-result`, or `/kimi-cancel` for the persisted job.
+
+Write boundaries are identical to the companion commands: rescue and pursue edit the real selected workspace, ask/review/challenge and read-only swarm deny writes and shell commands, and swarm-write works from born HEAD in a temporary worktree and returns a patch without applying or committing it. `/kimi-setup --uninstall` removes only the DSH managed block; the all-host uninstall flag is not exposed.
 
 ## The hook's per-command policy
 

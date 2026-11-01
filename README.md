@@ -1,8 +1,8 @@
-# Kimi for Claude Code and Codex
+# Kimi for Claude Code, Codex, and DeepSeek Harness
 
 [![Latest release](https://img.shields.io/github/v/release/linxule/kimi-plugin-cc)](https://github.com/linxule/kimi-plugin-cc/releases/latest) [![CI](https://github.com/linxule/kimi-plugin-cc/actions/workflows/ci.yml/badge.svg)](https://github.com/linxule/kimi-plugin-cc/actions/workflows/ci.yml) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-Use Kimi to explain code, review changes, challenge a design, or work toward a goal — an independent second opinion from a different model family, inside the Claude Code or Codex session you're already in.
+Use Kimi to explain code, review changes, challenge a design, or work toward a goal — an independent second opinion from a different model family, inside the Claude Code, Codex, or DeepSeek Harness session you're already in.
 
 [![Kimi Ambassador — academia](./assets/kimi-ambassador-academia.webp)](https://www.kimi.ai/lp/kimi-ambassador)
 
@@ -27,19 +27,19 @@ Choose a language below. Each guide opens on this page.
 
 ## Use Kimi in your coding tasks
 
-Ask Kimi to explain code, review changes, challenge a design, or make a focused fix. You can use this plugin in Claude Code or Codex.
+Ask Kimi to explain code, review changes, challenge a design, or make a focused fix. You can use this plugin in Claude Code, Codex, or DeepSeek Harness (DSH).
 
-The plugin runs the Kimi Code CLI on your computer. It uses your Kimi subscription or a provider you configure in Kimi. Calls count against that subscription or API account. Your Claude Code or Codex login stays unchanged. The selected provider receives the prompts and code needed for your task.
+The plugin runs the Kimi Code CLI on your computer. It uses your Kimi subscription or a provider you configure in Kimi. Calls count against that subscription or API account. Your host application's login stays unchanged. The selected provider receives the prompts and code needed for your task.
 
-Start with a question or a review. Their tool rules allow reading files and deny file writes and shell commands. Other modes can change files. Read the [safety limits](./docs/safety.md) before asking Kimi to make changes.
+Start with a question or a review. Their tool rules allow reading files and deny file writes and shell commands. Other modes can change files. DSH provides the same seven operations with the same write boundaries. Read the [safety limits](./docs/safety.md) before asking Kimi to make changes.
 
 ## Before you install
 
 You need:
 
 - macOS or Linux
-- Claude Code or Codex with plugin support
-- Node.js 22.5 or newer
+- Claude Code, Codex, or DSH with plugin support
+- Node.js 22.5 or newer (24.9 or newer for DSH)
 - Kimi Code CLI 2.4.1 (certified; 2.4.0, 2.3.3, 2.3.2, 2.3.1 and 2.3.0 are also certified)
 
 Windows is not currently supported. Contributors can help with the [no-model Windows diagnostics checks](./docs/windows-validation.md). Check your versions in a terminal:
@@ -95,20 +95,36 @@ The hook checks Kimi's tool calls against the plugin's rules. The `Probe:` line 
 Use $kimi-ask to explain how this project's main entry point works.
 ```
 
-If you use both Claude Code and Codex, run setup in each. Each app has its own hook in the shared Kimi configuration.
+If you use multiple hosts, run setup in each. Each app has its own hook in the shared Kimi configuration.
+
+## Install in DeepSeek Harness
+
+The DSH bundle provides the same seven operations as the other hosts: `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm`, and `kimi_swarm_write`. They use the same companion runtime, safety hooks, jobs, budgets, and artifacts. Rescue and pursue edit the selected workspace; swarm-write returns a patch without applying or committing it.
+
+From this repository checkout, run:
+
+```sh
+dsh plugin --profile web add ./plugins/kimi-dsh
+```
+
+For the published npm bundle, run `dsh plugin --profile web add dsh-kimi-plugin-cc` instead.
+
+Restart DSH when requested, then run `/kimi-setup` and `/kimi-setup --check`. Ask DSH to use one of the seven tools with a self-contained task. Job controls are `/kimi-status`, `/kimi-result`, and `/kimi-cancel`. `/kimi-setup --models` lists configured models, and `/kimi-setup --uninstall` removes only the DSH hook.
+
+DSH requires Node.js 24.9 or newer and DSH `>=0.2.1-rc.5 <0.3.0`. See the [DSH bundle guide](./plugins/kimi-dsh/README.md) for profile-level model, thinking, budget, review-base, and other configuration.
 
 ## npm distribution (optional)
 
 The existing marketplace commands above remain the default for Claude Code and
 Codex. Published releases are also available as
 [`kimi-plugin-cc` on npm](https://www.npmjs.com/package/kimi-plugin-cc), including
-both compiled plugin distributions. No Bun, TypeScript, or install scripts are
+all three compiled plugin distributions. No Bun, TypeScript, or install scripts are
 needed to use the package. Kimi Code CLI and Node are still prerequisites.
 
-For an explicitly versioned local Claude Code plugin, this example pins the 2.4.5 package:
+For an explicitly versioned local Claude Code plugin, this example pins the 2.5.0 package:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.4.5
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.5.0
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 
@@ -251,19 +267,19 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 
 ## 用 Kimi 辅助编程
 
-你可以让 Kimi 解释代码、审查修改、指出设计中的问题，或完成一项范围明确的修复。本插件支持 Claude Code 和 Codex。
+你可以让 Kimi 解释代码、审查修改、指出设计中的问题，或完成一项范围明确的修复。本插件支持 Claude Code、Codex 和 DeepSeek Harness（DSH）。
 
-插件在你的电脑上调用 Kimi Code CLI，使用你的 Kimi 订阅或在 Kimi 中配置的服务商。调用会消耗相应的订阅额度或产生 API 费用。Claude Code 和 Codex 的登录状态不变。任务所需的提示词和代码会发送给所选服务商。
+插件在你的电脑上调用 Kimi Code CLI，使用你的 Kimi 订阅或在 Kimi 中配置的服务商。调用会消耗相应的订阅额度或产生 API 费用。宿主应用的登录状态不变。任务所需的提示词和代码会发送给所选服务商。
 
-建议先尝试提问或代码审查。这两类任务允许读取文件，禁止写入文件和执行 shell 命令。其他模式可以修改文件。让 Kimi 动手修改前，请先了解[安全限制](./docs/safety.md)。
+建议先尝试提问或代码审查。这两类任务允许读取文件，禁止写入文件和执行 shell 命令。其他模式可以修改文件；DSH 同样提供七类操作，并遵循相同的写入边界。让 Kimi 动手修改前，请先了解[安全限制](./docs/safety.md)。DSH 的安装方法见[英文说明](#install-in-deepseek-harness)。
 
 ## 安装前准备
 
 你需要：
 
 - macOS 或 Linux
-- 支持插件的 Claude Code 或 Codex
-- Node.js 22.5 或更高版本
+- 支持插件的 Claude Code、Codex 或 DSH
+- Node.js 22.5 或更高版本（DSH 需要 24.9 或更高版本）
 - Kimi Code CLI 2.4.1（已认证；2.4.0、2.3.3、2.3.2、2.3.1 和 2.3.0 也已认证）
 
 目前不支持 Windows。在终端检查版本：
@@ -450,19 +466,19 @@ Ask、review、challenge 和只读 swarm 的工具规则禁止写入文件和执
 
 ## Utiliser Kimi pour vos tâches de développement
 
-Demandez à Kimi d'expliquer du code, de faire une revue de code, de remettre en question une approche ou de corriger un problème précis. Ce plugin fonctionne dans Claude Code et Codex.
+Demandez à Kimi d'expliquer du code, de faire une revue de code, de remettre en question une approche ou de corriger un problème précis. Ce plugin fonctionne dans Claude Code, Codex et DeepSeek Harness (DSH).
 
-Le plugin exécute Kimi Code CLI sur votre ordinateur. Il utilise votre abonnement Kimi ou un fournisseur configuré dans Kimi. Les appels consomment votre quota d'abonnement ou sont facturés sur votre compte API. Votre connexion à Claude Code ou à Codex ne change pas. Le fournisseur choisi reçoit les prompts et le code nécessaires à la tâche.
+Le plugin exécute Kimi Code CLI sur votre ordinateur. Il utilise votre abonnement Kimi ou un fournisseur configuré dans Kimi. Les appels consomment votre quota d'abonnement ou sont facturés sur votre compte API. La connexion à l'application hôte ne change pas. Le fournisseur choisi reçoit les prompts et le code nécessaires à la tâche.
 
-Commencez par une question ou une revue de code. Ces modes autorisent la lecture des fichiers, mais interdisent leur modification et l'exécution de commandes shell. D'autres modes peuvent modifier des fichiers. Consultez les [limites de sécurité](./docs/safety.md) avant de demander des modifications à Kimi.
+Commencez par une question ou une revue de code. Ces modes autorisent la lecture des fichiers, mais interdisent leur modification et l'exécution de commandes shell. D'autres modes peuvent modifier des fichiers ; DSH propose les sept mêmes opérations avec les mêmes limites d'écriture. Consultez les [limites de sécurité](./docs/safety.md) avant de demander des modifications à Kimi. Voir le [guide DSH en anglais](#install-in-deepseek-harness) pour l'installation.
 
 ## Préparer l'installation
 
 Il vous faut :
 
 - macOS ou Linux
-- une version de Claude Code ou de Codex prenant en charge les plugins
-- Node.js 22.5 ou une version ultérieure
+- une version de Claude Code, Codex ou DSH prenant en charge les plugins
+- Node.js 22.5 ou une version ultérieure (24.9 ou ultérieure pour DSH)
 - Kimi Code CLI 2.4.1 (certifiée ; les versions 2.4.0, 2.3.3, 2.3.2, 2.3.1 et 2.3.0 sont également certifiées)
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
@@ -649,19 +665,19 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 
 ## Kimi を開発に使う
 
-コードの説明、変更のレビュー、設計の問題点の指摘、範囲を絞った修正を Kimi に依頼できます。このプラグインは Claude Code と Codex で使えます。
+コードの説明、変更のレビュー、設計の問題点の指摘、範囲を絞った修正を Kimi に依頼できます。このプラグインは Claude Code、Codex、DeepSeek Harness（DSH）で使えます。
 
-プラグインは、お使いのコンピューターで Kimi Code CLI を実行します。Kimi のサブスクリプション、または Kimi に設定したプロバイダーを利用します。呼び出しは、そのサブスクリプションの利用枠を消費するか、API アカウントに課金されます。Claude Code や Codex のログイン状態は変わりません。タスクに必要なプロンプトとコードは、選択したプロバイダーに送信されます。
+プラグインは、お使いのコンピューターで Kimi Code CLI を実行します。Kimi のサブスクリプション、または Kimi に設定したプロバイダーを利用します。呼び出しは、そのサブスクリプションの利用枠を消費するか、API アカウントに課金されます。ホストアプリのログイン状態は変わりません。タスクに必要なプロンプトとコードは、選択したプロバイダーに送信されます。
 
-まずは質問かコードレビューを試してください。これらのモードではファイルの読み取りを許可し、書き込みとシェルコマンドの実行を禁止しています。ほかのモードではファイルを変更できます。変更を依頼する前に、[安全上の制限](./docs/safety.md)を確認してください。
+まずは質問かコードレビューを試してください。これらのモードではファイルの読み取りを許可し、書き込みとシェルコマンドの実行を禁止しています。ほかのモードではファイルを変更できます。DSH でも同じ 7 種類の操作を同じ書き込み範囲で提供します。変更を依頼する前に、[安全上の制限](./docs/safety.md)を確認してください。DSH のインストール方法は[英語の案内](#install-in-deepseek-harness)を参照してください。
 
 ## インストール前の準備
 
 次の環境が必要です。
 
 - macOS または Linux
-- プラグインに対応した Claude Code または Codex
-- Node.js 22.5 以降
+- プラグインに対応した Claude Code、Codex、または DSH
+- Node.js 22.5 以降（DSH では 24.9 以降）
 - Kimi Code CLI 2.4.1（認証済み。2.4.0、2.3.3、2.3.2、2.3.1 と 2.3.0 も認証済み）
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。

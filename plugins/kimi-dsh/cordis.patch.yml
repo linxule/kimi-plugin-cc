@@ -1,0 +1,45 @@
+- insert:
+    - id: kimi-plugin-cc
+      name: 'dsh-kimi-plugin-cc'
+    - id: tool-kimi-ask
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-ask
+        toolName: kimi_ask
+        maxDepth: provider-managed
+    - id: tool-kimi-review
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-review
+        toolName: kimi_review
+        maxDepth: provider-managed
+    - id: tool-kimi-challenge
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-challenge
+        toolName: kimi_challenge
+        maxDepth: provider-managed
+    - id: tool-kimi-rescue
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-rescue
+        toolName: kimi_rescue
+        maxDepth: provider-managed
+    - id: tool-kimi-pursue
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-pursue
+        toolName: kimi_pursue
+        maxDepth: provider-managed
+    - id: tool-kimi-swarm
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-swarm
+        toolName: kimi_swarm
+        maxDepth: provider-managed
+    - id: tool-kimi-swarm-write
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: kimi-swarm-write
+        toolName: kimi_swarm_write
+        maxDepth: provider-managed

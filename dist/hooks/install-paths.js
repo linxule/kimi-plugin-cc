@@ -410,7 +410,7 @@ export function hostIdFromHookCommand(command) {
 }
 /**
  * True only for a canonical two-single-quoted-token command whose script is
- * `approval-hook.js` under a kimi-plugin-cc/kimi-marketplace install tree.
+ * `approval-hook.js` under a kimi-plugin-cc/dsh-kimi-plugin-cc/kimi-marketplace install tree.
  * This strict ownership test protects hand-rolled and non-canonical user hooks
  * from orphan pruning.
  */
@@ -424,5 +424,5 @@ export function isOurApprovalHookCommand(decodedCommand) {
     const normalized = parsed.hookScript.replace(/\\/g, "/");
     // Require a real path segment, not an arbitrary substring, so a user hook in
     // a similarly named wrapper directory is never misclassified and pruned.
-    return normalized.includes("/kimi-plugin-cc/") || normalized.includes("/kimi-marketplace/");
+    return normalized.includes("/kimi-plugin-cc/") || normalized.includes("/dsh-kimi-plugin-cc/") || normalized.includes("/kimi-marketplace/");
 }

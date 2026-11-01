@@ -6,8 +6,8 @@ The shell entry points run the compiled Node runtime while preserving the caller
 | --- | --- |
 | `companion.sh` | Launch `dist/companion.js` for commands, skills, and the MCP stdio server |
 | `review-gate-hook.sh` | Launch the optional Claude Code Stop hook |
-| `surface-registry.ts` | Define Codex skills and MCP configuration, and lock Claude surface hashes |
-| `generate-surfaces.ts` | Generate Codex manifests, MCP launch config, skills, scripts, and the runtime mirror |
+| `surface-registry.ts` | Define Codex and DSH surfaces and lock Claude surface hashes |
+| `generate-surfaces.ts` | Generate Codex and DSH manifests, composition, skills, scripts, and runtime mirrors |
 | `check-package.mjs` | Validate the packed plugin, reject sync-conflict copies, and exercise isolated host, MCP, and version gates |
 | `smoke-rescue-drift.sh` | Run an opt-in live rescue check after CLI changes |
 | `audit-subscription-routing.ts` | Offline, exact-source counterexamples to atomic regional routing in CLI 2.0.1 |
@@ -18,7 +18,7 @@ Both shell entry points accept `CLAUDE_PLUGIN_ROOT` or `PLUGIN_ROOT` and otherwi
 
 `companion.sh` preserves the caller's directory in `KIMI_PLUGIN_CC_WORKSPACE_CWD`. It resolves Node from `KIMI_PLUGIN_CC_NODE_BIN` or `PATH` and requires Node.js 22.5 or newer.
 
-After changing runtime code or shell scripts, run `bun run build && bun run generate:surfaces`. Review and stage `dist/` and `plugins/kimi-codex/`, then run `bun run check`. Never edit the generated Codex package by hand.
+After changing runtime code or shell scripts, run `bun run build && bun run generate:surfaces`. Review and stage `dist/`, `plugins/kimi-codex/`, and `plugins/kimi-dsh/`, then run `bun run check`. Never edit either generated package by hand.
 
 Live smoke scripts use model calls. Read the script and the [smoke run instructions](../docs/ci.md) before using them. They are not part of routine offline checks.
 

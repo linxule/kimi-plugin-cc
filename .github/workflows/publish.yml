@@ -32,15 +32,21 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           node --input-type=module -e 'import p from "./package.json" with { type: "json" }; if (process.env.RELEASE_TAG !== `v${p.version}`) throw Error("Tag/package version mismatch");'
+      - name: Install pnpm for DSH plugin installation
+        run: npm install -g pnpm@10.11.0
       - run: bun install --frozen-lockfile
       - run: bun audit
       - run: bun run check
-      - name: Pack and test both host distributions
-        run: bun run check:package .tmp/npm
+      - name: Pack and test all host distributions
+        run: |
+          node scripts/check-package.mjs .tmp/npm
+          node scripts/check-dsh-package.mjs .tmp/dsh-npm
       - uses: actions/upload-artifact@v7
         with:
           name: npm-package
-          path: .tmp/npm/*.tgz
+          path: |
+            .tmp/npm/*.tgz
+            .tmp/dsh-npm/*.tgz
           if-no-files-found: error
           include-hidden-files: true
   publish:
@@ -64,14 +70,16 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
       # Bun owns installs/builds. npm is used only for its OIDC publishing support.
-      # Locate the tarball explicitly and publish it by an anchored ./ path: current
+      # Locate tarballs explicitly and publish them by anchored ./ paths: current
       # npm parses a bare `package/<file>.tgz` argument as the GitHub shorthand
       # `github:package/<file>` (v2.0.8 publish runs 38647325510 and 38647719689).
-      - name: Publish the packed tarball
+      - name: Publish both packed tarballs
         run: |
           set -euo pipefail
           ls -laR package
-          mapfile -t TGZ < <(find package -type f -name '*.tgz')
-          test "${#TGZ[@]}" -eq 1 || { echo "expected exactly one .tgz, found ${#TGZ[@]}" >&2; exit 1; }
-          # A bare dir/file argument is parsed by current npm as a GitHub shorthand; anchor it.
-          npm publish "./${TGZ[0]}" --access public --provenance
+          mapfile -t TGZ < <(find package -type f -name '*.tgz' | sort)
+          test "${#TGZ[@]}" -eq 2 || { echo "expected exactly two .tgz files, found ${#TGZ[@]}" >&2; exit 1; }
+          # Bare dir/file arguments are parsed by current npm as GitHub shorthand; anchor them.
+          for tarball in "${TGZ[@]}"; do
+            npm publish "./${tarball}" --access public --provenance
+          done

@@ -6,7 +6,7 @@ configured model for one task without changing that default.
 ## See configured models
 
 In Claude Code, run `/kimi:setup --models`. In Codex, ask `$kimi-setup` to list
-models. The underlying command is:
+models. In DSH, run `/kimi-setup --models` (or `--models --json`). The underlying command is:
 
 ```sh
 "<plugin-root>/scripts/companion.sh" setup --models
@@ -34,6 +34,8 @@ natural language. They select a unique configured match, ask when there are
 several, and guide setup when there is none. They do not guess model IDs or
 silently substitute the default after an error. An explicit `-m` remains a
 pass-through alias, so upstream can resolve it or report an error.
+
+DSH activations are one-shot and do not expose per-call model fields. Set `model` in the bundle's `kimi-plugin-cc` profile row to use one exact configured alias for every delegation from that profile; omit it to use the native Kimi default. This does not change the saved default or add fallback selection.
 
 Omitting `-m` uses the default for a **fresh** session. A resumed session keeps
 its previous model unless you supply `-m`. The optional review gate also uses
@@ -86,6 +88,8 @@ including `kosongConfig/configSection.ts`, `envOverlay.ts`, and
 `--thinking <effort>` requests per-run effort through `KIMI_MODEL_THINKING_EFFORT`, never a CLI flag or saved-default change; omitted flags preserve the operator-owned ambient variable, and resume does not inherit a previous job's request. Providers that are not trait-driven silently ignore it, as does a base level already `off`; an `alwaysThinking` model receives `off` unnormalized. Stream-json carries no thinking deltas (`writeThinkingDelta() {}`), so the plugin cannot verify whether the request was honoured.
 
 Use `--thinking off`, `--thinking high`, or `--thinking=<effort>` before the prompt. Values are lowercased and must match `/^[a-z][a-z0-9-]{0,31}$/` (a plugin-owned syntax bound; a future upstream token outside it is rejected before upstream sees it); upstream per-model `supportEfforts`, not a plugin enum, determines supported values. `--no-thinking` is an error: use `--thinking off`. In CLI 2.2.0 only the three Moonshot `kimi*` provider definitions are trait-driven. BYO providers ignore the request silently; an always-thinking model may remain thinking.
+
+DSH forwards the profile's `thinkingEffort` value as `--thinking <effort>` on every delegation. Omission preserves the ambient operator value; the same provider and observability limits apply.
 
 Jobs persist nullable `thinking_effort`; status and `result --json` expose `thinking_effort_requested`, not observed effort. Detached ask/rescue workers replay the request. A resume without `--thinking` exports no new override (any ambient operator value remains). No config.toml write occurs.
 

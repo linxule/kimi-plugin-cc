@@ -1,6 +1,6 @@
 # Kimi companion runtime
 
-The Kimi companion runtime powers ask, review, challenge, rescue, pursue, and swarm for Claude Code and Codex. Each model job starts a local `kimi -p --output-format stream-json` subprocess, with per-command safety hooks and an optional review gate.
+The Kimi companion runtime powers all seven ask, review, challenge, rescue, pursue, swarm, and swarm-write operations for Claude Code, Codex, and DeepSeek Harness. Each model job starts a local `kimi -p --output-format stream-json` subprocess, with per-command safety hooks and an optional review gate. DSH providers launch the same compiled companion through the host's managed subprocess service rather than adding an ACP transport.
 
 Native agent-core-v2 is certified only at the exact CLI versions listed in `kimi-engine.ts`. Legacy-v1 remains available for explicitly pinned versions in `KIMI_TESTED_MINORS`, through 0.41.x. See [engine certification](../docs/native-v2-certification-provenance.md) for the per-operation matrix.
 
@@ -26,6 +26,7 @@ The dispatcher in `companion.ts` exposes:
 | Module | Responsibility |
 | --- | --- |
 | `companion.ts` | Dispatch companion subcommands |
+| `dsh/` | Register all seven DSH providers and human commands, isolate host state, and manage subprocess lifecycles |
 | `mcp/` | Define typed tools, frame stdio, negotiate tasks, supervise fixed-ID children, and bind job ownership |
 | `cli-client.ts` | Build the child environment and arguments, parse output, enforce provenance, and cancel the process tree |
 | `kimi-engine.ts` | Select a certified engine and persist the execution plan |

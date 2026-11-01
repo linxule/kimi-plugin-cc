@@ -1,8 +1,10 @@
 # Registry releases
 
 The npm package `kimi-plugin-cc` ships the Claude plugin at its root and the
-self-contained Codex plugin under `plugins/kimi-codex`. GitHub marketplaces
-remain available. The package has no install scripts and no separate CLI.
+self-contained Codex and DSH plugins under `plugins/`. The independent npm
+package `dsh-kimi-plugin-cc` ships the same DSH bundle for direct
+`dsh plugin --profile <name> add dsh-kimi-plugin-cc` installation. GitHub
+marketplaces remain available. Neither package has install scripts or a separate CLI.
 
 ## Publishing status
 
@@ -86,15 +88,18 @@ bun run build
 bun run generate:surfaces
 # Review and stage generated distributions before the drift gate.
 bun run check
-bun run check:package .tmp/npm
+node scripts/check-package.mjs .tmp/npm
+node scripts/check-dsh-package.mjs .tmp/dsh-npm
 ```
 
-The package check inspects the actual tarball, rejects sync-conflict copies in
+The root package check inspects the actual tarball, rejects sync-conflict copies in
 any path component, verifies runtime copies and vendored licenses, and
-installs/checks the safety hook in isolated homes for both hosts. It also
+installs/checks the safety hook in isolated homes for all three hosts. It also
 exercises unsupported-version refusal using a fake CLI and modern MCP discovery
-plus legacy initialization on both extracted compiled distributions. It does
-not invoke a model or read the maintainer's Kimi configuration.
+plus legacy initialization on the extracted compiled distributions. The standalone
+DSH check packs the independent artifact, installs it into an isolated DSH home,
+verifies all seven tools, and boots the Web host. Neither check invokes a model
+or reads the maintainer's Kimi configuration.
 
 ## First publication (completed bootstrap reference)
 
@@ -131,8 +136,10 @@ operations; Bun remains the development toolchain.
 
 Push the reviewed release commit, wait for CI, tag it, and publish its GitHub
 release. `.github/workflows/publish.yml` runs on `release.published`; it checks
-the tag against `package.json`, runs the full gate and package smoke, then
-publishes the validated tarball through OIDC with provenance. The publish job
-has no source checkout or build scripts. A manual dispatch with an existing
-release tag is available for recovery after a verified publication failure.
-Check npm before retrying; released versions are immutable.
+the tag against `package.json`, runs the full gate and both package smokes, then
+publishes the root and standalone DSH tarballs through OIDC with provenance.
+Each package needs its own Trusted Publishing binding for this workflow and the
+`npm` environment. The publish job has no source checkout or build scripts. A
+manual dispatch with an existing release tag is available for recovery after a
+verified publication failure. Check npm before retrying; released versions are
+immutable.

@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "98bed4c6d8af81c5095acf15551d421da0e788b9d1e42453701a4d735efa7125" },
-  { path: ".claude-plugin/marketplace.json", sha256: "5e698bafad1f822d17ddbfb5a1f0b386c4391d00dc4c6dc27e61407faf39cc7c" },
+  { path: ".claude-plugin/plugin.json", sha256: "aaba30da927727523435552957ae42e3e2edcd418511a2e35f5cd26b0a291629" },
+  { path: ".claude-plugin/marketplace.json", sha256: "a66e274c185e1cf89ea74b417c33603814d2b5eda7384cb378757570c123e407" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
   { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
@@ -137,6 +137,162 @@ export const CODEX_MARKETPLACE = {
     },
   ],
 } as const;
+
+export const DSH_PLUGIN_SUBDIR = "plugins/kimi-dsh";
+export const DSH_PLUGIN_PACKAGE_NAME = "dsh-kimi-plugin-cc";
+export const DSH_VERSION_RANGE = ">=0.2.1-rc.5 <0.3.0";
+
+export const DSH_PLUGIN_MANIFEST = {
+  name: DSH_PLUGIN_PACKAGE_NAME,
+  version: PLUGIN_VERSION,
+  description: "Kimi Code subagents for DeepSeek Harness: all seven ask, review, challenge, rescue, pursue, swarm, and swarm-write operations through the kimi-plugin-cc companion runtime.",
+  type: "module",
+  main: "dist/dsh/index.js",
+  exports: {
+    ".": "./dist/dsh/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+  },
+  files: [
+    "cordis.patch.yml",
+    "dist/",
+    "scripts/",
+    "README.md",
+    "LICENSE",
+  ],
+  engines: {
+    node: ">=24.9.0",
+    dsh: DSH_VERSION_RANGE,
+  },
+  dsh: {
+    bundle: {
+      patch: "./cordis.patch.yml",
+    },
+  },
+  peerDependencies: {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-commands": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-llm": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-session": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-subagent": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-subprocess": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-working-directory": DSH_VERSION_RANGE,
+  },
+  dependencies: {
+    "@deepseek-ai/dsh-brand": DSH_VERSION_RANGE,
+    "@deepseek-ai/dsh-tool-subagent": DSH_VERSION_RANGE,
+    "@deepseek-ai/schemastery": "~3.18.5",
+  },
+  license: "Apache-2.0",
+  publishConfig: {
+    access: "public",
+    registry: "https://registry.npmjs.org/",
+  },
+  repository: {
+    type: "git",
+    url: "git+https://github.com/linxule/kimi-plugin-cc.git",
+    directory: "plugins/kimi-dsh",
+  },
+} as const;
+
+export const DSH_OPERATION_NAMES = ["ask", "review", "challenge", "rescue", "pursue", "swarm", "swarm-write"] as const;
+
+export const DSH_BUNDLE_PATCH = [
+  "- insert:",
+  "    - id: kimi-plugin-cc",
+  `      name: '${DSH_PLUGIN_PACKAGE_NAME}'`,
+  ...DSH_OPERATION_NAMES.flatMap((operation) => [
+    `    - id: tool-kimi-${operation}`,
+    "      name: '@deepseek-ai/dsh-tool-subagent'",
+    "      config:",
+    `        provider: kimi-${operation}`,
+    `        toolName: kimi_${operation.replaceAll("-", "_")}`,
+    "        maxDepth: provider-managed",
+  ]),
+  "",
+].join("\n");
+
+export const DSH_README = `# dsh-kimi-plugin-cc
+
+Kimi Code subagents for DeepSeek Harness (DSH), backed by the same companion runtime as the Claude Code and Codex plugins.
+
+## What this bundle provides
+
+| Tool | Operation | File access |
+|---|---|---|
+| \`kimi_ask\` | Answer a self-contained repository question | Read-only |
+| \`kimi_review\` | Review the working tree, including untracked files | Read-only |
+| \`kimi_challenge\` | Challenge assumptions and design choices | Read-only |
+| \`kimi_rescue\` | Investigate and implement a bounded fix | Can edit the selected workspace |
+| \`kimi_pursue\` | Pursue an autonomous multi-turn objective with a finite budget | Can edit the selected workspace |
+| \`kimi_swarm\` | Fan out independent read-only subagents | Read-only |
+| \`kimi_swarm_write\` | Edit disjoint targets in a temporary worktree and return a patch | Patch only; never applies or commits |
+
+Every activation starts a fresh companion and Kimi CLI process. The existing runtime owns hook verification, exact Kimi-version certification, SQLite jobs, response or safety budgets, artifacts, and process teardown. DSH owns delegation identity and completion notices. Parent conversations do not flow into the child, and child tool traffic stays out of the parent conversation.
+
+Job controls are \`/kimi-status [job-id]\`, \`/kimi-result [job-id]\`, and \`/kimi-cancel [job-id]\`. Without an id, status and result select the latest job for the current repository, and cancel selects the latest active job. Cancellation stops work but does not roll back changes or patches already produced.
+
+## Requirements
+
+- Node.js 24.9.0 or later.
+- DeepSeek Harness ${DSH_VERSION_RANGE}; this package is developed and composed against 0.2.1-rc.5.
+- Kimi Code CLI on \`PATH\`, authenticated and configured through Kimi. The companion's exact-version certification table remains authoritative.
+
+## Install
+
+From this repository checkout:
+
+\`\`\`sh
+dsh plugin --profile web add ./plugins/kimi-dsh
+\`\`\`
+
+For another DSH profile, replace \`web\` with its name. To install the published npm bundle instead, run \`dsh plugin --profile web add dsh-kimi-plugin-cc\`.
+
+Restart when requested, then run \`/kimi-setup\`. Setup is explicit: installing or enabling the bundle does not modify Kimi configuration. Delegation refuses to start when the DSH managed hook is missing or invalid.
+
+Useful setup commands:
+
+\`\`\`text
+/kimi-setup --check
+/kimi-setup --models
+/kimi-setup --models --json
+/kimi-setup --uninstall
+\`\`\`
+
+Model inventory is local and credential-safe; it is not a connection test. Uninstall removes only the DSH managed block. The all-host \`--uninstall --all\` action is deliberately not exposed through the DSH command.
+
+## Use
+
+Ask DSH to use one of the seven tools with a self-contained task. Each accepts a description, prompt, and optional working directory, returns an activation id, and delivers the final result when the companion finishes. Review and challenge treat the prompt as focus text. Pursue and swarm operations retain their existing finite default budgets; swarm-write returns the captured patch path without applying it.
+
+Prefer \`/kimi-cancel\` for stopping work when possible. DSH cancellation also terminates the managed subprocess range and waits for quiescence.
+
+## Configuration
+
+The bundle's \`kimi-plugin-cc\` row accepts:
+
+| Field | Default | Meaning |
+|---|---|---|
+| \`dataRoot\` | \`$DSH_HOME/plugin-data/kimi-plugin-cc\` | Absolute companion data directory; \`KIMI_PLUGIN_CC_DATA\` overrides the derived default |
+| \`env\` | \`{}\` | Explicit child environment layered over DSH's credential-scrubbed environment |
+| \`disposeGraceMs\` | \`6000\` | Managed subprocess termination grace |
+| \`maxOutputBytes\` | \`16777216\` | Maximum captured stdout or stderr bytes per command |
+| \`model\` | Native Kimi default | Optional configured model alias applied to every delegation |
+| \`thinkingEffort\` | Native Kimi default | Optional per-run thinking effort request |
+| \`budget\` | Existing command default | Optional duration such as \`30m\`, \`1h\`, or \`90s\`, validated at load and capped at 24h |
+| \`reviewBase\` | Working tree | Optional Git base applied only to review and challenge |
+
+Host identity, workspace, hook path, Node binary, and bypass variables are provider-owned and cannot be replaced through \`env\`. The DSH managed block uses host id \`dsh\`; Claude Code and Codex blocks remain independent. Native Kimi authentication and provider configuration stay under \`KIMI_CODE_HOME\` or \`~/.kimi-code\`.
+
+## Limits
+
+- Activations are one-shot and do not accept follow-up input, parent-context inheritance, per-call model overrides, output schemas, or Harness depth enforcement. Use profile configuration for a fixed model or thinking request; interactive ask/rescue resume stays outside the DSH provider.
+- DSH activation ids are not companion job ids. Use the slash commands to inspect companion state.
+- There is no child progress stream. Response-time budgets, safety ceilings, and timeout artifacts follow the existing companion rules.
+- The parent receives final stdout only on success. stderr stays on the host; failures use bounded diagnostics without task text, credentials, or raw protocol payloads.
+- This package does not create an account, select a provider, repair Kimi authentication, or provide an approval channel beyond the companion's managed PreToolUse policy.
+- Rescue and pursue edit the real selected workspace. Swarm-write works from born HEAD in a temporary worktree, excludes uncommitted changes, and returns a patch without applying or committing it.
+`;
 
 const MODEL_SELECTION_GUIDANCE = [
   "Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). Preserve `--thinking <effort>` or `--thinking=<effort>`; `--no-thinking` is rejected, use `--thinking off`. Omission preserves ambient operator env; resumes do not inherit previous job effort. Status and `result --json` report `thinking_effort_requested`, not observed effort.",

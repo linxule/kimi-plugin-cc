@@ -34,7 +34,7 @@ beforeAll(async () => {
       // has nothing to do with this test. Copying it made the setup hook time
       // out. `.tmp` is scratch build/test output, also irrelevant.
       return (
-        !parts.includes("node_modules") &&
+        !parts.some((part) => part.startsWith("node_modules")) &&
         !parts.includes(".git") &&
         !parts.includes(".claude") &&
         !parts.includes(".tmp")

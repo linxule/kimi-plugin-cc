@@ -2,6 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.5.0 — 2026-11-01
+
+- Add DeepSeek Harness as a third host with native `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm`, and `kimi_swarm_write` providers. Reuse the existing companion and `kimi -p` transport, managed hooks, exact-version certification, SQLite jobs, budgets, artifacts, and process lifecycle; no ACP transport.
+- Add DSH-owned setup, model inventory, host-scoped uninstall, and job controls, plus profile-level model, thinking, budget, review-base, data-root, environment, output, and teardown settings. Preserve read-only denials, real-workspace rescue/pursue writes, and patch-only swarm-write.
+- Package `dsh-kimi-plugin-cc` as an independently installable npm bundle with its own pack/install/composition/Web-boot gate. Publish root and DSH tarballs together through the existing OIDC workflow, with Node 24 CI and verified composition on DSH 0.2.1-rc.5 and 0.2.2-alpha.2.
+- Verify live DSH delegation: `kimi_ask` returns `4`, a managed-hook write denial creates no file, rescue writes only `DSH_OK`, and a two-target swarm-write returns a valid patch without applying it or touching the real workspace.
+- Update installation, safety, model, registry, contributor, and multilingual README guidance. Reduce `AGENTS.md` from 32,704 to 21,291 bytes by keeping detailed mechanics in owning references, and enforce a 24 KB ceiling.
+
 ## 2.4.5 — 2026-10-31
 
 - Certify exact kimi-code 2.4.1 for all eight native-v2 operations after exact-source review, plan and swarm controls, and candidate/production smoke. See [evidence](docs/upstream-2.4.1-certification.md).
