@@ -2,12 +2,13 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
-## Unreleased
+## 2.5.2 — 2026-11-02
 
 - Preserve TOML multiline values, line endings, and foreign hook fields during setup; repair mixed-host orphan marker comments without altering foreign hooks.
 - Keep the DSH disposal grace at least 6000ms, pin a stable Node path, and expose each Kimi tool's write boundary to the model.
 - Treat DSH services and its tool adapter as host-provided peers so ordinary npm consumers do not install the harness. Require patched DSH host/profile dependencies and audit both installations before the seven-tool composition and Web-boot smoke.
 - Add an installed-consumer security gate to CI and publication; reject failed or incomplete audits as well as high/critical advisories. Upstream DSH pins remain vulnerable, so existing installations require the documented explicit overrides.
+- Validate exact Kimi Code 2.4.1 with 24 real-binary smoke tests (167 assertions, no skips) and the 16-test exact-source audit; certification remains unchanged.
 
 ## 2.5.1 — 2026-11-01
 
