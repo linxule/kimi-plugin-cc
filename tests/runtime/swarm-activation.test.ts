@@ -20,6 +20,68 @@ const nodeCommand = Bun.which("node") ?? "node";
 const tokenCanary = "ready-token-canary-7f3c";
 const configCanary = "config-private-canary-91bd";
 
+class CloseTimeoutWebSocket {
+  readonly protocol: string;
+  readonly listeners = new Map<string, (event: any) => void>();
+
+  constructor(_url: string | URL, protocol: string) {
+    this.protocol = protocol;
+    queueMicrotask(() => this.emit("open", {}));
+  }
+
+  addEventListener(type: string, listener: (event: any) => void): void {
+    this.listeners.set(type, listener);
+  }
+
+  removeEventListener(type: string): void {
+    this.listeners.delete(type);
+  }
+
+  send(raw: string): void {
+    const frame = JSON.parse(raw);
+    queueMicrotask(() => {
+      if (frame.type === "client_hello") {
+        this.emit("message", { data: JSON.stringify({
+          type: "server_hello",
+          payload: {
+            ws_connection_id: "controlled-close-timeout",
+            protocol_version: 2,
+            capabilities: { event_batching: false, compression: false },
+          },
+        }) });
+        this.emit("message", { data: JSON.stringify({ type: "ack", id: frame.id, code: 0, payload: {} }) });
+        return;
+      }
+      if (frame.type !== "subscribe_v2") return;
+      this.emit("message", { data: JSON.stringify({
+        type: "ack",
+        id: frame.id,
+        code: 0,
+        payload: { accepted: [frame.payload.session_id], not_found: [] },
+      }) });
+      this.emit("message", { data: JSON.stringify({
+        type: "agent",
+        session_id: frame.payload.session_id,
+        agent_id: "main",
+        event_created_at: new Date().toISOString(),
+        status: "idle",
+        model: "chosen-model",
+        thinking: "medium",
+        permission_mode: "auto",
+        plan_mode: false,
+        swarm_mode: true,
+        tower_mode: false,
+      }) });
+    });
+  }
+
+  close(): void {}
+
+  private emit(type: string, event: any): void {
+    this.listeners.get(type)?.(event);
+  }
+}
+
 interface Fixture {
   readonly root: string;
   readonly cwd: string;
@@ -779,11 +841,20 @@ describe("swarm web lifecycle", () => {
       fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
       const options = makeOptions(fixture, { expectedVersion: "2.5.0", model: "chosen-model" });
       const identity = { sessionId: "session_mock", workspaceId: "wd_mock" };
-      await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
-        code: "SWARM_ACTIVATION_FAILED",
-        stage: "swarm-activation.status",
-        details: { session_id: identity.sessionId, workspace_id: identity.workspaceId },
-      });
+      const originalWebSocket = scenario === "ws-close-timeout" ? globalThis.WebSocket : undefined;
+      if (originalWebSocket !== undefined) {
+        globalThis.WebSocket = CloseTimeoutWebSocket as unknown as typeof WebSocket;
+      }
+      try {
+        await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
+          code: "SWARM_ACTIVATION_FAILED",
+          stage: "swarm-activation.status",
+          ...(scenario === "ws-close-timeout" ? { message: "Kimi web agent-state verification timed out." } : {}),
+          details: { session_id: identity.sessionId, workspace_id: identity.workspaceId },
+        });
+      } finally {
+        if (originalWebSocket !== undefined) globalThis.WebSocket = originalWebSocket;
+      }
       expect(spawns(await readLog(fixture))).toHaveLength(1);
       fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-success";
       await deactivateSwarmSession({ ...options, ...identity });
