@@ -1,6 +1,6 @@
 # Native v2 status — 2026-11-06
 
-Plugin 2.5.3 certifies exact CLI 2.5.1 for all eight operations
+Plugin 2.5.4 certifies exact CLI 2.5.1 for all eight operations
 (`1b02030d8c2c6b00131b23ebb67a231614877827`). Candidate and production matrices
 each passed 24 tests with 167 assertions and no skips in 358.88 and 364.25
 seconds, including real rescue, deterministic Bash.cwd denial, resume/plan-taint

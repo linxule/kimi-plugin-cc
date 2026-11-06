@@ -1,6 +1,6 @@
 {
   "name": "kimi-plugin-cc",
-  "version": "2.5.3",
+  "version": "2.5.4",
   "description": "Kimi Code subagents for DeepSeek Harness: all seven ask, review, challenge, rescue, pursue, swarm, and swarm-write operations through the kimi-plugin-cc companion runtime.",
   "type": "module",
   "main": "dist/dsh/index.js",

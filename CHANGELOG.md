@@ -2,6 +2,12 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.5.4 — 2026-11-06
+
+- Restore the original platform-neutral bounded-close settlement for swarm agent-state verification after follow-up CI showed that `wasClean` can both accept an early close and reject a valid one. The published 2.5.3 artifact contains the trial condition; this patch carries its revert without re-tagging or republishing it.
+- Keep deterministic close-timeout coverage through a controlled no-close-event socket and exact timeout-message assertion, plus a protocol-correct mock close handshake. Production behavior otherwise remains unchanged from the certified 2.5.0 and 2.5.1 implementation.
+- Revalidate 71 activation tests with 244 assertions, the full repository gate with 1,412 tests and 18,282 assertions, and 330-file package and consumer-security checks. Exact CLI certification remains unchanged through 2.5.1; installed hosts and operator pins are not updated by publication.
+
 ## 2.5.3 — 2026-11-06
 
 - Certify exact kimi-code 2.5.0 and 2.5.1 for all eight native-v2 operations. Preserve the no-plan construction, local execution and workspace-trust enforcement, authenticated WebSocket swarm state, bounded lifecycle cleanup, and the legacy-v1 0.41.x boundary. See the [2.5.0](docs/upstream-2.5.0-certification.md) and [2.5.1](docs/upstream-2.5.1-certification.md) evidence.

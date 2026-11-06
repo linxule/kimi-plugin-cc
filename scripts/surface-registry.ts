@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "93fc979f5a4fe49618898cfed4574b25e5dc71bad7ceb673501b8c24c4bc65be" },
-  { path: ".claude-plugin/marketplace.json", sha256: "36823b94afe441a9e234d2191b9d435b71e6ca2121919c0947c8d4811a0382a6" },
+  { path: ".claude-plugin/plugin.json", sha256: "c9d2c8dbbaea9d67dd18a6772e49a3dc13380d963789244bb9e73123352d966c" },
+  { path: ".claude-plugin/marketplace.json", sha256: "fce577fff10910c3221f61666d1a85ec3935345ed9d0a923e10bd8fde6300968" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
   { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
@@ -305,7 +305,7 @@ Host identity, workspace, hook path, Node binary, and bypass variables are provi
 - Rescue and pursue edit the real selected workspace. Swarm-write works from born HEAD in a temporary worktree, excludes uncommitted changes, and returns a patch without applying or committing it.
 `;
 
-export const DSH_PUBLISH_TIMESTAMP = 1793977273;
+export const DSH_PUBLISH_TIMESTAMP = 1793980739;
 
 export const DSH_DISCOVERY_INDEX = {
   format: 1,
