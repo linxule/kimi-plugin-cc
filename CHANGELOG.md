@@ -2,6 +2,12 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.5.3 — 2026-11-06
+
+- Certify exact kimi-code 2.5.0 and 2.5.1 for all eight native-v2 operations. Preserve the no-plan construction, local execution and workspace-trust enforcement, authenticated WebSocket swarm state, bounded lifecycle cleanup, and the legacy-v1 0.41.x boundary. See the [2.5.0](docs/upstream-2.5.0-certification.md) and [2.5.1](docs/upstream-2.5.1-certification.md) evidence.
+- Review every exact-version branch for fresh `--environment local`, hook schemas, preactivation, local environment/cwd binding, and protocol-v2 agent state. The 2.5.1 source scan passed 18 tests with 153 assertions; candidate and production matrices each passed 24 tests with 167 assertions and no skips, including real rescue, Bash.cwd confinement, resume/taint refusal, goal-turn denials, and child-authored patches.
+- Pass the full repository gate with 1,412 tests and 18,282 assertions, 330-file package checks across all three distributions, isolated consumer security, and independent read-only `claude -p` review with no must-fix findings. Update the manual smoke default to exact 2.5.1 and the current compatibility documentation; publication does not update installed hosts or operator pins.
+
 ## 2.5.2 — 2026-11-02
 
 - Preserve TOML multiline values, line endings, and foreign hook fields during setup; repair mixed-host orphan marker comments without altering foreign hooks.

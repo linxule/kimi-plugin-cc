@@ -13,9 +13,10 @@
 //     B. the EnterPlanMode tool (already hook-denied for every label);
 //     C. resuming a session whose agent wire journal holds a durable
 //        `plan_mode.enter` record (restore() folds ONLY agents/*/wire.jsonl).
-//   This module closes A and C before any process is spawned, and refuses the
+//   This module closes A and C before any process is spawned, refuses the
 //   v2-only experimental features (tower, subagent fork) that this plugin does
-//   not certify. B stays in runtime/hooks/approval-policy.ts.
+//   not certify, and requires local execution for configured and resumed sessions.
+//   B stays in runtime/hooks/approval-policy.ts.
 //
 // Contract:
 //   - Pure inspection: never writes, never rewrites operator config, never
@@ -155,6 +156,48 @@ export async function inspectPlanModeConfig(kimiHome) {
         reason: `\`${offending.join("`, `")}\` (upstream setting \`default_plan_mode\`) is set in ${configPath} and is not \`false\`.`,
     };
 }
+export async function inspectEnvironmentConfig(kimiHome) {
+    const parsed = await readParsedConfig(kimiHome);
+    if (parsed.kind === "unreadable") {
+        return { kind: "refuse", refusalKind: "v2-config-unreadable", reason: parsed.reason };
+    }
+    const section = parsed.config?.["environments"];
+    if (section !== undefined) {
+        if (section === null || typeof section !== "object" || Array.isArray(section)) {
+            return {
+                kind: "refuse",
+                refusalKind: "v2-environment-configured",
+                reason: "The [environments] section is not a table, so the execution environment cannot be verified as local.",
+            };
+        }
+        if (section["default"] !== undefined) {
+            return {
+                kind: "refuse",
+                refusalKind: "v2-environment-configured",
+                reason: "A default remote execution environment is configured in [environments]; plugin-managed jobs require the local environment.",
+            };
+        }
+    }
+    const workspace = parsed.config?.["workspace"];
+    if (workspace !== undefined) {
+        if (workspace === null || typeof workspace !== "object" || Array.isArray(workspace)) {
+            return {
+                kind: "refuse",
+                refusalKind: "v2-workspace-trust-disabled",
+                reason: "The [workspace] section is not a table, so project trust requirements cannot be verified.",
+            };
+        }
+        const trustDisabled = Object.entries(workspace).some(([key, value]) => upstreamSnakeToCamel(key) === "requireTrust" && value !== true);
+        if (trustDisabled) {
+            return {
+                kind: "refuse",
+                refusalKind: "v2-workspace-trust-disabled",
+                reason: "Workspace trust is disabled in [workspace]; plugin-managed jobs require project trust enforcement to remain enabled.",
+            };
+        }
+    }
+    return { kind: "ok" };
+}
 /**
  * Refuse v2-only experimental features this plugin does not certify.
  * Sources (per-flag precedence upstream is env → [experimental] config →
@@ -239,40 +282,39 @@ async function openJournalSafely(journalPath, maxBytes) {
     }
     return { kind: "ok", handle };
 }
-/**
- * Scan one open journal's lines for a plan-mode control record. Returns the
- * record `type` string on a match, "<unparseable>" for a suspicious line
- * that fails to parse, or null when the journal is clean.
- */
-async function scanJournalLines(handle) {
+async function scanJournalLines(handle, expectedExecutionRoot) {
     const rl = createInterface({ input: handle.createReadStream() });
     try {
         for await (const rawLine of rl) {
             const line = rawLine.trim();
             if (line.length === 0)
                 continue;
-            // Parse EVERY record and check its DECODED `type`. A raw-substring filter
-            // is unsafe on its own: a JSON-escaped type such as
-            // {"type":"plan_mode.enter"} contains no literal "plan_mode." yet
-            // upstream JSON.parse decodes it to "plan_mode.enter" and restores active
-            // plan mode. So parse first (this catches the escape). If a line FAILS to
-            // parse, upstream cannot fold it into a plan event either — but be
-            // conservative: a malformed line that still LOOKS plan-related is treated
-            // as tainted rather than skipped, so a hand-corrupted journal cannot hide
-            // a plan record behind a parse error.
             let parsed;
             try {
                 parsed = JSON.parse(line);
             }
             catch {
                 if (line.includes('"plan_mode.') || line.includes('"plan.')) {
-                    return "<unparseable>";
+                    return { kind: "tainted", recordType: "<unparseable>" };
+                }
+                if (line.includes('"environment.set_binding')) {
+                    return { kind: "environment", recordType: "<unparseable-environment-binding>" };
                 }
                 continue;
             }
-            const type = parsed?.["type"];
+            const record = parsed;
+            const type = record?.["type"];
             if (typeof type === "string" && (type.startsWith("plan_mode.") || type.startsWith("plan."))) {
-                return type;
+                return { kind: "tainted", recordType: type };
+            }
+            if (type === "environment.set_binding") {
+                if (record?.["environmentId"] !== "local") {
+                    return { kind: "environment", recordType: type };
+                }
+                const cwd = record?.["cwd"];
+                if (expectedExecutionRoot !== undefined && cwd !== undefined && cwd !== expectedExecutionRoot) {
+                    return { kind: "environment", recordType: "environment.set_binding.cwd" };
+                }
             }
         }
         return null;
@@ -281,16 +323,48 @@ async function scanJournalLines(handle) {
         rl.close();
     }
 }
+async function inspectSessionMetadataEnvironment(statePath, expectedExecutionRoot) {
+    const read = await readSmallFileSafe(statePath, CONFIG_MAX_BYTES);
+    if (read.kind === "absent")
+        return null;
+    if (read.kind === "unreadable") {
+        return { kind: "unavailable", reason: `${statePath}: ${read.reason}` };
+    }
+    let metadata;
+    try {
+        metadata = JSON.parse(read.contents);
+    }
+    catch {
+        return { kind: "unavailable", reason: `${statePath}: malformed session metadata` };
+    }
+    if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
+        return { kind: "unavailable", reason: `${statePath}: invalid session metadata` };
+    }
+    const record = metadata;
+    const environmentId = record["environmentId"];
+    if (environmentId !== undefined && environmentId !== "local") {
+        return { kind: "environment", journal: statePath, recordType: "session.metadata.environmentId" };
+    }
+    const environmentCwd = record["environmentCwd"];
+    if ((environmentId === undefined || environmentId === "local") &&
+        expectedExecutionRoot !== undefined &&
+        environmentCwd !== undefined &&
+        environmentCwd !== expectedExecutionRoot) {
+        return { kind: "environment", journal: statePath, recordType: "session.metadata.environmentCwd" };
+    }
+    return null;
+}
 /**
- * Scan every agent wire journal of a saved session for plan-mode records.
- * Layout at 0.42.0: `<kimiHome>/sessions/<workspaceId>/<sessionId>/agents/<agentId>/wire.jsonl`
+ * Scan saved session metadata and every agent wire journal for plan-mode records
+ * and nonlocal environment bindings. Layout at 0.42.0:
+ * `<kimiHome>/sessions/<workspaceId>/<sessionId>/agents/<agentId>/wire.jsonl`
  * (workspaceId is unknown to the plugin → enumerate `sessions/*` with bounded
  * readdir). Raw-line scan of EVERY agent journal: a JSON line whose `type`
- * starts with `plan_mode.` or `plan.` → tainted (fail-closed on a line that
- * looks suspicious but does not parse). No session dir, no journal, unreadable,
+ * starts with `plan_mode.` or `plan.` → tainted; `environment.set_binding` must
+ * name `environmentId:"local"`. No session dir, no journal, unreadable metadata,
  * or any single journal above the size cap → unavailable. Never modifies files.
  */
-export async function scanSessionJournalsForPlan(kimiHome, sessionId) {
+export async function scanSessionJournalsForPlan(kimiHome, sessionId, expectedExecutionRoot) {
     const sessionsDir = path.join(kimiHome, "sessions");
     const workspaceEntries = await boundedReaddir(sessionsDir, DIR_ENUM_CAP);
     if (workspaceEntries.kind === "absent") {
@@ -316,7 +390,11 @@ export async function scanSessionJournalsForPlan(kimiHome, sessionId) {
         }
         if (!workspaceEntry.isDirectory())
             continue;
-        const agentsDir = path.join(sessionsDir, workspaceEntry.name, sessionId, "agents");
+        const sessionDir = path.join(sessionsDir, workspaceEntry.name, sessionId);
+        const metadataFinding = await inspectSessionMetadataEnvironment(path.join(sessionDir, "state.json"), expectedExecutionRoot);
+        if (metadataFinding !== null)
+            return metadataFinding;
+        const agentsDir = path.join(sessionDir, "agents");
         const agentEntries = await boundedReaddir(agentsDir, DIR_ENUM_CAP);
         if (agentEntries.kind === "absent")
             continue;
@@ -347,9 +425,12 @@ export async function scanSessionJournalsForPlan(kimiHome, sessionId) {
             return { kind: "unavailable", reason: `${journalPath}: ${opened.reason}` };
         }
         try {
-            const taintedType = await scanJournalLines(opened.handle);
-            if (taintedType !== null) {
-                return { kind: "tainted", journal: journalPath, recordType: taintedType };
+            const finding = await scanJournalLines(opened.handle, expectedExecutionRoot);
+            if (finding?.kind === "tainted") {
+                return { kind: "tainted", journal: journalPath, recordType: finding.recordType };
+            }
+            if (finding?.kind === "environment") {
+                return { kind: "environment", journal: journalPath, recordType: finding.recordType };
             }
         }
         finally {
@@ -363,6 +444,8 @@ export async function scanSessionJournalsForPlan(kimiHome, sessionId) {
  *   CLI_V2_PLAN_MODE_CONFIGURED   details.refusal_kind = "v2-plan-mode-configured"
  *   CLI_V2_CONFIG_UNREADABLE      details.refusal_kind = "v2-config-unreadable"
  *   CLI_V2_EXPERIMENTAL_UNSAFE    details.refusal_kind = "v2-experimental-unsafe", details.selectors
+ *   CLI_V2_ENVIRONMENT_UNSAFE / CLI_V2_WORKSPACE_TRUST_UNSAFE for unsafe config
+ *   KIMI_SESSION_ENVIRONMENT_UNSAFE details.refusal_kind = "session-environment-unsafe"
  *   KIMI_SESSION_PLAN_TAINTED     details.refusal_kind = "session-plan-tainted", details.record_type
  *   KIMI_SESSION_JOURNAL_UNAVAILABLE details.refusal_kind = "session-journal-unavailable"
  * Every message carries a truthful remedy (edit the named setting / start a
@@ -384,6 +467,22 @@ export async function assertNativeV2Preflight(options) {
             details: { refusal_kind: planMode.refusalKind, retryable_after_setup: false },
         });
     }
+    const environment = await inspectEnvironmentConfig(options.kimiHome);
+    if (environment.kind === "refuse") {
+        const code = environment.refusalKind === "v2-environment-configured"
+            ? "CLI_V2_ENVIRONMENT_UNSAFE"
+            : environment.refusalKind === "v2-workspace-trust-disabled"
+                ? "CLI_V2_WORKSPACE_TRUST_UNSAFE"
+                : "CLI_V2_CONFIG_UNREADABLE";
+        const remedy = environment.refusalKind === "v2-environment-configured"
+            ? `Remove \`environments.default\` in ${configPath} so plugin-managed sessions stay local.`
+            : environment.refusalKind === "v2-workspace-trust-disabled"
+                ? `Set \`workspace.require_trust = true\` (or remove it) in ${configPath}.`
+                : `Fix or remove the unreadable file at ${configPath} so the execution environment can be verified as local.`;
+        throw new RuntimeError(code, `${environment.reason} ${remedy}`, stage, {
+            details: { refusal_kind: environment.refusalKind, retryable_after_setup: false },
+        });
+    }
     const experimental = await inspectExperimentalSelectors(options.kimiHome, options.env);
     if (experimental.kind === "refuse") {
         throw new RuntimeError("CLI_V2_EXPERIMENTAL_UNSAFE", `${experimental.reason} Unset the listed selector(s) before retrying.`, stage, {
@@ -395,7 +494,16 @@ export async function assertNativeV2Preflight(options) {
         });
     }
     if (options.resumeSessionId !== undefined) {
-        const journalScan = await scanSessionJournalsForPlan(options.kimiHome, options.resumeSessionId);
+        const journalScan = await scanSessionJournalsForPlan(options.kimiHome, options.resumeSessionId, options.expectedExecutionRoot);
+        if (journalScan.kind === "environment") {
+            throw new RuntimeError("KIMI_SESSION_ENVIRONMENT_UNSAFE", `Saved session ${options.resumeSessionId} has an unsafe execution environment binding (${journalScan.recordType} in ${journalScan.journal}). Start a fresh local session; saved session state was not modified.`, stage, {
+                details: {
+                    refusal_kind: "session-environment-unsafe",
+                    record_type: journalScan.recordType,
+                    retryable_after_setup: false,
+                },
+            });
+        }
         if (journalScan.kind === "tainted") {
             throw new RuntimeError("KIMI_SESSION_PLAN_TAINTED", `Saved session ${options.resumeSessionId} previously entered plan mode (record type "${journalScan.recordType}" in ${journalScan.journal}). Start a fresh session; saved session state was not modified.`, stage, {
                 details: {

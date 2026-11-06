@@ -32,6 +32,7 @@ const suite = SOURCE !== undefined && existsSync(SOURCE) ? describe : describe.s
 const CORE = "packages/agent-core-v2/src";
 const CLI = "apps/kimi-code/src";
 const KAP = "packages/kap-server/src";
+const SDK = "packages/node-sdk/src";
 
 /**
  * Per-version pins for files whose exact bytes decide the construction. A new
@@ -518,6 +519,176 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
     [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
       "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
   },
+  // 2.5.0: reviewed hook diagnostics, environment-aware plan targets, wire
+  // normalization, and the native SDK print bootstrap. The removed-tool surface
+  // and the other nine construction/schema files are unchanged from 2.4.1.
+  "2.5.0": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "322a7ec016ccb6f33ca0d9fdc1e609393921c366c2b5bb7063341c9ca29cc318",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "ef981d83e607f0427f77a0fc89e4c03d301116b01ac5f0c33bb68ea955749455",
+    [`${CORE}/features/plan/planService.ts`]:
+      "0d5d269e5cfc052db6697d4ebe01069e46ea756f2b34d7822ac4e8b2c3bd16a0",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "5a98a1f4ca9f14ae1e3f967c66943045f8e389e9379e06fd88863d44a41884da",
+    [`${CORE}/state/state.ts`]:
+      "736bd13f41d245b519ddce795bbf5ea6847016ed244c58f0b14d603d548a4f41",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "074d63a1a1be9d361abf3c46656415a1be1517a9a8237df34a6cc24ce9864cef",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "7075a05a7ec9cdb117469943ce1b507a97ad2c0e4bfd55d07eb64c30ec5e8dbc",
+    [`${CORE}/wire/record.ts`]:
+      "75f71ea73c2f7aef1f26efe6d5b1f86b4c1bbfa66945bd2d2bceec2e67b5109b",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "c8b692dd32cc86d09d95c7a83be2d357d73f071acb5c5a44387d12c6a652807c",
+    [`${CLI}/cli/v2/run-v2-print.ts`]:
+      "b40ca78e5bb7867ee636a38b9bfa1513e41dd1a832ae1c4e662f1fcb9865c19c",
+    [`${CORE}/app/sessionManager/sessionLookup.ts`]:
+      "d4a087aa8364e1ca1b9c7b2324956d06495c8c54c880c2a767a27560c676129d",
+    [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
+      "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
+    [`${SDK}/sdk-rpc-client-v2.ts`]:
+      "b10009d4f6eab8435a87068ec2d674b8745d136535a2014624a1b00c8ecc8e40",
+    [`${CORE}/app/sessionManager/sessionManagerService.ts`]:
+      "9f7b0909c592767c5affd66349d953379758a27e78be9e610fcd7ae020b3f4b6",
+    [`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`]:
+      "d02ed76254f37f79125c0f0e5ed3ae0ab13bd2eda2b129aaaaab71c2a15a0339",
+    [`${CORE}/session/agentLifecycle/agentLifecycleService.ts`]:
+      "bd16636c6249617a60188746aa96522e5333278c2b48903d7bc8e1d267e55462",
+    [`${CORE}/agent/environmentBinding/environmentBindingService.ts`]:
+      "3a54b6b80e9ccade6f5d5ec19a3a7ac0218c37aee9eedb970c0b0616194118c5",
+    [`${CORE}/agent/environmentBinding/environmentBindingOps.ts`]:
+      "bc0ff3d206520dbc16bf8223eb5dff67673865dfd25f04d391f962ef9322b13b",
+    [`${CORE}/app/config/configService.ts`]:
+      "8b1709ba10a5f7ae8d79be4eadd008e3861b6f2121fbed8b0dd8d1c6d198d53c",
+    [`${CORE}/workspace/workspaceTrust/configSection.ts`]:
+      "e10c5e96f0211e3936d03f68ee3695c8573ceb1398aed4e0bb4a3782f500d758",
+    [`${CORE}/workspace/workspaceTrust/workspaceTrustStore.ts`]:
+      "bcd4621eb02c50e9a79c4f0076afaa0e6f72ef299dedb149077a1b4e3bde7acc",
+    [`${CORE}/workspace/workspaceMcpConfig/workspaceMcpConfigService.ts`]:
+      "ff805190454881fc7179e63684c1a409e27e66c987ae3c856a42ca944405c3c2",
+    [`${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`]:
+      "701a53165f60d62a544e2e3154dadc97b41693014c456a9fec061327a3fdf9bc",
+    [`${CORE}/agent/tools/os/bash/bashTool.ts`]:
+      "91baca9ee4e70190cf24ccace0313e525c473b6184eab9eb1ec90f28e3bdb500",
+    [`${CORE}/remote/client/remoteEnvironmentProvider.ts`]:
+      "0260b35b201e632f4e742694f962ee414bd7bbac16eb9193e08540b8e8ad26f9",
+    [`${CLI}/cli/prompt-render.ts`]:
+      "d413a0678dcebb5a0a6f9dda8ce51d53e4b70d55b162afe6635a7d8c1a1536c4",
+    [`${CLI}/cli/goal-prompt.ts`]:
+      "b95cabc1336c191c5efebbbc08956d5d45138f39877ffffda8066bcb9fc75ca8",
+    [`${CLI}/cli/headless-exit.ts`]:
+      "9087cba8698f21aba08190240cedbf3da650d4596b6217eca26ec179d9396826",
+    [`${KAP}/protocol/ws-agent.ts`]:
+      "cbf9a9f2ae111dceb34e5674b336d3accacf265246bc187d7453b19cbfc5d093",
+    [`${KAP}/transport/ws/v1/agentState.ts`]:
+      "0261a6a674965935f03e4fa3be7bdde0b518d0c31f5ff01e35366de23dbcb5f1",
+    [`${KAP}/transport/ws/bearerProtocol.ts`]:
+      "c9ee2315b3872bcc86a1a50ba965cfa43700754b6421873fd9771067c5eb8ec2",
+    [`${KAP}/transport/ws/v1/wsConnectionV1.ts`]:
+      "f036f0bbc0af8b5d97de79db96f61f92f1cbe05b8e2498f2ee2989f7c2d3a69d",
+    [`${KAP}/transport/ws/v1/sessionAgentFeed.ts`]:
+      "d22f9cde4a7acfb49dda64740bd9eb818b6bd65c9a77aa921fb9840077cd6fb3",
+    [`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`]:
+      "13986d6ee58373c8f52e00b33fbf61c2a4a665f1fa40e2c65db56ed5addb0197",
+    [`${KAP}/routes/environment.ts`]:
+      "f40f3ef8f47cc8cc977e53bf8b9b5b67a415960cd64455902cab943291745689",
+    [`${KAP}/routes/sessions.ts`]:
+      "f99cae893c51ac987ab7b0cc16090d98a3549d9ad2509140434d8dea34f07bfb",
+    [`${KAP}/start.ts`]:
+      "21842202f83ac093b63ab3ced9805d56be8a46c0e6199e96457948cf4b0feac1",
+  },
+  // 2.5.1: the construction, hook schema, print, environment and WebSocket
+  // files are byte-identical to 2.5.0. Session-list visibility filtering is the
+  // only changed pinned file; it does not alter session creation or activation.
+  "2.5.1": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "322a7ec016ccb6f33ca0d9fdc1e609393921c366c2b5bb7063341c9ca29cc318",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "ef981d83e607f0427f77a0fc89e4c03d301116b01ac5f0c33bb68ea955749455",
+    [`${CORE}/features/plan/planService.ts`]:
+      "0d5d269e5cfc052db6697d4ebe01069e46ea756f2b34d7822ac4e8b2c3bd16a0",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "5a98a1f4ca9f14ae1e3f967c66943045f8e389e9379e06fd88863d44a41884da",
+    [`${CORE}/state/state.ts`]:
+      "736bd13f41d245b519ddce795bbf5ea6847016ed244c58f0b14d603d548a4f41",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "074d63a1a1be9d361abf3c46656415a1be1517a9a8237df34a6cc24ce9864cef",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "7075a05a7ec9cdb117469943ce1b507a97ad2c0e4bfd55d07eb64c30ec5e8dbc",
+    [`${CORE}/wire/record.ts`]:
+      "75f71ea73c2f7aef1f26efe6d5b1f86b4c1bbfa66945bd2d2bceec2e67b5109b",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "c8b692dd32cc86d09d95c7a83be2d357d73f071acb5c5a44387d12c6a652807c",
+    [`${CLI}/cli/v2/run-v2-print.ts`]:
+      "b40ca78e5bb7867ee636a38b9bfa1513e41dd1a832ae1c4e662f1fcb9865c19c",
+    [`${CORE}/app/sessionManager/sessionLookup.ts`]:
+      "d4a087aa8364e1ca1b9c7b2324956d06495c8c54c880c2a767a27560c676129d",
+    [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
+      "47c5feac88eab42e123f92fbbc85c1fa0740283daec63f5ae043a9e509980d4d",
+    [`${SDK}/sdk-rpc-client-v2.ts`]:
+      "b10009d4f6eab8435a87068ec2d674b8745d136535a2014624a1b00c8ecc8e40",
+    [`${CORE}/app/sessionManager/sessionManagerService.ts`]:
+      "9f7b0909c592767c5affd66349d953379758a27e78be9e610fcd7ae020b3f4b6",
+    [`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`]:
+      "d02ed76254f37f79125c0f0e5ed3ae0ab13bd2eda2b129aaaaab71c2a15a0339",
+    [`${CORE}/session/agentLifecycle/agentLifecycleService.ts`]:
+      "bd16636c6249617a60188746aa96522e5333278c2b48903d7bc8e1d267e55462",
+    [`${CORE}/agent/environmentBinding/environmentBindingService.ts`]:
+      "3a54b6b80e9ccade6f5d5ec19a3a7ac0218c37aee9eedb970c0b0616194118c5",
+    [`${CORE}/agent/environmentBinding/environmentBindingOps.ts`]:
+      "bc0ff3d206520dbc16bf8223eb5dff67673865dfd25f04d391f962ef9322b13b",
+    [`${CORE}/app/config/configService.ts`]:
+      "8b1709ba10a5f7ae8d79be4eadd008e3861b6f2121fbed8b0dd8d1c6d198d53c",
+    [`${CORE}/workspace/workspaceTrust/configSection.ts`]:
+      "e10c5e96f0211e3936d03f68ee3695c8573ceb1398aed4e0bb4a3782f500d758",
+    [`${CORE}/workspace/workspaceTrust/workspaceTrustStore.ts`]:
+      "bcd4621eb02c50e9a79c4f0076afaa0e6f72ef299dedb149077a1b4e3bde7acc",
+    [`${CORE}/workspace/workspaceMcpConfig/workspaceMcpConfigService.ts`]:
+      "ff805190454881fc7179e63684c1a409e27e66c987ae3c856a42ca944405c3c2",
+    [`${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`]:
+      "701a53165f60d62a544e2e3154dadc97b41693014c456a9fec061327a3fdf9bc",
+    [`${CORE}/agent/tools/os/bash/bashTool.ts`]:
+      "91baca9ee4e70190cf24ccace0313e525c473b6184eab9eb1ec90f28e3bdb500",
+    [`${CORE}/remote/client/remoteEnvironmentProvider.ts`]:
+      "0260b35b201e632f4e742694f962ee414bd7bbac16eb9193e08540b8e8ad26f9",
+    [`${CLI}/cli/prompt-render.ts`]:
+      "d413a0678dcebb5a0a6f9dda8ce51d53e4b70d55b162afe6635a7d8c1a1536c4",
+    [`${CLI}/cli/goal-prompt.ts`]:
+      "b95cabc1336c191c5efebbbc08956d5d45138f39877ffffda8066bcb9fc75ca8",
+    [`${CLI}/cli/headless-exit.ts`]:
+      "9087cba8698f21aba08190240cedbf3da650d4596b6217eca26ec179d9396826",
+    [`${KAP}/protocol/ws-agent.ts`]:
+      "cbf9a9f2ae111dceb34e5674b336d3accacf265246bc187d7453b19cbfc5d093",
+    [`${KAP}/transport/ws/v1/agentState.ts`]:
+      "0261a6a674965935f03e4fa3be7bdde0b518d0c31f5ff01e35366de23dbcb5f1",
+    [`${KAP}/transport/ws/bearerProtocol.ts`]:
+      "c9ee2315b3872bcc86a1a50ba965cfa43700754b6421873fd9771067c5eb8ec2",
+    [`${KAP}/transport/ws/v1/wsConnectionV1.ts`]:
+      "f036f0bbc0af8b5d97de79db96f61f92f1cbe05b8e2498f2ee2989f7c2d3a69d",
+    [`${KAP}/transport/ws/v1/sessionAgentFeed.ts`]:
+      "d22f9cde4a7acfb49dda64740bd9eb818b6bd65c9a77aa921fb9840077cd6fb3",
+    [`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`]:
+      "13986d6ee58373c8f52e00b33fbf61c2a4a665f1fa40e2c65db56ed5addb0197",
+    [`${KAP}/routes/environment.ts`]:
+      "f40f3ef8f47cc8cc977e53bf8b9b5b67a415960cd64455902cab943291745689",
+    [`${KAP}/routes/sessions.ts`]:
+      "a6a6202d06359466904c862ecd0a78bbae7c1eaf0c1b37cb16ac1d1ec79a1f15",
+    [`${KAP}/start.ts`]:
+      "21842202f83ac093b63ab3ced9805d56be8a46c0e6199e96457948cf4b0feac1",
+  },
 };
 
 /**
@@ -599,8 +770,8 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
   });
 
-  test("the plan-file guard is the ONLY final allow in the engine and the CLI", () => {
-    const sites = filesContaining([CORE, CLI], ".allow()");
+  test("the plan-file guard is the ONLY final allow in the engine, CLI, and SDK", () => {
+    const sites = filesContaining([CORE, CLI, SDK], ".allow()");
     expect(sites).toEqual([`${CORE}/features/plan/planService.ts`]);
     const guard = read(`${CORE}/features/plan/planService.ts`);
     // The allow must stay gated on an active plan: `if (plan === null) return;`
@@ -612,22 +783,83 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("plan service entry callers match the exact audited tool surface", () => {
-    expect(filesContaining([CORE, CLI, KAP], "new PlanModeEnter(")).toEqual([
+    expect(filesContaining([CORE, CLI, KAP, SDK], "new PlanModeEnter(")).toEqual([
       `${CORE}/features/plan/planService.ts`,
     ]);
-    const enterCallers = filesContaining([CORE, CLI, KAP], "IAgentPlanService").filter((rel) =>
+    const enterCallers = filesContaining([CORE, CLI, KAP, SDK], "IAgentPlanService").filter((rel) =>
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
+  });
+
+  test("2.5 print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
+    if (!["2.5.0", "2.5.1"].includes(upstreamVersion())) return;
+    const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
+    const marker = runner.indexOf("writeExperimentalVersion(");
+    const sdk = runner.indexOf("new SDKRpcClientV2(");
+    expect(marker).toBeGreaterThan(-1);
+    expect(sdk).toBeGreaterThan(marker);
+    expect(runner).not.toContain("setPlanMode(");
+    expect(runner).toContain("environmentId: opts.environment");
+    expect(runner).toContain("environmentCwd: opts.environmentCwd");
+    expect(runner).toContain("permissionMode.setMode('auto')");
+    expect(runner).toContain("agent.accessor.get(IAgentPermissionModeService).setMode('auto')");
+    const sdkClient = read(`${SDK}/sdk-rpc-client-v2.ts`);
+    expect(sdkClient).toContain("override async setPlanMode(");
+    expect(sdkClient).toContain("return agent.enterPlan()");
+  });
+
+  test("2.5 environment and workspace-trust dependencies are explicitly reviewed", () => {
+    if (!["2.5.0", "2.5.1"].includes(upstreamVersion())) return;
+    expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
+      "options.environmentId === LOCAL_ENVIRONMENT_ID",
+    );
+    expect(read(`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`)).toContain(
+      "environment.environmentId === LOCAL_ENVIRONMENT_ID",
+    );
+    expect(read(`${CORE}/agent/environmentBinding/environmentBindingOps.ts`)).toContain(
+      "static override readonly type = 'environment.set_binding'",
+    );
+    const trust = read(`${CORE}/workspace/workspaceTrust/configSection.ts`);
+    expect(trust).toContain("requireTrust: z.boolean().optional()");
+    expect(trust).toContain("requireTrust: true");
+    expect(read(`${CORE}/workspace/workspaceTrust/workspaceTrustStore.ts`)).toContain(
+      "if (!this.trustGateEnabled()) return true",
+    );
+    expect(read(`${CORE}/workspace/workspaceMcpConfig/workspaceMcpConfigService.ts`)).toContain(
+      "includeProject: trusted",
+    );
+  });
+
+  test("2.5 WebSocket state proof remains authenticated and bound to the live main agent", () => {
+    if (!["2.5.0", "2.5.1"].includes(upstreamVersion())) return;
+    const schema = read(`${KAP}/protocol/ws-agent.ts`);
+    for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
+      expect(schema).toContain(field);
+    }
+    expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
+    expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
+    const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
+    const snapshot = broadcaster.indexOf("this.sendAgentLists(state, target, transcriptGrades)");
+    const transcript = broadcaster.indexOf("await this.subscribeTranscript(state, target, transcriptGrades");
+    expect(snapshot).toBeGreaterThan(-1);
+    expect(transcript).toBeGreaterThan(snapshot);
+    expect(read(`${KAP}/routes/environment.ts`)).toContain("path: '/sessions/{session_id}/environment'");
+    const start = read(`${KAP}/start.ts`);
+    expect(start).toContain("extractWsBearerToken(req.headers['sec-websocket-protocol'])");
+    expect(start).toContain("ok = await validateCredential(candidate)");
+    expect(start.indexOf("ok = await validateCredential(candidate)")).toBeLessThan(
+      start.indexOf("wss.handleUpgrade(req, socket, head"),
+    );
   });
 
   test("default_plan_mode is a plain optional boolean with default false and no env binding", () => {
@@ -657,7 +889,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
@@ -720,6 +952,9 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
+    if (["2.5.0", "2.5.1"].includes(upstreamVersion())) {
+      expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
+    }
     // Every append-log read in the wire service names the single wire key.
     const logReads = wireService.match(/this\.log\.read(?:<[^>]*>)?\(\s*\n?\s*this\.wireScope,\s*\n?\s*(\w+)/g) ?? [];
     expect(logReads.length).toBeGreaterThan(0);

@@ -1,6 +1,6 @@
 {
   "name": "kimi-plugin-cc",
-  "version": "2.5.2",
+  "version": "2.5.3",
   "description": "Kimi for Claude Code, Codex, and DeepSeek Harness: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP tools through the local Kimi Code CLI.",
   "type": "module",
   "main": "dist/dsh/index.js",
@@ -134,6 +134,8 @@
     "docs/models.md",
     "docs/session-visibility.md",
     "docs/upstream-2.4.1-certification.md",
+    "docs/upstream-2.5.0-certification.md",
+    "docs/upstream-2.5.1-certification.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",

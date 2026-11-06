@@ -47,6 +47,7 @@ const RESERVED_PREFIX_FLAGS = new Set([
     "--plan", "--auto", "-y", "--yolo", "--yes", "--auto-approve", "--manual",
     // Model / profile / roots.
     "-m", "--model", "--skills-dir", "--agent", "--agent-file", "--add-dir",
+    "--environment", "--environment-cwd",
     // Terminal informational flags (would replace the run with a banner).
     "-V", "--version", "-h", "--help",
 ]);

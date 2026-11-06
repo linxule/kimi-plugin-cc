@@ -117,6 +117,8 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
   "2.3.3",
   "2.4.0",
   "2.4.1",
+  "2.5.0",
+  "2.5.1",
 ]);
 
 /** Per-operation native-v2 certification. One green operation never certifies another. */
@@ -233,6 +235,7 @@ export async function prepareKimiExecutionPlan(
       kimiHome: resolveKimiHome(options.env, options.cwd),
       env: options.env,
       resumeSessionId: options.resumeSessionId,
+      expectedExecutionRoot: options.cwd,
       stage: "kimi-engine.plan",
     });
   };

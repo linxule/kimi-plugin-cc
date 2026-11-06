@@ -98,6 +98,8 @@ describe("resolveKimiCliCommand", () => {
     JSON.stringify(["--yes"]),
     JSON.stringify(["--auto-approve"]),
     JSON.stringify(["--manual"]),
+    JSON.stringify(["--environment", "ssh-target"]),
+    JSON.stringify(["--environment-cwd=/remote/work"]),
     JSON.stringify(["-V"]),
   ])("rejects a reserved kimi flag in the prefix: %s", (raw) => {
     let threw: unknown;

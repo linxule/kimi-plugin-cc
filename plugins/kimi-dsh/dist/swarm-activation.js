@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { open } from "node:fs/promises";
 import path from "node:path";
@@ -9,7 +10,7 @@ import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } 
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
-const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3", "2.4.0", "2.4.1"];
+const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1"];
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
 // Exact 2.4.0 can take longer than 5s to drain session/workspace lifecycle work.
@@ -18,6 +19,8 @@ const JOURNAL_TIMEOUT_MS = 2_000;
 const JOURNAL_POLL_MS = 50;
 const READY_LINE_MAX_CHARS = 65_536;
 const REST_RESPONSE_MAX_BYTES = 1024 * 1024;
+const WEBSOCKET_MAX_FRAMES = 64;
+const WEBSOCKET_RESPONSE_MAX_CHARS = 1024 * 1024;
 const JOURNAL_MAX_BYTES = 64 * 1024 * 1024;
 const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 2_000;
 const DESCENDANT_TRACK_INTERVAL_MS = 50;
@@ -39,11 +42,12 @@ export async function preactivateSwarmSession(options) {
         web = await startWebChild(options, prepared.env, failureCode);
         await verifyMeta(web, prepared.expectedVersion, options.signal, failureCode);
         const model = await resolveProfileModel(web, options, failureCode);
-        identity = await createSession(web, options, failureCode);
+        identity = await createSession(web, options, prepared.expectedVersion, failureCode);
+        await verifyLocalEnvironment(web, identity, options.cwd, prepared.expectedVersion, options.signal, failureCode);
         options.onRecoveryEvent?.({ kind: "session", ...identity });
         profileMutationAttempted = true;
         await postSwarmProfile(web, identity, true, model, options.signal, failureCode);
-        await verifySwarmStatus(web, identity, true, model, options.signal, failureCode);
+        await verifySwarmStatus(web, identity, true, model, prepared.expectedVersion, options.signal, failureCode);
         await shutdownWeb(web, options.signal, failureCode);
         await requireSwarmJournal(prepared.kimiHome, identity, "enter", options.signal, failureCode);
         throwIfAborted(options.signal, failureCode, "swarm-activation.complete");
@@ -86,8 +90,9 @@ export async function deactivateSwarmSession(options) {
         throwIfAborted(options.signal, failureCode, "swarm-deactivation.pre-spawn");
         web = await startWebChild(options, prepared.env, failureCode);
         await verifyMeta(web, prepared.expectedVersion, options.signal, failureCode);
+        await verifyLocalEnvironment(web, options, options.cwd, prepared.expectedVersion, options.signal, failureCode);
         await postSwarmProfile(web, options, false, undefined, options.signal, failureCode);
-        await verifySwarmStatus(web, options, false, undefined, options.signal, failureCode);
+        await verifySwarmStatus(web, options, false, undefined, prepared.expectedVersion, options.signal, failureCode);
         await shutdownWeb(web, options.signal, failureCode);
         await requireSwarmJournal(prepared.kimiHome, options, "exit", options.signal, failureCode);
         options.onRecoveryEvent?.({ kind: "disabled" });
@@ -124,6 +129,7 @@ async function prepareWebSpawn(options, failureCode) {
         await assertNativeV2Preflight({
             kimiHome,
             env: options.env,
+            expectedExecutionRoot: options.cwd,
             stage: "swarm-activation.pre-spawn",
         });
     }
@@ -329,12 +335,28 @@ async function resolveProfileModel(web, options, failureCode) {
     }
     return data.default_model;
 }
-async function createSession(web, options, failureCode) {
-    const data = await restData(web, "POST", "/api/v1/sessions", { metadata: { cwd: options.cwd } }, options.signal, failureCode);
+async function createSession(web, options, expectedVersion, failureCode) {
+    const request = { metadata: { cwd: options.cwd } };
+    if (["2.5.0", "2.5.1"].includes(expectedVersion)) {
+        request.environment_id = "local";
+        request.environment_cwd = options.cwd;
+    }
+    const data = await restData(web, "POST", "/api/v1/sessions", request, options.signal, failureCode);
     if (!isRecord(data) || !validPathId(data.id) || !validPathId(data.workspace_id)) {
         throw failure(failureCode, "swarm-activation.create-session", "Kimi web returned an invalid session identity.");
     }
     return { sessionId: data.id, workspaceId: data.workspace_id };
+}
+async function verifyLocalEnvironment(web, identity, expectedCwd, expectedVersion, signal, failureCode) {
+    if (!["2.5.0", "2.5.1"].includes(expectedVersion))
+        return;
+    const data = await restData(web, "GET", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/environment`, undefined, signal, failureCode);
+    if (!isRecord(data)) {
+        throw failure(failureCode, "swarm-activation.environment", "Kimi web /environment returned an invalid payload.");
+    }
+    if (data.workspace_id !== identity.workspaceId || data.environment_id !== "local" || data.cwd !== expectedCwd) {
+        throw failure(failureCode, "swarm-activation.environment", "Kimi web /environment did not confirm the expected local workspace binding.");
+    }
 }
 async function postSwarmProfile(web, identity, active, model, signal, failureCode) {
     const agentConfig = {
@@ -345,23 +367,262 @@ async function postSwarmProfile(web, identity, active, model, signal, failureCod
         agentConfig.model = model;
     await restData(web, "POST", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/profile`, { agent_config: agentConfig }, signal, failureCode);
 }
-async function verifySwarmStatus(web, identity, active, model, signal, failureCode) {
-    const data = await restData(web, "GET", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/status`, undefined, signal, failureCode);
+async function verifySwarmStatus(web, identity, active, model, expectedVersion, signal, failureCode) {
+    const data = ["2.5.0", "2.5.1"].includes(expectedVersion)
+        ? await readWebSocketAgentState(web, identity.sessionId, signal, failureCode)
+        : await restData(web, "GET", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/status`, undefined, signal, failureCode);
+    const source = ["2.5.0", "2.5.1"].includes(expectedVersion) ? "agent state" : "/status";
     if (!isRecord(data)) {
-        throw failure(failureCode, "swarm-activation.status", "Kimi web /status returned an invalid payload.");
+        throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} returned an invalid payload.`);
     }
     if (data.swarm_mode !== active) {
-        throw failure(failureCode, "swarm-activation.status", `Kimi web /status did not confirm swarm_mode=${active}.`, { expected_swarm_mode: active });
+        throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm swarm_mode=${active}.`, { expected_swarm_mode: active });
     }
     if (data.plan_mode !== false) {
-        throw failure(failureCode, "swarm-activation.status", "Kimi web /status did not confirm plan mode is off.");
+        throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm plan mode is off.`);
     }
-    if (data.permission !== "auto") {
-        throw failure(failureCode, "swarm-activation.status", "Kimi web /status did not confirm auto permission mode.");
+    if (["2.5.0", "2.5.1"].includes(expectedVersion) && data.tower_mode !== false) {
+        throw failure(failureCode, "swarm-activation.status", "Kimi web agent state did not confirm tower mode is off.");
+    }
+    const permission = ["2.5.0", "2.5.1"].includes(expectedVersion) ? data.permission_mode : data.permission;
+    if (permission !== "auto") {
+        throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm auto permission mode.`);
     }
     if (active && data.model !== model) {
-        throw failure(failureCode, "swarm-activation.status", "Kimi web /status did not confirm the selected model alias.");
+        throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm the selected model alias.`);
     }
+}
+async function readWebSocketAgentState(web, sessionId, signal, failureCode) {
+    throwIfAborted(signal, failureCode, "swarm-activation.status");
+    await refreshOwnedDescendants(web);
+    throwIfAborted(signal, failureCode, "swarm-activation.status");
+    try {
+        return await new Promise((resolve, reject) => {
+            let socket;
+            const bearerProtocol = `kimi-code.bearer.${web.token}`;
+            const helloId = `swarm-activation-hello-${randomUUID()}`;
+            const subscribeId = `swarm-activation-subscribe-${randomUUID()}`;
+            try {
+                const url = new URL(web.origin);
+                url.protocol = "ws:";
+                url.pathname = "/api/v1/ws";
+                socket = new WebSocket(url, bearerProtocol);
+            }
+            catch {
+                reject(failure(failureCode, "swarm-activation.status", "Could not open the authenticated Kimi web agent-state channel."));
+                return;
+            }
+            let settled = false;
+            let serverHello = false;
+            let clientHelloAcknowledged = false;
+            let subscribeSent = false;
+            let subscriptionAcknowledged = false;
+            let closeRequested = false;
+            let latestState;
+            let frames = 0;
+            let receivedChars = 0;
+            const timer = setTimeout(() => {
+                settle(failure(failureCode, "swarm-activation.status", "Kimi web agent-state verification timed out.", { timeout_ms: REST_TIMEOUT_MS }));
+            }, REST_TIMEOUT_MS);
+            const cleanup = () => {
+                clearTimeout(timer);
+                signal?.removeEventListener("abort", onAbort);
+                socket.removeEventListener("open", onOpen);
+                socket.removeEventListener("message", onMessage);
+                socket.removeEventListener("error", onError);
+                socket.removeEventListener("close", onClose);
+                try {
+                    socket.close();
+                }
+                catch {
+                }
+            };
+            const settle = (result) => {
+                if (settled)
+                    return;
+                settled = true;
+                cleanup();
+                if (result instanceof RuntimeError)
+                    reject(result);
+                else
+                    resolve(result);
+            };
+            const rejectState = (message) => {
+                settle(failure(failureCode, "swarm-activation.status", message));
+            };
+            const send = (frame) => {
+                try {
+                    socket.send(JSON.stringify(frame));
+                    return true;
+                }
+                catch {
+                    rejectState("Could not send a Kimi web agent-state control frame.");
+                    return false;
+                }
+            };
+            const completeIfReady = () => {
+                if (serverHello &&
+                    clientHelloAcknowledged &&
+                    subscriptionAcknowledged &&
+                    latestState !== undefined &&
+                    !closeRequested) {
+                    closeRequested = true;
+                    try {
+                        socket.close();
+                    }
+                    catch {
+                        rejectState("Could not close the Kimi web agent-state channel for final validation.");
+                    }
+                }
+            };
+            const onOpen = () => {
+                if (socket.protocol !== bearerProtocol) {
+                    rejectState("Kimi web did not authenticate the agent-state channel with the expected subprotocol.");
+                    return;
+                }
+                send({
+                    type: "client_hello",
+                    id: helloId,
+                    payload: { client_id: "kimi-plugin-cc-swarm-activation" },
+                });
+            };
+            const onMessage = (event) => {
+                if (settled)
+                    return;
+                if (typeof event.data !== "string") {
+                    rejectState("Kimi web agent-state channel returned a non-text frame.");
+                    return;
+                }
+                frames += 1;
+                receivedChars += event.data.length;
+                if (frames > WEBSOCKET_MAX_FRAMES || receivedChars > WEBSOCKET_RESPONSE_MAX_CHARS) {
+                    rejectState("Kimi web agent-state channel exceeded the bounded response limit.");
+                    return;
+                }
+                let frame;
+                try {
+                    frame = JSON.parse(event.data);
+                }
+                catch {
+                    rejectState("Kimi web agent-state channel returned malformed JSON.");
+                    return;
+                }
+                if (!isRecord(frame) || typeof frame.type !== "string") {
+                    rejectState("Kimi web agent-state channel returned an invalid frame.");
+                    return;
+                }
+                if (frame.type === "server_hello") {
+                    if (serverHello || !isRecord(frame.payload) ||
+                        frame.payload.protocol_version !== 2 ||
+                        typeof frame.payload.ws_connection_id !== "string" ||
+                        !isRecord(frame.payload.capabilities) ||
+                        frame.payload.capabilities.event_batching !== false ||
+                        frame.payload.capabilities.compression !== false) {
+                        rejectState("Kimi web agent-state channel did not provide the expected protocol-v2 hello.");
+                        return;
+                    }
+                    serverHello = true;
+                    return;
+                }
+                if (!serverHello) {
+                    rejectState("Kimi web agent-state channel sent data before its protocol hello.");
+                    return;
+                }
+                if (frame.type === "ack") {
+                    if (typeof frame.id !== "string" || typeof frame.code !== "number" || !isRecord(frame.payload)) {
+                        rejectState("Kimi web agent-state channel returned an invalid acknowledgement.");
+                        return;
+                    }
+                    if (frame.id === helloId) {
+                        if (clientHelloAcknowledged || frame.code !== 0) {
+                            rejectState("Kimi web agent-state channel rejected the client hello.");
+                            return;
+                        }
+                        clientHelloAcknowledged = true;
+                        subscribeSent = send({
+                            type: "subscribe_v2",
+                            id: subscribeId,
+                            payload: { session_id: sessionId, transcript: { main: "block" } },
+                        });
+                        return;
+                    }
+                    if (frame.id === subscribeId) {
+                        if (subscriptionAcknowledged || !subscribeSent || frame.code !== 0 ||
+                            !Array.isArray(frame.payload.accepted) ||
+                            frame.payload.accepted.length !== 1 ||
+                            frame.payload.accepted[0] !== sessionId ||
+                            !Array.isArray(frame.payload.not_found) ||
+                            frame.payload.not_found.length !== 0) {
+                            rejectState("Kimi web agent-state channel did not accept the exact main-session subscription.");
+                            return;
+                        }
+                        subscriptionAcknowledged = true;
+                        completeIfReady();
+                        return;
+                    }
+                    rejectState("Kimi web agent-state channel returned an unexpected acknowledgement.");
+                    return;
+                }
+                if (frame.type === "agent") {
+                    if (!subscribeSent || !isAgentStateFrame(frame, sessionId)) {
+                        rejectState("Kimi web agent-state channel returned invalid or misbound main-agent state.");
+                        return;
+                    }
+                    latestState = frame;
+                    completeIfReady();
+                    return;
+                }
+                if (frame.type === "ping") {
+                    if (isRecord(frame.payload) && typeof frame.payload.nonce === "string") {
+                        send({ type: "pong", payload: { nonce: frame.payload.nonce } });
+                    }
+                }
+            };
+            const onAbort = () => {
+                settle(cancelledFailure(failureCode, "swarm-activation.status"));
+            };
+            const onError = () => {
+                rejectState("Kimi web agent-state channel failed before valid state was received.");
+            };
+            const onClose = () => {
+                if (closeRequested &&
+                    serverHello &&
+                    clientHelloAcknowledged &&
+                    subscriptionAcknowledged &&
+                    latestState !== undefined) {
+                    settle(latestState);
+                    return;
+                }
+                rejectState("Kimi web agent-state channel closed before valid state was received.");
+            };
+            signal?.addEventListener("abort", onAbort, { once: true });
+            socket.addEventListener("open", onOpen);
+            socket.addEventListener("message", onMessage);
+            socket.addEventListener("error", onError);
+            socket.addEventListener("close", onClose);
+            if (signal?.aborted === true)
+                onAbort();
+        });
+    }
+    finally {
+        await refreshOwnedDescendants(web);
+    }
+}
+function isAgentStateFrame(frame, sessionId) {
+    return frame.session_id === sessionId &&
+        frame.agent_id === "main" &&
+        typeof frame.event_created_at === "string" &&
+        Number.isFinite(Date.parse(frame.event_created_at)) &&
+        (frame.status === "idle" || frame.status === "running") &&
+        (frame.model === undefined || typeof frame.model === "string") &&
+        (frame.thinking === undefined || typeof frame.thinking === "string") &&
+        (frame.permission_mode === undefined ||
+            frame.permission_mode === "manual" ||
+            frame.permission_mode === "yolo" ||
+            frame.permission_mode === "auto") &&
+        typeof frame.plan_mode === "boolean" &&
+        typeof frame.swarm_mode === "boolean" &&
+        typeof frame.tower_mode === "boolean";
 }
 async function shutdownWeb(web, signal, failureCode) {
     await restData(web, "POST", "/api/v1/shutdown", undefined, signal, failureCode);

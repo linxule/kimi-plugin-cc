@@ -399,6 +399,97 @@ describe("assertNativeV2Preflight", () => {
     });
   });
 
+  test("refuses a configured default remote environment before spawn", async () => {
+    await withHome("assert-remote-default", async (home) => {
+      await writeConfig(home, '[environments]\ndefault = "build"\n[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).rejects.toMatchObject({
+        code: "CLI_V2_ENVIRONMENT_UNSAFE",
+        details: { refusal_kind: "v2-environment-configured", retryable_after_setup: false },
+      });
+    });
+  });
+
+  test("allows unused remote declarations without a default", async () => {
+    await withHome("assert-unused-remote-declaration", async (home) => {
+      await writeConfig(home, '[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toBeUndefined();
+    });
+  });
+
+  test("refuses a resumed nonlocal journal binding", async () => {
+    await withHome("assert-remote-journal", async (home) => {
+      await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "environment.set_binding", environmentId: "build", cwd: "/work" }),
+      ]);
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: "session-1" }))
+        .rejects.toMatchObject({
+          code: "KIMI_SESSION_ENVIRONMENT_UNSAFE",
+          details: { refusal_kind: "session-environment-unsafe", record_type: "environment.set_binding" },
+        });
+    });
+  });
+
+  test("refuses resumed nonlocal metadata and accepts an explicit local binding", async () => {
+    await withHome("assert-remote-metadata", async (home) => {
+      const statePath = await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: "/work" }),
+      ]).then((journal) => path.join(path.dirname(path.dirname(path.dirname(journal))), "state.json"));
+      await writeFile(statePath, JSON.stringify({ environmentId: "build", environmentCwd: "/work" }));
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: "session-1" }))
+        .rejects.toMatchObject({
+          code: "KIMI_SESSION_ENVIRONMENT_UNSAFE",
+          details: { refusal_kind: "session-environment-unsafe", record_type: "session.metadata.environmentId" },
+        });
+      await writeFile(statePath, JSON.stringify({ environmentId: "local", environmentCwd: "/work" }));
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: "session-1" }))
+        .resolves.toBeUndefined();
+    });
+  });
+
+  test.each(["require_trust = false", "requireTrust = false", 'require_trust = "true"'])(
+    "refuses disabled or malformed workspace trust: %s",
+    async (setting) => {
+      await withHome("assert-workspace-trust", async (home) => {
+        await writeConfig(home, `[workspace]\n${setting}\n`);
+        await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).rejects.toMatchObject({
+          code: "CLI_V2_WORKSPACE_TRUST_UNSAFE",
+          details: { refusal_kind: "v2-workspace-trust-disabled", retryable_after_setup: false },
+        });
+      });
+    },
+  );
+
+  test("accepts literal workspace trust enforcement", async () => {
+    await withHome("assert-workspace-trust-enabled", async (home) => {
+      await writeConfig(home, "[workspace]\nrequire_trust = true\n");
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toBeUndefined();
+    });
+  });
+
+  test("refuses local binding cwd that diverges from the expected execution root", async () => {
+    await withHome("assert-local-cwd-mismatch", async (home) => {
+      const journalPath = await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: "/work" }),
+      ]);
+      const statePath = path.join(path.dirname(path.dirname(path.dirname(journalPath))), "state.json");
+      await writeFile(statePath, JSON.stringify({ environmentCwd: "/work" }));
+      const options = { kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", expectedExecutionRoot: "/other" };
+      await expect(assertNativeV2Preflight(options)).rejects.toMatchObject({
+        code: "KIMI_SESSION_ENVIRONMENT_UNSAFE",
+        details: { record_type: "session.metadata.environmentCwd" },
+      });
+      await writeFile(statePath, JSON.stringify({ environmentCwd: "/other" }));
+      await expect(assertNativeV2Preflight(options)).rejects.toMatchObject({
+        code: "KIMI_SESSION_ENVIRONMENT_UNSAFE",
+        details: { record_type: "environment.set_binding.cwd" },
+      });
+      await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: "/other" }),
+      ]);
+      await expect(assertNativeV2Preflight(options)).resolves.toBeUndefined();
+    });
+  });
+
   test("throws CLI_V2_EXPERIMENTAL_UNSAFE when an experimental selector is truthy", async () => {
     await withHome("assert-experimental", async (home) => {
       await writeConfig(home, "[experimental]\ntower = true\n");
@@ -522,7 +613,7 @@ describe("scanSessionJournalsForPlan — enumeration errors are classified", () 
       try {
         const result = await scanSessionJournalsForPlan(home, "session_x");
         expect(result.kind).toBe("unavailable");
-        expect((result as { reason: string }).reason).toContain("could not enumerate");
+        expect((result as { reason: string }).reason).toContain("EACCES");
       } finally {
         await chmod(locked, 0o700);
       }

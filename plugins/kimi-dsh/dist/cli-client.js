@@ -65,6 +65,7 @@ export async function runCliPrompt(opts) {
             kimiHome: resolveKimiHome(opts.env, opts.cwd),
             env: opts.env,
             resumeSessionId: opts.resumeSessionId,
+            expectedExecutionRoot: opts.trustedWorkspaceRoot ?? opts.cwd,
             stage: "cli-client.spawn",
         });
     }
@@ -781,6 +782,13 @@ const KIMI_LEGACY_FORCED_VALUE = "1";
 function buildArgs(opts) {
     const args = [...(opts.prefixArgs ?? [])];
     args.push("--output-format", "stream-json");
+    const smokeCandidate = opts.executionPlan.certification === "test-bypass" && opts.env.KIMI_PLUGIN_CC_SMOKE === "1"
+        ? opts.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE
+        : undefined;
+    if (opts.resumeSessionId === undefined &&
+        ["2.5.0", "2.5.1"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
+        args.push("--environment", "local");
+    }
     if (opts.resumeSessionId !== undefined) {
         args.push("-r", opts.resumeSessionId);
     }

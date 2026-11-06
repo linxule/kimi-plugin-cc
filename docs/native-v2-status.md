@@ -1,59 +1,56 @@
-# Native v2 status — 2026-10-31
+# Native v2 status — 2026-11-06
 
-Plugin 2.4.5 certifies exact CLI 2.4.1 for all eight operations
-(`2c73f3f50af4fa7f2540ca0d2e33b07a1408e3a7`). The exact source gate,
-non-vacuous controls, and both expanded matrices passed, including real rescue
-and deterministic Bash.cwd evidence. Earlier certified versions remain
-supported; the [runtime table](../runtime/kimi-engine.ts) is the exact routing
-authority. Legacy-v1 remains limited to pinned binaries through 0.41.x.
+Plugin 2.5.3 certifies exact CLI 2.5.1 for all eight operations
+(`1b02030d8c2c6b00131b23ebb67a231614877827`). Candidate and production matrices
+each passed 24 tests with 167 assertions and no skips in 358.88 and 364.25
+seconds, including real rescue, deterministic Bash.cwd denial, resume/plan-taint
+refusal, both swarm modes, child-authored patch capture, and out-of-root denial.
+Earlier certified versions, including exact 2.5.0, remain supported; the
+[runtime table](../runtime/kimi-engine.ts) is the exact routing authority.
+Legacy-v1 remains limited to pinned binaries through 0.41.x. Publication does
+not update installed hosts or the operator's CLI pin.
 
-[Plugin 2.4.5 is published](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.5) at commit `de8c195c2986443a088b674717133b164d2e4ef2`. Release CI 41226096281 and publish workflow 41226438326 passed. The npm tarball has SHA-1 `39f97a6de4b26ad51ac77305054682fcd5cd0164`, contains 233 files, matches the CI artifact, and passed fresh isolated setup/check and version refusal for both hosts. Installed hosts and operator CLI pins remain unchanged.
+The exact-tag scan passed 18 tests with 153 assertions across 40 pinned source
+files; 39 files are byte-identical to 2.5.0, and the remaining session-list change
+does not alter creation or activation. Plan OFF denied an ordinary Write; armed
+plan ON wrote a 2,232-byte plan file without a plan-Write hook. A deterministic
+forced EnterPlanMode call was rejected before the hook. Direct swarm OFF produced
+no children; preactivated ON produced two children with managed denials and
+verified deactivation, including the idle-reclaimer override. Both matrices
+captured a 278-byte child-authored patch with a clean user tree and removed
+worktree. Repository and package evidence is recorded separately in the
+[2.5.1 certification record](upstream-2.5.1-certification.md).
 
-The exact-tag scan passed 15 tests and 96 assertions. Plan-ON/OFF, forced
-removed-tool, and direct-OFF/preactivated-ON swarm controls passed. The expanded
-candidate matrix passed 21 tests and 154 assertions without skips in 410.84
-seconds; production-table mode passed 21/154 without skips in 453.88 seconds.
-Both initial write-swarm runs captured a 278-byte child-authored patch, left the
-user tree clean, and removed the worktree. Candidate and production goal controls
-ran eight and twelve turns without any of the three goal files. Earlier review
-iterations are retained, but their Bash-inclusive goal evidence is superseded
-and not accepted for certification. The final prefix-hardened production matrix
-passed 24 tests and 167 assertions in 440.66 seconds, with same-call Write
-denials marked `isError: true` in all seven call-derived turn IDs and the whole
-workspace empty at settlement. The literal standard `bun run check` passed
-1,318 tests with 30 expected opt-in skips, zero failures and 17,319 assertions
-across 79 files in 358.83 seconds after earlier timing-sensitive attempts. Codex's
-final targeted re-review returned APPROVE. Clean package validation passed 233 files
-and includes this certification record.
+Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0 and 2.5.1 require host-preactivated swarm
+sessions. Short-lived authenticated loopback lifecycles bracket one ordinary
+`kimi -p -r` runner. Exact 2.5.0/2.5.1 replaces removed `/status` with protocol-v2
+WebSocket main-agent state, requiring unique request IDs, an accepted
+subscription, and the latest frame through intentional bounded close. It also
+pins `environment_id:"local"` and the expected cwd before either profile mutation.
+Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
+bindings refuse before spawn. Fresh 2.5.0/2.5.1 print selects `--environment local`;
+resume never receives that flag; the environment preflight rejects any persisted nonlocal or wrong-root metadata/binding, while older sessions without environment records do not fail this check merely for lacking them.
+Tokens remain in memory, activation consumes the finite budget, graceful shutdown
+retains the 15-second allowance, and unverified cleanup prevents success.
 
-Exact CLI 2.3.2, 2.3.3, 2.4.0 and 2.4.1 require host-preactivated swarm sessions.
-Short-lived, authenticated loopback web lifecycles activate and deactivate a
-same-job session around one ordinary `kimi -p -r` prompt runner. Model, auto
-permission, plan OFF, version and session identity are verified; the token stays
-in memory and the lifecycle disables ambient idle-session reclamation. Activation
-consumes the finite job budget. Graceful shutdown retains the bounded 15-second
-allowance introduced after exact 2.4.0's 6.743-second clean exit; exact 2.4.1's
-plan-arming lifecycle exited cleanly in 5.638 seconds. Cleanup must verify
-deactivation and process quiescence; uncertainty prevents success and preserves
-diagnostics and the write worktree. Durable recovery remains preview-first and
-cannot change a terminal job outcome. Older certified versions use direct print.
-
-Swarm evidence requires distinct child journals and each assigned Write/Edit
-path correlated with its own toolCallId/result. A tool-call record, exit 0,
-aggregate denial or coordinator-only patch is insufficient. The exact 2.4.1 OFF
+Swarm evidence still requires distinct child journals and each assigned
+Write/Edit path correlated with its own toolCallId/result. A tool-call record,
+exit 0, aggregate denial or coordinator-only patch is insufficient. The 2.5.1 OFF
 control created no children; ON produced two children with managed denials and
-verified deactivation, including with parent idle reclamation set to 1 ms.
+verified deactivation, including with parent idle reclamation set to 1 ms. A
+separate evidence-preserving out-of-root control correlated two child Writes with
+rescue denials and created no files.
 
-Exact 2.4.0 and 2.4.1 remove EnterPlanMode and cancel default plan mode on fresh
-print; a deterministic forced call rejects before the hook with no plan state.
-Resumed plan sessions remain possible, so every-agent journal refusal stays
-mandatory. Exact 2.4.1 wrote a 1,831-byte plan file without a plan-Write hook
-while ordinary tools remained denied, proving the plan-file bypass and every
-no-plan closure remain load-bearing. Stream records still lack execution
-outcomes, and session hints remain late, so detection ambiguity and timeout
-recovery are unchanged. Publication does not update installed hosts or the
-operator's CLI pin. Plugin and CLI versions advance independently; their numbers
-are not certification evidence.
+Exact 2.4.0, 2.4.1, 2.5.0 and 2.5.1 remove EnterPlanMode and cancel default plan mode on
+fresh print; deterministic forced calls reject before the hook with no plan
+state. Resumed plan sessions remain possible, so every-agent journal refusal
+stays mandatory. Stream records still lack execution outcomes, and session hints
+remain late, so detection ambiguity and timeout recovery are unchanged.
+Publication does not update installed hosts or the operator's CLI pin. Plugin and
+CLI versions advance independently; their numbers are not certification evidence.
+
+For the earlier 2.4.1 certification and publication record, see
+[the 2.4.1 evidence](upstream-2.4.1-certification.md).
 
 > **2.3.2 (certified 2026-10-25, plugin 2.4.1; retained by 2.4.2):** this release
 > introduced the bounded host activation lifecycle and child-attributed swarm

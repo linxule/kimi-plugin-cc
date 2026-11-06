@@ -1,0 +1,37 @@
+# Kimi Code 2.5.1 certification evidence — 2026-11-06
+
+## Status and exact source
+
+**Exact CLI 2.5.1 is certified for all eight operations by the plugin 2.5.2 working tree.** The exact-source audit, non-vacuous plan/environment/swarm controls, candidate matrix, production-table matrix, frozen-install, literal full repository check, package validation, and isolated consumer-security audit passed. Independent read-only `claude -p` review returned **APPROVE with no must-fix findings**. Commit, push, tag, publication, installed-host rollout, and operator CLI pin changes are outside this certification slice and were not performed.
+
+Candidate: `@moonshot-ai/kimi-code@2.5.1`, release commit `1b02030d8c2c6b00131b23ebb67a231614877827`, compared with certified 2.5.0 (`41c341434ae24e45bfe0f2232ec11b80531ac717`). The monitor recorded npm publication at 2026-11-05T09:58:53.967Z. A temporary isolated npm installation and its executable both report 2.5.1; its `dist/main.mjs` SHA-256 is `84156e7a0f500bb58f9734be57b26756c27eacefb9d884ef94db3af0d6b609dc`. The clean exact source checkout was verified at the release commit. The seven scoped 2.5.0→2.5.1 diffs are retained under `.claude/kimi-code-research/daily-monitor/2026-11-06-2.5.1-diffs/`.
+
+## Source and integration review
+
+- Scopes 01–06 are unchanged: print/CLI, before-execute and permission gates, external hooks, plan/restore, bootstrap/config/workspace, tools/fan-out/SDK. Scope 07 changes session-list visibility and web media projection only. The provider protocol omits empty system content on tool-bearing messages; the additional transcript change folds daemon media into web history. Neither changes headless stream records, execution, plan arming, hook ordering, environment binding, or WebSocket agent state.
+- DI/scope creation, OS backends, session reload, wire restore/migrations, and the other human-review scopes are unchanged. Of the 40 pinned files, 39 are byte-identical to 2.5.0. Only `kap-server/src/routes/sessions.ts` changed, for deleted-workspace filtering in session lists; session creation and activation are unchanged.
+- The expanded exact-tag scan passed **18 tests and 153 assertions**, with the print, environment/workspace-trust, and WebSocket checks actually executing on 2.5.1. The preserved 2.5.0 source scan also passed again with the same counts.
+- Reviewed candidate branches cover fresh `--environment local`, exact hook-schema acceptance, preactivation, explicit local binding, and authenticated protocol-v2 WebSocket state. After the production row was added, focused activation/engine/CLI/setup tests passed **296 tests with 3,617 assertions**; preflight and launcher tests separately passed **79 tests with 186 assertions**. Typecheck, build, and generated-surface regeneration passed.
+
+## Exact-binary controls
+
+Controls used a task-authorized Agent Key resolved only into each process and empty absolute-path isolated homes, except the forced removed-tool control, which used a loopback scripted provider and a dummy key. No personal config or OAuth store was read, copied, or symlinked. Controls ran sequentially. Credential-bearing config was removed after the evidence runs. Raw evidence is under `.claude/kimi-code-research/cert-2.5.1-live/`.
+
+- **Plan OFF Write:** the exact 2.5.1 marker was first; Write reached the custom deny-all hook and was denied on the same call ID. No target file or plan state was created.
+- **Plan ON:** authenticated agent state independently proved `plan_mode:true`, auto permission, and the env-model alias before resume. Glob reached the deny hook; a **2,232-byte** plan file was written without a plan-Write hook invocation. The workspace remained empty.
+- **Removed EnterPlanMode:** Write was offered but EnterPlanMode was absent. A scripted provider forced `call_enter_forced`; the exact binary returned `Tool "EnterPlanMode" not found` on that ID before any hook call and returned the rejection to the provider. No plan state or files appeared.
+- **Environment:** real activation and deactivation passed with the explicit local binding. A configured remote default refused before its command launcher ran, disabled workspace trust refused before spawn, and a resumed remote binding refused before spawn.
+- **Swarm OFF:** a real AgentSwarm call returned the inactive-mode result with zero child journals and no probe files.
+- **Swarm ON:** preactivation produced `agent-0` and `agent-1`; each child attempted its assigned Write with a matching managed-denial result under the same toolCallId. No probes landed, and deactivation verified `swarm_mode.exit` with ambient idle reclamation set to 1 ms.
+- **Out-of-root control:** two distinct child Writes were correlated with rescue denials on their assigned call IDs, created no files, and verified deactivation.
+- An initial diagnostic Write attempt used a relative artifact root, causing the spawned CLI to resolve a different home without the control hook. Its Write landed only inside that disposable fixture. The run was rejected as control evidence and superseded by the valid absolute-path plan-OFF run above; it is not counted as a product failure or a hook bypass.
+
+## Candidate matrix
+
+The candidate matrix (`candidate-smoke.log`) passed **24 tests with 167 assertions and no skips in 358.88 seconds**. Real `runRescue` landed the confined sentinel and persisted operation/version/engine/session/artifact evidence. The absolute out-of-root Bash.cwd call received its exact same-call denial and created no file. Resume and plan-taint refusal passed. Thirteen goal turns each had a matching managed Write denial. Both pursue terminal outcomes passed. Write-swarm produced a **278-byte** child-authored patch, left the user tree clean, removed its worktree, and denied the out-of-root write.
+
+## Production matrix and final gates
+
+The production-table matrix (`production-smoke.log`) with the candidate override explicitly unset passed **24 tests with 167 assertions and no skips in 364.25 seconds**. It independently repeated the confined rescue and Bash.cwd evidence, resume/taint refusal, both pursue outcomes, both swarm modes, and out-of-root denial. Eleven goal turns each had a matching managed Write denial, and write-swarm again captured a **278-byte** child-authored patch with a clean user tree and removed worktree.
+
+Frozen dependency installation checked 43 installs across 88 packages and made no changes. The literal standard `bun run check` passed **1,412 tests with 33 expected opt-in skips, 0 failures, and 18,282 assertions across 82 files in 362.99 seconds**, including the generated-distribution drift gate. Package validation passed **330 files**, all three compiled distributions, isolated hook setup/check and version refusal, a patched DSH host/profile with seven live providers/tools, and Web boot. The isolated npm consumer-security audit also passed. An independent read-only `claude -p` review returned **APPROVE with no must-fix findings** after inspecting the runtime, tests, documentation, diffs, and raw control artifacts. Its remaining notes were non-load-bearing evidence-retention limitations. Supporting logs are retained under `.claude/kimi-code-research/cert-2.5.1-live/`, including `check-standard.log`, `package-standard.log`, `consumer-security.log`, `claude-review.log`, `tag-scan-2.5.0-regression.log`, and `binary-sha256.txt`.

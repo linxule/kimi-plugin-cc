@@ -6,7 +6,7 @@ Normal CI uses mock models and needs no model credentials. Live smoke tests are 
 
 Before release validation, run `bun install --frozen-lockfile` locally too.
 An existing `node_modules` directory can disagree with the committed lockfile.
-Generate both runtime distributions with those dependencies, run the full
+Generate all three runtime distributions with those dependencies, run the full
 check, and wait for the release commit's CI success before tagging/publishing.
 Keep compiled-runtime regressions that execute emitted JS under Node and Bun;
 source-only Bun tests do not exercise TypeScript's compiler output.
@@ -16,18 +16,18 @@ source-only Bun tests do not exercise TypeScript's compiler output.
 The full check covers:
 
 - compiled runtime output
-- Claude surface hashes and generated Codex surfaces
+- Claude surface hashes and generated Codex/DSH surfaces
 - TypeScript types
 - the test suite, including real-process MCP protocol, task recovery, ownership, cancellation, and hook-enforcement coverage
-- changed or untracked files in `dist/` and `plugins/kimi-codex/`
+- changed or untracked files in `dist/`, `plugins/kimi-codex/`, and `plugins/kimi-dsh/`
 
-`bun run check:package` additionally packs the release tarball and runs modern MCP discovery plus legacy initialization on both extracted compiled distributions. These checks use mock-backed or protocol-only fixtures and make no provider calls.
+`bun run check:package` additionally packs the release tarball and runs modern MCP discovery plus legacy initialization on all three extracted compiled distributions. These checks use mock-backed or protocol-only fixtures and make no provider calls.
 
 The real-binary smoke suite skips unless explicitly enabled. A successful base CI run does not certify a new CLI version.
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.4.1`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.5.1`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
@@ -39,7 +39,7 @@ The suite checks:
 - write-swarm edits authored by distinct children and captured in a patch, with the real checkout unchanged; a coordinator-only patch is not fan-out evidence
 - out-of-worktree write attempts by real children denied
 
-On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0 and 2.4.1), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
+On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0 and 2.5.1), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
 
 Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidate, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
 
@@ -100,7 +100,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.4.1
+  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.5.1
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```

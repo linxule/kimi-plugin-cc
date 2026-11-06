@@ -30,12 +30,13 @@ interface Fixture {
 
 interface LogEntry {
   readonly pid: number;
-  readonly kind: "spawn" | "request" | "print" | "descendant" | "descendant-signal" | "parent-signal";
+  readonly kind: "spawn" | "request" | "print" | "descendant" | "descendant-signal" | "parent-signal" | "ws-open" | "ws-message";
   readonly argv?: string[];
   readonly env?: Record<string, unknown>;
   readonly method?: string;
   readonly path?: string;
   readonly body?: any;
+  readonly frame?: any;
 }
 
 async function createFixture(scenario = "success"): Promise<Fixture> {
@@ -211,7 +212,9 @@ describe("requiresSwarmPreactivation", () => {
     expect(requiresSwarmPreactivation("2.3.3")).toBe(true);
     expect(requiresSwarmPreactivation("2.4.0")).toBe(true);
     expect(requiresSwarmPreactivation("2.4.1")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.4.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.5.0")).toBe(true);
+    expect(requiresSwarmPreactivation("2.5.1")).toBe(true);
+    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.2", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
   });
@@ -698,6 +701,153 @@ describe("swarm web lifecycle", () => {
       const options = makeOptions(fixture);
       const identity = await preactivateSwarmSession(options);
       fixture.env.MOCK_KIMI_WEB_SCENARIO = "deactivation-plan-mismatch";
+      await expect(deactivateSwarmSession({ ...options, ...identity })).rejects.toMatchObject({
+        code: "SWARM_SESSION_CLEANUP_FAILED",
+        stage: "swarm-activation.status",
+      });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+    });
+  }, 15_000);
+
+  test.each(["2.5.0", "2.5.1"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
+    await withFixture("ws-success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = version;
+      const options = makeOptions(fixture, { expectedVersion: version, model: "chosen-model" });
+      const identity = await preactivateSwarmSession(options);
+      const activationLog = await readLog(fixture);
+      expect(requests(activationLog).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
+        "GET /api/v1/meta",
+        "POST /api/v1/sessions",
+        "GET /api/v1/sessions/session_mock/environment",
+        "POST /api/v1/sessions/session_mock/profile",
+        "POST /api/v1/shutdown",
+      ]);
+      expect(requests(activationLog).find((entry) => entry.path === "/api/v1/sessions")?.body).toMatchObject({
+        metadata: { cwd: fixture.cwd },
+        environment_id: "local",
+        environment_cwd: fixture.cwd,
+      });
+      expect(activationLog.filter((entry) => entry.kind === "ws-message").map((entry) => entry.frame.type)).toEqual([
+        "client_hello",
+        "subscribe_v2",
+      ]);
+      expect(activationLog.find((entry) => entry.kind === "ws-message" && entry.frame.type === "subscribe_v2")?.frame.payload)
+        .toEqual({ session_id: "session_mock", transcript: { main: "block" } });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.enter" });
+
+      await deactivateSwarmSession({ ...options, ...identity });
+      const fullLog = await readLog(fixture);
+      expect(requests(fullLog).slice(5).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
+        "GET /api/v1/meta",
+        "GET /api/v1/sessions/session_mock/environment",
+        "POST /api/v1/sessions/session_mock/profile",
+        "POST /api/v1/shutdown",
+      ]);
+      expect(requests(fullLog).some((entry) => entry.path?.endsWith("/status"))).toBe(false);
+      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(4);
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+    });
+  }, 15_000);
+
+  test.each([
+    "ws-auth-reject",
+    "ws-server-version",
+    "ws-hello-reject",
+    "ws-subscription-reject",
+    "ws-unacknowledged-state",
+    "ws-wrong-session",
+    "ws-wrong-agent",
+    "ws-malformed-json",
+    "ws-malformed-state",
+    "ws-swarm-mismatch",
+    "ws-plan-mismatch",
+    "ws-permission-mismatch",
+    "ws-model-mismatch",
+    "ws-tower-mismatch",
+    "ws-contradictory-state",
+    "ws-missing-model",
+    "ws-missing-permission",
+    "ws-wrong-hello-id",
+    "ws-wrong-subscribe-id",
+    "ws-no-server-hello",
+    "ws-missing-ack",
+    "ws-oversize-frame",
+    "ws-close-timeout",
+    "ws-close-before-ack",
+  ])("exact 2.5.0 refuses invalid agent-state proof and preserves cleanup: %s", async (scenario) => {
+    await withFixture(scenario, async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
+      const options = makeOptions(fixture, { expectedVersion: "2.5.0", model: "chosen-model" });
+      const identity = { sessionId: "session_mock", workspaceId: "wd_mock" };
+      await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.status",
+        details: { session_id: identity.sessionId, workspace_id: identity.workspaceId },
+      });
+      expect(spawns(await readLog(fixture))).toHaveLength(1);
+      fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-success";
+      await deactivateSwarmSession({ ...options, ...identity });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+    });
+  }, 15_000);
+
+  test.each(["2.5.0", "2.5.1"].flatMap((version) =>
+    ["ws-environment-remote", "ws-environment-workspace", "ws-environment-cwd"].map((scenario) => [version, scenario] as const)))(
+    "exact %s rejects an invalid local binding before profile mutation: %s",
+    async (version, scenario) => {
+      await withFixture(scenario, async (fixture) => {
+        fixture.env.MOCK_KIMI_WEB_VERSION = version;
+        const options = makeOptions(fixture, { expectedVersion: version });
+        await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
+          code: "SWARM_ACTIVATION_FAILED",
+          stage: "swarm-activation.environment",
+        });
+        expect(requests(await readLog(fixture)).some((entry) => entry.path?.endsWith("/profile"))).toBe(false);
+      });
+    },
+    15_000,
+  );
+
+  test("exact 2.5.0 rejects an invalid local binding before deactivation mutation", async () => {
+    await withFixture("ws-success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
+      const options = makeOptions(fixture, { expectedVersion: "2.5.0" });
+      const identity = await preactivateSwarmSession(options);
+      fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-environment-remote";
+      await expect(deactivateSwarmSession({ ...options, ...identity })).rejects.toMatchObject({
+        code: "SWARM_SESSION_CLEANUP_FAILED",
+        stage: "swarm-activation.environment",
+      });
+      expect(requests(await readLog(fixture)).filter((entry) => entry.path?.endsWith("/profile"))).toHaveLength(1);
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.enter" });
+    });
+  }, 15_000);
+
+  test("exact 2.5.0 agent-state cancellation remains bounded and does not self-deactivate", async () => {
+    await withFixture("ws-no-state", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
+      const controller = new AbortController();
+      const options = makeOptions(fixture, { expectedVersion: "2.5.0", signal: controller.signal });
+      const pending = preactivateSwarmSession(options);
+      await waitForLog(fixture, (entry) => entry.kind === "ws-message" && entry.frame.type === "subscribe_v2");
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.status",
+        details: { cancelled: true, cleanup_unverified: true },
+      });
+      expect(spawns(await readLog(fixture))).toHaveLength(1);
+      expect(requests(await readLog(fixture)).some((entry) =>
+        entry.path?.endsWith("/profile") && entry.body?.agent_config?.swarm_mode === false)).toBe(false);
+    });
+  }, 15_000);
+
+  test("exact 2.5.0 deactivation refuses plan state after the swarm exit mutation", async () => {
+    await withFixture("ws-success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
+      const options = makeOptions(fixture, { expectedVersion: "2.5.0" });
+      const identity = await preactivateSwarmSession(options);
+      fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-deactivation-plan-mismatch";
       await expect(deactivateSwarmSession({ ...options, ...identity })).rejects.toMatchObject({
         code: "SWARM_SESSION_CLEANUP_FAILED",
         stage: "swarm-activation.status",
