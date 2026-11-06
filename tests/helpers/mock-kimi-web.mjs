@@ -423,7 +423,7 @@ server.on("upgrade", (req, socket, head) => {
         if (next === undefined) break;
         buffered = buffered.subarray(next.consumed);
         if (next.opcode === 8) {
-          if (scenario !== "ws-close-timeout") socket.end();
+          if (scenario !== "ws-close-timeout") socket.end(Buffer.from([0x88, 0x02, 0x03, 0xe8]));
           return;
         }
         if (next.opcode !== 1) continue;

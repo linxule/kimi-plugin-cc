@@ -25,7 +25,7 @@ Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0 and 2.5.1 require host-preactivated 
 sessions. Short-lived authenticated loopback lifecycles bracket one ordinary
 `kimi -p -r` runner. Exact 2.5.0/2.5.1 replaces removed `/status` with protocol-v2
 WebSocket main-agent state, requiring unique request IDs, an accepted
-subscription, and the latest frame through intentional bounded close. It also
+subscription, and the latest frame through an intentional, bounded, clean close. It also
 pins `environment_id:"local"` and the expected cwd before either profile mutation.
 Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
 bindings refuse before spawn. Fresh 2.5.0/2.5.1 print selects `--environment local`;

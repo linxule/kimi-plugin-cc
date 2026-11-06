@@ -878,8 +878,9 @@ async function readWebSocketAgentState(
       const onError = () => {
         rejectState("Kimi web agent-state channel failed before valid state was received.");
       };
-      const onClose = () => {
+      const onClose = (event: CloseEvent) => {
         if (
+          event.wasClean &&
           closeRequested &&
           serverHello &&
           clientHelloAcknowledged &&

@@ -201,7 +201,7 @@ arbitrary user resume. Authenticated loopback `/meta` supplies activation-time
 backend/version evidence but never replaces the print marker. Exact 2.5.0/2.5.1 also
 requires an authenticated local environment/cwd binding before either profile
 mutation and protocol-v2 WebSocket main-agent state with unique request IDs, an
-accepted subscription, and the latest frame through intentional bounded close.
+accepted subscription, and the latest frame through an intentional, bounded, clean close.
 The lifecycle exports `KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to disable ambient idle-session reclamation.
 The job records `kimi_session_id_source = "preactivated"` before model spawn; the returned print
 session must match that ID and the source survives timeout metadata. Graceful
