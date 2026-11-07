@@ -2,6 +2,12 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.5.6 — 2026-11-07
+
+- Certify exact kimi-code 2.5.2 for all eight native-v2 operations, alongside 2.5.0 and 2.5.1. Upstream 2.5.2 changes only MCP pending-tool registration, tool-select reconciliation and tool-contract signature helpers; all seven audit scopes and all 40 pinned files are unchanged from 2.5.1, and pending replacements never resolve for execution. See the [2.5.2 evidence](docs/upstream-2.5.2-certification.md).
+- Extend every exact-version branch to 2.5.2: the production table, swarm preactivation and protocol-v2 agent state, fresh `--environment local`, and the reviewed hook schema. 2.5.3, prerelease and build-suffixed versions stay refused. The manual smoke workflow now defaults to 2.5.2.
+- Pass the exact-tag scan on 2.5.0, 2.5.1 and 2.5.2 (18 tests, 153 assertions each), seven sequential exact-binary controls, candidate and production matrices (24 tests, 167 assertions, no skips each), the full repository gate with 1,429 tests and 18,662 assertions, 331-file package checks across all three distributions, isolated consumer security, and independent Codex review. Publication does not update installed hosts or operator pins.
+
 ## 2.5.5 — 2026-11-07
 
 - Keep every host's managed hook block in one contiguous run: setup inserts a new block directly after the last managed END when only blanks/comments follow it and the parser proves the result equals the appended form, otherwise appends. A block previously appended after Magpie's model tables lost its BEGIN marker when Magpie rewrote them (yetone/magpie#5614), leaving an `END-without-BEGIN` orphan.

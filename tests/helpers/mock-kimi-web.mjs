@@ -130,7 +130,7 @@ async function handle(req, res) {
       send(res, null, { code: 40001, msg: `cwd mismatch ${token}` });
       return;
     }
-    if (["2.5.0", "2.5.1"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
+    if (["2.5.0", "2.5.1", "2.5.2"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
       send(res, null, { code: 40001, msg: "missing local environment binding" });
       return;
     }

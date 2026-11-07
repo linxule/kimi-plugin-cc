@@ -276,7 +276,8 @@ describe("requiresSwarmPreactivation", () => {
     expect(requiresSwarmPreactivation("2.4.1")).toBe(true);
     expect(requiresSwarmPreactivation("2.5.0")).toBe(true);
     expect(requiresSwarmPreactivation("2.5.1")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.2", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.5.2")).toBe(true);
+    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.3", "2.5.2-beta.1", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
   });
@@ -771,7 +772,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
     await withFixture("ws-success", async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_VERSION = version;
       const options = makeOptions(fixture, { expectedVersion: version, model: "chosen-model" });
@@ -862,7 +863,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1"].flatMap((version) =>
+  test.each(["2.5.0", "2.5.1", "2.5.2"].flatMap((version) =>
     ["ws-environment-remote", "ws-environment-workspace", "ws-environment-cwd"].map((scenario) => [version, scenario] as const)))(
     "exact %s rejects an invalid local binding before profile mutation: %s",
     async (version, scenario) => {

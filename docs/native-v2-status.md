@@ -1,47 +1,48 @@
-# Native v2 status — 2026-11-06
+# Native v2 status — 2026-11-07
 
-Plugin 2.5.5 certifies exact CLI 2.5.1 for all eight operations
-(`1b02030d8c2c6b00131b23ebb67a231614877827`). Candidate and production matrices
-each passed 24 tests with 167 assertions and no skips in 358.88 and 364.25
+Plugin 2.5.6 certifies exact CLI 2.5.2 for all eight operations
+(`1c142a007c10e881602690def96057c23a2baa12`). Candidate and production matrices
+each passed 24 tests with 167 assertions and no skips in 391.42 and 399.68
 seconds, including real rescue, deterministic Bash.cwd denial, resume/plan-taint
 refusal, both swarm modes, child-authored patch capture, and out-of-root denial.
-Earlier certified versions, including exact 2.5.0, remain supported; the
+Earlier certified versions, including exact 2.5.0 and 2.5.1, remain supported; the
 [runtime table](../runtime/kimi-engine.ts) is the exact routing authority.
 Legacy-v1 remains limited to pinned binaries through 0.41.x. Publication does
 not update installed hosts or the operator's CLI pin.
 
-The exact-tag scan passed 18 tests with 153 assertions across 40 pinned source
-files; 39 files are byte-identical to 2.5.0, and the remaining session-list change
-does not alter creation or activation. Plan OFF denied an ordinary Write; armed
-plan ON wrote a 2,232-byte plan file without a plan-Write hook. A deterministic
+The exact-tag scan passed 18 tests with 153 assertions; all 40 pinned source
+files are byte-identical to 2.5.1. Upstream 2.5.2 changes only MCP pending-tool
+registration, tool-select reconciliation and signature helpers, and a pending
+replacement never resolves for execution. Plan OFF denied an ordinary Write; armed
+plan ON wrote a 1,656-byte plan file without a plan-Write hook. A deterministic
 forced EnterPlanMode call was rejected before the hook. Direct swarm OFF produced
 no children; preactivated ON produced two children with managed denials and
 verified deactivation, including the idle-reclaimer override. Both matrices
 captured a 278-byte child-authored patch with a clean user tree and removed
 worktree. Repository and package evidence is recorded separately in the
-[2.5.1 certification record](upstream-2.5.1-certification.md).
+[2.5.2 certification record](upstream-2.5.2-certification.md).
 
-Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0 and 2.5.1 require host-preactivated swarm
+Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1 and 2.5.2 require host-preactivated swarm
 sessions. Short-lived authenticated loopback lifecycles bracket one ordinary
-`kimi -p -r` runner. Exact 2.5.0/2.5.1 replaces removed `/status` with protocol-v2
+`kimi -p -r` runner. Exact 2.5.0/2.5.1/2.5.2 replaces removed `/status` with protocol-v2
 WebSocket main-agent state, requiring unique request IDs, an accepted
 subscription, and the latest frame through intentional bounded close. It also
 pins `environment_id:"local"` and the expected cwd before either profile mutation.
 Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
-bindings refuse before spawn. Fresh 2.5.0/2.5.1 print selects `--environment local`;
+bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2 print selects `--environment local`;
 resume never receives that flag; the environment preflight rejects any persisted nonlocal or wrong-root metadata/binding, while older sessions without environment records do not fail this check merely for lacking them.
 Tokens remain in memory, activation consumes the finite budget, graceful shutdown
 retains the 15-second allowance, and unverified cleanup prevents success.
 
 Swarm evidence still requires distinct child journals and each assigned
 Write/Edit path correlated with its own toolCallId/result. A tool-call record,
-exit 0, aggregate denial or coordinator-only patch is insufficient. The 2.5.1 OFF
+exit 0, aggregate denial or coordinator-only patch is insufficient. The 2.5.2 OFF
 control created no children; ON produced two children with managed denials and
 verified deactivation, including with parent idle reclamation set to 1 ms. A
 separate evidence-preserving out-of-root control correlated two child Writes with
 rescue denials and created no files.
 
-Exact 2.4.0, 2.4.1, 2.5.0 and 2.5.1 remove EnterPlanMode and cancel default plan mode on
+Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1 and 2.5.2 remove EnterPlanMode and cancel default plan mode on
 fresh print; deterministic forced calls reject before the hook with no plan
 state. Resumed plan sessions remain possible, so every-agent journal refusal
 stays mandatory. Stream records still lack execution outcomes, and session hints
