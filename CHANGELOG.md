@@ -2,6 +2,13 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.5.5 — 2026-11-07
+
+- Keep every host's managed hook block in one contiguous run: setup inserts a new block directly after the last managed END when only blanks/comments follow it, otherwise appends. A block previously appended after Magpie's model tables lost its BEGIN marker when Magpie rewrote them (yetone/magpie#5614), leaving an `END-without-BEGIN` orphan.
+- Scope orphan markers per host. Markers pair only as an adjacent same-host BEGIN→END; another host's orphan is reported by `setup --check` and no longer fails this host, while own and legacy orphans still fail closed. The orphan remedy is plain `/kimi:setup`, never a scoped `--uninstall`, which would disarm a healthy block and leave the other host's orphan.
+- Name the native-v2 certified versions in the out-of-range version notice and measure "newer" against the newest exact one, instead of the legacy-v1 0.41.x bound.
+- Pass the full repository gate with 1,419 tests and 18,312 assertions, 330-file package checks across all three distributions, and isolated consumer security. Exact CLI certification remains unchanged through 2.5.1; publication does not update installed hosts or operator pins.
+
 ## 2.5.4 — 2026-11-06
 
 - Restore the original platform-neutral bounded-close settlement for swarm agent-state verification after follow-up CI showed that `wasClean` can both accept an early close and reject a valid one. The published 2.5.3 artifact contains the trial condition; this patch carries its revert without re-tagging or republishing it.
