@@ -782,13 +782,13 @@ function spliceBlock(
   return `${beforeWithSep}${replacementWithEnding}${after}`;
 }
 
-// Keep every host's block in one contiguous run. Comment-preserving config
-// writers (e.g. Magpie) regroup [[hooks]] tables and treat comments after a
-// table's keys as that table's trailing trivia: a block appended after a
-// foreign table loses its BEGIN marker and header when that table is rewritten,
-// leaving an orphan END. Insert after the last managed END only when nothing but
-// blanks/comments separates it from the next table header, so no trailing field
-// can rebind to the new [[hooks]] table; otherwise append.
+// Keep every host's block in one contiguous run. Magpie's table rewrite drops
+// comments that follow a table it owns (yetone/magpie#5614): a block appended
+// after such a table loses its BEGIN marker and header, leaving an orphan END.
+// Insert after the last managed END only when nothing but blanks/comments
+// precedes the next header AND the real parser proves the result equals the
+// appended form apart from hook order, so no field can rebind and no value can
+// be split; otherwise append.
 function insertBlockNearManagedBlocks(
   contents: string,
   blocks: readonly ManagedBlockEntry[],
@@ -806,11 +806,28 @@ function insertBlockNearManagedBlocks(
   const rawLines = contents.split(/(?<=\n)/);
   const head = rawLines.slice(0, anchor + 1).join("");
   const tail = rawLines.slice(anchor + 1).join("");
-  if (tail.length === 0) return appendBlock(contents, block, lineEnding);
+  const appended = appendBlock(contents, block, lineEnding);
+  if (tail.length === 0) return appended;
   const headWithEnding = head.endsWith("\n") ? head : `${head}${lineEnding}`;
   const body = block.endsWith(lineEnding) ? block : `${block}${lineEnding}`;
   const tailSeparator = /^\r?\n/.test(tail) ? "" : lineEnding;
-  return `${headWithEnding}${lineEnding}${body}${tailSeparator}${tail}`;
+  const inserted = `${headWithEnding}${lineEnding}${body}${tailSeparator}${tail}`;
+  return sameTomlIgnoringHookOrder(inserted, appended) ? inserted : appended;
+}
+
+function sameTomlIgnoringHookOrder(a: string, b: string): boolean {
+  const canonical = (text: string): string => {
+    const parsed = parseToml(text) as Record<string, unknown>;
+    const hooks = Array.isArray(parsed.hooks)
+      ? parsed.hooks.map((entry) => JSON.stringify(entry)).sort()
+      : parsed.hooks;
+    return JSON.stringify({ ...parsed, hooks });
+  };
+  try {
+    return canonical(a) === canonical(b);
+  } catch {
+    return false;
+  }
 }
 
 function appendBlock(contents: string, block: string, lineEnding: "\n" | "\r\n"): string {

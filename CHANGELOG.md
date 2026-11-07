@@ -4,10 +4,11 @@
 
 ## 2.5.5 — 2026-11-07
 
-- Keep every host's managed hook block in one contiguous run: setup inserts a new block directly after the last managed END when only blanks/comments follow it, otherwise appends. A block previously appended after Magpie's model tables lost its BEGIN marker when Magpie rewrote them (yetone/magpie#5614), leaving an `END-without-BEGIN` orphan.
+- Keep every host's managed hook block in one contiguous run: setup inserts a new block directly after the last managed END when only blanks/comments follow it and the parser proves the result equals the appended form, otherwise appends. A block previously appended after Magpie's model tables lost its BEGIN marker when Magpie rewrote them (yetone/magpie#5614), leaving an `END-without-BEGIN` orphan.
 - Scope orphan markers per host. Markers pair only as an adjacent same-host BEGIN→END; another host's orphan is reported by `setup --check` and no longer fails this host, while own and legacy orphans still fail closed. The orphan remedy is plain `/kimi:setup`, never a scoped `--uninstall`, which would disarm a healthy block and leave the other host's orphan.
+- Parse the whole config for the marker-less (absent-state) fallback instead of deleting managed-block lines first. Deleting them could hide a `matcher` that TOML binds to this host's bare hook table from a key written before another host's `[[hooks]]` header, reporting a disabled hook as installed; this predates 2.5.5 and was found in pre-tag review. Host isolation now counts clean exact-command entries against managed blocks carrying that command.
 - Name the native-v2 certified versions in the out-of-range version notice and measure "newer" against the newest exact one, instead of the legacy-v1 0.41.x bound.
-- Pass the full repository gate with 1,419 tests and 18,312 assertions, 330-file package checks across all three distributions, and isolated consumer security. Exact CLI certification remains unchanged through 2.5.1; publication does not update installed hosts or operator pins.
+- Pass the full repository gate with 1,421 tests and 18,320 assertions, 330-file package checks across all three distributions, isolated consumer security, 24 real-binary smoke tests (167 assertions, no skips) on exact 2.5.1, and independent Codex and Kimi pre-tag review. Exact CLI certification remains unchanged through 2.5.1; publication does not update installed hosts or operator pins.
 
 ## 2.5.4 — 2026-11-06
 

@@ -1508,6 +1508,41 @@ describe("host-scoped orphan markers", () => {
     expect(parseManagedBlock(interleaved, "claude-code").state.kind).toBe("orphan");
   });
 
+  test("absent fallback sees a matcher that another host's block binds to this host's bare table", async () => {
+    const { evaluateInstalled } = await import("../../runtime/hooks/managed-block.js");
+    // `matcher` precedes codex's [[hooks]] header, so TOML binds it to the bare
+    // table above; deleting block lines before parsing used to hide it.
+    const base = `[[hooks]]\nevent = "PreToolUse"\ncommand = "expected"\n# === BEGIN kimi-plugin-cc-managed:codex (v2.5.4) ===\nmatcher = "*"\n[[hooks]]\nevent = "PreToolUse"\ncommand = "other"\n# === END kimi-plugin-cc-managed:codex ===\n`;
+    for (const text of [base, `${base}# === END kimi-plugin-cc-managed:dsh ===\n`]) {
+      const verdict = evaluateInstalled(text, "expected", { hostId: "claude-code" });
+      expect(verdict.installed).toBe(false);
+    }
+    // A clean bare table next to an intact foreign block still passes.
+    const clean = base.replace('matcher = "*"\n', "");
+    expect(evaluateInstalled(clean, "expected", { hostId: "claude-code" }).installed).toBe(true);
+    // Another host's marked block carrying this exact command never counts for this host.
+    const foreignOnly = `# === BEGIN kimi-plugin-cc-managed:codex (v2.5.4) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "expected"\n# === END kimi-plugin-cc-managed:codex ===\n`;
+    expect(evaluateInstalled(foreignOnly, "expected", { hostId: "claude-code" }).installed).toBe(false);
+  });
+
+  test("insertion never lands inside a multiline value; setup falls back to append", async () => {
+    const { env, configPath } = await makeCase("placement-inside-array");
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    await runSetup([], makeContext(claudeEnv));
+    const seeded = (await readFile(configPath, "utf8")).replace(
+      "# === END kimi-plugin-cc-managed:claude-code ===\n",
+      "# === END kimi-plugin-cc-managed:claude-code ===\n\n[user]\noptions = [\n# === BEGIN kimi-plugin-cc-managed:dsh (v2.5.4) ===\n# === END kimi-plugin-cc-managed:dsh ===\n[1, 2],\n]\n",
+    );
+    await writeFile(configPath, seeded, "utf8");
+    const result = await runSetup([], makeContext(codexEnv));
+    expect(result.probe).toBe("ok");
+    const after = await readFile(configPath, "utf8");
+    expect(() => parseToml(after)).not.toThrow();
+    expect((parseToml(after) as any).user.options).toEqual([[1, 2]]);
+    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+  });
+
   test("a foreign orphan leaves this host's well-formed block found and reports it", async () => {
     const { parseManagedBlock } = await import("../../runtime/hooks/managed-block.js");
     const text = `${blockFor("claude-code", "x")}\n[[hooks]]\nevent = "PreToolUse"\ncommand = "y"\n# === END kimi-plugin-cc-managed:codex ===\n`;

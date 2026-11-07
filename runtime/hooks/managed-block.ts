@@ -475,24 +475,6 @@ export interface EvaluateInstalledOptions {
 }
 
 /**
- * Return `contents` with every well-formed managed BEGIN/END block removed
- * (inclusive), so what remains is only the bare/root TOML. Used by
- * `hasCleanEnforcingHookEntry` to enforce host isolation. Orphan marker lines
- * are comments and stay in place; the caller is only reached in the `absent`
- * state, where a well-formed foreign block is the norm.
- */
-function stripManagedBlockLines(contents: string): string {
-  const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
-  const paired = pairBlocks(lines);
-  const inBlock = new Set<number>();
-  for (const block of paired.blocks) {
-    for (let i = block.beginLine; i <= block.endLine; i += 1) inBlock.add(i);
-  }
-  if (inBlock.size === 0) return contents;
-  return lines.filter((_, i) => !inBlock.has(i)).join("\n");
-}
-
-/**
  * True if a parsed `hooks[]` array contains a clean enforcing entry for
  * `expectedCommand`: `event="PreToolUse"`, byte-exact `command`, NO `matcher`
  * (any spelling the parser normalized to the `matcher` key can disable/narrow
@@ -500,9 +482,10 @@ function stripManagedBlockLines(contents: string): string {
  * kimi-code's strict schema). Each host's hook path is distinct, so the command
  * uniquely identifies this host's entry.
  */
-function hooksArrayHasCleanEntry(hooks: unknown, expectedCommand: string): boolean {
-  if (!Array.isArray(hooks)) return false;
+function countCleanEntries(hooks: unknown, expectedCommand: string): number {
+  if (!Array.isArray(hooks)) return 0;
   const allowedKeys = new Set(["event", "command", "timeout"]);
+  let count = 0;
   for (const entry of hooks) {
     if (entry === null || typeof entry !== "object") continue;
     const rec = entry as Record<string, unknown>;
@@ -510,18 +493,25 @@ function hooksArrayHasCleanEntry(hooks: unknown, expectedCommand: string): boole
     if (rec.command !== expectedCommand) continue;
     if (Object.prototype.hasOwnProperty.call(rec, "matcher")) continue;
     if (!Object.keys(rec).every((k) => allowedKeys.has(k))) continue;
-    return true;
+    count += 1;
   }
-  return false;
+  return count;
+}
+
+function hooksArrayHasCleanEntry(hooks: unknown, expectedCommand: string): boolean {
+  return countCleanEntries(hooks, expectedCommand) > 0;
 }
 
 /**
- * Parser-based fallback used only in the absent state. Strip every managed
- * block first so another host's live hook cannot count for this host, then parse
- * the remaining bare/root TOML with the real parser rather than the prune line
- * scanner. `hooksArrayHasCleanEntry` requires the exact event and command, no
- * matcher in any spelling, and no foreign keys. Parse errors fail closed.
- * Callers run whole-file schema validation first, including timeout ranges.
+ * Parser-based fallback used only in the absent state. Parse the WHOLE file
+ * exactly as kimi-code does: deleting managed-block lines first would change
+ * which table their keys bind to (a `matcher` written before another host's
+ * `[[hooks]]` header belongs to the preceding table, possibly this host's bare
+ * one). Host isolation is kept by counting: every managed block whose body
+ * carries this exact command may account for one clean entry, so only a clean
+ * entry beyond those can be this host's marker-less table. Requires the exact
+ * event and command, no matcher in any spelling, and no foreign keys. Parse
+ * errors fail closed. Callers run whole-file schema validation first.
  */
 export function hasCleanEnforcingHookEntry(
   contents: string,
@@ -529,12 +519,16 @@ export function hasCleanEnforcingHookEntry(
 ): boolean {
   let parsed: unknown;
   try {
-    parsed = parseToml(stripManagedBlockLines(contents));
+    parsed = parseToml(contents);
   } catch {
     return false;
   }
   if (parsed === null || typeof parsed !== "object") return false;
-  return hooksArrayHasCleanEntry((parsed as Record<string, unknown>).hooks, expectedCommand);
+  const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
+  const managedWithCommand = pairBlocks(lines).blocks.filter(
+    (block) => block.commandPath === expectedCommand,
+  ).length;
+  return countCleanEntries((parsed as Record<string, unknown>).hooks, expectedCommand) > managedWithCommand;
 }
 
 /**
