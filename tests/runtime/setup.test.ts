@@ -939,7 +939,7 @@ describe("setup managed-block installer", () => {
       KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
     }));
     expect(result.probe).toBe("ok");
-    expect(result.warnings.join("\n")).toContain("kimi-code version 0.99.0 is outside the range");
+    expect(result.warnings.join("\n")).toContain("kimi-code version 0.99.0 is outside the versions");
     expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
   });
 
@@ -1130,6 +1130,82 @@ function extractBlock(contents: string, host: string): string {
 }
 
 describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
+  test("a new host block is placed after the existing managed block, not after foreign tables", async () => {
+    const { env, configPath } = await makeCase("placement-after-managed");
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+    await runSetup([], makeContext(claudeEnv));
+    const foreign = '[models."magpie/x"]\nprovider = "magpie"\nmodel = "x"\n';
+    await writeFile(configPath, `${await readFile(configPath, "utf8")}\n${foreign}`, "utf8");
+
+    await runSetup([], makeContext(codexEnv));
+    const after = await readFile(configPath, "utf8");
+    const claudeEnd = after.indexOf("# === END kimi-plugin-cc-managed:claude-code ===");
+    const codexBegin = after.indexOf("# === BEGIN kimi-plugin-cc-managed:codex");
+    const foreignAt = after.indexOf('[models."magpie/x"]');
+    expect(claudeEnd).toBeGreaterThan(-1);
+    expect(codexBegin).toBeGreaterThan(claudeEnd);
+    expect(foreignAt).toBeGreaterThan(codexBegin);
+    expect(after).toContain(foreign);
+    expect(() => parseToml(after)).not.toThrow();
+    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
+    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+  });
+
+  test("placement falls back to append when a field follows the existing block's END", async () => {
+    const { env, configPath } = await makeCase("placement-trailing-field");
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+    await runSetup([], makeContext(claudeEnv));
+    const seeded = (await readFile(configPath, "utf8")).replace(
+      "# === END kimi-plugin-cc-managed:claude-code ===\n",
+      '# === END kimi-plugin-cc-managed:claude-code ===\n# gap comment\nnote = 1\n\n[user]\nkeep = true\n',
+    );
+    await writeFile(configPath, seeded, "utf8");
+    await runSetup([], makeContext(codexEnv)).catch(() => undefined);
+    const after = await readFile(configPath, "utf8");
+    // A [[hooks]] header above `note = 1` would rebind that field to our table.
+    const codexAt = after.indexOf("BEGIN kimi-plugin-cc-managed:codex");
+    if (codexAt !== -1) expect(codexAt).toBeGreaterThan(after.indexOf("[user]"));
+    expect(after).toContain("# gap comment\nnote = 1\n");
+  });
+
+  test("another host's orphan END: owner fails closed with plain-setup advice, other host stays enforcing, install repairs", async () => {
+    const { env, configPath } = await makeCase("foreign-orphan-end");
+    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
+    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+    await runSetup([], makeContext(claudeEnv));
+    await runSetup([], makeContext(codexEnv));
+    const healthy = await readFile(configPath, "utf8");
+    // Reproduce the Magpie rewrite: codex's BEGIN marker and header comments vanish.
+    const begin = healthy.indexOf("# === BEGIN kimi-plugin-cc-managed:codex");
+    const table = healthy.indexOf("[[hooks]]", begin);
+    await writeFile(configPath, healthy.slice(0, begin) + healthy.slice(table), "utf8");
+
+    // The owning host fails closed with the plain-setup remedy.
+    const codexBroken = await runSetup(["--check"], makeContext(codexEnv));
+    expect(codexBroken.probe).toBe("failed");
+    expect(codexBroken.probeError).toContain("END-without-BEGIN");
+    expect(codexBroken.nextStep).toContain("without --uninstall");
+    expect(codexBroken.nextStep).not.toContain("Run /kimi:setup --uninstall, then");
+    // Another host's orphan never blocks this host's intact block, but is reported.
+    const claudeCheck = await runSetup(["--check"], makeContext(claudeEnv));
+    expect(claudeCheck.probe).toBe("ok");
+    expect(claudeCheck.warnings.join("\n")).toContain('Host "codex" has an orphaned END-without-BEGIN');
+
+    const repaired = await runSetup([], makeContext(claudeEnv));
+    expect(repaired.warnings.join("\n")).toContain("orphaned managed marker");
+    const after = await readFile(configPath, "utf8");
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    expect(after).not.toContain("END kimi-plugin-cc-managed:codex");
+    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
+    // Codex setup then re-adorns its markers.
+    await runSetup([], makeContext(codexEnv));
+    const readorned = await readFile(configPath, "utf8");
+    expect(readorned.match(/BEGIN kimi-plugin-cc-managed:codex/g)).toHaveLength(1);
+    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
+  });
+
   test("simultaneous dual-host setup serializes without lost updates", async () => {
     const { env, configPath } = await makeCase("dual-host-concurrent");
     const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
@@ -1413,5 +1489,31 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
       code: "INVALID_ARGS",
       stage: "setup.parse",
     });
+  });
+});
+
+describe("host-scoped orphan markers", () => {
+  const blockFor = (host: string, cmd: string) =>
+    `# === BEGIN kimi-plugin-cc-managed:${host} (v2.5.4) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "${cmd}"\ntimeout = 15\n# === END kimi-plugin-cc-managed:${host} ===\n`;
+
+  test("own, legacy, and interleaved orphans still fail closed", async () => {
+    const { parseManagedBlock } = await import("../../runtime/hooks/managed-block.js");
+    const own = `${blockFor("codex", "x")}# === END kimi-plugin-cc-managed:claude-code ===\n`;
+    expect(parseManagedBlock(own, "claude-code").state.kind).toBe("orphan");
+    const legacy = `${blockFor("claude-code", "x")}# === END kimi-plugin-cc-managed ===\n`;
+    expect(parseManagedBlock(legacy, "claude-code").state.kind).toBe("orphan");
+    // A foreign BEGIN interleaved inside this host's markers orphans this host's markers too.
+    const interleaved =
+      "# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.4) ===\n# === BEGIN kimi-plugin-cc-managed:codex (v2.5.4) ===\n[[hooks]]\nevent = \"PreToolUse\"\ncommand = \"x\"\n# === END kimi-plugin-cc-managed:claude-code ===\n";
+    expect(parseManagedBlock(interleaved, "claude-code").state.kind).toBe("orphan");
+  });
+
+  test("a foreign orphan leaves this host's well-formed block found and reports it", async () => {
+    const { parseManagedBlock } = await import("../../runtime/hooks/managed-block.js");
+    const text = `${blockFor("claude-code", "x")}\n[[hooks]]\nevent = "PreToolUse"\ncommand = "y"\n# === END kimi-plugin-cc-managed:codex ===\n`;
+    const parsed = parseManagedBlock(text, "claude-code");
+    expect(parsed.state.kind).toBe("found");
+    expect(parsed.foreignOrphans).toEqual([{ line: 10, detail: "END-without-BEGIN", hostId: "codex" }]);
+    expect(parseManagedBlock(text, "codex").state.kind).toBe("orphan");
   });
 });

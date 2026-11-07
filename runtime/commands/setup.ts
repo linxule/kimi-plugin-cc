@@ -52,14 +52,16 @@ import {
   findUnmanagedApprovalHookBlocks,
   markerCommentLines,
   MARKERS,
+  ORPHAN_MARKER_REMEDY,
   parseManagedBlock,
+  type ManagedBlockEntry,
   type ManagedBlockState,
 } from "../hooks/managed-block.js";
 import {
   formatVersionOutOfRangeWarning,
   probeKimiVersion,
 } from "../kimi-version-probe.js";
-import { isNativeV2CertifiedVersion } from "../kimi-engine.js";
+import { isNativeV2CertifiedVersion, NATIVE_V2_CERTIFIED_VERSIONS } from "../kimi-engine.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
@@ -319,7 +321,7 @@ async function runInstall(
     const block = buildManagedBlock(hookScriptPath, context.env, lineEnding, hostId);
     const next = state.kind === "found"
       ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
-      : appendBlock(existing, block, lineEnding);
+      : insertBlockNearManagedBlocks(existing, blocks, block, lineEnding);
     await assertKimiHookSetValid(next, configPath, "setup.install", context.env);
 
     const blockWritten = next !== original;
@@ -408,7 +410,12 @@ async function runCheck(
   });
 
   // Non-blocking coexistence + cruft notices.
-  const { blocks: allBlocks } = parseManagedBlock(existing, hostId);
+  const { blocks: allBlocks, foreignOrphans } = parseManagedBlock(existing, hostId);
+  for (const orphan of foreignOrphans) {
+    warnings.push(
+      `Host "${orphan.hostId}" has an orphaned ${orphan.detail} managed marker at line ${orphan.line + 1}; that host's commands refuse until it is repaired. ${ORPHAN_MARKER_REMEDY}`,
+    );
+  }
   const otherHosts = [
     ...new Set(allBlocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
   ];
@@ -468,7 +475,9 @@ async function runCheck(
       nextStep:
         installedCheck.state.kind === "absent"
           ? "Run /kimi:setup (without --check) to install the managed block."
-          : "Run /kimi:setup --uninstall, then /kimi:setup to repair.",
+          : installedCheck.state.kind === "orphan"
+            ? ORPHAN_MARKER_REMEDY
+            : "Run /kimi:setup --uninstall, then /kimi:setup to repair.",
       details: buildDetails({
         configPath,
         hookScriptPath,
@@ -771,6 +780,37 @@ function spliceBlock(
   const beforeWithSep = before.endsWith("\n") || before.length === 0 ? before : `${before}${lineEnding}`;
   const replacementWithEnding = replacement.endsWith(lineEnding) ? replacement : `${replacement}${lineEnding}`;
   return `${beforeWithSep}${replacementWithEnding}${after}`;
+}
+
+// Keep every host's block in one contiguous run. Comment-preserving config
+// writers (e.g. Magpie) regroup [[hooks]] tables and treat comments after a
+// table's keys as that table's trailing trivia: a block appended after a
+// foreign table loses its BEGIN marker and header when that table is rewritten,
+// leaving an orphan END. Insert after the last managed END only when nothing but
+// blanks/comments separates it from the next table header, so no trailing field
+// can rebind to the new [[hooks]] table; otherwise append.
+function insertBlockNearManagedBlocks(
+  contents: string,
+  blocks: readonly ManagedBlockEntry[],
+  block: string,
+  lineEnding: "\n" | "\r\n",
+): string {
+  if (blocks.length === 0) return appendBlock(contents, block, lineEnding);
+  const anchor = Math.max(...blocks.map((b) => b.endLine));
+  const lines = splitPreservingEnding(contents);
+  for (let i = anchor + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i]!.trim();
+    if (trimmed.startsWith("[")) break;
+    if (trimmed.length > 0 && !trimmed.startsWith("#")) return appendBlock(contents, block, lineEnding);
+  }
+  const rawLines = contents.split(/(?<=\n)/);
+  const head = rawLines.slice(0, anchor + 1).join("");
+  const tail = rawLines.slice(anchor + 1).join("");
+  if (tail.length === 0) return appendBlock(contents, block, lineEnding);
+  const headWithEnding = head.endsWith("\n") ? head : `${head}${lineEnding}`;
+  const body = block.endsWith(lineEnding) ? block : `${block}${lineEnding}`;
+  const tailSeparator = /^\r?\n/.test(tail) ? "" : lineEnding;
+  return `${headWithEnding}${lineEnding}${body}${tailSeparator}${tail}`;
 }
 
 function appendBlock(contents: string, block: string, lineEnding: "\n" | "\r\n"): string {
@@ -1234,7 +1274,7 @@ async function collectKimiVersionWarnings(
   // KIMI_TESTED_MINORS — that table never gains 0.42). Without this, setup on a
   // v2-certified binary would wrongly warn "not certified, commands will refuse".
   if (probe.inTestedRange || isNativeV2CertifiedVersion(probe.version)) return;
-  warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION));
+  warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION, NATIVE_V2_CERTIFIED_VERSIONS));
 }
 
 /**

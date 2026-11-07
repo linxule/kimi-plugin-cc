@@ -154,7 +154,7 @@ describe("formatVersionOutOfRangeWarning", () => {
       },
       "1.2.1-test",
     );
-    expect(text).toContain("NEWER than the newest version we have tested");
+    expect(text).toContain("NEWER than the newest certified version");
     expect(text).toContain(`${max.major}.${max.minor}.x`);
   });
 
@@ -163,7 +163,7 @@ describe("formatVersionOutOfRangeWarning", () => {
       { kind: "ok", version: "0.0.9", major: 0, minor: 0, patch: 9, inTestedRange: false },
       "1.2.1-test",
     );
-    expect(text).not.toContain("NEWER than the newest version we have tested");
+    expect(text).not.toContain("NEWER than the newest certified version");
   });
 });
 
@@ -243,5 +243,21 @@ describe("probeKimiVersion", () => {
     if (result.kind === "failed") {
       expect(result.reason).toContain("exit");
     }
+  });
+});
+
+describe("formatVersionOutOfRangeWarning with the native-v2 table", () => {
+  test("names native-v2 versions and measures NEWER against the newest exact one", () => {
+    const probe = { kind: "ok" as const, version: "2.5.2", major: 2, minor: 5, patch: 2, inTestedRange: false };
+    const text = formatVersionOutOfRangeWarning(probe, "9.9.9-test", ["2.4.1", "2.5.0", "2.5.1"]);
+    expect(text).toContain("native-v2 exact 2.4.1, 2.5.0, 2.5.1");
+    expect(text).toContain("NEWER than the newest certified version (2.5.1)");
+    expect(text).not.toContain("0.41.x) and is not yet certified");
+  });
+
+  test("an uncertified gap below the newest native-v2 version gets no NEWER note", () => {
+    const probe = { kind: "ok" as const, version: "2.4.5", major: 2, minor: 4, patch: 5, inTestedRange: false };
+    const text = formatVersionOutOfRangeWarning(probe, "9.9.9-test", ["2.4.1", "2.5.1"]);
+    expect(text).not.toContain("NEWER than");
   });
 });

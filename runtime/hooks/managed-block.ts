@@ -68,6 +68,14 @@ export interface ManagedBlockEntry {
 const MARKER_TAG = "kimi-plugin-cc-managed";
 
 /**
+ * Plain install removes unpaired marker comments for every host and leaves each
+ * host's hook table in place. A scoped uninstall removes only this host's
+ * markers, so it would disarm a healthy block and keep another host's orphan.
+ */
+export const ORPHAN_MARKER_REMEDY =
+  "Run /kimi:setup (without --uninstall or --check) to repair: install removes orphaned managed marker comments for every host and keeps each host's hook table. A scoped --uninstall does not remove another host's orphan marker. Another tool rewriting ~/.kimi-code/config.toml usually causes this.";
+
+/**
  * Strict BEGIN matcher. Accepts `# === BEGIN kimi-plugin-cc-managed`
  * with an optional `:<host-id>` suffix, an optional ` (vX.Y.Z)` suffix,
  * and trailing ` ===`. Group 1 captures the host id (undefined = legacy).
@@ -96,6 +104,8 @@ export interface ParsedManagedBlock {
   blocks: ManagedBlockEntry[];
   /** Lines with only a trailing CR removed, used for parsing and debugging. */
   lines: string[];
+  /** Unpaired markers suffixed for other hosts; advisory for this host. */
+  foreignOrphans: OrphanMarker[];
 }
 
 interface MarkerHit {
@@ -178,41 +188,50 @@ function findMarkers(lines: string[]): MarkerHit[] {
   return hits;
 }
 
+/** An unpaired managed marker comment. */
+export interface OrphanMarker {
+  line: number;
+  detail: "BEGIN-without-END" | "END-without-BEGIN";
+  /** Marker suffix; `null` for a legacy un-suffixed marker. */
+  hostId: string | null;
+}
+
 /**
- * Pair BEGIN/END markers into well-formed blocks. Return the first orphan
- * (BEGIN-without-END or END-without-BEGIN); verification fails closed on either.
+ * Pair BEGIN/END markers into well-formed blocks. A block is a BEGIN followed
+ * immediately (in marker order) by an END with the same host suffix; every
+ * other marker is an orphan. Nested or interleaved markers therefore orphan
+ * both sides rather than being guessed into a block. Callers decide which
+ * orphans fail closed (see `parseManagedBlock`).
  */
-function pairBlocks(
-  lines: string[],
-):
-  | { orphan: "BEGIN-without-END" | "END-without-BEGIN" }
-  | { blocks: ManagedBlockEntry[] } {
+function pairBlocks(lines: string[]): { blocks: ManagedBlockEntry[]; orphans: OrphanMarker[] } {
   const markers = findMarkers(lines);
   const blocks: ManagedBlockEntry[] = [];
-  let open: MarkerHit | null = null;
-  for (const marker of markers) {
-    if (marker.kind === "begin") {
-      // A second BEGIN before the previous one closed → the previous is orphaned.
-      if (open !== null) return { orphan: "BEGIN-without-END" };
-      open = marker;
+  const orphans: OrphanMarker[] = [];
+  let i = 0;
+  while (i < markers.length) {
+    const marker = markers[i]!;
+    const next = markers[i + 1];
+    if (marker.kind === "begin" && next !== undefined && next.kind === "end" && next.hostId === marker.hostId) {
+      const body = validateBlockBody(lines.slice(marker.index + 1, next.index));
+      blocks.push({
+        hostId: marker.hostId,
+        beginLine: marker.index,
+        endLine: next.index,
+        commandPath: body.commandPath,
+        valid: body.valid,
+        invalidReason: body.invalidReason,
+      });
+      i += 2;
       continue;
     }
-    // end
-    if (open === null) return { orphan: "END-without-BEGIN" };
-    if (open.hostId !== marker.hostId) return { orphan: "BEGIN-without-END" };
-    const body = validateBlockBody(lines.slice(open.index + 1, marker.index));
-    blocks.push({
-      hostId: open.hostId,
-      beginLine: open.index,
-      endLine: marker.index,
-      commandPath: body.commandPath,
-      valid: body.valid,
-      invalidReason: body.invalidReason,
+    orphans.push({
+      line: marker.index,
+      detail: marker.kind === "begin" ? "BEGIN-without-END" : "END-without-BEGIN",
+      hostId: marker.hostId,
     });
-    open = null;
+    i += 1;
   }
-  if (open !== null) return { orphan: "BEGIN-without-END" };
-  return { blocks };
+  return { blocks, orphans };
 }
 
 /** Validate the lines BETWEEN a BEGIN/END pair against the safety grammar. */
@@ -330,11 +349,16 @@ export function parseManagedBlock(contents: string, hostId: string): ParsedManag
   const rawLines = contents.split("\n");
   const lines = rawLines.map((line) => line.replace(/\r$/, ""));
 
-  const paired = pairBlocks(lines);
-  if ("orphan" in paired) {
-    return { state: { kind: "orphan", detail: paired.orphan }, blocks: [], lines };
+  const { blocks, orphans } = pairBlocks(lines);
+  // An orphan suffixed for ANOTHER host cannot be part of this host's block:
+  // this host's verdict still rests on its own well-formed pair, the whole-file
+  // hook-set validation, and the real-parser cleanliness check. Legacy and own
+  // orphans stay fail-closed because they may be this host's damaged block.
+  const ownOrphan = orphans.find((o) => o.hostId === null || o.hostId === hostId);
+  const foreignOrphans = orphans.filter((o) => o.hostId !== null && o.hostId !== hostId);
+  if (ownOrphan !== undefined) {
+    return { state: { kind: "orphan", detail: ownOrphan.detail }, blocks: [], lines, foreignOrphans };
   }
-  const blocks = paired.blocks;
 
   // A block belongs to this host when its marker suffix matches or, for a
   // legacy un-suffixed block, its command derives to this host. An unattributable
@@ -342,13 +366,14 @@ export function parseManagedBlock(contents: string, hostId: string): ParsedManag
   // another host is ignored so its block remains untouched.
   const relevant = blocks.filter((b) => effectiveHost(b, hostId) === hostId);
   if (relevant.length === 0) {
-    return { state: { kind: "absent" }, blocks, lines };
+    return { state: { kind: "absent" }, blocks, lines, foreignOrphans };
   }
   if (relevant.length > 1) {
     return {
       state: { kind: "duplicate", beginLines: relevant.map((b) => b.beginLine) },
       blocks,
       lines,
+      foreignOrphans,
     };
   }
   const block = relevant[0]!;
@@ -364,6 +389,7 @@ export function parseManagedBlock(contents: string, hostId: string): ParsedManag
     },
     blocks,
     lines,
+    foreignOrphans,
   };
 }
 
@@ -451,14 +477,13 @@ export interface EvaluateInstalledOptions {
 /**
  * Return `contents` with every well-formed managed BEGIN/END block removed
  * (inclusive), so what remains is only the bare/root TOML. Used by
- * `hasCleanEnforcingHookEntry` to enforce host isolation. If the markers are
- * unbalanced (orphan), returns the input unchanged — the caller is only reached
- * in the `absent` state, where a well-formed foreign block is the norm.
+ * `hasCleanEnforcingHookEntry` to enforce host isolation. Orphan marker lines
+ * are comments and stay in place; the caller is only reached in the `absent`
+ * state, where a well-formed foreign block is the norm.
  */
 function stripManagedBlockLines(contents: string): string {
   const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
   const paired = pairBlocks(lines);
-  if (!("blocks" in paired)) return contents;
   const inBlock = new Set<number>();
   for (const block of paired.blocks) {
     for (let i = block.beginLine; i <= block.endLine; i += 1) inBlock.add(i);
@@ -583,7 +608,7 @@ export function evaluateInstalled(
   if (state.kind === "orphan") {
     return {
       installed: false,
-      reason: `${state.detail} marker. Run /kimi:setup --uninstall to clear.`,
+      reason: `${state.detail} marker. ${ORPHAN_MARKER_REMEDY}`,
       state,
     };
   }
@@ -648,11 +673,8 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
   const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
   const tableLines = scanTomlLines(contents).tables;
   const managed = new Set<number>();
-  const paired = pairBlocks(lines);
-  if ("blocks" in paired) {
-    for (const block of paired.blocks) {
-      for (let i = block.beginLine; i <= block.endLine; i += 1) managed.add(i);
-    }
+  for (const block of pairBlocks(lines).blocks) {
+    for (let i = block.beginLine; i <= block.endLine; i += 1) managed.add(i);
   }
 
   const ranges: BareHookTable[] = [];

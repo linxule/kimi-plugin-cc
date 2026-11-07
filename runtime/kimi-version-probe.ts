@@ -231,29 +231,50 @@ export function maxTestedMinor(): { major: number; minor: number } {
   );
 }
 
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((part) => Number.parseInt(part, 10));
+  const pb = b.split(".").map((part) => Number.parseInt(part, 10));
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 /**
  * Format a user-facing warning line for an out-of-range version probe.
  * Setup itself may complete, but the execution-plan gate will refuse model
  * spawns until the operator selects a certified binary or updates the plugin.
+ * `nativeV2Certified` is the exact native-v2 table; both engines are named so
+ * the newest certified version is not misreported as the legacy-v1 bound.
  */
-export function formatVersionOutOfRangeWarning(probe: KimiVersionProbeOk, pluginVersion: string): string {
+export function formatVersionOutOfRangeWarning(
+  probe: KimiVersionProbeOk,
+  pluginVersion: string,
+  nativeV2Certified: readonly string[] = [],
+): string {
   const tested = KIMI_TESTED_MINORS.map((entry) => `${entry.major}.${entry.minor}.x`).join(", ");
   const max = maxTestedMinor();
-  const aboveMax =
-    probe.major > max.major || (probe.major === max.major && probe.minor > max.minor);
+  const newestNative = [...nativeV2Certified].sort(compareVersions).at(-1);
+  const probeRaw = `${probe.major}.${probe.minor}.${probe.patch}`;
+  const aboveMax = newestNative !== undefined
+    ? compareVersions(probeRaw, newestNative) > 0
+    : probe.major > max.major || (probe.major === max.major && probe.minor > max.minor);
+  const certified = nativeV2Certified.length > 0
+    ? `legacy-v1 ${tested}; native-v2 exact ${nativeV2Certified.join(", ")}`
+    : tested;
   const lines = [
-    `WARNING: kimi-code version ${probe.version} is outside the range kimi-plugin-cc ${pluginVersion} was tested against (${tested}).`,
+    `WARNING: kimi-code version ${probe.version} is outside the versions kimi-plugin-cc ${pluginVersion} certifies (${certified}).`,
   ];
   if (aboveMax) {
-    // Above the legacy-v1 tested upper bound is a release newer than the last
-    // legacy compatibility audit, commonly from out-of-band auto-upgrade drift.
+    // Commonly out-of-band auto-upgrade drift past the last certification.
     lines.push(
-      `  This is NEWER than the newest version we have tested (${max.major}.${max.minor}.x) and is not yet certified for model execution.`,
+      `  This is NEWER than the newest certified version (${newestNative ?? `${max.major}.${max.minor}.x`}) and is not yet certified for model execution.`,
     );
   }
   lines.push(
     `  Setup can complete, but model-spawning commands will refuse before Kimi starts rather than run an unreviewed engine/version route.`,
-    `  Update kimi-plugin-cc to a release that certifies this minor, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified kimi-code binary and retry setup.`,
+    `  Update kimi-plugin-cc to a release that certifies this version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified kimi-code binary and retry setup.`,
     `  KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production compatibility override.`,
   );
   return lines.join("\n");
