@@ -9,7 +9,7 @@ import { runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSess
 import { assertCliResultSuccess } from "../../runtime/commands/cli-helpers.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import { classifyManagedCommandFailure, classifySetupFailure } from "../../runtime/kimi-errors.js";
-import type { KimiExecutionPlan } from "../../runtime/kimi-engine.js";
+import { isNativeV2Certified, type KimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import {
   collectDescendantIdentities,
   collectDescendants,
@@ -242,7 +242,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["2.5.0", "2.5.1", "2.5.2"])("pins the local environment on exact %s candidate and production spawns", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
     const root = await createTestPluginDataRoot("cli-client-local-environment");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;
@@ -280,6 +280,12 @@ describe("runCliPrompt", () => {
       };
       delete options.env.KIMI_PLUGIN_CC_SMOKE;
       delete options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE;
+      if (!isNativeV2Certified("review", version)) {
+        const spawnCount = spawnSpy.mock.calls.length;
+        await expect(runCliPrompt(options)).rejects.toMatchObject({ code: "KIMI_CAPABILITY_NOT_CERTIFIED" });
+        expect(spawnSpy).toHaveBeenCalledTimes(spawnCount);
+        return;
+      }
       await runCliPrompt(options);
       expect(capturedArgs).toEqual([
         "run", mockKimiStreamPath,

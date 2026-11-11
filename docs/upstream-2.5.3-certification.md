@@ -1,0 +1,71 @@
+# Kimi Code 2.5.3 certification evidence — 2026-11-11
+
+## Status and exact source
+
+**Exact CLI 2.5.3 is certified for all eight operations by plugin 2.5.7.** The exact-source audit, non-vacuous plan/environment/swarm controls, candidate matrix, production-table matrix, frozen install, full repository check, package validation and isolated consumer-security audit passed. Codex's closing review returned **APPROVE with no findings**; Claude's closing review returned **READY-TO-TAG with no blocker or major findings**, and its two chronology corrections are included. Publication does not update installed hosts or operator pins.
+
+Candidate: `@moonshot-ai/kimi-code@2.5.3`, release commit `5af9942e9fb789b6a1530830575b3768499932e9`, compared with certified 2.5.2 (`1c142a007c10e881602690def96057c23a2baa12`). npm publication: 2026-11-10T13:12:36.201Z. An isolated npm installation and its executable both report 2.5.3; its `dist/main.mjs` SHA-256 is `07019fce6f568b642d4422e1daa81f975de6a21c578c82a924925c2e667aa11a`. The seven scoped 2.5.2→2.5.3 diffs and out-of-scope diffs are retained under `.claude/kimi-code-research/daily-monitor/2026-11-11-2.5.3-diffs/`.
+
+## Source and integration review
+
+Four independent source lanes returned COMPAT-PRESERVED for hooks/plan, stream/steering, swarm web lifecycle, and adversarial subprocess/out-of-scope review. Scopes 01–06 are unchanged: print/CLI, before-execute/permissions, external hooks, plan/restore, bootstrap/config/workspace, and tools/fan-out/SDK. Scope 07, the swarm-web activation scope, changes `kap-server/src/routes/prompts.ts` steering and `transcriptService.ts` presentation/transcript healing. Out-of-scope production changes cover the agent loop/human turn machinery, MCP stdio startup diagnostics, Windows process spawning, and one TUI interruption display condition. `_base/di` is unchanged.
+
+- The sole before-execute emitter and active-plan-gated final allow remain. Every real execution remains downstream of managed PreToolUse. Managed hooks pass `shell:true` and retain Node spawn; only Windows no-explicit-shell launches select locked `cross-spawn@7.0.6`. MCP startup changes affect bounded diagnostics and preserve close/escalation behavior.
+- Background-shell/tool-result/cron steering can be reachable and may split salvaged partial text into additional ordinary assistant records. It introduces no new role or metadata type and does not skip acting-state tool execution. Existing prose reassembly concatenates fragments without separators, including fragmented review-gate JSON. No dedicated delayed-stream steering control was run; timing remains a stated limitation.
+- Transcript healing emits presentation operations/resets and does not write wire journals, mutate modes, or invoke tools. Steering interrupts only text-only model streaming or retry, not the acting/tool-execution state.
+- All 40 load-bearing files are byte-identical to 2.5.2. The exact-tag scan passes **18 tests with 153 assertions** on 2.5.3, with print/environment/WebSocket cases executing; the same scan passes on the 2.5.2 regression tree.
+- Candidate prerequisites cover fresh `--environment local`, reviewed additive-hook schemas, preactivation/local binding, and protocol-v2 agent state. The initial focused production run after the table addition passed **319 tests with 4,307 assertions**, but its raw log was not retained. A later release-tree rerun reproduced those counts in **164.47 seconds** (`focused-production-tests.log`).
+
+## Exact-binary controls
+
+Controls ran sequentially after the user's explicit "keep going" authorization, using the dedicated Kimi API key and fresh isolated homes. No personal config or OAuth store was read, copied, or symlinked. Evidence-tree key scan: **0 matches**.
+
+- **Plan OFF Write:** exact 2.5.3 marker first. Write reached the deny hook and was denied on the same call; no target file or plan state.
+- **Plan ON:** an armed plan journal let Glob reach the deny hook, and a **1,417-byte** plan file was written without a plan-Write hook. The no-plan closures remain load-bearing; workspace stayed empty.
+- **Removed EnterPlanMode:** absent from offered tools. A forced call was rejected on the same call ID before any hook and returned to the scripted provider. No plan state or files appeared.
+- **Environment:** real activation/deactivation passed with explicit local binding. A remote default, disabled workspace trust, and resumed remote binding each refused before spawn.
+- **Swarm OFF:** a real AgentSwarm call returned inactive-mode result with zero child journals and no probe files.
+- **Swarm ON:** preactivation produced `agent-0` and `agent-1`. Each child's assigned Write matched a managed denial on the same toolCallId, no probes landed, and deactivation was verified with ambient idle reclamation set to 1 ms.
+- **Out-of-root:** two real children received rescue denials on their assigned absolute Write calls; no coordinator writes or target files; deactivation verified.
+
+Raw evidence and the per-control table are in `.claude/kimi-code-research/cert-2.5.3-live/controls-summary.md` and the retained summaries/journals.
+
+## Candidate matrix
+
+The retained evidence includes four red matrices before the passing candidate run; this was not a first-attempt pass:
+
+- `candidate-initial-matrix-failure.log`: **23 pass / 1 fail / 163 assertions**; the model did not produce the required resumed Write denial.
+- `candidate-second-matrix-failure.log`: **23 pass / 1 fail / 158 assertions** after a prompt-only change; this time the fresh Write-denial precondition failed.
+- `candidate-final-harness-goal-precondition-failure.log` (started 12:47Z): **23 pass / 1 fail / 183 assertions**; the real-model goal control produced no correlated denials, so its required precondition failed rather than being treated as a pass.
+- `candidate-default-goal-session-missing.log` (started 13:31Z): **23 pass / 1 fail / 190 assertions**; the budget-aborted goal run using the deterministic provider yielded no captured session ID and no `goal.summary`, so the lane could not select its per-turn journal evidence. The raw log does not show a store-recovery attempt or a digest mismatch.
+
+Separate real-model diagnostics proved fresh/resumed managed denials and unchanged taint refusal. The deterministic controls then removed model-choice variance without weakening the assertions. The smoke harness added bounded store recovery after the missing-session failure. Narrative notes record that its first attempt used the wrapped-prompt digest and returned `digest_mismatch:1`; no raw log of that particular attempt was retained. The control then used the unwrapped objective digest that native goal print actually stores. No hook bypass was found in the preserved evidence; the original model-choice variance remains unexplained rather than being presented as an upstream defect.
+
+- **Resume:** the loopback provider forces Write with exact fresh/resumed call IDs, requires managed denials on those exact calls, and verifies provider-received denial content, zero exit/non-abort/final assistant text, received/completed request accounting, and no provider request after taint. The isolated lane passed **30 assertions** with all Kimi credential variables removed and an unrelated dummy credential present (`credential-free-resume.log`).
+- **Goal:** `call_goal_*` cycles all three targets with managed denials, real start-record turn IDs, request/rejection/completion accounting, actual compaction handling, and objective-digest store recovery in the smoke harness. The isolated goal passed **21 assertions** with `budgetMs=10000`: `startedTurnCount=258`, `deniedTurnCount=257`, `denialCount=258`, `turnsUsed=259`, 519/519 exchanges, zero rejected requests, one compaction, all three targets, paused status, and empty workspace (`goal-scripted-control.log`). These are distinct metrics; `turnsUsed` is not the started-turn count.
+- **Full candidate:** **24 tests with zero failures and 201 assertions in 349.07 seconds** (`candidate-final-green.log`). Goal used default `budgetMs=120000` and harness-only `source=store_recovery`, with 2,021 started turns, 2,020 denied turns and 12 compactions. Write-swarm captured a **278-byte** child-authored patch with a clean user tree and removed worktree, and denied the out-of-root write.
+- Candidate diff SHA-256: `e134ab0e3d0922efe04db3de59557fdc6636aa9224de50eab9c2f7fa7ade8766`. Candidate log key scan: **0 matches**.
+
+The matrix's resume and goal lanes are deterministic, not sustained real-model coverage. Separate real-model fresh/resume diagnostics support the same managed denial behavior, but are not presented as continuing real-model coverage. The matrices ran on base `00c3e91` plus their recorded hashed diffs, not on the final release commit. Current runtime/test files match the production diff except for the subsequent `runtime/session-recovery.ts` comment correction and the `runtime/version.ts` plugin-version bump; the candidate harness predates the production run's additional `denialCount`/`minimumDenialCount` logging. Later changes are comments, release metadata, documentation and workflow wording, with regenerated mirrors. The final repository and package gates below cover the corrected release tree.
+
+## Production matrix
+
+Exact 2.5.3 was appended to `NATIVE_V2_CERTIFIED_VERSIONS` after candidate success. The initial focused production run passed **319 tests with 4,307 assertions** without a retained raw log; the later rerun documented above reproduced those counts. The production-table matrix passed **24 tests with zero failures and 201 assertions in 406.19 seconds** (`production-final-green.log`).
+
+Goal again used default `budgetMs=120000` and harness-only `source=store_recovery`: 2,034 started turns, 2,033 denied turns and 12 compactions. `denialCount=2034`, `minimumDenialCount=2033`. Write-swarm again captured a **278-byte** child-authored patch with a clean user tree and removed worktree, and denied the out-of-root write. Production diff SHA-256: `aa9974c4f2bcc6406079b4c0fda4bf542e07b545f8f7bdc9e581da74cd4b9cf6`. Production log key scan: **0 matches**.
+
+## Repository and package gates
+
+Frozen dependency installation made no changes. The corrected-tree `bun run check` passed **1,437 tests with 33 expected opt-in skips, zero failures and 18,980 assertions across 82 files in 396.30 seconds**, including generated-distribution drift, with pipeline exit status 0 (`check-release-final.log`). The final package/consumer rerun on that tree passed **332 files**, all three compiled distributions, isolated hook setup/check/version refusal, a patched DSH host/profile with seven live providers/tools and Web boot, and isolated npm consumer security, with exit status 0 (`package-and-consumer-final.log`). The pre-correction release-tree check also passed 1,437 tests and 18,980 assertions in 384.80 seconds (`check-release.log`), with 332-file package validation (`package-and-consumer-release.log`); those earlier results did not substitute for the final gate.
+
+Three earlier candidate full checks were red. `check-candidate.log` records **1,436 pass / 1 fail / 18,942 assertions** because a vendored runtime mirror was missing. `check-candidate-rerun.log` then had **1,437 pass / 0 fail / 18,943 assertions**, but the generated-distribution drift gate correctly refused unstaged generated changes. Later, `check-final-candidate.log` recorded **1,436 pass / 1 fail / 18,521 assertions** because the production table and its expected list were edited during that run. After regeneration/staging and letting the tree settle, candidate full validation passed **1,437 tests with 33 expected opt-in skips, zero failures and 18,945 assertions across 82 files in 407.82 seconds**, including generated-distribution drift. Package validation passed **331 files**, all three compiled distributions, isolated setup/check/version refusal, patched DSH host/profile with seven providers/tools and Web boot, and isolated npm consumer security. Those earlier results did not substitute for the final 2.5.7 release-tree checks above.
+
+Latest corrected-tree full-check counts: **1,437 tests / 33 expected skips / 0 failures / 18,980 assertions; 332 package files.**
+
+## Reviews and residual limits
+
+Codex candidate review returned no findings. Claude found no blockers; its two majors (spawn-boundary refusal and a passing full check) and redaction/provenance/wording notes were fixed and verified. Codex and Claude goal/resume reviews found no remaining correctness defects; correlation, credential-isolation, request-accounting, compaction and cleanup findings were addressed and rechecked.
+
+Review corrections covered exact-version documentation, focused-test evidence, failed-matrix/check history, goal-session causality and chronology, matrix provenance, scope 07, migration/workflow version lists, operator-local wrapper wording, and smoke-only store recovery. Codex's closing review returned **APPROVE — no findings** (`closing-codex-review.md`). Claude's closing review returned **READY-TO-TAG — no blocker or major findings** (`closing-claude-review.md`); its two remaining chronology corrections, red-matrix ordering and focused-log wording in the release notes, are included. The DSH timestamp deliberately remains at the prior release's value until publication produces a real timestamp.
+
+Real Windows `.cmd`/`npx` quoting/PID topology/taskkill and delayed-stream steering timing were not exercised on this macOS host. The manual Actions workflow does not export the uncertified-candidate selector; it accepts certified versions, while a candidate requires the local certification playbook's explicit seam. **Production pursue does not perform store recovery:** it persists the full-prompt digest, but only review, ask and rescue call the timeout-recovery path. `source=store_recovery` in the goal logs is harness-only evidence; a budget-aborted production pursue without a resume hint records no session ID. The fresh JobStore has no job rows, so its ID-exclusion path is not independently exercised; cwd/digest/time/uniqueness still bind recovery. Publication does not update installed hosts or operator pins.

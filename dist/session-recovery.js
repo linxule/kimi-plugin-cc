@@ -22,7 +22,9 @@ const SESSION_ID = /^session_[0-9a-f-]{36}$/;
  *
  * A candidate is bound to THIS job by content, not only by time: the first
  * user message in the session's main journal must carry a text item whose
- * sha256 equals the job's `prompt_digest` (the exact `-p` argument). Time and
+ * sha256 equals the caller-supplied digest of the exact `-p` argument. Native
+ * goal print stores the unwrapped objective, so the smoke recovery control
+ * supplies that digest. Production pursue does not perform store recovery. Time and
  * cwd alone would admit a concurrent TUI session, another host's finished job
  * (host-local stores cannot see each other's session ids), or a `state.json`
  * planted by repository code running under rescue. The digest is not unique

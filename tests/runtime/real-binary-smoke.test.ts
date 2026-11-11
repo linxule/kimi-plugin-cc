@@ -15,8 +15,12 @@
 //      preflight scans, the resumed run re-proves v2 provenance + hook denial,
 //      and a `plan_mode.enter` record appended to that journal makes the next
 //      resume refuse BEFORE spawn (arming vector C, proven on the real layout).
+//      A deterministic loopback provider forces Write with exact fresh/resumed
+//      call IDs; this lane uses no real credential or seed token store.
 //   4. autonomous goal mode (/kimi:pursue) — no files across a multi-turn run,
 //      with same-call managed denials proved in at least two distinct turns.
+//      A deterministic loopback provider cycles three targets with call_goal_*
+//      IDs; this lane also uses no real credential or seed token store.
 //   5. read-only swarm (/kimi:swarm) — a SPAWNED SUBAGENT's forced write is
 //      denied (zero files across the fan-out).
 //   6. write-swarm POSITIVE (/kimi:swarm --write) — a coder subagent's edits
@@ -40,12 +44,14 @@
 //
 // Why it is opt-in (skipped by default):
 //
-//   It needs a real kimi binary AND working credentials. It runs in an
+//   Most lanes need a real kimi binary AND working credentials. They run in an
 //   isolated KIMI_CODE_HOME seeded from a real kimi-code home (config copied;
 //   the OAuth token stores symlinked so refreshes land in the one real store),
-//   so it never mutates the operator's real config or session store. `bun run check` has neither binary nor creds in CI or a
-//   fresh clone, so the suite is skipped unless KIMI_PLUGIN_CC_SMOKE=1 and
-//   the prerequisites resolve. Run it with:
+//   so they never mutate the operator's real config or session store. Lanes 3b
+//   and 4 instead use empty homes and loopback providers, so they need neither
+//   working credentials nor a seed store. `bun run check` has neither binary
+//   nor creds in CI or a fresh clone, so the suite is skipped unless
+//   KIMI_PLUGIN_CC_SMOKE=1 and the prerequisites resolve. Run it with:
 //
 //     KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts
 //
@@ -73,6 +79,8 @@ import {
   type SwarmActivationOptions,
 } from "../../runtime/swarm-activation.js";
 import { JobStore } from "../../runtime/job-store.js";
+import { digestPrompt } from "../../runtime/jobs.js";
+import { recoverSessionIdFromStore } from "../../runtime/session-recovery.js";
 import { resolveKimiCliCommand } from "../../runtime/kimi-command.js";
 import {
   NATIVE_V2_CERTIFIED,
@@ -86,6 +94,7 @@ import { resolveRepoIdentity } from "../../runtime/git.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
+import { startScriptedWriteProvider } from "../helpers/scripted-write-provider.js";
 
 const SMOKE_ENABLED = process.env.KIMI_PLUGIN_CC_SMOKE === "1";
 const SEED_HOME =
@@ -378,14 +387,17 @@ function streamManagedDenial(
 
 interface GoalDenialEvidence extends ManagedDenialEvidence {
   readonly turnId: string;
+  readonly target: string;
   readonly isError: true;
 }
 
 function goalTurnDenials(wire: string): {
   readonly turnIds: readonly string[];
+  readonly startedTurnIds: readonly string[];
   readonly denials: readonly GoalDenialEvidence[];
 } {
-  const started = new Set<string>();
+  const turnIds = new Set<string>();
+  const startedTurnIds = new Set<string>();
   const calls = new Map<string, { turnId: string; toolName: string; args: Record<string, unknown> }>();
   const denials: GoalDenialEvidence[] = [];
   for (const line of wire.split("\n")) {
@@ -393,7 +405,9 @@ function goalTurnDenials(wire: string): {
     const record = JSON.parse(line) as Record<string, unknown>;
     if ((record.type === "agent.turn.started" || record.type === "turn.started") &&
         (typeof record.turnId === "number" || typeof record.turnId === "string")) {
-      started.add(String(record.turnId));
+      const turnId = String(record.turnId);
+      turnIds.add(turnId);
+      startedTurnIds.add(turnId);
       continue;
     }
     if (record.type !== "context.append_loop_event") continue;
@@ -403,7 +417,7 @@ function goalTurnDenials(wire: string): {
     if (candidate.type === "tool.call" && typeof candidate.toolCallId === "string" &&
         typeof candidate.name === "string") {
       if (typeof candidate.turnId !== "string" && typeof candidate.turnId !== "number") continue;
-      started.add(String(candidate.turnId));
+      turnIds.add(String(candidate.turnId));
       const args = candidate.args;
       calls.set(candidate.toolCallId, {
         turnId: String(candidate.turnId),
@@ -428,11 +442,12 @@ function goalTurnDenials(wire: string): {
     if (!isError || !output.startsWith(DENY_MARKER)) continue;
     const target = GOAL_FILES.find((name) => targetsWriteCall(call.toolName, call.args, name));
     if (target !== undefined) {
-      denials.push({ turnId: call.turnId, toolCallId: candidate.toolCallId, toolName: call.toolName, output, isError: true });
+      denials.push({ turnId: call.turnId, toolCallId: candidate.toolCallId, toolName: call.toolName, target, output, isError: true });
     }
   }
   return {
-    turnIds: [...started].sort((left, right) => left.localeCompare(right, undefined, { numeric: true })),
+    turnIds: [...turnIds].sort((left, right) => left.localeCompare(right, undefined, { numeric: true })),
+    startedTurnIds: [...startedTurnIds].sort((left, right) => left.localeCompare(right, undefined, { numeric: true })),
     denials,
   };
 }
@@ -730,16 +745,20 @@ test("goal journal evidence requires real turn starts, error results, and Write/
   ];
   const first = goalTurnDenials(attempts.map((record) => JSON.stringify(record)).join("\n"));
   expect(first.turnIds).toEqual(["0", "1"]);
+  expect(first.startedTurnIds).toEqual(["0", "1"]);
   expect(first.denials.map((denial) => denial.turnId)).toEqual(["0"]);
+  expect(first.denials.map((denial) => denial.target)).toEqual([GOAL_FILES[0]]);
   const second = goalTurnDenials([
     ...attempts,
     result("write-1", DENY_MARKER),
   ].map((record) => JSON.stringify(record)).join("\n"));
   expect(second.denials.map((denial) => denial.turnId)).toEqual(["0", "1"]);
+  expect(second.denials.map((denial) => denial.target)).toEqual([GOAL_FILES[0], GOAL_FILES[1]]);
   const legacy = goalTurnDenials(attempts.filter((record) =>
     record.type !== "agent.turn.started" && record.type !== "turn.started")
     .map((record) => JSON.stringify(record)).join("\n"));
   expect(legacy.turnIds).toEqual(["0", "1"]);
+  expect(legacy.startedTurnIds).toEqual([]);
   expect(legacy.denials.map((denial) => denial.turnId)).toEqual(["0"]);
 });
 
@@ -1241,7 +1260,9 @@ async function findSessionJournals(kimiHome: string, sessionId: string): Promise
 
 // Native-v2 resume lane (arming vector C, live): a resumed `kimi -r` session
 // replays its wire journal, so the plugin scans every agent journal for durable
-// plan-state records before spawning. This lane proves, against the real
+// plan-state records before spawning. A loopback provider forces Write on fresh
+// and resumed runs, avoiding model-choice variance; the binary, hook and journal
+// remain real. This lane proves, against the real
 // binary and the real on-disk layout, that (1) a fresh v2 run yields a
 // resumable session whose journal the scan can find, (2) the resumed run
 // re-proves v2 provenance (system.version first), keeps the same session id and
@@ -1250,25 +1271,57 @@ async function findSessionJournals(kimiHome: string, sessionId: string): Promise
 // next resume refuses BEFORE any process is created (the journal is not
 // appended to). Skipped on a pinned <= 0.41 binary: v1 resume has no journal
 // replay and the v1 resume path is covered by the default_plan_mode suite.
-suite("real-binary smoke: native-v2 resume re-proves provenance and refuses a plan-tainted journal", () => {
+const resumeSuite = PREREQS_OK || (SMOKE_ENABLED && BINARY_IS_V2) ? describe : describe.skip;
+resumeSuite("real-binary smoke: native-v2 resume re-proves provenance and refuses a plan-tainted journal", () => {
   const lane = BINARY_IS_V2 ? test : test.skip;
   lane(
     "native-v2: fresh → resumed both prove v2 + hook denial; a tainted journal refuses pre-spawn",
     async () => {
-      const kimiHome = await createTestPluginDataRoot("smoke-home-v2-resume");
-      const workspace = await createTestPluginDataRoot("smoke-ws-v2-resume");
-      const pluginData = await createTestPluginDataRoot("smoke-data-v2-resume");
+      const roots: string[] = [];
+      let kimiHome = "";
+      let workspace = "";
+      let pluginData = "";
+      let provider: Awaited<ReturnType<typeof startScriptedWriteProvider>> | undefined;
+      let primaryError: unknown;
       try {
-        await seedKimiHome(SEED_HOME, kimiHome);
+        kimiHome = await createTestPluginDataRoot("smoke-home-v2-resume");
+        roots.push(kimiHome);
+        workspace = await createTestPluginDataRoot("smoke-ws-v2-resume");
+        roots.push(workspace);
+        pluginData = await createTestPluginDataRoot("smoke-data-v2-resume");
+        roots.push(pluginData);
+        provider = await startScriptedWriteProvider();
         // PRECONDITION the lane depends on: plan mode is NOT configured on in
-        // the seeded home (the preflight would otherwise refuse the fresh run
-        // for a reason unrelated to resume).
+        // the empty isolated home, which never receives seed token stores.
         await setDefaultPlanMode(kimiHome, false);
-        const setupEnv: NodeJS.ProcessEnv = {
-          ...process.env,
+        expect(existsSync(path.join(kimiHome, "credentials")), "lane must not seed OAuth credentials").toBe(false);
+        expect(existsSync(path.join(kimiHome, "oauth")), "lane must not seed legacy OAuth state").toBe(false);
+        const baseEnv: NodeJS.ProcessEnv = {
+          PATH: process.env.PATH,
+          HOME: path.dirname(kimiHome),
+          TMPDIR: process.env.TMPDIR,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          SYSTEMROOT: process.env.SYSTEMROOT,
+          COMSPEC: process.env.COMSPEC,
+          PATHEXT: process.env.PATHEXT,
+          KIMI_PLUGIN_CC_NODE_BIN: process.env.KIMI_PLUGIN_CC_NODE_BIN,
+          KIMI_PLUGIN_CC_KIMI_BIN: process.env.KIMI_PLUGIN_CC_KIMI_BIN,
+          KIMI_PLUGIN_CC_SMOKE: "1",
+          KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE: V2_CANDIDATE,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_CODE_NO_AUTO_UPDATE: "1",
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+          KIMI_CODE_API_KEY: "scripted-test-only",
+          KIMI_MODEL_API_KEY: "scripted-test-only",
+          KIMI_MODEL_NAME: "scripted-write-control",
+          KIMI_MODEL_PROVIDER_TYPE: "kimi",
+          KIMI_MODEL_BASE_URL: `${provider.baseUrl}/v1`,
+          KIMI_MODEL_CAPABILITIES: "tool_use",
+        };
+        const setupEnv: NodeJS.ProcessEnv = {
+          ...baseEnv,
+          CLAUDE_PLUGIN_DATA: pluginData,
         };
         const setupResult = await runSetup([], makeContext(workspace, setupEnv));
         expect(
@@ -1277,11 +1330,6 @@ suite("real-binary smoke: native-v2 resume re-proves provenance and refuses a pl
         ).toBe("ok");
 
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
-        const baseEnv: NodeJS.ProcessEnv = {
-          ...process.env,
-          KIMI_CODE_HOME: kimiHome,
-          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
-        };
         const run = (resumeSessionId?: string) =>
           runCliPrompt({
             cwd: workspace,
@@ -1292,14 +1340,26 @@ suite("real-binary smoke: native-v2 resume re-proves provenance and refuses a pl
             commandLabel: "ask",
             prompt: WRITE_PROMPT,
             ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+            signal: AbortSignal.timeout(PER_RUN_BUDGET_MS),
           });
+        const providerDenial = (request: unknown, callId: string): boolean => {
+          const messages = (request as { messages?: Array<{ role?: string; tool_call_id?: string }> } | undefined)?.messages;
+          const lastMessage = messages?.at(-1);
+          return lastMessage?.role === "tool" && lastMessage.tool_call_id === callId && JSON.stringify(lastMessage).includes(DENY_MARKER);
+        };
 
         // Phase 1: fresh run.
         const fresh = await run();
         expect(fresh.systemVersion, "fresh v2 run must emit system.version").toBe(BINARY_VERSION);
         expect(fresh.sessionId, "fresh v2 run must yield a resumable session id").toBeDefined();
-        expect(streamManagedDenial(fresh.records, TARGET_FILENAME), "fresh run must correlate its managed denial").toBeDefined();
+        expect(fresh.exitCode, "fresh must exit successfully").toBe(0);
+        expect(fresh.aborted, "fresh must not be aborted").not.toBe(true);
+        expect(streamManagedDenial(fresh.records, TARGET_FILENAME), "fresh run must correlate its managed denial").toMatchObject({ toolCallId: "call_write_0" });
         expect(await fileExists(path.join(workspace, TARGET_FILENAME))).toBe(false);
+        expect(fresh.records.at(-1), "fresh must receive the final assistant response").toMatchObject({ role: "assistant", content: "Managed denial recorded." });
+        expect(provider.receivedRequests, "fresh must not make rejected side requests").toBe(2);
+        expect(provider.completedExchanges, "fresh must complete its tool-call and final provider exchanges").toBe(2);
+        expect(providerDenial(provider.requests[1]?.bodyJson, "call_write_0"), "fresh denial must return to the provider on its own call").toBe(true);
         const sessionId = fresh.sessionId as string;
 
         // The scan's premise, checked against the real layout: at least one
@@ -1313,15 +1373,25 @@ suite("real-binary smoke: native-v2 resume re-proves provenance and refuses a pl
         // Phase 2: clean resume. The preflight scans the (clean) journal, the
         // binary replays it, and provenance + hook denial hold on the -r path.
         const resumed = await run(sessionId);
+        console.log(`[smoke] resume records: ${JSON.stringify(resumed.records)}`);
         expect(resumed.systemVersion, "resumed v2 run must emit system.version").toBe(BINARY_VERSION);
         expect(resumed.sessionId, "resume must continue the same session").toBe(sessionId);
-        expect(streamManagedDenial(resumed.records, TARGET_FILENAME), "resume must correlate its managed denial").toBeDefined();
+        expect(resumed.exitCode, "resume must exit successfully").toBe(0);
+        expect(resumed.aborted, "resume must not be aborted").not.toBe(true);
+        expect(streamManagedDenial(resumed.records, TARGET_FILENAME), "resume must correlate its managed denial").toMatchObject({ toolCallId: "call_write_2" });
         expect(await fileExists(path.join(workspace, TARGET_FILENAME))).toBe(false);
+        expect(resumed.records.at(-1), "resume must receive the final assistant response").toMatchObject({ role: "assistant", content: "Managed denial recorded." });
+        expect(provider.receivedRequests, "resume must not make rejected side requests").toBe(4);
+        expect(provider.completedExchanges, "resume must complete its tool-call and final provider exchanges").toBe(4);
+        expect(providerDenial(provider.requests[3]?.bodyJson, "call_write_2"), "resumed denial must return to the provider on its own call").toBe(true);
+        expect(existsSync(path.join(kimiHome, "credentials")), "no OAuth store may appear after fresh and resume").toBe(false);
+        expect(existsSync(path.join(kimiHome, "oauth")), "no legacy OAuth state may appear after fresh and resume").toBe(false);
 
         // Phase 3: taint the REAL journal with the durable record restore()
         // would fold, then prove the next resume refuses before any process is
         // created — the journal must not grow (a spawned child appends to it).
         const taintTarget = journals[0] as string;
+        const providerRequestCountBeforeTaint = provider.receivedRequests;
         await appendFile(
           taintTarget,
           `${JSON.stringify({ type: "plan_mode.enter", agentId: "main", id: "smoke-taint" })}\n`,
@@ -1336,11 +1406,29 @@ suite("real-binary smoke: native-v2 resume re-proves provenance and refuses a pl
           (await stat(taintTarget)).size,
           "a refused resume must not have spawned a child (journal grew)",
         ).toBe(sizeAfterTaint);
+        expect(provider.receivedRequests, "a refused resume must not call the provider, even on a rejected route").toBe(providerRequestCountBeforeTaint);
         expect(await fileExists(path.join(workspace, TARGET_FILENAME))).toBe(false);
+      } catch (error) {
+        primaryError = error;
+        throw error;
       } finally {
-        await cleanupTestPath(kimiHome);
-        await cleanupTestPath(workspace);
-        await cleanupTestPath(pluginData);
+        let cleanupError: unknown;
+        try {
+          if (provider !== undefined) await provider.close();
+        } catch (error) {
+          cleanupError = error;
+        }
+        for (const root of roots) {
+          try {
+            await cleanupTestPath(root);
+          } catch (error) {
+            cleanupError ??= error;
+          }
+        }
+        if (primaryError === undefined && cleanupError !== undefined) throw cleanupError;
+        if (primaryError !== undefined && cleanupError !== undefined) {
+          console.error(`[smoke] cleanup after failure also failed: ${String(cleanupError)}`);
+        }
       }
     },
     PER_RUN_BUDGET_MS * 2 + 30_000,
@@ -1350,56 +1438,92 @@ suite("real-binary smoke: native-v2 resume re-proves provenance and refuses a pl
 // The load-bearing safety test for /kimi:pursue: a read-only goal runs real
 // continuation turns, must leave the whole workspace empty at settlement, and
 // must produce same-call managed error denials in at least two distinct turns.
-// Marker text alone is not evidence.
+// A deterministic loopback provider cycles the three targets with call_goal_*
+// IDs, avoiding model-choice variance while the goal driver, hook and journal
+// remain real. Marker text alone is not evidence.
 // The journal also exposes which turns had attempts, rather than inferring
 // per-turn denials from an aggregate marker or turnsUsed metadata.
-suite("real-binary smoke: autonomous goal mode denies writes across turns (pursue)", () => {
+const goalSuite = PREREQS_OK || (SMOKE_ENABLED && BINARY_IS_V2) ? describe : describe.skip;
+goalSuite("real-binary smoke: autonomous goal mode denies writes across turns (pursue)", () => {
   test(
     "a multi-turn goal under a read-only label writes NO file and denies attempts in distinct turns",
     async () => {
-      const kimiHome = await createTestPluginDataRoot("smoke-home-goal");
-      const workspace = await createTestPluginDataRoot("smoke-ws-goal");
-      const pluginData = await createTestPluginDataRoot("smoke-data-goal");
+      const roots: string[] = [];
+      let kimiHome = "";
+      let workspace = "";
+      let pluginData = "";
+      let provider: Awaited<ReturnType<typeof startScriptedWriteProvider>> | undefined;
+      let primaryError: unknown;
       try {
-        await seedKimiHome(SEED_HOME, kimiHome);
-        const setupEnv: NodeJS.ProcessEnv = {
-          ...process.env,
+        kimiHome = await createTestPluginDataRoot("smoke-home-goal");
+        roots.push(kimiHome);
+        workspace = await createTestPluginDataRoot("smoke-ws-goal");
+        roots.push(workspace);
+        pluginData = await createTestPluginDataRoot("smoke-data-goal");
+        roots.push(pluginData);
+        provider = await startScriptedWriteProvider({ fileNames: GOAL_FILES, callIdPrefix: "call_goal_" });
+        await setDefaultPlanMode(kimiHome, false);
+        expect(existsSync(path.join(kimiHome, "credentials")), "goal lane must not seed OAuth credentials").toBe(false);
+        expect(existsSync(path.join(kimiHome, "oauth")), "goal lane must not seed legacy OAuth state").toBe(false);
+        const baseEnv: NodeJS.ProcessEnv = {
+          PATH: process.env.PATH,
+          HOME: path.dirname(kimiHome),
+          TMPDIR: process.env.TMPDIR,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          SYSTEMROOT: process.env.SYSTEMROOT,
+          COMSPEC: process.env.COMSPEC,
+          PATHEXT: process.env.PATHEXT,
+          KIMI_PLUGIN_CC_NODE_BIN: process.env.KIMI_PLUGIN_CC_NODE_BIN,
+          KIMI_PLUGIN_CC_KIMI_BIN: process.env.KIMI_PLUGIN_CC_KIMI_BIN,
+          KIMI_PLUGIN_CC_SMOKE: "1",
+          KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE: V2_CANDIDATE,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_CODE_NO_AUTO_UPDATE: "1",
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+          KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND: "1",
+          KIMI_CODE_API_KEY: "scripted-test-only",
+          KIMI_MODEL_API_KEY: "scripted-test-only",
+          KIMI_MODEL_NAME: "scripted-write-control",
+          KIMI_MODEL_PROVIDER_TYPE: "kimi",
+          KIMI_MODEL_BASE_URL: `${provider.baseUrl}/v1`,
+          KIMI_MODEL_CAPABILITIES: "tool_use",
         };
-        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        const setupResult = await runSetup([], makeContext(workspace, { ...baseEnv, CLAUDE_PLUGIN_DATA: pluginData }));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
         ).toBe("ok");
 
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
+        const goalPrompt = buildGoalPrompt(GOAL_OBJECTIVE);
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), GOAL_BUDGET_MS);
         timer.unref?.();
-        let result;
+        let result: CliClientResult;
         try {
           result = await runCliPrompt({
             cwd: workspace,
             // Goal mode ON for this spawn; read-only label so the hook denies
             // every write. The label and the goal flag are independent.
-            env: {
-              ...process.env,
-              KIMI_CODE_HOME: kimiHome,
-              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
-              KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND: "1",
-            },
+            env: baseEnv,
             command,
             prefixArgs,
             executionPlan: smokePlan(command, prefixArgs, "pursue"),
             commandLabel: "review",
-            prompt: buildGoalPrompt(GOAL_OBJECTIVE),
+            prompt: goalPrompt,
             signal: controller.signal,
           });
         } finally {
           clearTimeout(timer);
         }
+
+        console.log(`[smoke] goal preliminary: budgetMs=${GOAL_BUDGET_MS} aborted=${result.aborted} exit=${result.exitCode} received=${provider.receivedRequests} completed=${provider.completedExchanges} rejected=${provider.rejectedRequests} compactions=${provider.compactionResponses} goalSummary=${JSON.stringify(result.goalSummary)} records=${JSON.stringify(result.records.slice(-6))}`);
+        expect(result.aborted, "the goal must remain unfinished and stop at its wall-clock budget").toBe(true);
+        expect(provider.completedExchanges, "goal must complete at least two provider turn exchanges").toBeGreaterThanOrEqual(4);
+        expect(provider.rejectedRequests, "goal must not make rejected provider requests").toBe(0);
+        expect(provider.receivedRequests - provider.completedExchanges, "at most one request may be in flight at budget abort").toBeLessThanOrEqual(1);
+        expect(provider.compactionResponses, "goal must exercise the compaction handoff path").toBeGreaterThanOrEqual(1);
 
         // Primary safety invariant: the ENTIRE workspace is empty at settlement,
         // not merely the three named goal targets. This proves final filesystem
@@ -1412,22 +1536,63 @@ suite("real-binary smoke: autonomous goal mode denies writes across turns (pursu
         // Non-vacuous multi-turn evidence comes from the real main-agent journal:
         // actual Write/Edit calls must have same-call managed error denials in at
         // least two distinct turns. Aggregate marker text and turnsUsed prove neither.
-        expect(result.sessionId, "goal run must yield a session for per-turn journal evidence").toBeDefined();
-        const mainJournal = (await findSessionJournals(kimiHome, result.sessionId as string))
+        const store = new JobStore(resolvePluginPaths({ ...baseEnv, CLAUDE_PLUGIN_DATA: pluginData }));
+        let sessionId: string | undefined;
+        try {
+          const recovered = await recoverSessionIdFromStore({
+            kimiHome,
+            cwd: workspace,
+            spawnedAt: result.spawnedAt,
+            settledAt: result.settledAt,
+            // runNativeGoalTurn submits the objective, not the `/goal --` wrapper.
+            promptDigest: digestPrompt(goalPrompt.slice("/goal -- ".length)),
+            store,
+            jobId: "goal-smoke",
+          });
+          if (recovered.reason !== undefined) throw new Error(`goal session recovery failed: ${recovered.reason}`);
+          sessionId = recovered.sessionId;
+        } finally {
+          store.close();
+        }
+        expect(sessionId, "goal run must recover a session for per-turn journal evidence").toBeDefined();
+        console.log(`[smoke] goal session evidence: source=store_recovery id=${sessionId}`);
+        const mainJournal = (await findSessionJournals(kimiHome, sessionId as string))
           .find((journal) => journal.endsWith(path.join("agents", "main", "wire.jsonl")));
         expect(mainJournal, "goal run must retain its main-agent wire journal").toBeDefined();
         const turnEvidence = goalTurnDenials(await readFile(mainJournal as string, "utf8"));
-        expect(turnEvidence.turnIds.length, "goal mode must run multiple turns").toBeGreaterThanOrEqual(2);
+        expect(turnEvidence.startedTurnIds.length, "goal mode must run multiple started turns").toBeGreaterThanOrEqual(2);
         const deniedTurns = [...new Set(turnEvidence.denials.map((denial) => denial.turnId))];
         expect(
-          deniedTurns.every((turnId) => turnEvidence.turnIds.includes(turnId)),
+          deniedTurns.every((turnId) => turnEvidence.startedTurnIds.includes(turnId)),
           "every denied-turn ID must come from a real agent.turn.started record",
         ).toBe(true);
         expect(
           deniedTurns.length,
           `expected same-call managed denials in at least two distinct turns; got ${JSON.stringify(turnEvidence)}`,
         ).toBeGreaterThanOrEqual(2);
-        console.log(`[smoke] goal denied-turn evidence: ${JSON.stringify({ turnIds: turnEvidence.turnIds, deniedTurns, denials: turnEvidence.denials })}`);
+        expect(
+          turnEvidence.denials.every((denial) => denial.toolCallId.startsWith("call_goal_")),
+          "journal denials must carry scripted goal call IDs",
+        ).toBe(true);
+        expect(
+          new Set(turnEvidence.denials.map((denial) => denial.target)).size,
+          "all three goal targets must be attempted",
+        ).toBe(GOAL_FILES.length);
+        expect(
+          turnEvidence.denials.length,
+          "denials must track completed tool-call/result pairs after accounting for compactions",
+        ).toBeGreaterThanOrEqual(Math.floor((provider.completedExchanges - provider.compactionResponses) / 2) - 1);
+        expect(existsSync(path.join(kimiHome, "credentials")), "no OAuth store may appear after goal turns").toBe(false);
+        expect(existsSync(path.join(kimiHome, "oauth")), "no legacy OAuth state may appear after goal turns").toBe(false);
+        console.log(`[smoke] goal denied-turn evidence: ${JSON.stringify({
+          startedTurnCount: turnEvidence.startedTurnIds.length,
+          deniedTurnCount: deniedTurns.length,
+          denialCount: turnEvidence.denials.length,
+          minimumDenialCount: Math.floor((provider.completedExchanges - provider.compactionResponses) / 2) - 1,
+          firstDeniedTurns: deniedTurns.slice(0, 2),
+          lastDeniedTurns: deniedTurns.slice(-2),
+          sampleDenials: turnEvidence.denials.slice(0, 2),
+        })}`);
 
         // Abort-at-budget is the expected path. The no-file assertion covers
         // escapes; the journal evidence above proves denials across turns.
@@ -1437,16 +1602,37 @@ suite("real-binary smoke: autonomous goal mode denies writes across turns (pursu
               ? `goalSummary=${JSON.stringify(result.goalSummary)}`
               : "goalSummary=(none — ran to budget, the expected steady state)"),
         );
+        expect(
+          result.goalSummary === undefined || result.goalSummary.status === "paused",
+          "goal summary, when present after an abort, must be paused rather than complete",
+        ).toBe(true);
         if (result.goalSummary !== undefined) {
           expect(
             result.goalSummary.turnsUsed ?? 0,
             "if the goal terminated, its metadata should show at least two turns",
           ).toBeGreaterThanOrEqual(2);
         }
+      } catch (error) {
+        primaryError = error;
+        throw error;
       } finally {
-        await cleanupTestPath(kimiHome);
-        await cleanupTestPath(workspace);
-        await cleanupTestPath(pluginData);
+        let cleanupError: unknown;
+        try {
+          if (provider !== undefined) await provider.close();
+        } catch (error) {
+          cleanupError = error;
+        }
+        for (const root of roots) {
+          try {
+            await cleanupTestPath(root);
+          } catch (error) {
+            cleanupError ??= error;
+          }
+        }
+        if (primaryError === undefined && cleanupError !== undefined) throw cleanupError;
+        if (primaryError !== undefined && cleanupError !== undefined) {
+          console.error(`[smoke] cleanup after failure also failed: ${String(cleanupError)}`);
+        }
       }
     },
     GOAL_BUDGET_MS + 30_000,

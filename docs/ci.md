@@ -27,19 +27,20 @@ The real-binary smoke suite skips unless explicitly enabled. A successful base C
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.5.2`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.5.3`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
 - forced writes denied under each read-only label
 - unsafe experimental selectors and default plan mode refused before spawn
 - native-v2 provenance, resume, and plan-tainted journal refusal
+- deterministic loopback Write attempts for native-v2 resume and goal continuation, with exact call IDs and objective-digest store recovery; these two lanes require no real credentials
 - managed denials correlated with write attempts across goal-mode continuation turns
 - actual read-only swarm fan-out, proved by distinct child journals with each child's assigned Write attempt and managed denial, not merely an `AgentSwarm` call or aggregate denial
 - write-swarm edits authored by distinct children and captured in a patch, with the real checkout unchanged; a coordinator-only patch is not fan-out evidence
 - out-of-worktree write attempts by real children denied
 
-On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1 and 2.5.2), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
+On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
 
 Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidate, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
 
@@ -76,9 +77,10 @@ The seed directory is empty and can be removed afterward. Choose provider type a
 service-account vault and resolve it only for the smoke process:
 
 ```sh
-# ~/.secrets.agent.op maps KIMI_CODE_API_KEY to the vault item (by UUID).
-# Adapt it to the CLI's env-model channel with the documented coding endpoint.
-op-agent run --env-file ~/.secrets.agent.op -- bash -c '
+# ~/.secrets.agent.kimi-plugin-cc.op maps only KIMI_CODE_API_KEY to the vault item
+# (by UUID), so unrelated shared-vault items cannot block this task. Adapt it to
+# the CLI's env-model channel with the documented coding endpoint.
+op-agent run --env-file ~/.secrets.agent.kimi-plugin-cc.op -- bash -c '
   export KIMI_MODEL_API_KEY="$KIMI_CODE_API_KEY"
   export KIMI_MODEL_NAME="kimi-for-coding"
   export KIMI_MODEL_PROVIDER_TYPE="kimi"
@@ -100,7 +102,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.5.2
+  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.5.3
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```

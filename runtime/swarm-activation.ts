@@ -26,7 +26,7 @@ import {
   type ProcessIdentity,
 } from "./process-tree.js";
 
-const PREACTIVATION_VERSIONS: readonly string[] = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2"];
+const PREACTIVATION_VERSIONS: readonly string[] = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3"];
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
 // Exact 2.4.0 can take longer than 5s to drain session/workspace lifecycle work.
@@ -561,7 +561,7 @@ async function createSession(
   failureCode: FailureCode,
 ): Promise<SwarmSessionIdentity> {
   const request: Record<string, unknown> = { metadata: { cwd: options.cwd } };
-  if (["2.5.0", "2.5.1", "2.5.2"].includes(expectedVersion)) {
+  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(expectedVersion)) {
     request.environment_id = "local";
     request.environment_cwd = options.cwd;
   }
@@ -587,7 +587,7 @@ async function verifyLocalEnvironment(
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<void> {
-  if (!["2.5.0", "2.5.1", "2.5.2"].includes(expectedVersion)) return;
+  if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(expectedVersion)) return;
   const data = await restData(
     web,
     "GET",
@@ -640,7 +640,7 @@ async function verifySwarmStatus(
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<void> {
-  const data = ["2.5.0", "2.5.1", "2.5.2"].includes(expectedVersion)
+  const data = ["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(expectedVersion)
     ? await readWebSocketAgentState(web, identity.sessionId, signal, failureCode)
     : await restData(
         web,
@@ -650,7 +650,7 @@ async function verifySwarmStatus(
         signal,
         failureCode,
       );
-  const source = ["2.5.0", "2.5.1", "2.5.2"].includes(expectedVersion) ? "agent state" : "/status";
+  const source = ["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(expectedVersion) ? "agent state" : "/status";
   if (!isRecord(data)) {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} returned an invalid payload.`);
   }
@@ -665,10 +665,10 @@ async function verifySwarmStatus(
   if (data.plan_mode !== false) {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm plan mode is off.`);
   }
-  if (["2.5.0", "2.5.1", "2.5.2"].includes(expectedVersion) && data.tower_mode !== false) {
+  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(expectedVersion) && data.tower_mode !== false) {
     throw failure(failureCode, "swarm-activation.status", "Kimi web agent state did not confirm tower mode is off.");
   }
-  const permission = ["2.5.0", "2.5.1", "2.5.2"].includes(expectedVersion) ? data.permission_mode : data.permission;
+  const permission = ["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(expectedVersion) ? data.permission_mode : data.permission;
   if (permission !== "auto") {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm auto permission mode.`);
   }

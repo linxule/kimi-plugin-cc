@@ -2,6 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.5.7 — 2026-11-11
+
+- Certify exact kimi-code 2.5.3 for all eight native-v2 operations, alongside 2.5.0, 2.5.1 and 2.5.2. All 40 load-bearing source files are unchanged from 2.5.2; steering/transcript, agent-loop, MCP startup and Windows spawn changes preserve the single before-execute gate and no-plan construction. See the [2.5.3 evidence](docs/upstream-2.5.3-certification.md).
+- Extend every exact-version branch to 2.5.3: production table, swarm preactivation/local binding and protocol-v2 agent state, fresh `--environment local`, and the reviewed hook schema. Prerelease/build-suffixed versions and 2.5.4 remain refused. The manual smoke workflow now defaults to 2.5.3.
+- Make resume and goal controls deterministic with loopback providers, exact fresh/resumed/goal call IDs, per-turn managed denials, compaction handling, and smoke-only objective-digest store recovery. Both candidate and production matrices pass 24 tests with 201 assertions in 349.07 and 406.19 seconds, including real rescue/Bash.cwd confinement, resume/taint refusal, child-authored patches, and out-of-root denial.
+- Repair the operator-local certification wrapper with a Kimi-only, mode-0600 credential mapping and literal environment-based redaction, so an unrelated missing shared-vault item cannot block certification. This wrapper is not shipped in the plugin. Publication does not update installed hosts or operator pins.
+- Pass the exact-tag scan on 2.5.3 and the 2.5.2 regression tree (18 tests, 153 assertions each), sequential exact-binary controls, candidate and production matrices (24 tests, 201 assertions each, no skips), the corrected-tree full repository gate with 1,437 tests and 18,980 assertions in 396.30 seconds, and 332-file package checks across all three distributions with isolated consumer security.
+
 ## 2.5.6 — 2026-11-07
 
 - Certify exact kimi-code 2.5.2 for all eight native-v2 operations, alongside 2.5.0 and 2.5.1. Upstream 2.5.2 changes only MCP pending-tool registration, tool-select reconciliation and tool-contract signature helpers; all seven audit scopes and all 40 pinned files are unchanged from 2.5.1, and pending replacements never resolve for execution. See the [2.5.2 evidence](docs/upstream-2.5.2-certification.md).

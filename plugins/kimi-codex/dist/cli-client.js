@@ -786,7 +786,7 @@ function buildArgs(opts) {
         ? opts.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE
         : undefined;
     if (opts.resumeSessionId === undefined &&
-        ["2.5.0", "2.5.1", "2.5.2"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
+        ["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
         args.push("--environment", "local");
     }
     if (opts.resumeSessionId !== undefined) {

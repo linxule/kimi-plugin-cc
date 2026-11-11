@@ -28,8 +28,10 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 // only the wall-clock hard bound. Read/write modes reuse review/rescue lineage,
 // and the mandatory PreToolUse hook enforces read-only policy or trusted-worktree
 // write confinement on the coordinator and every subagent. Write mode requires
-// kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0 and 2.5.1 additionally
-// activate a same-job session through a bounded loopback web lifecycle, then resume it through the normal print path.
+// kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2
+// and 2.5.3 additionally activate a same-job session through a bounded loopback
+// web lifecycle, then resume it through the normal print path. The production
+// certification table controls whether each exact version is reachable.
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
 const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
