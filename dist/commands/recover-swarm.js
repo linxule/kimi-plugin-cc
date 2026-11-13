@@ -103,7 +103,8 @@ export async function runRecoverSwarm(argv, context) {
             if (current.command !== plan.command || current.kimiVersion !== plan.kimiVersion || JSON.stringify(current.prefixArgs) !== JSON.stringify(plan.prefixArgs))
                 throw recoveryError("The exact recorded CLI is not selected. Restore that certified binary before session cleanup.");
             signal.throwIfAborted();
-            await deactivateSwarmSession({ cwd: record.cwd, env: context.env, command: current.command,
+            const recoveryExecutionCwd = await realpath(record.cwd);
+            await deactivateSwarmSession({ cwd: recoveryExecutionCwd, env: context.env, command: current.command,
                 prefixArgs: current.prefixArgs, executionPlan: current, commandLabel: expectedRoot ? "swarm-write" : "swarm",
                 trustedWorkspaceRoot: expectedRoot ?? undefined, ...record.session, signal,
                 onRecoveryEvent: (event) => recordRecoveryEvent(store, record, event) });

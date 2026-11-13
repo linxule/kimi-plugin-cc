@@ -4,6 +4,8 @@ Normal stop: use `scripts/companion.sh cancel` for a shell-owned run, or the MCP
 
 For exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1 and 2.5.0/2.5.1/2.5.2/2.5.3 swarm runs created by this runtime, status includes a durable `swarm_recovery` record. It contains the resolved home/workspace, companion identity, launch intent, verified process identities and session identity. It never contains the web authentication token, credentials, prompt or config contents. Session identity is committed before the request enabling swarm mode.
 
+The exact 2.6.0 integration is a candidate, not a certified version. Recovery canonicalizes `record.cwd` only for session deactivation through symlinked execution parents. Ownership, workspace, and patch checks continue to use the original recorded alias.
+
 ## Preview, then recover
 
 Run from the original repository with its original plugin data root and Kimi home:
@@ -17,7 +19,7 @@ Preview does not signal processes, modify sessions, or capture patches. Apply:
 
 1. Requires the original companion to be gone and acquires an identity-checked recovery claim. A second recovery cannot race the first; a dead recovery owner can be reclaimed by compare-and-swap.
 2. Revalidates recorded processes and groups. It stops only verified individual identities, never a guessed PID or unproven group. An unknown surviving group member, changed group, incomplete probe or unrecorded launch refuses recovery.
-3. If session cleanup is pending, requires the selected exact certified CLI and valid managed hook. It starts one bounded authenticated web lifecycle, disables the recorded session's swarm mode, verifies the version-appropriate state proof and exit journal, then verifies process quiescence. On 2.5.0/2.5.1/2.5.2/2.5.3 this includes the local environment binding and protocol-v2 WebSocket main-agent state rather than `/status`. It does not resume a prompt, generate model output, install hooks or retry failed cleanup automatically. New recovery web launches are themselves journaled.
+3. If session cleanup is pending, requires the selected exact certified CLI and valid managed hook. It starts one bounded authenticated web lifecycle, disables the recorded session's swarm mode, verifies the version-appropriate state proof and exit journal, then verifies process quiescence. On 2.5.0/2.5.1/2.5.2/2.5.3 this includes the local environment binding and protocol-v2 WebSocket main-agent state rather than `/status`. It does not resume a prompt, generate model output, install hooks or retry failed cleanup automatically. New recovery web launches are themselves journaled. Deactivation uses the realpath of `record.cwd`; the original recorded alias remains the ownership, workspace, and patch-check boundary.
 4. Captures a binary patch from a retained write worktree. It does not apply the patch or delete the tree. The result names both paths for inspection.
 
 The recovery attempt has a 30-second cancellation signal, with bounded identity probes and normal teardown. Interrupting recovery retains its journal. An already-recovered record is an idempotent no-op. Failed/cancelled/completed job outcomes are immutable; a previously running abandoned job becomes failed, never completed. Recovery status is separate from task success.

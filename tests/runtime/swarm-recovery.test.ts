@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { JobStore } from "../../runtime/job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
@@ -110,6 +110,60 @@ describe("durable swarm recovery", () => {
       expect(await readFile(log, "utf8")).toBe(logAfter);
       expect(JSON.stringify(store.getJob(job.job_id))).toBe(settled);
       expect((await launch(["recover-swarm", job.job_id, "--apply"], root, recoverEnv).done).code).toBe(1);
+    } finally {
+      running.child.kill("SIGKILL");
+      await running.done;
+      if (orphanPid) { try { process.kill(-orphanPid, "SIGKILL"); } catch {} }
+      store.close();
+      if (worktree) await removeWorktree(repo, worktree);
+      await cleanupTestPath(repo);
+      await cleanupTestPath(root);
+    }
+  }, 30_000);
+
+  test("compiled hard-kill recovery canonicalizes a symlinked execution root", async () => {
+    const root = await createTestPluginDataRoot("swarm-crash-symlink");
+    const alias = path.join(root, "alias");
+    await symlink(root, alias);
+    const repo = await createGitRepoFixture("swarm-crash-symlink-repo");
+    const home = path.join(root, "home");
+    const log = path.join(root, "web.jsonl");
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: alias, KIMI_CODE_HOME: home,
+      KIMI_PLUGIN_CC_KIMI_BIN: node, KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mock]),
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", MOCK_KIMI_WEB_LOG: log,
+      MOCK_KIMI_WEB_VERSION: "2.5.3", MOCK_KIMI_WEB_TOKEN: "never-persist-this-token" };
+    await mkdir(home, { recursive: true });
+    const paths = resolvePluginPaths(env);
+    await ensurePluginPaths(paths);
+    const store = new JobStore(paths);
+    const running = launch(["task", "swarm", "--write", "--budget", "20s", "symlinked crash recovery fixture"], repo, env);
+    let worktree: string | undefined;
+    let orphanPid: number | undefined;
+    try {
+      const repoId = (await resolveRepoIdentity(repo)).repoId;
+      const { job, recovery } = await waitUntil(async () => {
+        const job = store.findLatestJob({ repoId });
+        const recovery = job && store.getSwarmRecovery(job.job_id)?.record;
+        const entries = (await readFile(log, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+        if (!job || !recovery?.sessionDirty || !entries.some((entry) => entry.frame?.type === "subscribe_v2")) return;
+        return { job, recovery };
+      });
+      expect(recovery.launches[0]?.pending).toBe(false);
+      worktree = recovery.workspaceRoot!;
+      orphanPid = recovery.launches[0]!.identities[0]!.pid;
+      await writeFile(path.join(worktree, "recovered.txt"), "keep this untracked work\n");
+      running.child.kill("SIGKILL");
+      await running.done;
+      const recovered = await launch(["recover-swarm", job.job_id, "--apply"], repo, env).done;
+      expect(recovered.code, recovered.stderr).toBe(0);
+      const output = JSON.parse(recovered.stdout);
+      expect(output.recovery_complete).toBe(true);
+      expect(await readFile(output.patch_path, "utf8")).toContain("+keep this untracked work");
+      expect(existsSync(worktree)).toBe(true);
+      expect(store.getSwarmRecovery(job.job_id)?.record.complete).toBe(true);
+      const journal = await readFile(path.join(home, "sessions/wd_mock/session_mock/agents/main/wire.jsonl"), "utf8");
+      expect(journal).toContain('"type":"swarm_mode.exit"');
+      expect(JSON.stringify(store.getSwarmRecovery(job.job_id))).not.toContain("never-persist-this-token");
     } finally {
       running.child.kill("SIGKILL");
       await running.done;

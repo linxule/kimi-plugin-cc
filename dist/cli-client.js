@@ -115,8 +115,8 @@ export async function runCliPrompt(opts) {
     const records = [];
     const malformed = [];
     // Rolling stderr tail — keep only the trailing STDERR_TAIL_BYTES so a
-    // long-running kimi process emitting megabytes of stderr (tool.progress,
-    // thinking deltas) doesn't grow our RSS unboundedly.
+    // long-running kimi process emitting megabytes of stderr (tool.updated
+    // output/status, thinking deltas) doesn't grow our RSS unboundedly.
     let stderrTail = "";
     let announcedSessionId;
     let announcedGoalSummary;
@@ -786,7 +786,7 @@ function buildArgs(opts) {
         ? opts.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE
         : undefined;
     if (opts.resumeSessionId === undefined &&
-        ["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
+        ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
         args.push("--environment", "local");
     }
     if (opts.resumeSessionId !== undefined) {

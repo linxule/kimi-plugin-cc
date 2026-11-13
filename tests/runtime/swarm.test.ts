@@ -78,20 +78,20 @@ describe("parseSwarmArgs", () => {
     const args = parseSwarmArgs(["--budget", "1h", "--cap", "6", "audit", "every", "route"]);
     expect(args.budgetMs).toBe(3_600_000);
     expect(args.cap).toBe(6);
-    // --cap is the SOFT total-count hint only; it must NOT feed the hard
-    // concurrency ceiling (that is --max-concurrency's job after the v1.2.7 split).
+    // --cap is the SOFT total-count hint only; it must NOT feed the
+    // normal-launch concurrency setting (that is --max-concurrency's job).
     expect(args.maxConcurrency).toBeUndefined();
     expect(args.objective).toBe("audit every route");
   });
 
-  test("--cap and --max-concurrency are independent (soft total vs hard concurrency)", () => {
+  test("--cap and --max-concurrency are independent (soft total vs normal-launch concurrency)", () => {
     const args = parseSwarmArgs(["--cap", "20", "--max-concurrency", "4", "sweep", "the", "repo"]);
     expect(args.cap).toBe(20);
     expect(args.maxConcurrency).toBe(4);
     expect(args.objective).toBe("sweep the repo");
   });
 
-  test("--max-concurrency alone sets only the hard ceiling", () => {
+  test("--max-concurrency alone sets only the normal-launch ceiling", () => {
     const args = parseSwarmArgs(["--max-concurrency", "3", "review", "x"]);
     expect(args.maxConcurrency).toBe(3);
     expect(args.cap).toBeUndefined();
@@ -162,10 +162,9 @@ describe("parseSwarmArgs", () => {
 });
 
 describe("resolveSwarmMaxConcurrency", () => {
-  test("applies the hard concurrency default when --max-concurrency is unset", () => {
-    // v1.3: swarm is model-invocable via the kimi-swarm agent, so an
-    // auto-dispatched fan-out must never run with an unbounded peak. The runtime
-    // enforces a finite ceiling by construction rather than trusting agent prose.
+  test("applies the normal-launch concurrency default when --max-concurrency is unset", () => {
+    // Model-invocable swarms always export a finite normal-launch setting
+    // rather than relying on agent prose; rate-limit recovery is a separate case.
     expect(resolveSwarmMaxConcurrency(undefined)).toBe(SWARM_DEFAULT_MAX_CONCURRENCY);
     expect(SWARM_DEFAULT_MAX_CONCURRENCY).toBe(4);
   });

@@ -1,7 +1,7 @@
 import { recordRecoveryEvent, finishRecoveryRecord } from "../../runtime/swarm-recovery.js";
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink } from "node:fs/promises";
 import path from "node:path";
 
 import { runSwarm } from "../../runtime/commands/swarm.js";
@@ -247,6 +247,30 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       const log = await readLog(fixture);
       expect(printEntries(log)).toHaveLength(1);
       expect(profileRequests(log, false)).toHaveLength(1);
+    });
+  }, 20_000);
+
+  test("canonicalizes a symlinked write worktree for preactivated resume", async () => {
+    await withFixture("success", true, async (fixture) => {
+      const aliasRoot = await createTestPluginDataRoot("swarm-command-alias");
+      const target = path.join(aliasRoot, "actual-data");
+      const alias = path.join(aliasRoot, "linked-data");
+      await mkdir(target, { recursive: true });
+      await symlink(target, alias);
+      fixture.env.CLAUDE_PLUGIN_DATA = alias;
+      try {
+        await expect(runSwarm(["--write", "--budget", "10s", "target"], context(fixture)))
+          .resolves.toContain(proseSentinel);
+        const log = await readLog(fixture);
+        const created = log.find((entry) => entry.kind === "request" && entry.path === "/api/v1/sessions");
+        const print = printEntries(log)[0];
+        expect(created).toBeDefined();
+        expect(print).toBeDefined();
+        expect(print!.cwd).toBe(created!.body.metadata.cwd);
+        expect(print!.cwd).toContain(`${target}${path.sep}`);
+      } finally {
+        await cleanupTestPath(aliasRoot);
+      }
     });
   }, 20_000);
 

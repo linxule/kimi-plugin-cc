@@ -859,6 +859,190 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
     [`${KAP}/start.ts`]:
       "21842202f83ac093b63ab3ced9805d56be8a46c0e6199e96457948cf4b0feac1",
   },
+  // 2.6.0: reviewed executor, live-root, swarm-lifecycle, journal-normalization,
+  // and direct-subscription protocol bytes at commit 740d6c0b.
+  "2.6.0": {
+    [`${CORE}/features/externalHooks/configSection.ts`]:
+      "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+    [`${CORE}/features/externalHooks/internal/types.ts`]:
+      "322a7ec016ccb6f33ca0d9fdc1e609393921c366c2b5bb7063341c9ca29cc318",
+    [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+      "b3bb899d89ae1aeca0dc25eaf530f061992f8610e031eca86a1853bc06c679c0",
+    [`${CORE}/features/plan/planService.ts`]:
+      "15973cf75e5f87362e2ebaa8a708be5929965221ef517115f9ab8988e04c7546",
+    [`${CORE}/state/eventDispatcherService.ts`]:
+      "fa7b1a4aae91bab708f11fa1383e0f1b58612a161dff96f43f003af789a56889",
+    [`${CORE}/state/state.ts`]:
+      "e48d456b078fd387857599a8b0f7f289623d7d1614230e46b898fa4a1f719e75",
+    [`${CORE}/features/plan/planOps.ts`]:
+      "ed1010511cef4244f35e3baee8cca0fd6638b709f28703c6159eb1735fe05137",
+    [`${CORE}/app/config/toml.ts`]:
+      "57f3830d4fcbf48bb79f6e400efb53af3198ea64de194b381ff8545ab808e334",
+    [`${CORE}/app/sessionExport/wire-scan.ts`]:
+      "29489dabbc2a585a5cc70015a7b160f7c0a13403f102de007bbce89d1a6b5ef9",
+    [`${CORE}/wire/wireService.ts`]:
+      "ca38106e043bc230b77e606ff641286cc000b76dc34a04d331425d326e3b23ee",
+    [`${CORE}/wire/record.ts`]:
+      "ec9e4c1ad7b1c067a782570f5bfd0d7299a60fc120d8ca997243d134b7f8eb1d",
+    [`${CORE}/wire/tree/fork.ts`]:
+      "9588d05ee09f9c5534f19f0c4be7c521b4c74c4071d489073abfa203d533a5a9",
+    [`${CLI}/cli/v2/run-v2-print.ts`]:
+      "aa2973350da8339e3424a8df8c84254ae8c26a886244cda83b545b2e59d8650f",
+    [`${CORE}/app/sessionManager/sessionLookup.ts`]:
+      "d4a087aa8364e1ca1b9c7b2324956d06495c8c54c880c2a767a27560c676129d",
+    [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
+      "43375aced3e13dcd0fb0233932d86ef16336d6d4aac16c3fec164b8c8c4abce0",
+    [`${SDK}/sdk-rpc-client-v2.ts`]:
+      "ca5b95fb4c8bd169a963a62d6c2d12d9ecfb10c3dd68a14de2cc0a42f7985c36",
+    [`${CORE}/app/sessionManager/sessionManagerService.ts`]:
+      "9f7b0909c592767c5affd66349d953379758a27e78be9e610fcd7ae020b3f4b6",
+    [`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`]:
+      "7387c13342305644419f80fb9148ba30457f1b28e21b1a76f004c05238088470",
+    [`${CORE}/session/agentLifecycle/agentLifecycleService.ts`]:
+      "5c603a0910c7d5de768f96b4f24ef8e07757681f0450a4dc1154dc15c9c5de94",
+    [`${CORE}/agent/environmentBinding/environmentBindingService.ts`]:
+      "6fb825ba3b5f38511bc90ce4a3adbfd2f0dd211b46f80490ff4b35deba69ee9b",
+    [`${CORE}/agent/environmentBinding/environmentBindingOps.ts`]:
+      "bc0ff3d206520dbc16bf8223eb5dff67673865dfd25f04d391f962ef9322b13b",
+    [`${CORE}/app/config/configService.ts`]:
+      "8b1709ba10a5f7ae8d79be4eadd008e3861b6f2121fbed8b0dd8d1c6d198d53c",
+    [`${CORE}/workspace/workspaceTrust/configSection.ts`]:
+      "e10c5e96f0211e3936d03f68ee3695c8573ceb1398aed4e0bb4a3782f500d758",
+    [`${CORE}/workspace/workspaceTrust/workspaceTrustStore.ts`]:
+      "ff59ccb811c48fe3e0535becc9a68ad8921962ca5be8ac4e8a02762690fea164",
+    [`${CORE}/workspace/workspaceMcpConfig/workspaceMcpConfigService.ts`]:
+      "8bbc1e6ccd2fdd3ad30d17e7984deec20c86e430f07960ee495f0fab541060a9",
+    [`${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`]:
+      "304a3fad6f4292789059a517ba1a3d865d60a700bf47759eb1ea14f29418f58d",
+    [`${CORE}/agent/tools/os/bash/bashTool.ts`]:
+      "e3aecff7fb8a394fb4f3ef63e305a48069f0ffd251ed40117e903b3293bf6559",
+    [`${CORE}/remote/client/remoteEnvironmentProvider.ts`]:
+      "0260b35b201e632f4e742694f962ee414bd7bbac16eb9193e08540b8e8ad26f9",
+    [`${CLI}/cli/prompt-render.ts`]:
+      "d413a0678dcebb5a0a6f9dda8ce51d53e4b70d55b162afe6635a7d8c1a1536c4",
+    [`${CLI}/cli/goal-prompt.ts`]:
+      "b95cabc1336c191c5efebbbc08956d5d45138f39877ffffda8066bcb9fc75ca8",
+    [`${CLI}/cli/headless-exit.ts`]:
+      "9087cba8698f21aba08190240cedbf3da650d4596b6217eca26ec179d9396826",
+    [`${KAP}/protocol/ws-agent.ts`]:
+      "7c4702e09b26f1daf44bb17e61c69ba4f2c53ea6fa1f752998c338679f01087c",
+    [`${KAP}/transport/ws/v1/agentState.ts`]:
+      "c9de1f771f9cac100ef6330a661d372f6af7336e02ed2cb0a698d030e7dec80c",
+    [`${KAP}/transport/ws/bearerProtocol.ts`]:
+      "c9ee2315b3872bcc86a1a50ba965cfa43700754b6421873fd9771067c5eb8ec2",
+    [`${KAP}/transport/ws/v1/wsConnectionV1.ts`]:
+      "8eed7a6e80a616c1f52599fcce3127e6c43fee2c12b862e3b50df9d05eeb3783",
+    [`${KAP}/transport/ws/v1/sessionAgentFeed.ts`]:
+      "fff4f4fc515fd73b7f722da9dc9f5a4d013f1053481b7202507c59c6e7910c3d",
+    [`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`]:
+      "3feba744a838169fe54e5c45a92dbfe3586bfef2e588d5c99c5af382cb7b9db9",
+    [`${KAP}/routes/environment.ts`]:
+      "2896fd55bf06250a2c99b43305c1e4f23eea991848d2cb2782cb8931a96bb740",
+    [`${KAP}/routes/sessions.ts`]:
+      "56a668b0df3a6dabcc4481d72f3d85f224edf2f36cf6999003198f78810a287a",
+    [`${KAP}/start.ts`]:
+      "242b6419f697ff42afd669261b30ef1e65738ed28c4d47b4e91f35602725297b",
+    [`${CORE}/agent/toolExecutor/legacyHooks.ts`]:
+      "f28ea8b7e462268990e4f10bc38693bce99b3e1304f7200756019a6bd007c4f6",
+    [`${CORE}/agent/toolExecutor/toolExecutorService.ts`]:
+      "662efd34010010983056e5368dbb8fc1bc74a65576a8423f1e19fdb62c000c2a",
+    [`${CORE}/agent/toolExecutor/toolExecutor.ts`]:
+      "090c18ac2ccd10bda832184fc8f8f41ab80ea070097b00bae1eb0f5b2ec09780",
+    [`${CORE}/agent/permissionGate/permissionGateService.ts`]:
+      "e54b9f3c60e16542af71b52211b8eb37eb05a05fdbcae335296075400af34f13",
+    [`${CORE}/tool/executor/tool-executor.ts`]:
+      "9809209d8d5e1576d4d46d580650f9c2b4aa9a0a8443a49be3fea447de3f4198",
+    [`${CORE}/tool/executor/hook-composer.ts`]:
+      "87fbe3ee4b66c257deb3f697d5e1eddf1edbbdac4f8087dd04190700a8488fda",
+    [`${CORE}/tool/executor/legacy-adapter.ts`]:
+      "36dbe505edc195383bacb2bc1b40f8cb94f81f693f1a9e25ca00c387e81061d1",
+    [`${CORE}/features/externalHooks/externalHooksFeature.ts`]:
+      "658b6655cd2484d0001240e3ddbf9bc7c740f94d9ff93cbe83ce472a12188fc1",
+    [`${CORE}/wire/human.ts`]:
+      "13bebbc0dfd6774a12a6573d53e4b0df5533db40a44e987020da4b8bbe1c193d",
+    [`${CORE}/agent/loop/core/loop-actor.ts`]:
+      "f8012925aa1dc49504f5aa6a6d9bf2cdec2a38c565c8734d6be35fe694243303",
+    [`${CORE}/agent/shellCommand/shellCommandService.ts`]:
+      "5d6ab2ed43b04b4b583759bcfdf092980ea6eac75f807a67aabafc89ee4cbeea",
+    [`${CORE}/features/swarm/agent/swarmService.ts`]:
+      "39e7b76f2ee237d1f55ebc32ea84dee7b7d851d9370c6d4a971732869475ef39",
+    [`${CORE}/features/swarm/session/agentRunBatch.ts`]:
+      "339dbd7962c3b9bac145aff83aee06d6e5f3c6b9e8c472d4f4f94d7fb26390fc",
+    [`${CORE}/features/swarm/session/sessionSwarmService.ts`]:
+      "d4c80b19c03ee3c76469b0ca2e155bfb8f4f3f9a5019dafa21713b6eb89edbf0",
+    [`${CORE}/features/swarm/session/swarmMemberTask.ts`]:
+      "0d3dc139b4b3046b6aa924de1ef97a7342a0fef7f7e9680aa1c590b16186b7a4",
+    [`${CORE}/agent/task/taskService.ts`]:
+      "84f9c0c2c58903b0e35d80b6e9c8c4f245838fbed23937cdc6afbc58b50ff87e",
+    [`${CORE}/agent/tools/task/task-stop/taskStopTool.ts`]:
+      "2b0ea33daa6c7ebb28ecf756332ab2852351a69a7f9d862c37bd571e5f56b039",
+    [`${CORE}/session/subagent/subagentService.ts`]:
+      "7617d01bd6c7252caa5d575cba83eac17e14b28631bd6e9a3faa44511e2d1d06",
+    [`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`]:
+      "aad08384b2072731c01b17b5caa154fa048bba5cd87103285670f647807ea448",
+    [`${CORE}/features/swarm/swarmOps.ts`]:
+      "ee1d7b950482b38d4ca5616a03db485c64ba23a6dfd1af21d2346c3f99b93680",
+    [`${CORE}/agent/loop/journal.ts`]:
+      "6db67cb9803ee0b410349afc3b8d70a06fd29480499f462d3fbc58a19fc43a78",
+    [`${CORE}/agent/loop/turnOps.ts`]:
+      "01169a2ac6fd044021049dc4bf08ce4a9a258b00e5b42fc3a7f385f968eac08f",
+    [`${CORE}/agent/loop/loopService.ts`]:
+      "619befc8f9eea145cd01882a959dd73b347fbe08418595261d79fe75a5eda564",
+    [`${CORE}/agent/loop/turnProjection.ts`]:
+      "b36045d4c410a71a935df7dcb9a2b705ae4379c887a7af3292a24c4994b756ac",
+    [`${CORE}/agent/contextMemory/loopEventFold.ts`]:
+      "a785714d432d385a649deb9c37a7e5376a802ad08f7b5817e76db4eab39e6d8d",
+    [`${CORE}/session/subagent/mirrorAgentRun.ts`]:
+      "c52b28630bd8ab125c4def10d8b4ab577578bc81c3771474469d8b90ffc42e42",
+    [`${CORE}/_base/di/cascadeEngine.ts`]:
+      "ceb727b65f6a60e1644789b30048e5bb0436270cf01b9924f8985f8a7ac78c21",
+    [`${CORE}/_base/di/scope.ts`]:
+      "f474989c70dc4f5063ac10c2c3ff4780fb17d961946a3a05e1616fea7a13256c",
+    [`${CORE}/features/feature.ts`]:
+      "e0b281a039200524bd289401be1d937d0709dc1951f4352cd130e89656a3451b",
+    [`${CORE}/workspace/workspaceDirs/workspaceDirsService.ts`]:
+      "8b93555ab2d73cf12fd7e717ba935017a1add233fb0af10f288d6a731a0b6fa6",
+    [`${CORE}/session/workspaceContext/workspaceRoots.ts`]:
+      "8b1d6bfdb3da68afad5b00c9e869270996b32128148027692e446dbbc53e2487",
+    [`${CORE}/workspace/workspaceTrust/workspaceTrustService.ts`]:
+      "29c7756014c7f0ad94a640d2183b60bb6e91f36632d634af1284871b08973dc6",
+    [`${CORE}/app/sessionIndex/sessionIndexSource.ts`]:
+      "e3659f557668cf798c424e1c4a1c846abf98fe84f0750ee6b313b5baac774055",
+    [`${CORE}/workspace/workspaceInstance/workspaceInstanceManagerService.ts`]:
+      "677b1cedf43a720855ec0bff83757b944309debff6b18557316a222bebcdc45b",
+    [`${CORE}/agent/loop/profileAdapter.ts`]:
+      "90fd5e02835fe8afebf91270c92713ffde8611010bceadbf9da97b92895364e2",
+    [`${CORE}/features/btw/btwService.ts`]:
+      "b9ae0e8f51bc9262f67a440c8b024bf6c83e5e918e65259aa0f896bd4fdf98f3",
+    [`${CORE}/features/goal/goalService.ts`]:
+      "090624c3f71a9f447bb8dd35d93a53be17ffe985a0c9e4d0ca9ab6c3173fb239",
+    [`${CORE}/features/tower/towerService.ts`]:
+      "7cb07fc0be7ec8babe7e0f04c80a43160504760b7ec8f92fa124d82972f39ced",
+    [`${CORE}/agent/toolDedupe/toolDedupeService.ts`]:
+      "0188b03ff68dbf13bd6a8234c4274ef6abf4e1d61af78faad7b185398ef9887b",
+    [`${CORE}/agent/toolPolicy/toolPolicyService.ts`]:
+      "364fadd926c88eebccebf7277daae3284bc58b5b78c1cdce4b8d0d2e2682948d",
+    [`${CORE}/agent/toolSelect/toolSelectService.ts`]:
+      "373c78ad962f8b9d74cc5a68586c46e974f35e9dc7d72239c1d66dfbd7dae844",
+    [`${CORE}/agent/mcp/mcpService.ts`]:
+      "21235344108f1011e506c077cc3699923844d25d9d45e3a629bef8b4ad16a4a0",
+    [`${CORE}/features/fileHistory/fileHistoryService.ts`]:
+      "59685167b17932f3d1f28a4a5c25af0fa71ab8c92a55f03f6a08b35aedfdeabc",
+    [`${CORE}/agent/agentsMdReminder/agentsMdReminderService.ts`]:
+      "c7c3ebc1d19372d664f24635dc65337374d7b4b3f410636920065db2ae4e81db",
+    [`${CORE}/features/plan/planFeature.ts`]:
+      "5f225e09c7d2997d35137f33fba9425bfd9c25c0cd2d4f6666a6d9a256fe3e73",
+    [`${CORE}/agent/tools/os/write/write.ts`]:
+      "2e68559fcc0cb191ab41145fa84ab83bad8f87a5d8c9d81604e3144e7ce10167",
+    [`${CORE}/agent/tools/edit/edit.ts`]:
+      "7041e1d31bbe766e3e00c7f86ade466d1887c575770b51a2022f196df1095eae",
+    [`${CORE}/agent/tools/os/bash/bash.ts`]:
+      "16b1de61b520b5a6670c81c6b1d657f7e9ed124acf695e7225322f1dafe39cef",
+    [`${KAP}/protocol/ws-control.ts`]:
+      "1a23ac146e8f90b2598f8247d299465bdc1d6fc881255f58099d8096c7e21591",
+    [`${KAP}/routes/sessionAgentConfig.ts`]:
+      "8e493190bc577c3294634f9e032e53abd04b73afafecc2ec867aff88a0c380d1",
+  },
 };
 
 /**
@@ -960,19 +1144,19 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
   });
 
-  test("2.5 print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())) return;
+  test("2.5+ print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) return;
     const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
     const marker = runner.indexOf("writeExperimentalVersion(");
     const sdk = runner.indexOf("new SDKRpcClientV2(");
@@ -988,8 +1172,8 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(sdkClient).toContain("return agent.enterPlan()");
   });
 
-  test("2.5 environment and workspace-trust dependencies are explicitly reviewed", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())) return;
+  test("2.5+ environment and workspace-trust dependencies are explicitly reviewed", () => {
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) return;
     expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
       "options.environmentId === LOCAL_ENVIRONMENT_ID",
     );
@@ -1010,8 +1194,9 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
-  test("2.5 WebSocket state proof remains authenticated and bound to the live main agent", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())) return;
+  test("2.5+ WebSocket state proof remains authenticated and bound to the live main agent", () => {
+    const version = upstreamVersion();
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(version)) return;
     const schema = read(`${KAP}/protocol/ws-agent.ts`);
     for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
       expect(schema).toContain(field);
@@ -1019,10 +1204,28 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
     expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
     const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
-    const snapshot = broadcaster.indexOf("this.sendAgentLists(state, target, transcriptGrades)");
-    const transcript = broadcaster.indexOf("await this.subscribeTranscript(state, target, transcriptGrades");
-    expect(snapshot).toBeGreaterThan(-1);
-    expect(transcript).toBeGreaterThan(snapshot);
+    if (version === "2.6.0") {
+      const control = read(`${KAP}/protocol/ws-control.ts`);
+      expect(control).toContain("type: z.literal('subscribe')");
+      expect(control).toContain("type: z.literal('response')");
+      expect(control).toContain("request_id: z.string().min(1)");
+      expect(control).toContain("session_id: z.string().min(1)");
+      expect(control).toContain("agent_ids: z.array(z.string().min(1)).min(1).optional()");
+      expect(control).not.toContain("server_hello");
+      const connection = read(`${KAP}/transport/ws/v1/wsConnectionV1.ts`);
+      expect(connection).toContain("agentIds ?? [MAIN_AGENT_ID]");
+      expect(connection).toContain("this.respond(requestId, ErrorCode.SUCCESS)");
+      expect(connection).not.toContain("client_hello");
+      const accepted = broadcaster.indexOf("accepted?.();");
+      const snapshot = broadcaster.indexOf("this.sendAgentLists(state, target, added);");
+      expect(accepted).toBeGreaterThan(-1);
+      expect(snapshot).toBeGreaterThan(accepted);
+    } else {
+      const snapshot = broadcaster.indexOf("this.sendAgentLists(state, target, transcriptGrades)");
+      const transcript = broadcaster.indexOf("await this.subscribeTranscript(state, target, transcriptGrades");
+      expect(snapshot).toBeGreaterThan(-1);
+      expect(transcript).toBeGreaterThan(snapshot);
+    }
     expect(read(`${KAP}/routes/environment.ts`)).toContain("path: '/sessions/{session_id}/environment'");
     const start = read(`${KAP}/start.ts`);
     expect(start).toContain("extractWsBearerToken(req.headers['sec-websocket-protocol'])");
@@ -1059,25 +1262,78 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
     }
   });
 
-  test("every tool execution passes the single before-execute emitter", () => {
+  test("every tool execution passes the reviewed before-execute emitter composition", () => {
     const callers = filesContaining([CORE], "fireBeforeExecute(");
     expect(callers).toEqual([
       `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
+      ...(upstreamVersion() === "2.6.0" ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
   });
 
   test("the before-execute subscriber population is exactly the audited set", () => {
+    if (upstreamVersion() === "2.6.0") {
+      expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
+        `${CORE}/agent/toolExecutor/legacyHooks.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutor.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
+        `${CORE}/features/btw/btwService.ts`,
+        `${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`,
+        `${CORE}/features/goal/goalService.ts`,
+        `${CORE}/features/plan/planService.ts`,
+        `${CORE}/features/tower/towerService.ts`,
+      ]);
+      expect(filesContaining([CORE], "registerHook(")).toEqual([
+        `${CORE}/agent/agentsMdReminder/agentsMdReminderService.ts`,
+        `${CORE}/agent/mcp/mcpService.ts`,
+        `${CORE}/agent/permissionGate/permissionGateService.ts`,
+        `${CORE}/agent/shellCommand/shellCommandService.ts`,
+        `${CORE}/agent/task/taskService.ts`,
+        `${CORE}/agent/toolDedupe/toolDedupeService.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutor.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
+        `${CORE}/agent/toolPolicy/toolPolicyService.ts`,
+        `${CORE}/agent/toolSelect/toolSelectService.ts`,
+        `${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`,
+        `${CORE}/features/fileHistory/fileHistoryService.ts`,
+      ]);
+      expect(filesContaining([CORE], "registerToolBatchStarting(")).toEqual([
+        `${CORE}/agent/loop/loop.ts`,
+        `${CORE}/agent/loop/loopService.ts`,
+        `${CORE}/features/swarm/agent/swarmService.ts`,
+      ]);
+      return;
+    }
     expect(filesContaining([CORE], "onBeforeExecuteTool(")).toEqual(
       EXPECTED_BEFORE_EXECUTE_SUBSCRIBERS,
     );
+  });
+
+  test("2.6 executor phases preserve managed-hook veto and execution ordering", () => {
+    if (upstreamVersion() !== "2.6.0") return;
+    const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
+    expect(service).toContain("composeToolExecutorHooks([resetHook, legacyHook, ...hooks, internalHook])");
+    const executor = read(`${CORE}/tool/executor/tool-executor.ts`);
+    const starting = executor.indexOf("await decide('starting'");
+    const permitting = executor.indexOf("await decide('permitting'");
+    const beforeExecute = executor.indexOf("await hook?.beforeExecute");
+    const execute = executor.indexOf("returned = await tool.execute");
+    expect(starting).toBeGreaterThan(-1);
+    expect(permitting).toBeGreaterThan(starting);
+    expect(beforeExecute).toBeGreaterThan(permitting);
+    expect(execute).toBeGreaterThan(beforeExecute);
+    const legacy = read(`${CORE}/agent/toolExecutor/legacyHooks.ts`);
+    expect(legacy).toContain("if (decision?.allow === true) return { skipPermitting: true };");
+    expect(legacy).toContain("if (decision?.veto !== undefined)");
+    expect(read(`${CORE}/tool/executor/hook-composer.ts`)).toContain("if ('skipPermitting' in decision)");
+    expect(read(`${CORE}/agent/permissionGate/permissionGateService.ts`)).toContain("event.pass(");
   });
 
   test("the external-hooks agent service is eager (present in every agent scope)", () => {
@@ -1122,7 +1378,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(upstreamVersion())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) {
       expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
     }
     // Every append-log read in the wire service names the single wire key.
@@ -1151,7 +1407,16 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       expect(end, "readRestoreChains body delimiter changed").toBeGreaterThan(-1);
       const chains = body.slice(0, end);
       expect(chains).toContain("const entries = await this.readStableEntries();");
-      expect(chains).toContain("restorable: restorableChain(entries, tree).map(({ record }) => record)");
+      if (upstreamVersion() === "2.6.0") {
+        expect(chains).toContain(
+          "restorable: normalizeLegacyTurnSteerRecords(restorableChain(entries, tree).map(({ record }) => record))",
+        );
+        const human = read(`${CORE}/wire/human.ts`);
+        expect(human).toContain("normalized.push(record);");
+        expect(human).not.toMatch(/plan_mode|["'`]plan\.|planMode|PlanMode/);
+      } else {
+        expect(chains).toContain("restorable: restorableChain(entries, tree).map(({ record }) => record)");
+      }
       expect(chains).toContain("journal: entries.map(({ record }) => record)");
       expect(dispatcher).toContain("this.replayPass(chains.restorable, true, resolved)");
       expect(dispatcher).toContain("this.replayPass(chains.journal, false, resolved)");

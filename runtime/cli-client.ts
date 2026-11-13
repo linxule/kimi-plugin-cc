@@ -82,9 +82,10 @@ export interface CliClientOptions {
    */
   trustedWorkspaceRoot?: string;
   /**
-   * Hard cap on how many AgentSwarm subagents kimi-code runs CONCURRENTLY,
-   * exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (kimi-code
-   * 0.18.0+). Older binaries silently ignore the unknown env var, so
+   * Normal-launch cap on how many AgentSwarm subagents kimi-code runs
+   * CONCURRENTLY, exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
+   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0 sources can exceed it during
+   * rate-limit recovery. Older binaries silently ignore the unknown env var, so
    * on < 0.18 the soft --cap prompt-count hint is the only count bound. Only
    * /kimi:swarm sets this (from --max-concurrency, distinct from the soft --cap
    * total-count hint). Upstream's `resolveSwarmMaxConcurrency` THROWS on a
@@ -306,8 +307,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   const records: StreamJsonRecord[] = [];
   const malformed: Array<{ line: string; reason: string }> = [];
   // Rolling stderr tail — keep only the trailing STDERR_TAIL_BYTES so a
-  // long-running kimi process emitting megabytes of stderr (tool.progress,
-  // thinking deltas) doesn't grow our RSS unboundedly.
+  // long-running kimi process emitting megabytes of stderr (tool.updated
+  // output/status, thinking deltas) doesn't grow our RSS unboundedly.
   let stderrTail = "";
   let announcedSessionId: string | undefined;
   let announcedGoalSummary: GoalSummaryRecord | undefined;
@@ -1090,7 +1091,7 @@ function buildArgs(opts: CliClientOptions): string[] {
     : undefined;
   if (
     opts.resumeSessionId === undefined &&
-    ["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
+    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
   ) {
     args.push("--environment", "local");
   }

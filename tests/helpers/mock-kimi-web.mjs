@@ -130,7 +130,7 @@ async function handle(req, res) {
       send(res, null, { code: 40001, msg: `cwd mismatch ${token}` });
       return;
     }
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
       send(res, null, { code: 40001, msg: "missing local environment binding" });
       return;
     }
@@ -329,6 +329,10 @@ function readWsFrame(buffer) {
 
 function handleWsMessage(socket, frame) {
   void record({ kind: "ws-message", frame });
+  if (version === "2.6.0") {
+    handleWsMessageV26(socket, frame);
+    return;
+  }
   if (frame.type === "client_hello") {
     sendWsFrame(socket, {
       type: "ack",
@@ -384,6 +388,53 @@ function handleWsMessage(socket, frame) {
   });
 }
 
+function handleWsMessageV26(socket, frame) {
+  if (frame.type !== "subscribe") return;
+  if (scenario === "ws-malformed-json") {
+    sendWsFrame(socket, "{not-json");
+    return;
+  }
+  if (scenario === "ws-oversize-frame") {
+    sendWsFrame(socket, "x".repeat(1024 * 1024));
+  }
+  if (scenario === "ws-close-before-ack") {
+    socket.end();
+    return;
+  }
+  if (scenario === "ws-missing-ack") return;
+  const rejected = scenario === "ws-subscription-reject";
+  if (scenario !== "ws-unacknowledged-state") {
+    sendWsFrame(socket, {
+      type: "response",
+      request_id: scenario === "ws-wrong-subscribe-id" ? "wrong-subscribe-id" : frame.request_id,
+      code: rejected ? 40401 : 0,
+      msg: rejected ? "not found" : "success",
+    });
+  }
+  if (rejected || scenario === "ws-no-state") return;
+  const reportedSwarm = scenario === "ws-swarm-mismatch" && swarmMode ? false : swarmMode;
+  const planMode = (scenario === "ws-plan-mismatch" && swarmMode) ||
+    scenario === "ws-deactivation-plan-mismatch";
+  const agentFrame = {
+    type: "agent",
+    session_id: scenario === "ws-wrong-session" ? "session_other" : sessionId,
+    agent_id: scenario === "ws-wrong-agent" ? "agent-0" : "main",
+    event_created_at: new Date().toISOString(),
+    status: "idle",
+    compacting: false,
+    model: scenario === "ws-missing-model" ? undefined : scenario === "ws-model-mismatch" && swarmMode ? "wrong-model" : model,
+    thinking: "medium",
+    permission_mode: scenario === "ws-missing-permission" ? undefined : scenario === "ws-permission-mismatch" ? "manual" : permission,
+    plan_mode: scenario === "ws-malformed-state" ? "false" : planMode,
+    swarm_mode: reportedSwarm,
+    tower_mode: scenario === "ws-tower-mismatch",
+  };
+  sendWsFrame(socket, agentFrame);
+  if (scenario === "ws-contradictory-state") {
+    sendWsFrame(socket, { ...agentFrame, swarm_mode: !reportedSwarm });
+  }
+}
+
 const server = createServer((req, res) => {
   handle(req, res).catch(() => {
     if (!res.headersSent) send(res, null, { status: 500, code: 50001, msg: `internal ${token} ${configCanary}` });
@@ -433,7 +484,7 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
     }
   });
-  if (scenario !== "ws-no-server-hello") {
+  if (version !== "2.6.0" && scenario !== "ws-no-server-hello") {
     sendWsFrame(socket, {
       type: "server_hello",
       timestamp: new Date().toISOString(),
@@ -463,7 +514,7 @@ const args = process.argv.slice(2);
 if (args[0] === "mock-descendant") {
   await runMockDescendant();
 } else if (args.includes("--version")) {
-  process.stdout.write("2.3.2\n");
+  process.stdout.write(`${version}\n`);
   process.exit(0);
 } else if (args.includes("-p")) {
   process.exit(await runPrint(args));

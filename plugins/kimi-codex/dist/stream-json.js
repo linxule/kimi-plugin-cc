@@ -23,8 +23,8 @@
 //     stream, not on a separate channel.
 //   - thinking.delta events are silently discarded by the CLI's
 //     PromptJsonWriter (`writeThinkingDelta(): void {}`).
-//   - tool.progress events are written to stderr only, never entering
-//     stream-json.
+//   - tool.updated output/status events are written to stderr only, never
+//     entering stream-json.
 //   - assistant messages are only emitted when content OR tool_calls are
 //     non-empty; we still defend against the empty case for resilience.
 export const MAX_STREAM_JSON_LINE_BYTES = 1_048_576;

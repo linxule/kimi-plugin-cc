@@ -185,8 +185,10 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
   the rescue allowlist reads `tool_input.cwd` and confines it to the trusted root.
 - `-r` refuses when the session's recorded cwd differs from the current cwd
   (`run-v2-print.ts:426-432`).
-- `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` is still a hard cap, but **unset = no cap**; the
-  plugin always exports it (4 read / 1 write).
+- `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` caps normal launches on 0.18.0+, but **unset = no
+  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0 sources can
+  exceed the requested cap during rate-limit recovery, so this is not an unconditional peak
+  or write-serialization guarantee. See `docs/safety.md` for the current limitation.
 - The update preflight runs on the `-p` path; every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1`.
 - `[experimental]` config alone can enable `tower`/`subagent_fork`; the preflight refuses them
   (`CLI_V2_EXPERIMENTAL_UNSAFE`) alongside the master `KIMI_CODE_EXPERIMENTAL_FLAG`.

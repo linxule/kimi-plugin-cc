@@ -40,6 +40,28 @@ class CloseTimeoutWebSocket {
   send(raw: string): void {
     const frame = JSON.parse(raw);
     queueMicrotask(() => {
+      if (frame.type === "subscribe") {
+        this.emit("message", { data: JSON.stringify({
+          type: "response",
+          request_id: frame.request_id,
+          code: 0,
+        }) });
+        this.emit("message", { data: JSON.stringify({
+          type: "agent",
+          session_id: frame.session_id,
+          agent_id: "main",
+          event_created_at: new Date().toISOString(),
+          status: "idle",
+          compacting: false,
+          model: "chosen-model",
+          thinking: "medium",
+          permission_mode: "auto",
+          plan_mode: false,
+          swarm_mode: true,
+          tower_mode: false,
+        }) });
+        return;
+      }
       if (frame.type === "client_hello") {
         this.emit("message", { data: JSON.stringify({
           type: "server_hello",
@@ -278,7 +300,8 @@ describe("requiresSwarmPreactivation", () => {
     expect(requiresSwarmPreactivation("2.5.1")).toBe(true);
     expect(requiresSwarmPreactivation("2.5.2")).toBe(true);
     expect(requiresSwarmPreactivation("2.5.3")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.4", "2.5.2-beta.1", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.6.0")).toBe(true);
+    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.4", "2.6.1", "2.5.2-beta.1", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
   });
@@ -773,7 +796,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
     await withFixture("ws-success", async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_VERSION = version;
       const options = makeOptions(fixture, { expectedVersion: version, model: "chosen-model" });
@@ -791,12 +814,20 @@ describe("swarm web lifecycle", () => {
         environment_id: "local",
         environment_cwd: fixture.cwd,
       });
-      expect(activationLog.filter((entry) => entry.kind === "ws-message").map((entry) => entry.frame.type)).toEqual([
-        "client_hello",
-        "subscribe_v2",
-      ]);
-      expect(activationLog.find((entry) => entry.kind === "ws-message" && entry.frame.type === "subscribe_v2")?.frame.payload)
-        .toEqual({ session_id: "session_mock", transcript: { main: "block" } });
+      const control = activationLog.filter((entry) => entry.kind === "ws-message");
+      expect(control.map((entry) => entry.frame.type)).toEqual(
+        version === "2.6.0" ? ["subscribe"] : ["client_hello", "subscribe_v2"],
+      );
+      if (version === "2.6.0") {
+        expect(control[0]?.frame).toMatchObject({
+          session_id: "session_mock",
+          agent_ids: ["main"],
+        });
+        expect(control[0]?.frame.request_id).toEqual(expect.any(String));
+      } else {
+        expect(control.find((entry) => entry.frame.type === "subscribe_v2")?.frame.payload)
+          .toEqual({ session_id: "session_mock", transcript: { main: "block" } });
+      }
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.enter" });
 
       await deactivateSwarmSession({ ...options, ...identity });
@@ -808,7 +839,7 @@ describe("swarm web lifecycle", () => {
         "POST /api/v1/shutdown",
       ]);
       expect(requests(fullLog).some((entry) => entry.path?.endsWith("/status"))).toBe(false);
-      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(4);
+      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(version === "2.6.0" ? 2 : 4);
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
     });
   }, 15_000);
@@ -864,7 +895,54 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3"].flatMap((version) =>
+  test.each([
+    "ws-auth-reject",
+    "ws-subscription-reject",
+    "ws-unacknowledged-state",
+    "ws-wrong-session",
+    "ws-wrong-agent",
+    "ws-malformed-json",
+    "ws-malformed-state",
+    "ws-swarm-mismatch",
+    "ws-plan-mismatch",
+    "ws-permission-mismatch",
+    "ws-model-mismatch",
+    "ws-tower-mismatch",
+    "ws-contradictory-state",
+    "ws-missing-model",
+    "ws-missing-permission",
+    "ws-wrong-subscribe-id",
+    "ws-missing-ack",
+    "ws-oversize-frame",
+    "ws-close-timeout",
+    "ws-close-before-ack",
+  ])("exact 2.6.0 refuses invalid agent-state proof and preserves cleanup: %s", async (scenario) => {
+    await withFixture(scenario, async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.0";
+      const options = makeOptions(fixture, { expectedVersion: "2.6.0", model: "chosen-model" });
+      const identity = { sessionId: "session_mock", workspaceId: "wd_mock" };
+      const originalWebSocket = scenario === "ws-close-timeout" ? globalThis.WebSocket : undefined;
+      if (originalWebSocket !== undefined) {
+        globalThis.WebSocket = CloseTimeoutWebSocket as unknown as typeof WebSocket;
+      }
+      try {
+        await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
+          code: "SWARM_ACTIVATION_FAILED",
+          stage: "swarm-activation.status",
+          ...(scenario === "ws-close-timeout" ? { message: "Kimi web agent-state verification timed out." } : {}),
+          details: { session_id: identity.sessionId, workspace_id: identity.workspaceId },
+        });
+      } finally {
+        if (originalWebSocket !== undefined) globalThis.WebSocket = originalWebSocket;
+      }
+      expect(spawns(await readLog(fixture))).toHaveLength(1);
+      fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-success";
+      await deactivateSwarmSession({ ...options, ...identity });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+    });
+  }, 15_000);
+
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].flatMap((version) =>
     ["ws-environment-remote", "ws-environment-workspace", "ws-environment-cwd"].map((scenario) => [version, scenario] as const)))(
     "exact %s rejects an invalid local binding before profile mutation: %s",
     async (version, scenario) => {

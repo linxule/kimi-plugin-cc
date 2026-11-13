@@ -271,6 +271,23 @@ describe("scanSessionJournalsForPlan", () => {
     });
   });
 
+  test("legacy steer normalization cannot hide plan records in a child journal", async () => {
+    await withHome("journal-legacy-steer-plan", async (home) => {
+      await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "turn.prompt", turnId: 0, input: [], origin: { kind: "user" } }),
+      ]);
+      await writeJournal(home, "ws1", "session-1", "child-1", [
+        JSON.stringify({ type: "turn.steer", turnId: 0, input: [], origin: { kind: "user" } }),
+        JSON.stringify({ type: "plan_mode.enter" }),
+        JSON.stringify({ type: "turn.steer", turnId: 1, input: [], origin: { kind: "user" } }),
+        JSON.stringify({ type: "plan.revision" }),
+      ]);
+      const result = await scanSessionJournalsForPlan(home, "session-1");
+      expect(result.kind).toBe("tainted");
+      expect((result as { recordType: string }).recordType).toBe("plan_mode.enter");
+    });
+  });
+
   test("no matching session id → unavailable", async () => {
     await withHome("journal-no-match", async (home) => {
       await writeJournal(home, "ws1", "session-1", "main", [

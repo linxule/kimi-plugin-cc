@@ -100,14 +100,15 @@ export interface SwarmArgs extends KimiFlagState {
   /**
    * SOFT cap on TOTAL subagent count — a hint injected into the coordinator
    * prompt (buildSwarmPrompt). NOT hook-enforceable (the hook is stateless and
-   * can't count subagents), so the model may exceed it. For a HARD bound on how
-   * many subagents run AT ONCE, see `maxConcurrency`; the always-on hard bound
-   * on the whole run is the wall-clock `--budget`.
+   * can't count subagents), so the model may exceed it. For the normal-launch
+   * concurrency setting, see `maxConcurrency`; the always-on hard bound on the
+   * whole run is the wall-clock `--budget`.
    */
   cap?: number;
   /**
-   * Concurrent-subagent ceiling exported as
+   * Normal-launch concurrency ceiling exported as
    * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY and enforced on kimi-code 0.18.0+;
+   * reviewed 2.5.3/2.6.0 sources can exceed it during rate-limit recovery;
    * older binaries ignore it. Distinct from `cap`: concurrency (how many run
    * simultaneously) ≠ total count (how many run over the whole life of the
    * swarm). See runtime/cli-client.ts buildKimiCliEnvironment.

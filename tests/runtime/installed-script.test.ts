@@ -67,7 +67,7 @@ afterAll(async () => {
   if (cleanCopyRoot) {
     await rm(cleanCopyRoot, { recursive: true, force: true });
   }
-});
+}, 60_000);
 
 describe("installed-plugin script wrappers", () => {
   test("companion.sh launches dist/companion.js under sanitized PATH via KIMI_PLUGIN_CC_NODE_BIN", () => {

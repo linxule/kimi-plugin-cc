@@ -403,7 +403,7 @@ function goalTurnDenials(wire: string): {
   for (const line of wire.split("\n")) {
     if (!line.trim()) continue;
     const record = JSON.parse(line) as Record<string, unknown>;
-    if ((record.type === "agent.turn.started" || record.type === "turn.started") &&
+    if ((record.type === "agent.turn.started" || record.type === "turn.started" || record.type === "turn.prompt") &&
         (typeof record.turnId === "number" || typeof record.turnId === "string")) {
       const turnId = String(record.turnId);
       turnIds.add(turnId);
@@ -739,7 +739,8 @@ test("goal journal evidence requires real turn starts, error results, and Write/
     result("write-0", DENY_MARKER),
     call("0", "sensitive-0", `/work/${DENY_MARKER}/${GOAL_FILES[0]}`),
     result("sensitive-0", `PathSecurityError: ${DENY_MARKER}`),
-    started(1, "turn.started"),
+    { type: "turn.prompt", turnId: 1, agentId: "main", input: [], origin: { kind: "user" }, trigger: "continue" },
+    { type: "agent.input.submitted", turnId: 99 },
     call("1", "write-1", GOAL_FILES[1]),
     result("write-1", DENY_MARKER, false),
   ];
@@ -754,12 +755,12 @@ test("goal journal evidence requires real turn starts, error results, and Write/
   ].map((record) => JSON.stringify(record)).join("\n"));
   expect(second.denials.map((denial) => denial.turnId)).toEqual(["0", "1"]);
   expect(second.denials.map((denial) => denial.target)).toEqual([GOAL_FILES[0], GOAL_FILES[1]]);
-  const legacy = goalTurnDenials(attempts.filter((record) =>
-    record.type !== "agent.turn.started" && record.type !== "turn.started")
+  const withoutStarts = goalTurnDenials(attempts.filter((record) =>
+    record.type !== "agent.turn.started" && record.type !== "turn.started" && record.type !== "turn.prompt")
     .map((record) => JSON.stringify(record)).join("\n"));
-  expect(legacy.turnIds).toEqual(["0", "1"]);
-  expect(legacy.startedTurnIds).toEqual([]);
-  expect(legacy.denials.map((denial) => denial.turnId)).toEqual(["0"]);
+  expect(withoutStarts.turnIds).toEqual(["0", "1"]);
+  expect(withoutStarts.startedTurnIds).toEqual([]);
+  expect(withoutStarts.denials.map((denial) => denial.turnId)).toEqual(["0"]);
 });
 
 test("workspace entries include empty directories at settlement", async () => {
@@ -1564,7 +1565,7 @@ goalSuite("real-binary smoke: autonomous goal mode denies writes across turns (p
         const deniedTurns = [...new Set(turnEvidence.denials.map((denial) => denial.turnId))];
         expect(
           deniedTurns.every((turnId) => turnEvidence.startedTurnIds.includes(turnId)),
-          "every denied-turn ID must come from a real agent.turn.started record",
+          "every denied-turn ID must come from a durable turn.prompt or legacy agent.turn.started record",
         ).toBe(true);
         expect(
           deniedTurns.length,

@@ -2,7 +2,7 @@ import { resolveKimiHome } from "../kimi-home.js";
 import { probeProcessIdentity } from "../process-tree.js";
 import { recordRecoveryEvent, finishRecoveryRecord } from "../swarm-recovery.js";
 import { allocateJobId } from "../job-id.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
 import { ResponseTimeoutError, runCliPromptWithBudget } from "../cli-client.js";
@@ -23,46 +23,46 @@ import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMiss
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // /kimi:swarm — parallel fan-out, read-only by default and runtime-foreground-only.
 // A finite wall-clock budget bounds the whole run. --cap is a SOFT total-count
-// prompt hint; --max-concurrency is a HARD peak ceiling enforced on kimi-code
-// 0.18.0+. The plugin always exports that setting; older read-only swarms retain
-// only the wall-clock hard bound. Read/write modes reuse review/rescue lineage,
-// and the mandatory PreToolUse hook enforces read-only policy or trusted-worktree
-// write confinement on the coordinator and every subagent. Write mode requires
-// kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2
-// and 2.5.3 additionally activate a same-job session through a bounded loopback
-// web lifecycle, then resume it through the normal print path. The production
-// certification table controls whether each exact version is reachable.
+// prompt hint; --max-concurrency caps normal launches on kimi-code 0.18.0+.
+// Reviewed 2.5.3/2.6.0 schedulers can exceed that cap during rate-limit recovery.
+// The plugin always exports the setting; older read-only swarms retain only the
+// wall-clock hard bound. Read/write modes reuse review/rescue lineage, and the
+// mandatory PreToolUse hook enforces read-only policy or trusted-worktree write
+// confinement on the coordinator and every subagent. Write mode requires
+// kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2,
+// and certified 2.5.3 activate a same-job session through a bounded loopback
+// web lifecycle, then resume it through the normal print path. Candidate 2.6.0
+// uses that lifecycle too but is not production-certified. The certification
+// table controls whether each exact version is reachable.
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
 const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
 /**
- * Default concurrency setting when the user passes no `--max-concurrency`.
- * The plugin always exports KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; kimi-code
- * 0.18.0+ enforces it as a hard peak ceiling, while older read-only swarms
- * ignore it and retain only the wall-clock hard bound. Conservative by design;
- * override with an explicit `--max-concurrency N`.
+ * Default normal-launch concurrency setting when the user passes no
+ * `--max-concurrency`. The plugin always exports
+ * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; older read-only swarms ignore it and
+ * retain only the wall-clock hard bound. Rate-limit recovery can exceed it on
+ * reviewed 2.5.3/2.6.0 sources; this is not an unconditional peak guarantee.
  */
 export const SWARM_DEFAULT_MAX_CONCURRENCY = 4;
 /**
- * Resolve the effective hard concurrency ceiling: an explicit `--max-concurrency`
- * wins; otherwise fall back to SWARM_DEFAULT_MAX_CONCURRENCY so the ceiling is
- * never unset. Pure + exported for unit testing (the parser leaves the value
- * undefined; swarm.ts owns the default, mirroring `budgetMs`).
+ * Resolve the requested normal-launch concurrency: an explicit
+ * `--max-concurrency` wins; otherwise use SWARM_DEFAULT_MAX_CONCURRENCY so the
+ * setting is never unset. Pure + exported for unit testing (the parser leaves
+ * the value undefined; swarm.ts owns the default, mirroring `budgetMs`).
  */
 export function resolveSwarmMaxConcurrency(requested) {
     return requested ?? SWARM_DEFAULT_MAX_CONCURRENCY;
 }
 /**
- * Default HARD concurrency ceiling for WRITE mode — 1 (serialized) vs read's 4.
- * Writes are riskier than reads: disjoint-target partitioning is prompt-only and
- * unenforceable (the hook is stateless), so two concurrent `coder` subagents
- * racing the same file in the shared worktree would corrupt the patch. Serialize
- * by default until a real-binary smoke proves clean concurrent disjoint writes;
- * override with an explicit `--max-concurrency N`. Effective only on kimi-code
- * 0.18.0+ (the write-mode version gate), so the ceiling is always enforced.
+ * Default normal-launch concurrency for WRITE mode — 1 (serialized) vs read's 4.
+ * Disjoint-target partitioning is prompt-only, so normal writes serialize by
+ * default. Rate-limit recovery can still exceed the requested cap on reviewed
+ * 2.5.3/2.6.0 sources; this is not an unconditional serialization guarantee.
+ * Override with an explicit `--max-concurrency N`.
  */
 export const SWARM_WRITE_DEFAULT_MAX_CONCURRENCY = 1;
-/** Resolve the write-mode concurrency ceiling: explicit wins, else default 1. */
+/** Resolve the write-mode normal-launch concurrency: explicit wins, else default 1. */
 export function resolveSwarmWriteMaxConcurrency(requested) {
     return requested ?? SWARM_WRITE_DEFAULT_MAX_CONCURRENCY;
 }
@@ -76,9 +76,10 @@ export function resolveSwarmWriteMaxConcurrency(requested) {
  * Read-only is NOT enforced by this prose — the PreToolUse hook (swarm label) at
  * policy index 0 denies every write/edit/shell for the coordinator AND every
  * subagent, so slimming this text does not move the safety boundary. The optional
- * `cap` is a SOFT subagent-count hint (the hook cannot enforce a count). The HARD
- * concurrency ceiling is separate: --max-concurrency →
+ * `cap` is a SOFT subagent-count hint (the hook cannot enforce a count). The
+ * normal-launch concurrency setting is separate: --max-concurrency →
  * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (see executeSwarmJob / cli-client buildKimiCliEnvironment).
+ * Reviewed 2.5.3/2.6.0 sources can exceed it during rate-limit recovery.
  * The --budget wall-clock ceiling is the always-on hard bound on the whole run.
  */
 export function buildSwarmPrompt(objective, cap) {
@@ -211,7 +212,7 @@ async function runReadSwarm(parsed, objective, context) {
             await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
             throw classified;
         }
-        const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, resolveSwarmMaxConcurrency(parsed.maxConcurrency), context);
+        const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, resolveSwarmMaxConcurrency(parsed.maxConcurrency), context, undefined, await realpath(context.cwd));
         if (!completed.final_output_path) {
             throw new RuntimeError("SWARM_RESULT_MISSING", "Swarm finished without a rendered result.", "swarm.result");
         }
@@ -321,7 +322,7 @@ async function runWriteSwarm(parsed, objective, context) {
                 onPatchCaptureFailure: () => {
                     preserveWorktree = true;
                 },
-            });
+            }, await realpath(worktreePath));
             if (preserveWorktree && completed.error) {
                 throw new RuntimeError(completed.error.code, completed.error.message, completed.error.stage, {
                     details: completed.error.details,
@@ -391,8 +392,11 @@ async function executeSwarmJob(jobId, prompt, objective, budgetMs, maxConcurrenc
  * (`spawnCwd`), the hook label is "swarm-write", and `workspaceRoot` (the same
  * worktree) is exported as the trusted allowlist root + used to capture the
  * patch. Undefined ⇒ read-only swarm (label "swarm", spawn cwd = job.cwd).
+ * Real command paths supply the canonical execution cwd for activation/resume,
+ * trusted-root checks, read-mode preflight, and the print spawn. Virtual test
+ * doubles may omit the canonical path and retain their original spawn spelling.
  */
-writeMode) {
+writeMode, executionCwd) {
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const store = new JobStore(paths);
@@ -467,7 +471,7 @@ writeMode) {
             store.saveSwarmRecovery(job.job_id, recovery);
         }
         activationOptions = {
-            cwd: writeMode?.spawnCwd ?? job.cwd,
+            cwd: executionCwd ?? writeMode?.spawnCwd ?? job.cwd,
             env: context.env,
             command: executionPlan.command,
             prefixArgs: executionPlan.prefixArgs,
@@ -476,7 +480,7 @@ writeMode) {
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
             swarmMaxConcurrency: maxConcurrency,
-            trustedWorkspaceRoot: writeMode?.workspaceRoot,
+            trustedWorkspaceRoot: executionCwd ?? writeMode?.workspaceRoot,
             expectedVersion: executionPlan.kimiVersion ?? undefined,
             onRecoveryEvent: recovery ? (event) => recordRecoveryEvent(store, recovery, event) : undefined,
         };
@@ -556,7 +560,7 @@ writeMode) {
             prompt,
             commandLabel,
             swarmMaxConcurrency: maxConcurrency,
-            trustedWorkspaceRoot: writeMode?.workspaceRoot,
+            trustedWorkspaceRoot: executionCwd ?? writeMode?.workspaceRoot,
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
             resumeSessionId: preactivated?.sessionId,
