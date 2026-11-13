@@ -61,7 +61,11 @@ import {
   formatVersionOutOfRangeWarning,
   probeKimiVersion,
 } from "../kimi-version-probe.js";
-import { isNativeV2CertifiedVersion, NATIVE_V2_CERTIFIED_VERSIONS } from "../kimi-engine.js";
+import {
+  isNativeV2CertifiedVersion,
+  NATIVE_V2_ANY_OPERATION_VERSIONS,
+  NATIVE_V2_NON_SWARM_VERSIONS,
+} from "../kimi-engine.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
@@ -1286,12 +1290,15 @@ async function collectKimiVersionWarnings(
     // clearer message. Avoid double-noise.
     return;
   }
-  // Certified for EITHER engine is "in range": the legacy tested minors, or an
-  // exact native-v2 certified version (which is deliberately outside
-  // KIMI_TESTED_MINORS — that table never gains 0.42). Without this, setup on a
-  // v2-certified binary would wrongly warn "not certified, commands will refuse".
-  if (probe.inTestedRange || isNativeV2CertifiedVersion(probe.version)) return;
-  warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION, NATIVE_V2_CERTIFIED_VERSIONS));
+  if (!probe.inTestedRange && !isNativeV2CertifiedVersion(probe.version)) {
+    warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION, NATIVE_V2_ANY_OPERATION_VERSIONS));
+    return;
+  }
+  if (NATIVE_V2_NON_SWARM_VERSIONS.includes(probe.version)) {
+    warnings.push(
+      `NOTE: kimi-code ${probe.version} is certified for review, challenge, ask, rescue, review gate, and pursue only. Read-only swarm and write swarm refuse before model spawn because upstream rate-limit recovery can exceed maxConcurrency.`,
+    );
+  }
 }
 
 /**

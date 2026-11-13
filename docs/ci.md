@@ -27,7 +27,7 @@ The real-binary smoke suite skips unless explicitly enabled. A successful base C
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.5.3`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.6.0`, certified for non-swarm operations only. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
@@ -41,6 +41,8 @@ The suite checks:
 - out-of-worktree write attempts by real children denied
 
 On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
+
+Exact 2.6.0 uses the narrowed non-swarm production profile. Its three swarm execution lanes are intentional exclusions, not passing swarm evidence. Both real command paths must return `v2-swarm-not-certified` before creating a model session, with no leftover write worktree or user-tree change. Those two refusal checks must run and pass, and no other skip is accepted. Exact 2.6.1 is not included by implication.
 
 Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidate, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
 
@@ -102,7 +104,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.5.3
+  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.6.0
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```

@@ -41,7 +41,7 @@ its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 The certification basis is the **no-plan construction** (see
 [`native-v2-certification-provenance.md` §2](native-v2-certification-provenance.md#2-native-v2-entry-gate)),
 not an upstream ordering guarantee — plan still registers before external
-hooks at every reviewed version through 2.5.3 (confirmed in `dist/main.mjs` at 0.42.0 and by the
+hooks at every reviewed version through 2.6.0 (confirmed in `dist/main.mjs` at 0.42.0 and by the
 plan-ON live control on every audited binary). Certification is per EXACT
 version and per operation; a patch release is NOT certified until the three
 gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
@@ -340,7 +340,7 @@ KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE=<exact-version> \
 
 The candidate version must match the binary. Candidate mode does not bypass hook-schema review, hook installation, or the no-plan preflight. Review and represent a new major's hook schema before running it.
 
-For native v2, the smoke checks the first-line `system.version` marker against the probed version and exercises every operation. It covers hook denials, default-plan and experimental-selector refusals, native-v2 resume and tainted-journal refusal, `Bash.cwd` confinement, and write-swarm patch capture and cleanup. The real `runRescue` lane must land a confined write and persist operation/version/session/artifact evidence; pursue and swarm-write lineage do not certify rescue. A separate deterministic Bash attempt with absolute out-of-root `cwd` must produce a same-call managed denial and no file. Pinned legacy binaries use the legacy lanes and must not emit the v2 provenance marker. Read the test results to confirm which lanes ran; skipped tests are not passing evidence.
+For native v2, the smoke checks the first-line `system.version` marker against the probed version and exercises every operation in the declared certification scope. It covers hook denials, default-plan and experimental-selector refusals, native-v2 resume and tainted-journal refusal, `Bash.cwd` confinement, and write-swarm patch capture and cleanup where certified. The real `runRescue` lane must land a confined write and persist operation/version/session/artifact evidence; pursue and swarm-write lineage do not certify rescue. A separate deterministic Bash attempt with absolute out-of-root `cwd` must produce a same-call managed denial and no file. Pinned legacy binaries use the legacy lanes and must not emit the v2 provenance marker. Read the test results to confirm which lanes ran; skipped tests are not passing evidence. On exact 2.6.0, the three swarm execution lanes are explicitly outside the narrowed scope; both real production command paths must instead return `v2-swarm-not-certified` before creating a model session. Those refusal checks are required, and no other skip is accepted.
 
 Every swarm smoke must prove real children, not just `AgentSwarm` calls, aggregate denials, or a patch:
 
@@ -360,6 +360,7 @@ Read all four reports and the live results. Save a synthesis to `reports/NN-upst
 |---|---|
 | An already-certified version needs documentation corrections | Documentation update; no certification or version change |
 | A new exact native-v2 version passes every gate | Add the production certification row and prepare the next unused plugin patch release with explicit upstream compatibility |
+| A deliberately narrowed scope passes every in-scope gate and all exclusion/refusal controls | Add only the proven operation rows, name the exclusions, and prepare the next unused plugin patch with that explicit scope; never imply full-operation certification |
 | A gate fails or evidence is incomplete | Keep the candidate uncertified; record the blocker and required follow-up |
 
 A certification-table addition changes runtime routing even when upstream's hook implementation is unchanged. It is not a docs-only checkup. Matching upstream's version number never substitutes for a passing gate.
@@ -367,6 +368,8 @@ A certification-table addition changes runtime routing even when upstream's hook
 ### Phase 3 — Edits
 
 After all candidate gates pass, update `NATIVE_V2_CERTIFIED` through its version list in `runtime/kimi-engine.ts`. Keep the legacy table capped at 0.41. Update the exact-version source hashes and assertions in `tests/audit/v2-tag-scan.test.ts` only after reviewing their source changes.
+
+A deliberately narrowed certification must name its excluded operations in the table and contract. Exact 2.6.0 admits only review, challenge, ask, rescue, review_gate and pursue because its AgentSwarm rate-limit recovery exceeds the configured maximum. Both swarm modes refuse before model spawn with `v2-swarm-not-certified`, including at the persisted-plan spawn boundary; they never fall back to legacy-v1. The production matrix replaces the three excluded swarm execution lanes with real read/write command-refusal checks and permits no other skips. This scoped certification does not certify 2.6.0 swarm activation, recovery, or any 2.6.x patch. Full swarm restoration requires an exact upstream release containing the scheduler correction and fresh full-scope evidence. Keep `NATIVE_V2_CERTIFIED_VERSIONS` as the all-operation export for consumers that automatically select a full-swarm pin; use `NATIVE_V2_ANY_OPERATION_VERSIONS` for the scoped union and per-operation rows.
 
 Update the current compatibility statements in `AGENTS.md`, `docs/invariants.md`, `docs/native-v2-status.md`, and this playbook. Record evidence and residual risks in the provenance guide and roadmap audit log. Follow the [release checklist](../AGENTS.md#releasing) for version metadata and the changelog.
 

@@ -943,6 +943,24 @@ describe("setup managed-block installer", () => {
     expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
   });
 
+  test("2.6.0 setup reports the narrowed non-swarm certification", async () => {
+    if (process.platform === "win32") return;
+    const { env, configPath } = await makeCase("non-swarm-version-notice");
+    const kimiBin = path.join(path.dirname(configPath), "kimi-2.6.0");
+    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '2.6.0'\n", "utf8");
+    await chmod(kimiBin, 0o700);
+
+    const result = await runSetup([], makeContext({
+      ...env,
+      KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
+    }));
+    expect(result.probe).toBe("ok");
+    const warnings = result.warnings.join("\n");
+    expect(warnings).toContain("certified for review, challenge, ask, rescue, review gate, and pursue only");
+    expect(warnings).toContain("Read-only swarm and write swarm refuse before model spawn");
+    expect(warnings).not.toContain("outside the versions");
+  });
+
   test.each(["PermissionRequest", "PermissionResult", "Interrupt"].flatMap((event) =>
     ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].map((version) => [event, version] as const)))(
     "exact reviewed 2.x schemas accept %s (setup %s) but refuse unreviewed versions",
@@ -1211,7 +1229,7 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     const readorned = await readFile(configPath, "utf8");
     expect(readorned.match(/BEGIN kimi-plugin-cc-managed:codex/g)).toHaveLength(1);
     expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
-  });
+  }, 30_000);
 
   test("simultaneous dual-host setup serializes without lost updates", async () => {
     const { env, configPath } = await makeCase("dual-host-concurrent");

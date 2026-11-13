@@ -29,6 +29,8 @@
 //      proof (1-3 only assert denial) — it caught the v1.4.1 path-field bug.
 //   7. write-swarm NEGATIVE (/kimi:swarm --write) — a subagent's absolute-path
 //      write OUTSIDE the trusted worktree root is hook-denied.
+//   8. narrowed non-swarm production scope — both swarm commands refuse before
+//      model spawn; only explicitly excluded execution lanes skip.
 //
 // Why it exists (the latent finding behind it):
 //
@@ -84,7 +86,8 @@ import { recoverSessionIdFromStore } from "../../runtime/session-recovery.js";
 import { resolveKimiCliCommand } from "../../runtime/kimi-command.js";
 import {
   NATIVE_V2_CERTIFIED,
-  NATIVE_V2_CERTIFIED_VERSIONS,
+  NATIVE_V2_ANY_OPERATION_VERSIONS,
+  NATIVE_V2_NON_SWARM_VERSIONS,
   NATIVE_V2_SAFETY_PROFILE,
   type KimiExecutionPlan,
   type KimiOperationKind,
@@ -190,7 +193,7 @@ const PREREQS_OK = SMOKE_ENABLED && SEED_OK && BINARY !== undefined;
 
 // Detect the ACTUAL engine of the resolved binary (one cheap subprocess) so the
 // smoke asserts the right provenance: kimi-code whose exact version is in
-// NATIVE_V2_CERTIFIED_VERSIONS runs native-v2; a pinned <= 0.41 binary runs
+// NATIVE_V2_ANY_OPERATION_VERSIONS runs native-v2; a pinned <= 0.41 binary runs
 // legacy-v1. On v2, `system.version` is mandatory; on v1 it must be absent.
 function detectBinaryVersion(bin: string | undefined): string | undefined {
   if (bin === undefined) return undefined;
@@ -214,7 +217,7 @@ if (SMOKE_ENABLED && V2_CANDIDATE !== undefined &&
   throw new Error(`smoke v2 candidate ${V2_CANDIDATE} does not match binary ${BINARY_VERSION}`);
 }
 const BINARY_IS_V2 = BINARY_VERSION !== undefined &&
-  (NATIVE_V2_CERTIFIED_VERSIONS.includes(BINARY_VERSION) || BINARY_VERSION === V2_CANDIDATE);
+  (NATIVE_V2_ANY_OPERATION_VERSIONS.includes(BINARY_VERSION) || BINARY_VERSION === V2_CANDIDATE);
 
 // The real runRescue and write-swarm lanes call production version gates. Permit
 // the reviewed candidate only in this test process's operation map, never in the
@@ -832,6 +835,13 @@ const GOAL_OBJECTIVE = [
 ].join(" ");
 
 const suite = PREREQS_OK ? describe : describe.skip;
+const PRODUCTION_NON_SWARM =
+  BINARY_VERSION !== undefined &&
+  V2_CANDIDATE === undefined &&
+  NATIVE_V2_NON_SWARM_VERSIONS.includes(BINARY_VERSION);
+const swarmReadSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
+const swarmWriteSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
+const nonSwarmSuite = PREREQS_OK && PRODUCTION_NON_SWARM ? describe : describe.skip;
 
 suite("real-binary smoke: read-only commands cannot write (H7)", () => {
   for (const label of READ_ONLY_LABELS) {
@@ -1686,7 +1696,7 @@ const SWARM_WRITE_PROMPT = [
   `single-agent answer or discuss whether the probe files should exist. Launch now.`,
 ].join(" ");
 
-suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () => {
+swarmReadSuite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () => {
   test(
     "a forced write attempt by a spawned swarm subagent is denied by the PreToolUse hook",
     async () => {
@@ -1764,6 +1774,60 @@ suite("real-binary smoke: read-only swarm subagents cannot write (swarm)", () =>
     },
     SWARM_BUDGET_MS + 30_000,
   );
+});
+
+nonSwarmSuite("real-binary smoke: narrowed production certification refuses swarm before spawn", () => {
+  for (const operationKind of ["swarm", "swarm-write"] as const) {
+    test(`${operationKind} returns the scoped refusal without creating a model session`, async () => {
+      const kimiHome = await createTestPluginDataRoot(`smoke-home-${operationKind}-refusal`);
+      const workspace = await createTestPluginDataRoot(`smoke-ws-${operationKind}-refusal`);
+      const pluginData = await createTestPluginDataRoot(`smoke-data-${operationKind}-refusal`);
+      try {
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          KIMI_CODE_HOME: kimiHome,
+          CLAUDE_PLUGIN_DATA: pluginData,
+        };
+        const write = operationKind === "swarm-write";
+        if (write) await initUserRepo(workspace);
+        const statusBefore = write
+          ? gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"])
+          : undefined;
+        const worktreesBefore = write
+          ? gitIn(workspace, ["worktree", "list", "--porcelain"])
+          : undefined;
+        await expect(
+          runSwarm([
+            ...(write ? ["--write"] : []),
+            "this objective must never reach a model process",
+          ], makeContext(workspace, env)),
+        ).rejects.toMatchObject({
+          code: "KIMI_CAPABILITY_NOT_CERTIFIED",
+          message: expect.stringContaining("non-swarm"),
+          details: {
+            refusal_kind: "v2-swarm-not-certified",
+            certification_scope: "non-swarm",
+            operation_kind: operationKind,
+            kimi_version: BINARY_VERSION,
+          },
+        });
+        expect(existsSync(path.join(kimiHome, "sessions"))).toBe(false);
+        if (write) {
+          expect(gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"])).toBe(statusBefore!);
+          expect(gitIn(workspace, ["worktree", "list", "--porcelain"])).toBe(worktreesBefore!);
+          const paths = resolvePluginPaths(env);
+          const { repoId } = await resolveRepoIdentity(workspace);
+          expect(await listSwarmWriteDirs(path.join(paths.worktreesDir, repoId))).toEqual([]);
+        } else {
+          expect(await readdir(workspace)).toEqual([]);
+        }
+      } finally {
+        await cleanupTestPath(kimiHome);
+        await cleanupTestPath(workspace);
+        await cleanupTestPath(pluginData);
+      }
+    }, 30_000);
+  }
 });
 
 // Positive pursue lifecycle proof: read-only goal smoke above intentionally
@@ -1903,7 +1967,7 @@ async function readFirstFileMatching(dir: string, prefix: string, suffix: string
   return hit ? readFile(path.join(dir, hit), "utf8") : null;
 }
 
-suite("real-binary smoke: write-swarm edits land in the worktree, never the user tree (--write)", () => {
+swarmWriteSuite("real-binary smoke: write-swarm edits land in the worktree, never the user tree (--write)", () => {
   test(
     "a coder subagent's edits are captured as a patch and the user's real tree is untouched",
     async () => {
@@ -2076,7 +2140,7 @@ const ESCAPE_FILES = [
   "WRITE_SWARM_ESCAPE_2_SHOULD_NOT_EXIST.txt",
 ] as const;
 
-suite("real-binary smoke: write-swarm denies out-of-worktree writes (--write)", () => {
+swarmWriteSuite("real-binary smoke: write-swarm denies out-of-worktree writes (--write)", () => {
   test(
     "a spawned swarm-write subagent's absolute-path write OUTSIDE the trusted root is hook-denied",
     async () => {

@@ -19,7 +19,7 @@ The default suite uses local fixtures and mock subprocesses. Live provider calls
 
 `audit/v2-tag-scan.test.ts` checks the source assumptions behind native-v2 enforcement. It requires an exact upstream source tree through `KIMI_CODE_SOURCE_TAG_DIR`; it is skipped without that input.
 
-`runtime/real-binary-smoke.test.ts` runs through `bun run smoke:real`. It checks real hook denials, goal continuation, native-v2 preflight and resume, swarm child enforcement, and write-swarm patch capture. Read [CI and live smoke](../docs/ci.md) before running it: the harness can copy credential-bearing seed files even when API authentication is available. It needs authorized test authentication, and runs must be sequential. A skipped lane is not a passing certification result.
+`runtime/real-binary-smoke.test.ts` runs through `bun run smoke:real`. It checks real hook denials, goal continuation, native-v2 preflight and resume, swarm child enforcement, and write-swarm patch capture. On exact 2.6.0's narrowed production profile, the three swarm execution lanes are excluded; both production command paths must instead prove `v2-swarm-not-certified` before model spawn. Read [CI and live smoke](../docs/ci.md) before running it: the harness can copy credential-bearing seed files even when API authentication is available. It needs authorized test authentication, and runs must be sequential. A skipped lane is not a passing certification result.
 
 ## Test isolation
 

@@ -4,7 +4,7 @@ Normal stop: use `scripts/companion.sh cancel` for a shell-owned run, or the MCP
 
 For exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1 and 2.5.0/2.5.1/2.5.2/2.5.3 swarm runs created by this runtime, status includes a durable `swarm_recovery` record. It contains the resolved home/workspace, companion identity, launch intent, verified process identities and session identity. It never contains the web authentication token, credentials, prompt or config contents. Session identity is committed before the request enabling swarm mode.
 
-The exact 2.6.0 integration is a candidate, not a certified version. Recovery canonicalizes `record.cwd` only for session deactivation through symlinked execution parents. Ownership, workspace, and patch checks continue to use the original recorded alias.
+The exact 2.6.0 swarm integration is candidate-only: the narrowed 2.6.0 non-swarm certification excludes both swarm operations and does not certify this recovery path. Recovery canonicalizes `record.cwd` only for session deactivation through symlinked execution parents. Ownership, workspace, and patch checks continue to use the original recorded alias.
 
 ## Preview, then recover
 

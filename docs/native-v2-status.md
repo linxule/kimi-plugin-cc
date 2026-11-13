@@ -1,4 +1,10 @@
-# Native v2 status — 2026-11-11
+# Native v2 status — 2026-11-13
+
+## Exact 2.6.0 non-swarm scope
+
+Plugin 2.5.8 certifies exact CLI 2.6.0 for review, challenge, ask, rescue, review gate and pursue only. Read-only swarm and write swarm are excluded and refuse before model spawn with `v2-swarm-not-certified`; neither falls back to legacy-v1. This boundary also applies to persisted plans and every host transport. Setup reports the narrowed scope. The production-table matrix passed **23 tests with 170 assertions in 241.67 seconds**, with exactly the three excluded swarm execution lanes skipped and both real command-refusal checks passing. The [2.6.0 certification record](upstream-2.6.0-certification.md) owns the exact-binary evidence.
+
+The exclusion is load-bearing: upstream rate-limit recovery can exceed `maxConcurrency` (two active attempts at cap 1 and five at cap 4). The candidate protocol/executor integration and the full 24-test candidate matrix passed, but those results do not certify production swarm use. Full swarm certification still ends at exact 2.5.3, whose inherited limitation remains disclosed. `NATIVE_V2_CERTIFIED_VERSIONS` remains the all-operation export for automatic full-swarm pins; `NATIVE_V2_ANY_OPERATION_VERSIONS` owns the scoped union, so existing pin behavior does not silently select non-swarm-only 2.6.0. The upstream correction is tracked in [issue #4926](https://github.com/MoonshotAI/kimi-code/issues/4926); restoring swarm on a later release requires fresh cap controls and full-scope matrices.
 
 Plugin 2.5.7 certifies exact CLI 2.5.3 for all eight operations
 (`5af9942e9fb789b6a1530830575b3768499932e9`). Candidate and production matrices
@@ -30,7 +36,7 @@ WebSocket main-agent state, requiring unique request IDs, an accepted
 subscription, and the latest frame through intentional bounded close. It also
 pins `environment_id:"local"` and the expected cwd before either profile mutation.
 Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
-bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3 print selects `--environment local`;
+bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0 print selects `--environment local`;
 resume never receives that flag; the environment preflight rejects any persisted nonlocal or wrong-root metadata/binding, while older sessions without environment records do not fail this check merely for lacking them.
 Tokens remain in memory, activation consumes the finite budget, graceful shutdown
 retains the 15-second allowance, and unverified cleanup prevents success.
@@ -43,7 +49,7 @@ verified deactivation, including with parent idle reclamation set to 1 ms. A
 separate evidence-preserving out-of-root control correlated two child Writes with
 rescue denials and created no files.
 
-Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3 remove EnterPlanMode and cancel default plan mode on
+Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.0 remove EnterPlanMode and cancel default plan mode on
 fresh print; deterministic forced calls reject before the hook with no plan
 state. Resumed plan sessions remain possible, so every-agent journal refusal
 stays mandatory. Stream records still lack execution outcomes, and session hints

@@ -285,7 +285,40 @@ describe("runSwarm certified execution-plan gate", () => {
     }
   });
 
-
+  test.each([
+    { label: "swarm", args: ["review", "two", "targets"] },
+    { label: "swarm-write", args: ["--write", "edit", "two", "targets"] },
+  ])("2.6.0 refuses $label before model invocation", async ({ label, args }) => {
+    const pluginDataRoot = await createTestPluginDataRoot(`swarm-scoped-${label}-data`);
+    const workspace = await createGitRepoFixture(`swarm-scoped-${label}-repo`);
+    const kimiHome = await createTestPluginDataRoot(`swarm-scoped-${label}-home`);
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+    try {
+      const env = {
+        ...makeMockEnv(pluginDataRoot, invocationPath, kimiHome),
+        KIMI_PLUGIN_CC_MOCK_VERSION: "2.6.0",
+      };
+      const statusBefore = execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" });
+      const worktreesBefore = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: workspace, encoding: "utf8" });
+      await expect(runSwarm([...args], makeContext(workspace, env))).rejects.toMatchObject({
+        code: "KIMI_CAPABILITY_NOT_CERTIFIED",
+        message: expect.stringContaining("non-swarm"),
+        details: {
+          refusal_kind: "v2-swarm-not-certified",
+          certification_scope: "non-swarm",
+          operation_kind: label,
+          kimi_version: "2.6.0",
+        },
+      });
+      expect(existsSync(invocationPath)).toBe(false);
+      expect(execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" })).toBe(statusBefore);
+      expect(execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: workspace, encoding: "utf8" })).toBe(worktreesBefore);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(kimiHome);
+    }
+  });
 });
 
 describe("write-swarm lifecycle", () => {

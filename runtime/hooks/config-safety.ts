@@ -785,7 +785,7 @@ function validateVersionSensitiveEvents(
   // 2.4.0 (f26e4d91), 2.4.1 (2c73f3f5), 2.5.0 (41c34143), 2.5.1 (1b02030d),
   // 2.5.2 (1c142a00), 2.5.3 (5af9942e), and 2.6.0 (740d6c0b):
   // the additive events and HookDefSchema are unchanged. Exact 2.6.0 schema acceptance
-  // covers the integration candidate, not production certification.
+  // covers the narrowed non-swarm production certification, not swarm operations.
   // Require the full version string AND matching components; no inferred 2.x compatibility.
   if (
     version.major === 2 && (

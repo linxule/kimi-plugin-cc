@@ -30,3 +30,62 @@ test("compiled distributions preserve the stdout-only CLI refusal", () => {
     expect(result.status, result.stderr).toBe(0);
   }
 });
+
+
+// Execute the narrowed operation scope through all three emitted runtimes.
+test("compiled distributions enforce the 2.6.0 non-swarm scope", () => {
+  for (const root of ["./dist", "./plugins/kimi-codex/dist", "./plugins/kimi-dsh/dist"]) {
+    const script = `
+      import assert from 'node:assert/strict';
+      import {
+        assertExecutionPlanMatchesSpawn,
+        NATIVE_V2_ANY_OPERATION_VERSIONS,
+        NATIVE_V2_CERTIFIED,
+        NATIVE_V2_CERTIFIED_VERSIONS,
+        NATIVE_V2_SAFETY_PROFILE,
+        selectIntendedEngine,
+      } from '${root}/kimi-engine.js';
+      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.6.0'), false);
+      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.at(-1), '2.5.3');
+      assert.equal(NATIVE_V2_ANY_OPERATION_VERSIONS.includes('2.6.0'), true);
+      const base = {
+        schemaVersion: 1,
+        operationKind: 'ask',
+        intendedEngine: 'native-v2',
+        command: process.execPath,
+        prefixArgs: [],
+        kimiVersion: '2.6.0',
+        certification: 'certified',
+        resumedFromJobId: null,
+        safetyProfile: NATIVE_V2_SAFETY_PROFILE,
+      };
+      for (const operationKind of ['review', 'challenge', 'ask', 'rescue', 'review_gate', 'pursue']) {
+        assert.doesNotThrow(() => assertExecutionPlanMatchesSpawn(
+          { ...base, operationKind }, process.execPath, [],
+        ));
+      }
+      for (const operationKind of ['swarm', 'swarm-write']) {
+        assert.equal(selectIntendedEngine(operationKind, { version: '2.6.0' }), 'native-v2');
+        assert.throws(
+          () => assertExecutionPlanMatchesSpawn({ ...base, operationKind }, process.execPath, []),
+          error => {
+            assert.equal(error.code, 'KIMI_CAPABILITY_NOT_CERTIFIED');
+            assert.equal(error.details.refusal_kind, 'v2-swarm-not-certified');
+            assert.equal(error.details.certification_scope, 'non-swarm');
+            assert.equal(error.details.kimi_version, '2.6.0');
+            return true;
+          },
+        );
+      }
+      for (const operationKind of ['rescue', 'swarm-write']) {
+        const smokeMatrix = NATIVE_V2_CERTIFIED;
+        smokeMatrix.set(operationKind, [...smokeMatrix.get(operationKind), '9.9.9']);
+        assert.equal(selectIntendedEngine(operationKind, { version: '9.9.9' }), 'native-v2');
+      }
+    `;
+    const result = spawnSync("node", ["--input-type=module", "-e", script], {
+      cwd: process.cwd(), encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+  }
+});

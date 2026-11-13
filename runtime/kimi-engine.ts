@@ -123,17 +123,34 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
   "2.5.3",
 ]);
 
+/**
+ * Exact releases certified only for review, challenge, ask, rescue, review_gate
+ * and pursue. Their upstream rate-limit recovery can exceed AgentSwarm's
+ * configured maximum, so both swarm operations refuse before model spawn.
+ */
+export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2.6.0"]);
+
+/**
+ * Any-operation union used by setup and engine selection. The older
+ * NATIVE_V2_CERTIFIED_VERSIONS export stays all-operation-only for consumers
+ * that choose a full-swarm pin automatically.
+ */
+export const NATIVE_V2_ANY_OPERATION_VERSIONS: readonly string[] = Object.freeze([
+  ...NATIVE_V2_CERTIFIED_VERSIONS,
+  ...NATIVE_V2_NON_SWARM_VERSIONS,
+]);
+
 /** Per-operation native-v2 certification. One green operation never certifies another. */
 export const NATIVE_V2_CERTIFIED: ReadonlyMap<KimiOperationKind, readonly string[]> = new Map<
   KimiOperationKind,
   readonly string[]
 >([
-  ["review", NATIVE_V2_CERTIFIED_VERSIONS],
-  ["challenge", NATIVE_V2_CERTIFIED_VERSIONS],
-  ["ask", NATIVE_V2_CERTIFIED_VERSIONS],
-  ["rescue", NATIVE_V2_CERTIFIED_VERSIONS],
-  ["review_gate", NATIVE_V2_CERTIFIED_VERSIONS],
-  ["pursue", NATIVE_V2_CERTIFIED_VERSIONS],
+  ["review", NATIVE_V2_ANY_OPERATION_VERSIONS],
+  ["challenge", NATIVE_V2_ANY_OPERATION_VERSIONS],
+  ["ask", NATIVE_V2_ANY_OPERATION_VERSIONS],
+  ["rescue", NATIVE_V2_ANY_OPERATION_VERSIONS],
+  ["review_gate", NATIVE_V2_ANY_OPERATION_VERSIONS],
+  ["pursue", NATIVE_V2_ANY_OPERATION_VERSIONS],
   ["swarm", NATIVE_V2_CERTIFIED_VERSIONS],
   ["swarm-write", NATIVE_V2_CERTIFIED_VERSIONS],
 ]);
@@ -156,20 +173,21 @@ export function isNativeV2Certified(
 export function isNativeV2CertifiedVersion(version: string): boolean {
   const normalized = parseVersionLine(version)?.raw;
   if (normalized === undefined) return false;
-  return NATIVE_V2_CERTIFIED_VERSIONS.includes(normalized);
+  return NATIVE_V2_ANY_OPERATION_VERSIONS.includes(normalized);
 }
 
 /**
- * Engine selection for a probed binary: native v2 when the exact version is
- * certified for this operation, else legacy-v1 (whose own tested-range check
- * still applies). kimi-code 0.42.0 removed the v1 engine, so a v1 plan on a
- * ≥0.42 binary is refused by the legacy range rather than silently run on v2.
+ * Select native v2 for an exactly certified version or a test-only operation
+ * admission, then enforce scope in assertCertifiedCapability. A narrowed
+ * release must not fall back to legacy-v1 for an excluded operation.
  */
 export function selectIntendedEngine(
   operationKind: KimiOperationKind,
   probe: Pick<KimiVersionProbeOk, "version">,
 ): KimiEngine {
-  return isNativeV2Certified(operationKind, probe.version) ? "native-v2" : "legacy-v1";
+  return isNativeV2CertifiedVersion(probe.version) || isNativeV2Certified(operationKind, probe.version)
+    ? "native-v2"
+    : "legacy-v1";
 }
 
 const UNSAFE_EXPERIMENTAL_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -799,6 +817,30 @@ function nativeV2NotCertified(
   version: string | null,
 ): RuntimeError {
   const certified = NATIVE_V2_CERTIFIED.get(operationKind) ?? [];
+  const normalized = version === null ? undefined : parseVersionLine(version)?.raw;
+  if (
+    normalized !== undefined &&
+    NATIVE_V2_NON_SWARM_VERSIONS.includes(normalized) &&
+    (operationKind === "swarm" || operationKind === "swarm-write")
+  ) {
+    return new RuntimeError(
+      "KIMI_CAPABILITY_NOT_CERTIFIED",
+      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its upstream rate-limit recovery can exceed AgentSwarm's configured maximum, so this plugin refuses AgentSwarm before model spawn. Use a non-swarm operation on ${normalized}, or select a version explicitly certified for ${operationKind}.`,
+      "kimi-engine.capability",
+      {
+        details: {
+          refusal_kind: "v2-swarm-not-certified",
+          certification_scope: "non-swarm",
+          retryable_after_setup: false,
+          operation_kind: operationKind,
+          intended_engine: "native-v2",
+          kimi_version: normalized,
+          certified_versions: [...certified],
+          certified_operations: ["review", "challenge", "ask", "rescue", "review_gate", "pursue"],
+        },
+      },
+    );
+  }
   const observed = version === null ? "an unprobed version" : `kimi-code ${version}`;
   return new RuntimeError(
     "KIMI_CAPABILITY_NOT_CERTIFIED",

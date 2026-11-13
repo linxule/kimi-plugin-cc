@@ -40,7 +40,7 @@ You need:
 - macOS or Linux
 - Claude Code, Codex, or DSH with plugin support
 - Node.js 22.5 or newer (24.9 or newer for DSH)
-- Kimi Code CLI 2.4.1 (certified; 2.4.0, 2.3.3, 2.3.2, 2.3.1 and 2.3.0 are also certified)
+- Kimi Code CLI 2.6.0 for review, challenge, ask, rescue, review gate, or pursue. Both swarm modes refuse on 2.6.0; full eight-operation certification ends at 2.5.3, with the [documented rate-limit limitation](./docs/safety.md). Other exact certified versions remain supported per the [runtime matrix](./docs/native-v2-certification-provenance.md).
 
 Windows is not currently supported. Contributors can help with the [no-model Windows diagnostics checks](./docs/windows-validation.md). Check your versions in a terminal:
 
@@ -238,7 +238,7 @@ Remove the app's hook before removing its plugin. In Claude Code, run `/kimi:set
 
 If a hook check fails, follow its diagnosis. Run setup for the affected app when instructed. Do not bypass the check.
 
-If you see `KIMI_CAPABILITY_NOT_CERTIFIED`, update the plugin or use a certified CLI version. Running setup again does not certify a new CLI.
+If you see `KIMI_CAPABILITY_NOT_CERTIFIED`, update the plugin or select a CLI certified for the requested operation. On 2.6.0, use the six non-swarm operations; swarm requires a CLI version certified for that operation, not merely a release listed for another operation. Running setup again does not certify a new CLI or expand its operation scope.
 
 If you see `CLI_V2_PLAN_MODE_CONFIGURED`, set `default_plan_mode` to `false` or remove it from your Kimi `config.toml` file. Sessions run by this plugin cannot use plan mode.
 
@@ -284,7 +284,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code、Codex 或 DSH
 - Node.js 22.5 或更高版本（DSH 需要 24.9 或更高版本）
-- Kimi Code CLI 2.4.1（已认证；2.4.0、2.3.3、2.3.2、2.3.1 和 2.3.0 也已认证）
+- Kimi Code CLI 2.6.0（仅限 review、challenge、ask、rescue、review gate 和 pursue；两种 swarm 模式均会拒绝运行。完整八项操作认证止于 2.5.3，并有已披露的速率限制恢复缺陷。其他精确认证版本见[运行时矩阵](./docs/native-v2-certification-provenance.md)）
 
 目前不支持 Windows。在终端检查版本：
 
@@ -455,7 +455,7 @@ codex plugin add kimi@kimi-marketplace
 
 如果钩子检查失败，请按诊断信息处理。提示需要重新配置时，在对应应用中运行 setup。不要绕过检查。
 
-如果出现 `KIMI_CAPABILITY_NOT_CERTIFIED`，请更新插件，或改用已验证兼容的 CLI 版本。再次运行 setup 不能让新的 CLI 版本自动通过兼容性验证。
+如果出现 `KIMI_CAPABILITY_NOT_CERTIFIED`，请更新插件，或改用针对所需操作已认证的 CLI 版本。2.6.0 仅支持六项非 swarm 操作；swarm 需要选择针对该操作认证的版本，而不是仅凭其他操作已认证的版本。再次运行 setup 不能认证新的 CLI，也不能扩大其操作范围。
 
 如果出现 `CLI_V2_PLAN_MODE_CONFIGURED`，请将 Kimi 的 `config.toml` 文件中的 `default_plan_mode` 设为 `false`，或删除该项。本插件运行的会话不能使用计划模式。
 
@@ -503,7 +503,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code, Codex ou DSH prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure (24.9 ou ultérieure pour DSH)
-- Kimi Code CLI 2.4.1 (certifiée ; les versions 2.4.0, 2.3.3, 2.3.2, 2.3.1 et 2.3.0 sont également certifiées)
+- Kimi Code CLI 2.6.0 (uniquement pour review, challenge, ask, rescue, review gate et pursue ; les deux modes swarm sont refusés. La certification complète des huit opérations s'arrête à 2.5.3, avec la limite connue de récupération après limitation de débit. Les autres versions exactes certifiées figurent dans la [matrice runtime](./docs/native-v2-certification-provenance.md))
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -672,7 +672,7 @@ Supprimez le hook de l'application avant d'en retirer le plugin. Dans Claude Cod
 
 Si la vérification du hook échoue, suivez le diagnostic. Relancez setup dans l'application concernée lorsque les instructions le demandent. Ne contournez pas la vérification.
 
-Si vous voyez `KIMI_CAPABILITY_NOT_CERTIFIED`, mettez à jour le plugin ou utilisez une version du CLI dont la compatibilité a été vérifiée. Relancer setup ne valide pas la compatibilité d'une nouvelle version du CLI.
+Si vous voyez `KIMI_CAPABILITY_NOT_CERTIFIED`, mettez à jour le plugin ou utilisez une version du CLI certifiée pour l'opération demandée. La version 2.6.0 est limitée aux six opérations non swarm ; swarm exige une version certifiée pour cette opération, pas seulement pour une autre. Relancer setup ne valide pas une nouvelle version du CLI et n'élargit pas son champ d'opérations.
 
 Si vous voyez `CLI_V2_PLAN_MODE_CONFIGURED`, réglez `default_plan_mode` sur `false` ou supprimez cette option du fichier `config.toml` de Kimi. Les sessions lancées par ce plugin ne peuvent pas utiliser le mode plan.
 
@@ -718,7 +718,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code、Codex、または DSH
 - Node.js 22.5 以降（DSH では 24.9 以降）
-- Kimi Code CLI 2.4.1（認証済み。2.4.0、2.3.3、2.3.2、2.3.1 と 2.3.0 も認証済み）
+- Kimi Code CLI 2.6.0（対象は review、challenge、ask、rescue、review gate、pursue のみ。両 swarm モードは拒否されます。8 操作すべての認証は 2.5.3 までで、継承されたレート制限復帰時の問題も開示しています。その他の正確な認証バージョンは[ランタイムマトリックス](./docs/native-v2-certification-provenance.md)を参照）
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 
@@ -889,7 +889,7 @@ codex plugin add kimi@kimi-marketplace
 
 フックの確認に失敗した場合は、診断結果に従って対処してください。Setup の実行を指示された場合は、該当するアプリで実行します。確認を回避しないでください。
 
-`KIMI_CAPABILITY_NOT_CERTIFIED` が表示されたら、プラグインを更新するか、互換性を検証済みの CLI バージョンを使ってください。Setup を再実行しても、新しい CLI の互換性が検証済みになるわけではありません。
+`KIMI_CAPABILITY_NOT_CERTIFIED` が表示されたら、プラグインを更新するか、実行したい操作が認証された CLI バージョンを選んでください。2.6.0 では 6 つの非 swarm 操作のみ利用できます。swarm には、ほかの操作ではなく、その操作が認証されたバージョンが必要です。Setup を再実行しても、新しい CLI の互換性が検証済みになったり、対応操作が広がったりすることはありません。
 
 `CLI_V2_PLAN_MODE_CONFIGURED` が表示されたら、Kimi の `config.toml` で `default_plan_mode` を `false` にするか、その項目を削除してください。このプラグインが実行するセッションではプランモードを使えません。
 

@@ -57,9 +57,10 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 // confinement on the coordinator and every subagent. Write mode requires
 // kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2,
 // and certified 2.5.3 activate a same-job session through a bounded loopback
-// web lifecycle, then resume it through the normal print path. Candidate 2.6.0
-// uses that lifecycle too but is not production-certified. The certification
-// table controls whether each exact version is reachable.
+// web lifecycle, then resume it through the normal print path. Candidate-only
+// 2.6.0 activation uses that lifecycle too; production 2.6.0 is non-swarm
+// certified and refuses both modes before model spawn. The certification table
+// controls whether each exact version is reachable.
 
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
