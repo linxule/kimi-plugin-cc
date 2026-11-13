@@ -50,3 +50,16 @@ Upstream `AgentRunBatch` can exceed `maxConcurrency` during rate-limit recovery:
 - Final package validation (`non-swarm-release-final-package.log`): **333 files**, all three compiled distributions, isolated setup/check/version refusal, patched DSH host/profile with seven providers/tools and Web boot, terminal exit 0. `non-swarm-release-final-consumer.log` passed isolated npm consumer security with exit 0.
 - Codex's final review returned **APPROVE with no blocker or major findings**, after verifying persisted-plan refusals, candidate selection, 2.6.1 refusal and intersection-based full-swarm pins staying at 2.5.3. Its publication-metadata note is handled by recording the actual DSH publication timestamp at publication, as in the preceding release.
 - Claude's final review returned **APPROVE — no blockers, no majors**. Its remaining schema-scope contradiction, environment/plan lists, translated remedy text and new-swarm-certification wording were corrected, and the schema comment's compiled mirrors were regenerated. Initial findings also drove the candidate fix, complete staged snapshot, export compatibility split, evidence corrections and Git-admin assertion. Subsequent CI/publication receipts are recorded below before completion. Publication does not update installed hosts or operator CLI pins.
+
+## Publication receipt
+
+Release commit `887958d7de39cf388ebc3faaffd31cabe76c5a99` passed [release-commit CI run 43452771909](https://github.com/linxule/kimi-plugin-cc/actions/runs/43452771909), including both the full check/package pipeline and Windows spawn controls. The immutable [v2.5.8 tag and GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.5.8) are live. [Release-event publication run 43453807099](https://github.com/linxule/kimi-plugin-cc/actions/runs/43453807099) passed build and OIDC publish.
+
+npm published `kimi-plugin-cc@2.5.8` at **2026-11-13T15:41:45.145Z**. The registry tarball contains 333 files and is byte-identical to the validated CI artifact:
+
+- SHA-1: `65145489591e6873556f85a06506d0d276880441`
+- SHA-256: `6fc5f44aacafa92671f5aea8e2343e6323116f81d4456dee47181481050af5f4`
+- Signed SLSA provenance: sigstore log index `3857088726`
+- Publish attestation: sigstore log index `3857133123`
+
+A fresh registry installation has zero production advisories and no invalid or missing signatures. Isolated setup and `setup --check` pass with the explicit non-swarm warning; the installed runtime preserves the full-swarm pin list and enforces all six non-swarm admissions and both swarm refusals. The new certification record is present in the package. The DSH discovery timestamp is updated to the npm publication time. No installed host or operator CLI pin was changed.
