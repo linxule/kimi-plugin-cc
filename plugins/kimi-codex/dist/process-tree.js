@@ -278,7 +278,9 @@ async function collectProcessSnapshotRowsFromPs(pids) {
         });
         stdout = result.stdout;
     }
-    catch {
+    catch (err) {
+        if (uniquePids !== undefined && isExitCode(err, 1))
+            return [];
         return undefined;
     }
     return parsePsSnapshotRows(stdout);

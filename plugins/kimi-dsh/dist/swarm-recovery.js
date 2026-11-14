@@ -22,6 +22,21 @@ export function recordRecoveryEvent(store, record, event) {
             launch.quiescent = true;
             launch.pending = false;
         }
+        else if (event.kind === "print-processes-snapshot") {
+            const root = launch.identities[0];
+            if (!root)
+                throw recoveryError("The print root identity was not durably recorded before its process snapshot.");
+            // The root remains the recovery anchor after exit. Complete bounded
+            // snapshots replace historical descendants; an incomplete observation
+            // cannot discard an identity whose exit has not been proven.
+            const previous = new Map(launch.identities.map((identity) => [processIdentityKey(identity), identity]));
+            const current = event.identities.map((identity) => previous.get(processIdentityKey(identity)) ?? identity);
+            const all = event.complete ? [root, ...current] : [...launch.identities, ...current];
+            launch.identities = [...new Map(all.map((identity) => [processIdentityKey(identity), identity])).values()];
+            launch.pending = false;
+            launch.uncertain = !event.complete;
+            launch.boundedSnapshot = true;
+        }
         else if ("identities" in event) {
             const all = [...launch.identities, ...event.identities];
             launch.identities = [...new Map(all.map((identity) => [`${identity.pid}:${identity.startToken}:${identity.processGroupId}`, identity])).values()];
@@ -30,6 +45,10 @@ export function recordRecoveryEvent(store, record, event) {
         }
     }
     store.saveSwarmRecovery(record.jobId, record);
+}
+function processIdentityKey(identity) {
+    // A changed process group is not a new ownership grant for the same process.
+    return `${identity.pid}:${identity.startToken}`;
 }
 export function finishRecoveryRecord(store, record) {
     record.complete = !record.sessionDirty && record.launches.every((entry) => entry.quiescent)
@@ -73,6 +92,24 @@ export async function validateRecoveryGroupMembers(known, members, validate = re
     }
     return ownership.identities;
 }
+export async function inspectRecoveryLaunchProcesses(launch, validate = revalidateProcessIdentities, collect = collectProcessGroupsIdentities) {
+    let known = launch.identities;
+    if (launch.kind === "print" && launch.boundedSnapshot === true) {
+        const live = await validate(known);
+        if (!live.complete || live.groupChanged?.length) {
+            throw recoveryError("Process ownership or group membership is uncertain.");
+        }
+        // The saved root remains first for ancestry recovery, but an exited root
+        // grants no ownership of its numeric group after that group is reused.
+        known = live.identities;
+        if (known.length === 0)
+            return [];
+    }
+    const members = await collect(known.map((identity) => identity.processGroupId));
+    if (members === undefined)
+        throw recoveryError("Process group membership is unreadable.");
+    return validateRecoveryGroupMembers(known, members, validate);
+}
 /** Never signal an unproven group, PID replacement, or changed-PGID process. */
 export async function recoverLaunch(launch, persist, signal) {
     if (launch.quiescent)
@@ -96,12 +133,7 @@ export async function recoverLaunch(launch, persist, signal) {
         launch.identities = [...new Map([...launch.identities, ...descendants].map((id) => [`${id.pid}:${id.startToken}:${id.processGroupId}`, id])).values()];
         persist();
     }
-    const inspect = async () => {
-        const members = await collectProcessGroupsIdentities(launch.identities.map((id) => id.processGroupId));
-        if (members === undefined)
-            throw recoveryError("Process group membership is unreadable.");
-        return validateRecoveryGroupMembers(launch.identities, members);
-    };
+    const inspect = () => inspectRecoveryLaunchProcesses(launch);
     for (const [killSignal, waitMs] of [["SIGTERM", 1500], ["SIGKILL", 500]]) {
         signal?.throwIfAborted();
         for (const identity of await inspect()) {

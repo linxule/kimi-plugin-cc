@@ -11,7 +11,9 @@ const posixTest = process.platform === "win32" ? test.skip : test;
 
 for (const [mode, width] of [
   ["success", "1"], ["success", "2"], ["error-exit", "2"], ["cancel", "2"],
-  ["legacy", "2"], ["snapshot-error", "2"], ["persistence-error", "2"],
+  ["legacy", "2"], ["snapshot-error", "2"], ["identity-error", "2"], ["persistence-error", "2"],
+  ["incomplete-retention", "2"], ["snapshot-persistent", "2"],
+  ["identity-persistent", "2"], ["persistence-persistent", "2"],
   ["sticky", "2"], ["slow-spawn", "2"], ["failure", "2"],
 ]) {
   posixTest(`bounded swarm settlement ${mode}, concurrency ${width}`, async () => {
@@ -37,8 +39,9 @@ for (const [mode, width] of [
       expect(status, output).toBe(0);
       const result = JSON.parse(await readFile(path.join(root, "result.json"), "utf8"));
       expect(result.mode).toBe(mode);
-      expect(result.leafAliveAtReturn).toBe(mode === "failure");
-      if (mode === "failure") {
+      const hasLiveTail = mode === "failure" || mode === "identity-persistent";
+      expect(result.leafAliveAtReturn).toBe(hasLiveTail);
+      if (hasLiveTail) {
         expect(result.errorCode).toBe("CLI_PROCESS_SETTLEMENT_FAILED");
         expect(result.cleanupUnverified).toBe(true);
         const identity: ProcessIdentity = JSON.parse(await readFile(path.join(root, "identity.json"), "utf8"));

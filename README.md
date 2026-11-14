@@ -194,7 +194,7 @@ Use these commands to follow a task:
 | Read the result | `/kimi:result` | `$kimi-result` |
 | Cancel work | `/kimi:cancel` | `$kimi-cancel` |
 
-Without a job ID, cancel stops the latest running task for this repository. If several tasks are running, check which one you want to stop first. Use cancel rather than interrupting the app so write-swarm can save its patch. For interrupted runs created by the unreleased recovery implementation, see [preview-first swarm recovery](./docs/swarm-recovery.md); it never applies a patch or deletes abandoned work.
+Without a job ID, cancel stops the latest running task for this repository. If several tasks are running, check which one you want to stop first. Use cancel rather than interrupting the app so write-swarm can save its patch. For interrupted swarm runs with a recovery record, see [preview-first swarm recovery](./docs/swarm-recovery.md); it never applies a patch or deletes abandoned work.
 
 Canceling a task does not undo changes it has already made.
 

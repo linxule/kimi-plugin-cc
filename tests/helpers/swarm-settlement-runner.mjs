@@ -14,6 +14,9 @@ const paths = Object.fromEntries([
   "ready", "writes", "signals", "shellRelease", "shellExited", "rootRelease", "rootExited", "identity", "result",
 ].map((name) => [name, path.join(root, `${name}.json`)]));
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const transientModes = ["snapshot-error", "identity-error", "persistence-error", "incomplete-retention"];
+const persistentModes = ["snapshot-persistent", "identity-persistent", "persistence-persistent"];
+const liveTailModes = ["failure", "identity-persistent"];
 async function waitFor(read, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -56,6 +59,16 @@ async function main() {
   let publishedBeforeRoot = false;
   let capturedDuringRootCallback = false;
   let faultEnabled = false;
+  let incompletePassActive = false;
+  let retentionBaseline = [];
+  let snapshotFailures = 0;
+  let identityFailures = 0;
+  let checkpointFailures = 0;
+  const checkpoints = [];
+  let recoveredComplete = false;
+  let retainedDuringIncomplete = false;
+  let retriedCheckpoint = false;
+  let failedCheckpointSignature;
   let promise;
   try {
     promise = runCliPrompt({
@@ -81,29 +94,72 @@ async function main() {
         collectorCalls++;
         const identities = await collectDescendantIdentities(...args);
         for (const identity of identities) captured.set(identity.pid, identity);
-        if (mode === "snapshot-error" && identities.length > 0 && !failureInjected) {
+        if (faultEnabled && (
+          mode === "snapshot-persistent" ||
+          (["snapshot-error", "incomplete-retention"].includes(mode) && !failureInjected)
+        )) {
           failureInjected = true;
+          snapshotFailures++;
+          if (mode === "incomplete-retention") {
+            incompletePassActive = true;
+            retentionBaseline = checkpoints.at(-1)?.identities ?? [];
+          }
           throw new Error("scripted snapshot failure");
         }
         return identities;
       },
-      processIdentityReader: mode === "sticky" || mode === "failure" ? async (pid) => {
+      processIdentityReader: async (pid) => {
         const actual = await probeProcessIdentity(pid);
         assert.equal(actual.complete, true);
-        if (leaf?.pid === pid && faultEnabled && (mode === "failure" || !actual.identity)) {
-          failureInjected = true;
-          // Report liveness without granting a signal target under a changed
-          // group. The outer test retains the actual identity for safe cleanup.
-          return { ...leaf, processGroupId: leaf.processGroupId + 1 };
+        if (leaf?.pid === pid && faultEnabled) {
+          if (mode === "incomplete-retention" && incompletePassActive) return undefined;
+          if (mode === "identity-persistent" || (mode === "identity-error" && !failureInjected)) {
+            failureInjected = true;
+            identityFailures++;
+            throw new Error("scripted identity read failure");
+          }
+          if (mode === "failure" || (mode === "sticky" && !actual.identity)) {
+            failureInjected = true;
+            // Report liveness without granting a signal target under a changed
+            // group. The outer test retains the actual identity for safe cleanup.
+            return { ...leaf, processGroupId: leaf.processGroupId + 1 };
+          }
         }
         return actual.identity;
-      } : undefined,
-      onProcessIdentities: async (identities) => {
+      },
+      onProcessIdentities: async (identities, complete) => {
         publishedBeforeRoot ||= !rootCallbackComplete;
-        if (mode === "persistence-error" && identities.length > 0 && !failureInjected) {
+        const snapshot = identities.map((identity) => ({ ...identity }));
+        const signature = JSON.stringify([snapshot, complete]);
+        const checkpoint = { identities: snapshot, complete, faultEnabled, succeeded: false };
+        checkpoints.push(checkpoint);
+        if (faultEnabled && (
+          mode === "persistence-persistent" || (mode === "persistence-error" && !failureInjected)
+        )) {
           failureInjected = true;
+          checkpointFailures++;
+          failedCheckpointSignature ??= signature;
           throw new Error("scripted persistence failure");
         }
+        checkpoint.succeeded = true;
+        if (faultEnabled && !complete && snapshot.some((identity) => identity.pid === leaf.pid)) {
+          retainedDuringIncomplete = true;
+        }
+        if (mode === "incomplete-retention" && incompletePassActive) {
+          assert.equal(complete, false);
+          assert.ok(retentionBaseline.length > 0);
+          assert.ok(retentionBaseline.every((prior) => snapshot.some((identity) =>
+            identity.pid === prior.pid && identity.startToken === prior.startToken &&
+            identity.processGroupId === prior.processGroupId)),
+          "an incomplete pass must retain every previously checkpointed identity");
+          assert.ok(snapshot.some((identity) => identity.pid === leaf.pid && identity.startToken === leaf.startToken),
+            "an incomplete pass must retain the leaf even when a later substep reports it missing");
+          incompletePassActive = false;
+        }
+        if (failureInjected && complete && snapshot.some((identity) => identity.pid === leaf?.pid)) {
+          recoveredComplete = true;
+        }
+        if (failedCheckpointSignature === signature) retriedCheckpoint = true;
       },
       onSpawn: mode === "slow-spawn" ? async () => {
         const ready = await waitFor(async () => JSON.parse(await readFile(paths.ready, "utf8")));
@@ -132,12 +188,30 @@ async function main() {
       assert.equal(captured.get(leaf.pid).startToken, leaf.startToken);
     }
     await pause(700);
+    // Arm before the shell disappears so checkpoint errors occur on a changed,
+    // nonempty snapshot. Keep the root alive until transient recovery is proved.
+    if ([...transientModes, ...persistentModes].includes(mode)) faultEnabled = true;
     await writeFile(paths.shellRelease, "release\n");
     const shell = await waitFor(async () => JSON.parse(await readFile(paths.shellExited, "utf8")));
     const shellState = await probeProcessIdentity(shell.pid);
     assert.equal(shellState.complete, true);
     assert.equal(shellState.identity, undefined);
     assert.equal((await probeProcessIdentity(leaf.pid)).identity?.startToken, leaf.startToken);
+    if (transientModes.includes(mode)) {
+      await waitFor(async () => recoveredComplete ? true : undefined);
+      assert.equal(failureInjected, true);
+      if (mode === "persistence-error") {
+        await waitFor(async () => retriedCheckpoint ? true : undefined);
+      } else {
+        assert.equal(retainedDuringIncomplete, true);
+      }
+    }
+    if (persistentModes.includes(mode)) {
+      await waitFor(async () => failureInjected ? true : undefined);
+      if (mode !== "persistence-persistent") {
+        await waitFor(async () => retainedDuringIncomplete ? true : undefined);
+      }
+    }
     faultEnabled = true;
     const releasedAt = Date.now();
     await writeFile(paths.rootRelease, "release\n");
@@ -156,7 +230,7 @@ async function main() {
 
     const outcome = await within(promise.then((result) => ({ result }), (error) => ({ error })));
     assert.ok(Date.now() - releasedAt < 3000);
-    if (["snapshot-error", "persistence-error", "sticky", "failure"].includes(mode)) {
+    if ([...persistentModes, "sticky", "failure"].includes(mode)) {
       assert.equal(failureInjected, true);
       assert.equal(outcome.error?.code, "CLI_PROCESS_SETTLEMENT_FAILED");
       assert.equal(outcome.error?.details?.process_cleanup_unverified, true);
@@ -171,7 +245,7 @@ async function main() {
     assert.equal(current.complete, true);
     const writesAtReturn = await readFile(paths.writes, "utf8");
     await pause(120);
-    if (mode === "failure") {
+    if (liveTailModes.includes(mode)) {
       assert.equal(current.identity?.startToken, leaf.startToken);
       assert.ok((await readFile(paths.writes, "utf8")).length > writesAtReturn.length);
     } else {
@@ -181,8 +255,29 @@ async function main() {
     if (version === "2.6.2") {
       assert.ok(collectorCalls > 0);
       assert.equal(teardownCalls, 1);
-      if (mode !== "failure") assert.ok((await readFile(paths.signals, "utf8")).trim().length > 0);
+      if (!liveTailModes.includes(mode)) assert.ok((await readFile(paths.signals, "utf8")).trim().length > 0);
+      if (!outcome.error) {
+        const finalCheckpoint = checkpoints.at(-1);
+        assert.equal(finalCheckpoint?.complete, true);
+        assert.equal(finalCheckpoint?.succeeded, true);
+        assert.deepEqual(finalCheckpoint?.identities, []);
+      }
     } else assert.equal(teardownCalls, 0);
+    if (mode === "snapshot-persistent" || mode === "identity-persistent") {
+      const incomplete = checkpoints.filter((checkpoint) => checkpoint.faultEnabled && !checkpoint.complete);
+      assert.ok(incomplete.length > 0);
+      assert.ok(incomplete.every((checkpoint) => checkpoint.identities.some((identity) =>
+        identity.pid === leaf.pid && identity.startToken === leaf.startToken)),
+      "persistent incomplete passes must never publish false empty ownership");
+      assert.equal(checkpoints.at(-1)?.complete, false);
+      assert.ok((mode === "snapshot-persistent" ? snapshotFailures : identityFailures) > 1);
+    }
+    if (mode === "persistence-persistent") {
+      assert.ok(checkpointFailures > 1);
+      assert.equal(checkpoints.at(-1)?.succeeded, false);
+      assert.ok(checkpoints.some((checkpoint) => checkpoint.faultEnabled && checkpoint.identities.length === 0),
+        "quiescent processes still require a successful final checkpoint");
+    }
     if (mode === "slow-spawn") {
       assert.equal(capturedDuringRootCallback, true);
       assert.equal(publishedBeforeRoot, false);
@@ -191,11 +286,14 @@ async function main() {
     await writeFile(paths.result, JSON.stringify({
       mode, width: Number(width), version, collectorCalls, teardownCalls,
       failureInjected, capturedDuringRootCallback, publishedBeforeRoot,
+      recoveredComplete, retainedDuringIncomplete, retriedCheckpoint,
+      snapshotFailures, identityFailures, checkpointFailures,
+      checkpoints,
       errorCode: outcome.error?.code, cleanupUnverified: outcome.error?.details?.process_cleanup_unverified,
       leafAliveAtReturn: current.identity?.startToken === leaf.startToken,
     }));
   } finally {
-    if (mode !== "failure") await killObserved();
+    if (!liveTailModes.includes(mode)) await killObserved();
     NATIVE_V2_CERTIFIED.set("swarm", oldRow);
   }
 }

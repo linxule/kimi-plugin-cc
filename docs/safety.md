@@ -251,6 +251,8 @@ The native `TaskStop` policy remains in the plugin-owned session after deactivat
 
 Normal print exit and terminal cancellation both wait for identity-verified owned-process settlement before artifacts or write patches are captured. A native timeout on an individual Bash call does not prove arbitrary command descendants have stopped before the next wave. An allowed repository test can itself start many OS subprocesses; the concurrency limit counts Kimi child-agent turns, not those processes. The whole-job settlement barrier stops verified owned tails and refuses success when quiescence cannot be established.
 
+Process-tree settlement applies on POSIX; Windows retains direct-child-only cleanup. Job-end cleanup also stops observed, identity-verified build/test daemon descendants, so services started by the job are not preserved. Process sampling retains the trusted-repository boundary and does not provide universal OS daemon containment.
+
 `--cap` stays a soft lifetime-total hint, separate from concurrency. Sequential waves can process more targets than the concurrency limit. The finite budget bounds duration, not dollars or total tokens. This construction does not change the existing trust boundary for test runners or other allowed commands that execute repository code.
 
 The construction is exact-version-specific. Older certified versions retain normal-launch limits and the inherited recovery overrun; exact 2.6.0 remains non-swarm-only. The upstream 2.6.2 binary is unmodified. Validation state and evidence are recorded in the [2.6.2 certification record](upstream-2.6.2-certification.md).

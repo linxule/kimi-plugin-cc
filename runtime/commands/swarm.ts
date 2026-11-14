@@ -657,7 +657,8 @@ async function executeSwarmJob(
 
   try {
     const executionPlan = executionPlanFromPersisted(job);
-    const singleWorker = usesBoundedSwarmPolicy(executionPlan) && maxConcurrency === 1;
+    const boundedSwarm = usesBoundedSwarmPolicy(executionPlan);
+    const singleWorker = boundedSwarm && maxConcurrency === 1;
     const needsPreactivation = !singleWorker && requiresSwarmPreactivation(executionPlan.kimiVersion);
     // A direct worker still needs durable print ownership and patch recovery.
     // Its record has no activated session and never requires web cleanup.
@@ -780,7 +781,8 @@ async function executeSwarmJob(
         },
         onProcessIdentities: recovery
           ? (identities, complete) => recordRecoveryEvent(store, recovery!, {
-              kind: "print-processes", identities: [...identities], complete,
+              kind: boundedSwarm ? "print-processes-snapshot" : "print-processes",
+              identities: [...identities], complete,
             })
           : undefined,
         signal: handlers.signal,

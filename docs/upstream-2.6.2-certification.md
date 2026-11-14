@@ -16,20 +16,38 @@ The exact source and binary remain commit `6a8493df3e1d796a63f7c7ca0de76c1e690cd
 
 The native TaskStop policy persists after deactivation of the owned parallel session. A later external interactive resume of that historical session is outside the managed-job certification.
 
-### Evidence required before certification
+### Validation receipts
+
+The completed receipts below cover runtime commit `d1c4fe306dd3a4f5b1496c105d937f562b856764`. Final review requires additional process-observation and recovery reliability fixes; final-tree reruns remain **PENDING**, so these passing receipts are not yet the release gate. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; those ignored logs are evidence locations, not package contents.
 
 | Gate | Receipt |
 | --- | --- |
-| Exact-source audit and tag scan; no-plan/local controls | PENDING |
-| Canonical-hook, environment and emitted-runtime regression tests | PENDING |
-| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PENDING |
-| Native background-policy closure, explicit background denial, normal-exit descendant quiescence before capture | PENDING |
-| Single-worker read/write, delegation denial, patch and cancellation controls | PENDING |
-| Real-provider candidate and production operation matrices | PENDING |
-| Frozen dependency install, full repository gate, package and consumer security | PENDING |
-| Independent review, release-commit smoke, CI and publication | PENDING |
+| Exact-source audit and tag scan | PASS: 31 tests / 393 assertions, 115 source pins; exact 2.5.3 regression 19 pass / 12 version-specific skips / 153 assertions |
+| Production matrix and emitted-runtime regression tests | PASS: 37 tests / 767 assertions in 11.79s, including all three compiled distributions, canonical-hook policy, escape-monitor propagation and unsafe-settlement patch refusal |
+| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PASS: part of the 23-test stock-binary suite, 138 assertions in 270.27s; no failures |
+| Native background-policy closure, explicit background denial, normal-exit descendant quiescence before capture | PASS: parallel auto-background and explicit-background controls in that same stock-binary suite |
+| Single-worker read/write, delegation denial, patch and cancellation controls | PASS: explicit/default concurrency-one, automatic-background, cancellation and budget controls in that same suite |
+| Real-provider production operation matrix, no-plan and local-execution controls | PENDING: `live-production-commit.log` is running against the frozen commit |
+| Frozen dependency install and full repository gate | PENDING final full-gate receipt: `production-full-check.log` |
+| Package and isolated consumer security | PASS: 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot; isolated npm consumer security |
+| Final independent review, CI and publication | PENDING |
+
+The 23 stock-binary controls use the untouched 2.6.2 executable with a scripted test provider. They exercise new/resumed waves, odd target grouping, both nested profiles, invalid resumes, read/write cancellation, active HTTP/tool budget expiry, and 429/context recovery beyond the native 180-second interval. Their deterministic responses prove enforcement and settlement; the separate real-provider matrix must still prove useful model behavior through the production operation paths.
+
+| Completed evidence file | SHA-256 |
+| --- | --- |
+| `source-scan-2.6.2.log` | `ea21898d94dba98fa68792565c6d2bb409af04307fc72446af2da58598f2e507` |
+| `source-scan-2.5.3.log` | `f04df6af7b6c2252526bba52a2df357a1f152618c4f6fc12ca6354400232723c` |
+| `production-matrix-compiled.log` | `51e44db91a8f5e57b4cbc582a8b3a0341ab0376f4333a550f358101abd660352` |
+| `production-01.log` | `bd35efeaa8ddce2397f65e41bcdb67547a74896105e6badf03e7cb44e60668fa` |
+| `production-package.log` | `4464e978ccb6f6ad9e0b37c4d9816f4ceb7ed99228315d6c8e250af373fd2e64` |
+| `production-consumer-security.log` | `3dea92a3793941ba29017dec7b3e7a7a254eb45473130349fa4502b70a817221` |
+
+### Counterexamples that determined the construction
 
 The earlier prototype supplied 11 admission/recovery binary controls, 18 direct hook probes and 10 lifecycle controls. It established a real guard-only failure (three active children at width two after a short native timeout) and a protected counterpart, including process checks before provider cleanup. Those ignored research artefacts motivated the production construction; they do not replace the canonical implementation or release gates above.
+
+Review then exposed a second route: native Bash background completion could wake a child after its wave had returned. The owned-session TaskStop policy closes both explicit and automatic detachment in parallel mode; the hook separately rejects explicit background requests. A later parallel control found a timed-out Bun descendant surviving successful print exit. That failure required identity tracking and a normal-exit settlement barrier before artifact or patch capture, plus refusal to capture a patch when settlement remains uncertain. The passing production controls include these closures. Concurrency-one automatic backgrounding remains supported because its root-agent turns are sequential and whole-job settlement still gates the result. None of these controls claims a bound on arbitrary OS subprocess counts or settlement of every command descendant between individual waves.
 
 ## Historical plugin 2.5.9 non-swarm certification — 2026-11-14
 

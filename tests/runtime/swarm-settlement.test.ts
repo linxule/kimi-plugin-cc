@@ -10,6 +10,7 @@ const worktree = "/virtual/swarm-worktree";
 const patchPath = "/virtual/artifacts/partial.patch";
 const rootIdentity: ProcessIdentity = { pid: 71001, processGroupId: 71001, startToken: "ps:root", state: "S" };
 const childIdentity: ProcessIdentity = { pid: 71002, processGroupId: 71002, startToken: "ps:child", state: "S" };
+const completedChildIdentity: ProcessIdentity = { pid: 71003, processGroupId: 71003, startToken: "ps:completed-child", state: "S" };
 
 interface PrintOptions {
   onSpawn?: (pid: number) => void | Promise<void>;
@@ -100,6 +101,10 @@ async function runFault(options: { kind: FaultKind; complete?: boolean; cancelli
     runCliPromptWithBudget: async (print: PrintOptions) => {
       expect(typeof print.onProcessIdentities).toBe("function");
       await print.onSpawn?.(rootIdentity.pid);
+      const firstSnapshot = options.complete === false ? [rootIdentity] : [rootIdentity, completedChildIdentity];
+      await print.onProcessIdentities!(firstSnapshot, true);
+      identityCallbackCalls += 1;
+      expect(snapshots.at(-1)?.launches[0]?.identities).toEqual(firstSnapshot);
       await print.onProcessIdentities!([rootIdentity, childIdentity], options.complete ?? true);
       identityCallbackCalls += 1;
       durableBeforeThrow = structuredClone(snapshots.at(-1)!);
@@ -127,7 +132,7 @@ async function runFault(options: { kind: FaultKind; complete?: boolean; cancelli
   );
   expect(activationCalls).toBe(0);
   expect(deactivationCalls).toBe(0);
-  expect(identityCallbackCalls).toBe(1);
+  expect(identityCallbackCalls).toBe(2);
   expect(disposed).toBe(true);
   expect(closed).toBe(true);
   expect(durableBeforeThrow?.launches).toHaveLength(1);

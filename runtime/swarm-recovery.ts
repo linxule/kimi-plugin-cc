@@ -5,6 +5,7 @@ import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProce
 export type SwarmRecoveryEvent =
   | { kind: "web-spawn" | "print-spawn" | "web-exit" | "print-exit" | "disabled" }
   | { kind: "web-processes" | "print-processes"; identities: ProcessIdentity[]; complete: boolean }
+  | { kind: "print-processes-snapshot"; identities: ProcessIdentity[]; complete: boolean }
   | { kind: "session"; sessionId: string; workspaceId: string };
 export interface RecoveryLaunch {
   kind: "web" | "print";
@@ -12,6 +13,7 @@ export interface RecoveryLaunch {
   identities: ProcessIdentity[];
   quiescent: boolean;
   uncertain: boolean;
+  boundedSnapshot?: true;
 }
 export interface SwarmRecoveryRecord {
   schema: 1;
@@ -45,6 +47,19 @@ export function recordRecoveryEvent(store: JobStore, record: SwarmRecoveryRecord
     if (event.kind === "web-exit" || event.kind === "print-exit") {
       launch.quiescent = true;
       launch.pending = false;
+    } else if (event.kind === "print-processes-snapshot") {
+      const root = launch.identities[0];
+      if (!root) throw recoveryError("The print root identity was not durably recorded before its process snapshot.");
+      // The root remains the recovery anchor after exit. Complete bounded
+      // snapshots replace historical descendants; an incomplete observation
+      // cannot discard an identity whose exit has not been proven.
+      const previous = new Map(launch.identities.map((identity) => [processIdentityKey(identity), identity]));
+      const current = event.identities.map((identity) => previous.get(processIdentityKey(identity)) ?? identity);
+      const all = event.complete ? [root, ...current] : [...launch.identities, ...current];
+      launch.identities = [...new Map(all.map((identity) => [processIdentityKey(identity), identity])).values()];
+      launch.pending = false;
+      launch.uncertain = !event.complete;
+      launch.boundedSnapshot = true;
     } else if ("identities" in event) {
       const all = [...launch.identities, ...event.identities];
       launch.identities = [...new Map(all.map((identity) => [`${identity.pid}:${identity.startToken}:${identity.processGroupId}`, identity])).values()];
@@ -53,6 +68,11 @@ export function recordRecoveryEvent(store: JobStore, record: SwarmRecoveryRecord
     }
   }
   store.saveSwarmRecovery(record.jobId, record);
+}
+
+function processIdentityKey(identity: ProcessIdentity): string {
+  // A changed process group is not a new ownership grant for the same process.
+  return `${identity.pid}:${identity.startToken}`;
 }
 
 export function finishRecoveryRecord(store: JobStore, record: SwarmRecoveryRecord): void {
@@ -104,6 +124,27 @@ export async function validateRecoveryGroupMembers(
   return ownership.identities;
 }
 
+export async function inspectRecoveryLaunchProcesses(
+  launch: RecoveryLaunch,
+  validate: typeof revalidateProcessIdentities = revalidateProcessIdentities,
+  collect: typeof collectProcessGroupsIdentities = collectProcessGroupsIdentities,
+): Promise<ProcessIdentity[]> {
+  let known = launch.identities;
+  if (launch.kind === "print" && launch.boundedSnapshot === true) {
+    const live = await validate(known);
+    if (!live.complete || live.groupChanged?.length) {
+      throw recoveryError("Process ownership or group membership is uncertain.");
+    }
+    // The saved root remains first for ancestry recovery, but an exited root
+    // grants no ownership of its numeric group after that group is reused.
+    known = live.identities;
+    if (known.length === 0) return [];
+  }
+  const members = await collect(known.map((identity) => identity.processGroupId));
+  if (members === undefined) throw recoveryError("Process group membership is unreadable.");
+  return validateRecoveryGroupMembers(known, members, validate);
+}
+
 /** Never signal an unproven group, PID replacement, or changed-PGID process. */
 export async function recoverLaunch(launch: RecoveryLaunch, persist: () => void, signal?: AbortSignal): Promise<void> {
   if (launch.quiescent) return;
@@ -124,11 +165,7 @@ export async function recoverLaunch(launch: RecoveryLaunch, persist: () => void,
     launch.identities = [...new Map([...launch.identities, ...descendants].map((id) => [`${id.pid}:${id.startToken}:${id.processGroupId}`, id])).values()];
     persist();
   }
-  const inspect = async () => {
-    const members = await collectProcessGroupsIdentities(launch.identities.map((id) => id.processGroupId));
-    if (members === undefined) throw recoveryError("Process group membership is unreadable.");
-    return validateRecoveryGroupMembers(launch.identities, members);
-  };
+  const inspect = () => inspectRecoveryLaunchProcesses(launch);
   for (const [killSignal, waitMs] of [["SIGTERM", 1500], ["SIGKILL", 500]] as const) {
     signal?.throwIfAborted();
     for (const identity of await inspect()) {

@@ -10,7 +10,10 @@ const runner = path.join(process.cwd(), "tests/helpers/swarm-settlement-runner.m
 const posixTest = process.platform === "win32" ? test.skip : test;
 
 for (const distribution of ["dist", "plugins/kimi-codex/dist", "plugins/kimi-dsh/dist"]) {
-  for (const mode of ["success", "failure"]) {
+  for (const mode of [
+    "success", "failure", "snapshot-error", "identity-error", "persistence-error", "incomplete-retention",
+    "snapshot-persistent", "identity-persistent", "persistence-persistent",
+  ]) {
     posixTest(`${distribution} settles owned tails and exits naturally after ${mode}`, async () => {
       const root = await createTestPluginDataRoot("compiled-swarm-settlement");
       const child = spawn("node", [runner, path.join(process.cwd(), distribution), "js", root, mode, "2"], {
@@ -31,8 +34,9 @@ for (const distribution of ["dist", "plugins/kimi-codex/dist", "plugins/kimi-dsh
         expect(status, output).toBe(0);
         const result = JSON.parse(await readFile(path.join(root, "result.json"), "utf8"));
         expect(result.mode).toBe(mode);
-        expect(result.leafAliveAtReturn).toBe(mode === "failure");
-        if (mode === "failure") {
+        const hasLiveTail = mode === "failure" || mode === "identity-persistent";
+        expect(result.leafAliveAtReturn).toBe(hasLiveTail);
+        if (hasLiveTail) {
           expect(result.errorCode).toBe("CLI_PROCESS_SETTLEMENT_FAILED");
           expect(result.cleanupUnverified).toBe(true);
         }

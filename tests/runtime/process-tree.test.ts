@@ -1,9 +1,107 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
 import { revalidateProcessIdentities, waitForProcessTreeExit, type ProcessIdentity } from "../../runtime/process-tree.js";
 
 const captured = { pid: 4_242, processGroupId: 100, startToken: "test:start", state: "S" };
+
+describe("targeted ps snapshot exit", () => {
+  type Row = ProcessIdentity & { parentPid: number };
+  type Exec = (command: string, args: string[], options: unknown) => Promise<{ stdout: string }>;
+
+  async function snapshotReader(exec: Exec) {
+    const source = await readFile("runtime/process-tree.ts", "utf8");
+    const snippets = [
+      ["async function collectVerifiedDescendantIdentities(", "async function collectProcessSnapshotRows():"],
+      ["async function collectProcessSnapshotRowsFromPs(", "async function readCurrentIdentityBatch("],
+      ["function parsePsSnapshotRows(", "function mergeIdentityBatches("],
+      ["function toProcessIdentity(", "function dedupeIdentities("],
+      ["function uniqueValidPids(", "function sleep("],
+      ["function isExitCode(", undefined],
+    ].map(([start, end]) => source.slice(source.indexOf(start!), end === undefined ? undefined : source.indexOf(end)));
+    const code = new Bun.Transpiler({ loader: "ts" }).transformSync(snippets.join("\n"));
+    let beforeVerification: (rows: Row[]) => Promise<void> = async () => undefined;
+    const bindings = {
+      execFileAsync: exec,
+      process: { platform: "darwin" },
+      PROCESS_SNAPSHOT_TIMEOUT_MS: 1_000,
+      PROCESS_IDENTITY_PROBE_TIMEOUT_MS: 1_000,
+      MAX_DESCENDANT_DEPTH: 8,
+      MAX_DESCENDANT_PIDS: 512,
+      collectProcessSnapshotRows: async (): Promise<Row[] | undefined> => {
+        const rows = await api.read();
+        if (rows !== undefined) await beforeVerification(rows);
+        return rows;
+      },
+    };
+    const api = new Function(...Object.keys(bindings), `${code}; return { read: collectProcessSnapshotRowsFromPs, collect: collectVerifiedDescendantIdentities };`)(
+      ...Object.values(bindings),
+    ) as {
+      read: (pids?: number[]) => Promise<Row[] | undefined>;
+      collect: (pid: number, expectedRoot?: ProcessIdentity) => Promise<ProcessIdentity[]>;
+    };
+    return { ...api, beforeVerification: (callback: typeof beforeVerification) => { beforeVerification = callback; } };
+  }
+
+  test("exit 1 for an explicit PID list is a complete empty snapshot", async () => {
+    const reader = await snapshotReader(async () => { throw { code: 1 }; });
+    await expect(reader.read([101, 102])).resolves.toEqual([]);
+  });
+
+  test("exit 1 for the full process table remains a probe failure", async () => {
+    const reader = await snapshotReader(async () => { throw { code: 1 }; });
+    await expect(reader.read()).resolves.toBeUndefined();
+  });
+
+  test("other targeted errors remain probe failures", async () => {
+    for (const error of [{ code: 2 }, { code: "ENOENT" }, { killed: true, signal: "SIGTERM" }]) {
+      const reader = await snapshotReader(async () => { throw error; });
+      await expect(reader.read([101, 102])).resolves.toBeUndefined();
+    }
+  });
+
+  test.skipIf(process.platform !== "darwin")("an orphan anchor and child can naturally exit between snapshots", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kimi-process-snapshot-"));
+    const release = path.join(dir, "release");
+    const ready = path.join(dir, "ready.json");
+    const exec = promisify(execFile);
+    const deadline = Date.now() + 5_000;
+    const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
+      while (!(await predicate())) {
+        if (Date.now() > deadline) throw new Error("orphan fixture did not settle");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+    const childCode = `const fs=require('node:fs'); const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);process.exit(0);}},10);setTimeout(()=>process.exit(0),6000).unref();`;
+    const anchorCode = `const fs=require('node:fs');const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{stdio:'ignore'});fs.writeFileSync(${JSON.stringify(ready)},JSON.stringify({anchor:process.pid,child:child.pid}));child.on('exit',()=>process.exit(0));`;
+    const launcherCode = `const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(anchorCode)}],{detached:true,stdio:'ignore'});child.unref();`;
+    try {
+      await exec(process.execPath, ["-e", launcherCode]);
+      await waitUntil(async () => readFile(ready).then(() => true, () => false));
+      const ids = JSON.parse(await readFile(ready, "utf8")) as { anchor: number; child: number };
+      const reader = await snapshotReader((command, args, options) => exec(command, args, options as Parameters<typeof execFile>[2]) as Promise<{ stdout: string }>);
+      const observed = await reader.read([ids.anchor, ids.child]);
+      const anchor = observed?.find((row) => row.pid === ids.anchor);
+      expect(anchor).toBeDefined();
+      expect(observed?.find((row) => row.pid === ids.child)?.parentPid).toBe(ids.anchor);
+      expect(anchor?.parentPid).toBe(1);
+      reader.beforeVerification(async (rows) => {
+        expect(rows.some((row) => row.pid === ids.anchor)).toBe(true);
+        expect(rows.some((row) => row.pid === ids.child && row.parentPid === ids.anchor)).toBe(true);
+        await writeFile(release, "exit");
+        await waitUntil(async () => (await reader.read([ids.anchor, ids.child]))?.length === 0);
+      });
+      await expect(reader.collect(ids.anchor, anchor)).resolves.toEqual([]);
+    } finally {
+      await writeFile(release, "exit").catch(() => undefined);
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 10_000);
+});
 
 describe("retained process-tree anchor identity", () => {
   type Row = ProcessIdentity & { parentPid: number };

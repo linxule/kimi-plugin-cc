@@ -580,8 +580,11 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       if (boundedSwarm) beginTeardown();
     });
 
-    let trackingError: unknown;
-    const captureDescendantIdentities = async (childPid: number, expectedRoot?: ProcessIdentity): Promise<ProcessIdentity[]> => {
+    const captureDescendantIdentities = async (
+      childPid: number,
+      expectedRoot?: ProcessIdentity,
+      onFailure?: (error: unknown) => void,
+    ): Promise<ProcessIdentity[]> => {
       let snapshot: ProcessIdentity[];
       try {
         const collected = await raceWithValueTimeout(
@@ -594,7 +597,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
             event: "descendant_collection_timeout",
             timeout_ms: DESCENDANT_SNAPSHOT_TIMEOUT_MS,
           });
-          if (boundedSwarm) trackingError ??= new Error("descendant ownership snapshot timed out");
+          onFailure?.(new Error("descendant ownership snapshot timed out"));
           return [];
         }
         snapshot = collected;
@@ -603,7 +606,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           event: "descendant_collection_error",
           message: formatError(err),
         });
-        if (boundedSwarm) trackingError ??= err;
+        onFailure?.(err);
         return [];
       }
 
@@ -683,6 +686,10 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     let trackerPass: Promise<void> | undefined;
     let publishedIdentities = "";
     let spawnRecorded = opts.onSpawn === undefined;
+    let observationError: unknown;
+    let checkpointError: unknown;
+    let lastPassComplete = false;
+    let lastPassCheckpointed = false;
     const retainIdentities = (identities: readonly ProcessIdentity[]) => {
       for (const identity of identities) {
         // A changed PGID is not a new ownership grant. Keep the first identity
@@ -695,42 +702,63 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     const refreshTrackedIdentities = (): Promise<void> => {
       if (trackerPass) return trackerPass;
       trackerPass = (async () => {
+        lastPassComplete = false;
+        lastPassCheckpointed = false;
+        let passError: unknown;
+        const noteFailure = (error: unknown) => { passError ??= error; };
         const childPid = child.pid;
         if (childPid === undefined || process.platform === "win32") return;
-        const reachable = !processExited ? await captureDescendantIdentities(childPid) : [];
+        const reachable = !processExited ? await captureDescendantIdentities(childPid, undefined, noteFailure) : [];
         retainIdentities(reachable);
         const reachableKeys = new Set(reachable.map(identityKey));
+        const priorIdentities = [...trackedIdentities.values()];
         const validation = await revalidateProcessIdentities([...trackedIdentities.values()], {
           identityReader, timeoutMs: IDENTITY_REVALIDATION_TIMEOUT_MS,
         });
         if (!validation.complete) {
-          trackingError ??= new Error("descendant ownership could not be revalidated");
-        } else {
-          const liveKeys = new Set([...validation.identities, ...(validation.groupChanged ?? [])].map(identityKey));
+          noteFailure(new Error("descendant ownership could not be revalidated"));
+        }
+        // Once a shell exits its surviving children are no longer under the
+        // print root. Reuse their pinned identities as anchors, never bare PIDs.
+        // Probe even an anchor reported missing by validation: only a complete
+        // pass may retire its evidence, and the expected identity rejects reuse.
+        const orphanedAnchors = priorIdentities.filter((identity) => !reachableKeys.has(identityKey(identity)));
+        const additional = await Promise.all(orphanedAnchors.map((identity) =>
+          captureDescendantIdentities(identity.pid, identity, noteFailure)));
+        for (const identities of additional) retainIdentities(identities);
+        if (passError === undefined) {
+          const liveKeys = new Set([
+            ...validation.identities, ...(validation.groupChanged ?? []), ...additional.flat(),
+          ].map(identityKey));
           for (const key of trackedIdentities.keys()) {
             if (!liveKeys.has(key)) trackedIdentities.delete(key);
           }
         }
-        // Once a shell exits its surviving children are no longer under the
-        // print root. Reuse their pinned identities as anchors, never bare PIDs.
-        const orphanedAnchors = validation.identities.filter((identity) => !reachableKeys.has(identityKey(identity)));
-        const additional = await Promise.all(orphanedAnchors.map((identity) =>
-          captureDescendantIdentities(identity.pid, identity)));
-        for (const identities of additional) retainIdentities(identities);
+        // Observation failures describe this pass. A later complete pass can
+        // recover; incomplete passes retain every earlier ownership identity.
+        observationError = passError;
+        lastPassComplete = passError === undefined;
         const current = [...trackedIdentities.values()];
-        const signature = JSON.stringify([current.map((identity) => [identity.pid, identity.startToken, identity.processGroupId]), trackingError === undefined]);
+        const signature = JSON.stringify([current.map((identity) => [identity.pid, identity.startToken, identity.processGroupId]), lastPassComplete]);
         // Recovery stores the print root first. Capture starts immediately,
         // but descendant publication waits for that durable root checkpoint.
-        if (spawnRecorded && signature !== publishedIdentities) {
-          publishedIdentities = signature;
-          try {
-            await opts.onProcessIdentities?.(current, trackingError === undefined);
-          } catch (error) {
-            trackingError ??= error;
+        if (spawnRecorded) {
+          if (signature === publishedIdentities && checkpointError === undefined) {
+            lastPassCheckpointed = true;
+          } else {
+            try {
+              await opts.onProcessIdentities?.(current, lastPassComplete);
+              publishedIdentities = signature;
+              checkpointError = undefined;
+              lastPassCheckpointed = true;
+            } catch (error) {
+              checkpointError = error;
+            }
           }
         }
       })().catch((error: unknown) => {
-        trackingError ??= error;
+        observationError = error;
+        lastPassComplete = false;
       }).finally(() => {
         trackerPass = undefined;
       });
@@ -740,7 +768,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       const deadline = Date.now() + Math.max(0, timeoutMs);
       while (true) {
         await refreshTrackedIdentities();
-        if (processExited && trackedIdentities.size === 0) return true;
+        if (processExited && trackedIdentities.size === 0 && lastPassComplete && lastPassCheckpointed) return true;
         if (Date.now() >= deadline) return false;
         await new Promise<void>((resolve) => setTimeout(resolve, Math.min(BOUNDED_DESCENDANT_POLL_MS, deadline - Date.now())));
       }
@@ -757,8 +785,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           await signalCapturedTree(childPid, [...trackedIdentities.values()], "SIGKILL");
           quiescent = await waitForTrackedExit(POST_KILL_QUIESCENCE_MS);
         }
-        if (!quiescent) throw new Error("owned descendants did not reach verified quiescence");
-        if (trackingError !== undefined) throw trackingError;
+        if (!quiescent) throw checkpointError ?? observationError ?? new Error("owned descendants did not reach verified quiescence");
       } finally {
         if (trackerTimer) clearInterval(trackerTimer);
         await trackerPass;
