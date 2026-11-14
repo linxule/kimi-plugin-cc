@@ -219,7 +219,13 @@ async function runner(runtimeRoot, extension, root) {
     assert.deepEqual(finalCheckpoint.identities, []);
     const current = await probeProcessIdentity(leaf.pid);
     assert.equal(current.complete, true);
-    assert.notEqual(current.identity?.startToken, leaf.startToken);
+    const quiescence = await revalidateProcessIdentities([leaf], {
+      // Linux may retain a reparented zombie until its new parent reaps it.
+      identityReader: async () => current.identity,
+    });
+    assert.equal(quiescence.complete, true);
+    assert.deepEqual(quiescence.identities, []);
+    assert.deepEqual(quiescence.groupChanged ?? [], []);
     const atReturn = await readFile(paths.writes, "utf8");
     await pause(100);
     assert.equal(await readFile(paths.writes, "utf8"), atReturn);

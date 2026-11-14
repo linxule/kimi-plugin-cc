@@ -17,6 +17,8 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const transientModes = ["snapshot-error", "batch-snapshot-error", "identity-error", "persistence-error", "incomplete-retention"];
 const persistentModes = ["snapshot-persistent", "identity-persistent", "persistence-persistent"];
 const liveTailModes = ["failure", "identity-persistent"];
+const isQuiescent = (identity) => identity === undefined || /^[ZX]/.test(identity.state.trim().toUpperCase());
+const isObservedAlive = (identity, expected) => identity?.startToken === expected.startToken && !isQuiescent(identity);
 async function waitFor(read, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -39,7 +41,7 @@ let leaf;
 async function killObserved() {
   if (!leaf) return;
   const current = await probeProcessIdentity(leaf.pid);
-  if (current.complete && current.identity?.startToken === leaf.startToken &&
+  if (current.complete && isObservedAlive(current.identity, leaf) &&
     current.identity.processGroupId === leaf.processGroupId) {
     try { process.kill(leaf.pid, "SIGKILL"); } catch { /* Already exited. */ }
   }
@@ -133,7 +135,7 @@ async function main() {
             identityFailures++;
             throw new Error("scripted identity read failure");
           }
-          if (mode === "failure" || (mode === "sticky" && !actual.identity)) {
+          if (mode === "failure" || (mode === "sticky" && isQuiescent(actual.identity))) {
             failureInjected = true;
             // Report liveness without granting a signal target under a changed
             // group. The outer test retains the actual identity for safe cleanup.
@@ -215,8 +217,8 @@ async function main() {
     const shell = await waitFor(async () => JSON.parse(await readFile(paths.shellExited, "utf8")));
     const shellState = await probeProcessIdentity(shell.pid);
     assert.equal(shellState.complete, true);
-    assert.equal(shellState.identity, undefined);
-    assert.equal((await probeProcessIdentity(leaf.pid)).identity?.startToken, leaf.startToken);
+    assert.equal(isQuiescent(shellState.identity), true);
+    assert.equal(isObservedAlive((await probeProcessIdentity(leaf.pid)).identity, leaf), true);
     if (transientModes.includes(mode)) {
       await waitFor(async () => recoveredComplete ? true : undefined);
       assert.equal(failureInjected, true);
@@ -270,10 +272,10 @@ async function main() {
     const writesAtReturn = await readFile(paths.writes, "utf8");
     await pause(120);
     if (liveTailModes.includes(mode)) {
-      assert.equal(current.identity?.startToken, leaf.startToken);
+      assert.equal(isObservedAlive(current.identity, leaf), true);
       assert.ok((await readFile(paths.writes, "utf8")).length > writesAtReturn.length);
     } else {
-      assert.notEqual(current.identity?.startToken, leaf.startToken);
+      assert.equal(isObservedAlive(current.identity, leaf), false);
       assert.equal(await readFile(paths.writes, "utf8"), writesAtReturn);
     }
     if (version === "2.6.2") {
@@ -332,7 +334,7 @@ async function main() {
       snapshotFailures, batchSnapshotFailures, identityFailures, checkpointFailures,
       checkpoints,
       errorCode: outcome.error?.code, cleanupUnverified: outcome.error?.details?.process_cleanup_unverified,
-      leafAliveAtReturn: current.identity?.startToken === leaf.startToken,
+      leafAliveAtReturn: isObservedAlive(current.identity, leaf),
     }));
   } finally {
     if (!liveTailModes.includes(mode)) await killObserved();
