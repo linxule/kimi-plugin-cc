@@ -285,7 +285,7 @@ describe("runSwarm certified execution-plan gate", () => {
     }
   });
 
-  test.each(["2.6.0", "2.6.2"].flatMap((version) => [
+  test.each(["2.6.0"].flatMap((version) => [
     { label: "swarm", args: ["review", "two", "targets"] },
     { label: "swarm-write", args: ["--write", "edit", "two", "targets"] },
   ].map((entry) => ({ ...entry, version }))))("$version refuses $label before model invocation", async ({ label, args, version }) => {
@@ -480,6 +480,8 @@ describe("write-swarm lifecycle", () => {
         dispose() {},
       }),
       executionPlanFromPersisted: () => ({ command: "unused", prefixArgs: [] }),
+      usesBoundedSwarmPolicy: () => false,
+      requiresSwarmPreactivation: () => false,
       runCliPromptWithBudget: async () => {
         throw new RuntimeError("RESPONSE_TIMEOUT", "budget elapsed", "swarm.prompt");
       },
@@ -515,6 +517,27 @@ describe("write-swarm lifecycle", () => {
 });
 
 describe("buildSwarmPrompt", () => {
+  test("bounded concurrency one directs read-only work without delegation", () => {
+    const prompt = buildSwarmPrompt("inspect every route", 20, 1);
+    expect(prompt).toContain("single worker");
+    expect(prompt).toContain("inspect every route");
+    expect(prompt).toContain("Agent and AgentSwarm are denied");
+    expect(prompt).toContain("every write/edit tool are denied");
+    expect(prompt).not.toContain("Launch the parallel fan-out");
+    expect(prompt).not.toContain("20 subagents");
+  });
+
+  test("bounded parallel waves count new and resumed entries separately from the total hint", () => {
+    const prompt = buildSwarmPrompt("inspect every route", 20, 4);
+    expect(prompt).toContain("at most 4 entries in total, counting both new items and resumed agents");
+    expect(prompt).toContain("at most 20 subagents in total");
+    expect(prompt).toContain("at least two new entries");
+    expect(prompt).toContain("a single resumed agent is allowed");
+    expect(prompt).toContain("For odd target counts, group multiple targets into disjoint worker entries");
+    expect(prompt).toContain("sequential waves");
+    expect(prompt).toContain("forks are denied");
+  });
+
   // v1.8.6: the prompt was slimmed after the kimi-code 0.26.0 (k3) coordinator
   // hung when over-prescribed. It now states the read-only goal + report shape
   // and trusts the model to fan out with its own subagent capability, while
@@ -567,6 +590,29 @@ describe("buildSwarmPrompt", () => {
 });
 
 describe("buildSwarmWritePrompt", () => {
+  test("bounded concurrency one edits directly with the patch and confinement contract", () => {
+    const prompt = buildSwarmWritePrompt("fix every route", 20, 1);
+    expect(prompt).toContain("single worker");
+    expect(prompt).toContain("fix every route");
+    expect(prompt).toContain("Agent and AgentSwarm are denied");
+    expect(prompt).toContain("throwaway git worktree");
+    expect(prompt).toContain("captured as a patch");
+    expect(prompt).toContain("Git mutation is denied");
+    expect(prompt).not.toContain("Coordinate a parallel");
+    expect(prompt).not.toContain("20 subagents");
+  });
+
+  test("bounded parallel writes use the requested wave size and preserve the total hint", () => {
+    const prompt = buildSwarmWritePrompt("fix every route", 20, 2);
+    expect(prompt).toContain("at most 2 entries in total, counting both new items and resumed agents");
+    expect(prompt).toContain("at most 20 subagents in total");
+    expect(prompt).toContain("at least two new entries");
+    expect(prompt).toContain("For odd target counts, group multiple targets into disjoint worker entries");
+    expect(prompt).toContain("Each file must belong to only one subagent's assignment");
+    expect(prompt).not.toContain("Give each subagent ONE target");
+    expect(prompt).toContain("wait for each wave to finish");
+  });
+
   test("steers to the write-capable coder profile and disjoint editing", () => {
     const prompt = buildSwarmWritePrompt("apply the rename across the package");
     expect(prompt).toContain("AgentSwarm");

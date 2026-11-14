@@ -1,11 +1,4 @@
-// Pure decision logic for the kimi-code PreToolUse hook. The entry script owns
-// stdin/stdout/exit semantics so callers can test this policy without mocking
-// process IO.
-//
-// `kimi -p` hard-codes `permission: 'auto'`, and PreToolUse fires before
-// permission rules, so this hook is load-bearing for read-only commands.
-// Unknown command labels fail closed to READ_ONLY_TOOLS. An absent
-// KIMI_PLUGIN_CC_CMD means out-of-plugin use and remains unrestricted.
+import { BOUNDED_SWARM_POLICY, evaluateSwarmWaveInput } from "../swarm-policy.js";
 /**
  * Tools considered read-only across review/challenge/review_gate/rescue.
  *
@@ -80,6 +73,26 @@ export function decideHookOutcomePure(input, ctx) {
         return { decision: "allow" };
     }
     const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
+    if ((label === "swarm" || label === "swarm-write") &&
+        (ctx.swarmPolicy !== undefined || ctx.swarmWaveSize !== undefined)) {
+        if (toolName === AGENT_SWARM_TOOL) {
+            return evaluateSwarmWaveInput(input.tool_input, ctx.swarmPolicy, ctx.swarmWaveSize);
+        }
+        if (toolName === "Agent") {
+            return {
+                decision: "deny",
+                reason: "kimi-plugin-cc safety hook: singular Agent delegation is denied for bounded swarm jobs.",
+            };
+        }
+        const args = input.tool_input;
+        if (toolName === "Bash" && typeof args === "object" && args !== null &&
+            args.run_in_background === true) {
+            return {
+                decision: "deny",
+                reason: "kimi-plugin-cc safety hook: run commands in the foreground; explicit background commands are disabled for bounded swarm execution.",
+            };
+        }
+    }
     if (PLAN_MODE_TOOLS.has(toolName)) {
         return {
             decision: "deny",
@@ -133,14 +146,15 @@ export function decideHookOutcomePure(input, ctx) {
             // AgentSwarm are allowed and the singular Agent stays denied. This adds
             // no direct tool-write permission within the repository/Git trust
             // boundary: read-only Git context commands still trust repository Git
-            // configuration and can execute configured helpers. Nested AgentSwarm
-            // calls remain allowed, with their cost bounded by the command budget.
+            // configuration and can execute configured helpers. Exact 2.6.2 waves
+            // pass the admission guard above; fresh children cannot activate swarm
+            // mode. Older paths retain their inherited scheduler limitations.
             if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
                 return { decision: "allow" };
             }
             return {
                 decision: "deny",
-                reason: denySwarmMessage(toolName),
+                reason: denySwarmMessage(toolName, ctx.swarmPolicy === BOUNDED_SWARM_POLICY && ctx.swarmWaveSize === "1"),
             };
         case "swarm-write": {
             // Write-capable fan-out runs in an ephemeral worktree. AgentSwarm and the
@@ -200,8 +214,16 @@ function denyReadOnlyMessage(label, toolName) {
         "If you need to mutate state, the user must invoke /kimi:rescue (write-capable) rather than this command.",
     ].join(" ");
 }
-function denySwarmMessage(toolName) {
+function denySwarmMessage(toolName, singleWorker) {
     const tool = toolName.length > 0 ? toolName : "<unspecified>";
+    if (singleWorker) {
+        return [
+            "kimi-plugin-cc safety hook: swarm with concurrency 1 is a read-only review.",
+            `Tool "${tool}" is denied — use Read, Grep, or Glob to inspect the workspace.`,
+            "Complete the review yourself; delegation is denied.",
+            "Return your findings in a markdown report.",
+        ].join(" ");
+    }
     return [
         "kimi-plugin-cc safety hook: swarm is a read-only parallel review.",
         `Tool "${tool}" is denied — every subagent may use Read, Grep, or Glob to inspect the workspace,`,

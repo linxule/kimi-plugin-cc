@@ -121,14 +121,16 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
   "2.5.1",
   "2.5.2",
   "2.5.3",
+  "2.6.2",
 ]);
 
 /**
  * Exact releases certified only for review, challenge, ask, rescue, review_gate
  * and pursue. Their upstream rate-limit recovery can exceed AgentSwarm's
- * configured maximum, so both swarm operations refuse before model spawn.
+ * configured maximum, and these releases lack a certified plugin admission
+ * construction, so both swarm operations refuse before model spawn.
  */
-export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2.6.0", "2.6.2"]);
+export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2.6.0"]);
 
 /**
  * Any-operation union used by setup and engine selection. The older
@@ -138,7 +140,7 @@ export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2
 export const NATIVE_V2_ANY_OPERATION_VERSIONS: readonly string[] = Object.freeze([
   ...NATIVE_V2_CERTIFIED_VERSIONS,
   ...NATIVE_V2_NON_SWARM_VERSIONS,
-]);
+].sort((left, right) => left.localeCompare(right, "en", { numeric: true })));
 
 /** Per-operation native-v2 certification. One green operation never certifies another. */
 export const NATIVE_V2_CERTIFIED: ReadonlyMap<KimiOperationKind, readonly string[]> = new Map<
@@ -825,7 +827,7 @@ function nativeV2NotCertified(
   ) {
     return new RuntimeError(
       "KIMI_CAPABILITY_NOT_CERTIFIED",
-      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its upstream rate-limit recovery can exceed AgentSwarm's configured maximum, so this plugin refuses AgentSwarm before model spawn. Use a non-swarm operation on ${normalized}, or select a version explicitly certified for ${operationKind}.`,
+      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code 2.6.2 for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
       "kimi-engine.capability",
       {
         details: {

@@ -27,6 +27,7 @@
 // `/bin/sh -c` does not depend on its working directory or PATH.
 import { decideHookOutcome } from "./approval-policy.js";
 import { evaluateRescueHookRequest } from "../rescue-approval.js";
+import { SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV } from "../swarm-policy.js";
 const STDIN_TIMEOUT_MS = 5_000;
 async function main() {
     const stdinText = await readStdinWithTimeout(STDIN_TIMEOUT_MS);
@@ -45,6 +46,8 @@ async function main() {
     const decision = await decideHookOutcome(input, {
         commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
         operationKind: process.env.KIMI_PLUGIN_CC_OPERATION,
+        swarmPolicy: process.env[SWARM_POLICY_ENV],
+        swarmWaveSize: process.env[SWARM_WAVE_SIZE_ENV],
         rescueEvaluator: evaluateRescueHookRequest,
         // Trusted root for rescue/pursue/swarm-write. Set by the plugin spawn; the
         // model inside kimi cannot forge it and hook payload cwd is not trusted.

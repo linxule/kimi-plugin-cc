@@ -17,6 +17,8 @@ import {
 } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
+import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
+import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
 import {
   collectDescendantIdentities,
   collectProcessGroupsIdentities,
@@ -145,6 +147,9 @@ export async function preactivateSwarmSession(
       options.signal,
       failureCode,
     );
+    if (usesBoundedSwarmPolicy(options.executionPlan) && options.swarmMaxConcurrency! > 1) {
+      await installBoundedSwarmToolPolicy(prepared.kimiHome, identity, options.signal);
+    }
     throwIfAborted(options.signal, failureCode, "swarm-activation.complete");
     return identity;
   } catch (error) {

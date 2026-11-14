@@ -17,6 +17,7 @@ import {
 } from "../../runtime/kimi-engine.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { maxTestedMinor } from "../../runtime/kimi-version-probe.js";
+import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -67,11 +68,25 @@ describe("kimi execution plan", () => {
     }
   });
 
+  test("every swarm certification after 2.5.3 requires the bounded execution policy", () => {
+    for (const operationKind of ["swarm", "swarm-write"] as const) {
+      const versions = NATIVE_V2_CERTIFIED.get(operationKind)!.filter(
+        (version) => version.localeCompare("2.5.3", "en", { numeric: true }) > 0,
+      );
+      expect(versions.length).toBeGreaterThan(0);
+      for (const kimiVersion of versions) {
+        expect(usesBoundedSwarmPolicy({
+          operationKind, intendedEngine: "native-v2", kimiVersion,
+        }), `${operationKind} ${kimiVersion} must use the bounded execution policy`).toBe(true);
+      }
+    }
+  });
+
   test("native-v2 certifies only the exact per-operation version set, under the no-plan profile", async () => {
     expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"]);
     for (const operationKind of ["swarm", "swarm-write"] as const) {
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).not.toContain("2.6.0");
-      expect(NATIVE_V2_CERTIFIED.get(operationKind)).not.toContain("2.6.2");
+      expect(NATIVE_V2_CERTIFIED.get(operationKind)).toContain("2.6.2");
     }
     expect([...NATIVE_V2_CERTIFIED.keys()].sort()).toEqual(
       ["ask", "challenge", "pursue", "rescue", "review", "review_gate", "swarm", "swarm-write"],
@@ -115,7 +130,7 @@ describe("kimi execution plan", () => {
         }),
       ).resolves.toMatchObject({ intendedEngine: "native-v2", kimiVersion: "0.42.0" });
 
-      for (const version of ["2.6.0", "2.6.2"]) {
+      for (const version of ["2.6.0"]) {
         const nonSwarmPlan = await prepareKimiExecutionPlan({
           operationKind: "ask",
           cwd,
@@ -142,7 +157,7 @@ describe("kimi execution plan", () => {
             }),
           ).rejects.toMatchObject({
             code: "KIMI_CAPABILITY_NOT_CERTIFIED",
-            message: expect.stringContaining("non-swarm"),
+            message: expect.stringContaining("Select exact kimi-code 2.6.2"),
             details: {
               refusal_kind: "v2-swarm-not-certified",
               certification_scope: "non-swarm",
@@ -163,7 +178,7 @@ describe("kimi execution plan", () => {
         }
       }
 
-      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3"]) {
+      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.2"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           const majorTwo = await prepareKimiExecutionPlan({
             operationKind,

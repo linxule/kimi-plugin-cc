@@ -1046,7 +1046,10 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
 };
 
 // 2.6.2 (6a8493df): mutable participant replay and loop-journal freezing retain
-// the same two wire-journal restore passes and raw plan-taint closure.
+// the same two wire-journal restore passes and raw plan-taint closure. The
+// additional pins cover bounded swarm waves: task identity, settlement,
+// per-agent activation, owned resume, the forced native timeout ceiling, and
+// session-wide native TaskStop disablement that prevents Bash auto-detachment.
 PINNED_HASHES["2.6.2"] = {
   ...PINNED_HASHES["2.6.0"],
   [`${CORE}/state/eventDispatcherService.ts`]:
@@ -1057,6 +1060,56 @@ PINNED_HASHES["2.6.2"] = {
     "226a4377822a042e0bc391b695ac0a40ac65ce35d7ba307ddd095885f59dd91a",
   [`${SDK}/sdk-rpc-client-v2.ts`]:
     "4c635caed581c09332ad9e54490d578bd5a30e4fe37e6b8e88720a691142638c",
+  [`${CORE}/features/swarm/tools/agent-swarm/agent-swarm.ts`]:
+    "a9c06b889692626c38e535f80f54ad0f4349fe798bf7c2986999319d8bdc7d0f",
+  [`${CORE}/features/swarm/configSection.ts`]:
+    "fb08489d5d56b17af20fdbd11676cf9a37127519d33e769649dd35c10164e7c3",
+  [`${CORE}/features/swarm/swarmFeature.ts`]:
+    "a28426dfd4a2f53fb66e6e00d4e8d6e4a1dd30f37d694bbaff65664c9dab2fd7",
+  [`${CORE}/session/subagent/runAgentTurn.ts`]:
+    "0e2915b27d3ba5142ae917e26036d096bfcbbe6a430df93c8ba36efbfa5bff0d",
+  [`${CORE}/session/subagent/spawn.ts`]:
+    "ccd5931bb49b1ebd595d1fbcc374e12613f61893954759c0227af046ffe739b1",
+  [`${CORE}/session/subagent/flag.ts`]:
+    "a6d6e0ec065ecbe043addac17826c3542e02341e422c6fb2d547980a9f9563d1",
+  [`${CORE}/session/agentLifecycle/subagentMetadata.ts`]:
+    "75996d22d8d1ec954d59cdc67c95e4ad25ec8685a1e14afaa4529ce3b297f7c4",
+  [`${CORE}/session/agentLifecycle/profile/profiles.ts`]:
+    "ce9895a1e519872228515d2aba7bed8a5c34c4ab39d23590ae9a3dce1cfff4c2",
+  [`${CORE}/agent/toolExecutor/toolScheduler.ts`]:
+    "6112511b45092a3d63150395166b5610337732a24420cb0f9598d65f8ec667ab",
+  [`${CORE}/agent/task/printDefaults.ts`]:
+    "cd96a9ef7b5c44c7b15d197ef73ffced96718ba4306c93cfd17687a62f1d2925",
+  [`${CORE}/_base/utils/timer.ts`]:
+    "840147aa36f6c1cdd7bb8a3e479342dfeca2f3a88a885ccb6c0fb3cea7ff9b9a",
+  [`${CORE}/_base/utils/abort.ts`]:
+    "07f6191fc42e479dd33c5263e009ce2fe160b0797e9d9c484d8e7f701ea958db",
+  [`${CORE}/features/externalHooks/session/sessionExternalHooksService.ts`]:
+    "201925b50a1a49b104e79a3b6db75de4f527fd2e84c80a7c1df6785506f7b7ab",
+  [`${CORE}/features/externalHooks/app/externalHooksRunnerService.ts`]:
+    "63ebf53f2e312ca5984b50bcbaf360d3114221d2fd1c1bd44579df1f69271444",
+  [`${CORE}/agent/task/taskOutput.ts`]:
+    "1ffba2f17f46edb0bfd606d75c9811c9f54597da3054e52a13d5541f008e4620",
+  [`${CORE}/agent/task/configSection.ts`]:
+    "ee84882f5d3fbf0887c6967ea060f2eec31b050aa2c9e1fa8aee752c30906d87",
+  [`${CORE}/session/sessionToolPolicy/sessionToolPolicyService.ts`]:
+    "0fd170d82e6bfe8a1e4111886f5ccf1e7ed0532bf0dcbaf6dc911f2993ccce8e",
+  [`${CORE}/agent/toolPolicy/evaluate.ts`]:
+    "087c8c39b94ffbc6dfad59a45bac792d8ddbdbfbd8898788644f97062a1f3901",
+  [`${CORE}/persistence/backends/node-fs/atomicDocumentStore.ts`]:
+    "2a738b0d4e6e806150d1c2e91b579c035f88ad4fd4aaf571c5e6637a07ef19fa",
+  [`${CORE}/persistence/backends/node-fs/fileStorageService.ts`]:
+    "e7b00f29291cc6a1b288ea3fad1850405ab693817846d6d37770fb5ebd6013fd",
+  [`${CORE}/session/sessionContext/sessionContext.ts`]:
+    "d64fa89b478cfedfbab5f2f566180415ad972f2e71b25bb55d2fcb684a284b1d",
+  [`${CORE}/workspace/sessionLifecycle/internal/addressing.ts`]:
+    "9118987642f8749dc6cce9c1cd130212e807b31dc434059f60578d75725273eb",
+  [`${CORE}/features/tower/tools/spawn/spawnTool.ts`]:
+    "c8fd9ee9a81a909eea9b7335936db8f9d92ce5de57134b37eee02e0115134784",
+  [`${CORE}/agent/tools/ask-user-question/askUserQuestionTool.ts`]:
+    "b6f18610da05b24270a096c7c7ee9305a22c4f6d0974c6078c717a65c626cfda",
+  [`${CORE}/agent/tools/agent/agentTool.ts`]:
+    "6afed948b81bb0850c7b165fe65908141b5af40eec54a548a9dec444a3b197ee",
 };
 
 /**
@@ -1500,5 +1553,227 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   test("the legacy engine selector is gone (v2-only print mode)", () => {
     expect(filesContaining([CLI, CORE], "KIMI_CODE_LEGACY_FLAG")).toEqual([]);
     expect(read(`${CLI}/cli/run-prompt.ts`)).toContain("runV2Print");
+  });
+});
+
+// These assertions pin the upstream premises of the plugin's bounded-wave
+// construction, including the cancellation weakness it must close. They do
+// not assert that native maxConcurrency is repaired or replace binary controls.
+const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && upstreamVersion() === "2.6.2"
+  ? describe
+  : describe.skip;
+
+boundedSwarmSuite("exact 2.6.2 bounded-swarm source premises", () => {
+  function section(source: string, start: string, end: string): string {
+    const first = source.indexOf(start);
+    const last = source.indexOf(end, first + start.length);
+    expect(first, `missing audited section ${start}`).toBeGreaterThan(-1);
+    expect(last, `missing end of audited section ${start}`).toBeGreaterThan(first);
+    return source.slice(first, last);
+  }
+
+  test("strict input constructs exactly one foreground task per new or resumed entry", () => {
+    const schema = read(`${CORE}/features/swarm/tools/agent-swarm/agent-swarm.ts`);
+    expect(schema).toContain(".strict()");
+    expect(schema).toMatch(/items:\s*z\s*\.array\(z\.string\(\)\.trim\(\)\.min\(1\)\)/);
+    expect(schema).toMatch(/resume_agent_ids:\s*z\s*\.record\(z\.string\(\)\.trim\(\)\.min\(1\), z\.string\(\)\.trim\(\)\.min\(1\)\)/);
+    expect(schema).not.toMatch(/\b(?:timeout|run_in_background)\s*:/);
+    const tool = read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`);
+    expect(tool).toContain("const totalCount = resumeCount + itemCount;");
+    expect(tool).toContain("return resumeCount > 0 || itemCount >= 2;");
+    const specs = section(tool, "const specs: AgentSwarmSpec[] = [];", "return specs;");
+    expect(specs).toContain("for (const entry of resumeEntries)");
+    expect(specs).toContain("items.forEach((item, index) =>");
+    expect(specs.match(/specs\.push\(/g)).toHaveLength(2);
+    expect(tool).toContain("const tasks: SessionSwarmTask<AgentSwarmSpec>[] = specs.map((spec) =>");
+    expect(tool).toContain("runInBackground: false,");
+    expect(tool).toContain("const results = await this.swarmService.run({");
+  });
+
+  test("recovery reuses task identity after completion and ordinary retry awaits loop settlement", () => {
+    const batch = read(`${CORE}/features/swarm/session/agentRunBatch.ts`);
+    expect(batch).toContain("this.states = tasks.map((task, index) =>");
+    expect(batch).toContain("this.pending = [...this.states];");
+    expect(batch).toContain("const completion = await handle.completion;");
+    const outcome = section(batch, "private handleAttemptOutcome(", "private handleAttemptError(");
+    expect(outcome.indexOf("this.releaseAttempt(attempt)")).toBeLessThan(outcome.indexOf("this.requeueRateLimited(attempt, outcome.agentId)"));
+    expect(batch).toContain("state.retryAgentId = agentId;");
+    expect(batch).toContain("this.pending.unshift(state);");
+    expect(batch).toContain("this.launcher.retry(attempt.state.retryAgentId, runOptions)");
+    const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
+    expect(runner).toContain("const result = await turn.result;");
+    expect(runner).toContain("await abortable(loop.retry(), controller.signal)");
+    const loop = read(`${CORE}/agent/loop/loopService.ts`);
+    expect(section(loop, "async retry():", "private maybeSettle()")).toContain("await this.settled();");
+    expect(loop).toContain("await loop.waitForIdle();\n    await this.turns.drain();");
+  });
+
+  test("active swarm rejects parallel model batches and holds the tool lease until return", () => {
+    const mode = read(`${CORE}/features/swarm/agent/swarmService.ts`);
+    const guard = section(mode, "loop.registerToolBatchStarting(", "enter(trigger:");
+    expect(guard).toContain("if (!this.isActive) return undefined;");
+    expect(guard).toContain("(toolCall) => toolCall.name === 'AgentSwarm'");
+    expect(guard).toContain("agentSwarmCount === 1 && event.toolCalls.length === 1");
+    expect(guard).toContain("reason: 'agent_swarm_batch'");
+    expect(read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`)).toContain("accesses: ToolAccesses.all(),");
+    const executor = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
+    expect(executor).toContain("const release = await batch.scheduler.lease(");
+    expect(executor).toContain("context.prepared.onExecuted = () => {");
+    const scheduler = read(`${CORE}/agent/toolExecutor/toolScheduler.ts`);
+    expect(scheduler).toContain("return { result: new Promise<void>((resolve) => { release = resolve; }) };");
+    expect(scheduler).toContain("ToolAccesses.conflict(task.accesses, candidate.accesses)");
+  });
+
+  test("fresh children have per-agent inactive swarm state and cannot enter it as a tool", () => {
+    const feature = read(`${CORE}/features/swarm/swarmFeature.ts`);
+    expect(feature).toContain("this.contributeAgentService(IAgentSwarmService, AgentSwarmService, {");
+    expect(feature).toContain("activation: ScopeActivation.OnScopeCreated");
+    const state = read(`${CORE}/features/swarm/swarmOps.ts`);
+    expect(state).toContain("defineState('swarm', (): SwarmModeTrigger | null => null)");
+    expect(state).toContain("if (e.trigger === 'tool') return s;");
+    const mode = read(`${CORE}/features/swarm/agent/swarmService.ts`);
+    expect(mode).toMatch(/if \(trigger === 'tool'\) \{\s*throw new Error2\(ErrorCodes\.VALIDATION_FAILED, 'Only the user can turn on swarm mode\.'/);
+    const tool = read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`);
+    expect(tool.match(/if \(!this\.swarmMode\.isActive\) return SWARM_MODE_OFF_RESULT;/g)).toHaveLength(2);
+    const profiles = read(`${CORE}/session/agentLifecycle/profile/profiles.ts`);
+    expect(section(profiles, "const CODER_TOOLS = [", "const EXPLORE_TOOLS = [")).not.toContain("'AgentSwarm'");
+    expect(filesContaining([CORE, CLI, KAP, SDK], "new SwarmModeEnter(")).toEqual([
+      `${CORE}/features/swarm/agent/swarmService.ts`,
+    ]);
+  });
+
+  test("resume uses only idle children owned by the caller in the current session", () => {
+    const service = read(`${CORE}/features/swarm/session/sessionSwarmService.ts`);
+    const resume = section(service, "private async resumeAttempt(", "private async observe(");
+    expect(resume).toContain("await this.requireOwnedSubagent(callerAgentId, agentId)");
+    expect(resume).toContain("this.requireIdleSubagent(agentId, child);");
+    const ownership = section(service, "private async requireOwnedSubagent(", "export type _AgentRunUsage");
+    expect(ownership).toContain("meta === undefined || !isSubagentMeta(meta)");
+    expect(ownership).toContain("subagentParentAgentId(meta) !== callerAgentId");
+    expect(ownership).toContain("const meta = await this.metadata.read();");
+    expect(ownership).toContain("return meta.agents?.[agentId];");
+    expect(service).toContain("child.accessor.get(IAgentLoopService).snapshot().state === 'running'");
+    const metadata = read(`${CORE}/session/agentLifecycle/subagentMetadata.ts`);
+    expect(metadata).toContain("return meta.type === 'sub';");
+    expect(metadata).toContain("firstNonEmpty(meta.labels?.['parentAgentId'], meta.parentAgentId ?? undefined)");
+  });
+
+  test("fork stays explicit and copies profile tools and history without swarm activation", () => {
+    const tool = read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`);
+    expect(tool).toContain("const fork = args.fork === true;");
+    expect(tool).toContain("if (fork && !this.flags.enabled(SUBAGENT_FORK_FLAG_ID))");
+    expect(tool).toContain("if (fork && Object.keys(args.resume_agent_ids ?? {}).length > 0)");
+    expect(read(`${CORE}/session/subagent/flag.ts`)).toContain("default: false,");
+    const compatibility = read(`${CORE}/session/subagent/spawn.ts`);
+    expect(compatibility).toContain("requestedProfileName !== own.profileName");
+    expect(compatibility).toContain("args.model !== own.modelAlias");
+    const lifecycle = read(`${CORE}/session/agentLifecycle/agentLifecycleService.ts`);
+    const fork = section(lifecycle, "async fork(sourceContext:", "get(agentId:");
+    expect(fork).toContain("initialProfile: override?.profile === undefined ? sourceData : undefined");
+    expect(fork).toContain("initialTools: override?.profile === undefined ? sourceLoop.baselineTools() : undefined");
+    expect(fork).toContain(".initializeHistory(historyFromContextPreservingToolNotes(");
+    expect(fork).not.toMatch(/swarm|Swarm/);
+  });
+
+  test("native timeout accepts the positive maximum timer and has no model-input override", () => {
+    const config = read(`${CORE}/features/swarm/configSection.ts`);
+    expect(config).toContain("export const SWARM_TIMEOUT_ENV = 'KIMI_CODE_SWARM_TIMEOUT_MS';");
+    expect(config).toContain("return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;");
+    expect(config).toContain("timeoutMs: { env: SWARM_TIMEOUT_ENV, parse: parseTimeoutMsEnv }");
+    const timer = read(`${CORE}/_base/utils/timer.ts`);
+    expect(timer).toContain("export const MAX_TIMER_DELAY_MS = 0x7fffffff;");
+    expect(timer).toContain("setTimeout(callback, Math.min(timeoutMs, MAX_TIMER_DELAY_MS))");
+    const tool = read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`);
+    expect(tool).toContain("const timeoutMs = resolveSwarmTimeoutMs(this.config);");
+    expect(tool).toContain("timeout: timeoutMs,");
+    const batch = read(`${CORE}/features/swarm/session/agentRunBatch.ts`);
+    expect(batch).toContain("task.timeout === undefined || task.timeout <= 0");
+    expect(batch).toContain("attempt.controller.abort(new Error('Subagent timed out.'))");
+    const defaults = read(`${CORE}/agent/task/printDefaults.ts`);
+    expect(defaults).toContain("if (!isUnset(inspected, key)) return;");
+    expect(defaults).toContain("PRINT_SWARM_TIMEOUT_MS_DEFAULT = 0");
+  });
+
+  test("native cancellation still needs the plugin deadline and quiescence closure", () => {
+    const batch = read(`${CORE}/features/swarm/session/agentRunBatch.ts`);
+    expect(batch).toContain("this.controller.abort(this.batchSignal?.reason);");
+    const abort = read(`${CORE}/_base/utils/abort.ts`);
+    expect(section(abort, "export function abortable<T>(", "export function linkAbortSignal(")).toContain("reject(abortReason(signal));");
+    const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
+    expect(runner).toContain("await abortable(loop.retry(), controller.signal)");
+    const mirror = read(`${CORE}/session/subagent/mirrorAgentRun.ts`);
+    expect(mirror.indexOf("await subagents?.hooks.onWillStartAgentTask.run(")).toBeLessThan(mirror.indexOf("const result = await run.completion;"));
+    const hooks = read(`${CORE}/features/externalHooks/session/sessionExternalHooksService.ts`);
+    expect(hooks).toContain("subagents.hooks.onWillStartAgentTask.register('externalHooks'");
+    expect(hooks).toContain("ctx.signal.throwIfAborted();");
+    const external = read(`${CORE}/features/externalHooks/app/externalHooksRunnerService.ts`);
+    expect(external).toContain("return this.triggerInner(event, args).catch((error: unknown): HookResult[] => {");
+    expect(external).toContain("return Promise.resolve([]);");
+  });
+
+  test("detached completion can wake a finished child and must be prevented", () => {
+    const loop = read(`${CORE}/agent/loop/core/loop-actor.ts`);
+    const finish = section(loop, "private finishTurn(", "private appendPendingReminders(");
+    expect(finish).toContain("if (slot.turnId !== turn.id || slot.detached) continue;");
+    expect(finish).toContain("this.phase = this.phase === 'closed' ? 'closed' : 'idle';");
+    const completion = section(loop, "private drainDetachedCompletions():", "private deferForCompletion(");
+    expect(completion).toContain("type: 'tool.async_ended'");
+    expect(completion).toContain("this.mailbox.queue([entry]);");
+    expect(completion).toContain("if (!this.resetting) this.held = false;");
+    expect(completion).toContain("this.schedule();");
+    expect(loop).toContain("return this.normal.length > 0 || this.notifyEntries.length > 0;");
+    expect(loop).toContain("this.phase === 'idle' && !this.held && !this.hasPendingCompletions && this.mailbox.hasTrigger");
+    expect(read(`${CORE}/agent/task/taskOutput.ts`)).toContain("source: 'async-tool'");
+  });
+
+  test("native TaskStop disablement prevents explicit and timeout-triggered Bash detachment", () => {
+    const bash = read(`${CORE}/agent/tools/os/bash/bashTool.ts`);
+    const allowed = section(bash, "private allowBackground():", "private autoBackgroundOnTimeout():");
+    expect(allowed).toContain("this.toolPolicy.isToolActive('TaskList') &&");
+    expect(allowed).toContain("this.toolPolicy.isToolActive('TaskOutput') &&");
+    expect(allowed).toContain("this.toolPolicy.isToolActive('TaskStop')");
+    expect(bash).toContain("bashAutoBackgroundOnTimeout ?? true");
+    expect(bash).toContain("if (this.allowBackground() && this.autoBackgroundOnTimeout() && !detached)");
+    expect(bash).toContain("timedOut = true;\n        stopReason = 'Timed out';\n        void proc.kill('SIGTERM')");
+    const validate = section(bash, "private validateRunRequest(", "private backgroundStartedResult(");
+    expect(validate).toContain("if (args.run_in_background !== true) return undefined;");
+    expect(validate).toContain("if (!this.allowBackground())");
+    expect(read(`${CORE}/agent/tools/os/bash/bash.ts`)).toContain("export const MAX_TIMEOUT_S = 5 * 60;");
+    const config = read(`${CORE}/agent/task/configSection.ts`);
+    expect(section(config, "export const taskEnvBindings:", "export const stripTaskEnv")).not.toContain("bashAutoBackgroundOnTimeout");
+  });
+
+  test("cold-loaded session policy is shared by every agent and overrides profile tool allowance", () => {
+    const policy = read(`${CORE}/session/sessionToolPolicy/sessionToolPolicyService.ts`);
+    expect(policy).toContain("const STATE_KEY = 'state.json';");
+    expect(policy).toContain("this.scope = sessionContext.scope('tool-policy');");
+    expect(policy).toContain("this.ready = this.load();");
+    expect(policy).toContain("const stored = await this.store.get<SessionToolPolicyState>(this.scope, STATE_KEY);");
+    expect(policy).toContain("this.state = { disabledTools: [...new Set(stored.disabledTools)] };");
+    expect(policy).toContain("LifecycleScope.Session,\n  ISessionToolPolicy,");
+    const lifecycle = read(`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`);
+    expect(lifecycle).toContain("await handle.accessor.get(ISessionToolPolicy).ready;");
+    const agentPolicy = read(`${CORE}/agent/toolPolicy/toolPolicyService.ts`);
+    expect(section(agentPolicy, "isToolActiveForProfile(", "async setSessionDisabledTools(")).toContain("sessionDisabledTools: this.sessionToolPolicy.disabledTools()");
+    expect(read(`${CORE}/agent/toolPolicy/evaluate.ts`)).toContain("isToolActive({ disallowedTools: layers.sessionDisabledTools }, name, source)");
+    expect(read(`${CORE}/session/sessionContext/sessionContext.ts`)).toContain("`${sessionScope}/${subKey}`");
+    expect(read(`${CORE}/workspace/sessionLifecycle/internal/addressing.ts`)).toContain("return join(homeDir, sessionScopeOf(handlerScope, sessionId));");
+    const store = read(`${CORE}/persistence/backends/node-fs/atomicDocumentStore.ts`);
+    expect(store).toContain("JSON.parse(textDecoder.decode(bytes))");
+    expect(store).toContain("await this.storage.write(scope, key, this.codec.encode(value), { atomic: true });");
+    expect(read(`${CORE}/persistence/backends/node-fs/fileStorageService.ts`)).toContain("return join(this.baseDir, scope, key);");
+  });
+
+  test("other builtin model detachment callers remain the separately denied delegation and question tools", () => {
+    // Source census only: managed policy tests must separately prove these
+    // three non-Bash callers are denied. External UI/SDK detach is outside
+    // the owned, stopped-activation-server print lifecycle.
+    expect(filesContaining([`${CORE}/agent/tools`, `${CORE}/features`], /\bdetach\?\.\(/)).toEqual([
+      `${CORE}/agent/tools/agent/agentTool.ts`,
+      `${CORE}/agent/tools/ask-user-question/askUserQuestionTool.ts`,
+      `${CORE}/agent/tools/os/bash/bashTool.ts`,
+      `${CORE}/features/tower/tools/spawn/spawnTool.ts`,
+    ]);
+    expect(read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`)).toContain("runInBackground: false,");
   });
 });

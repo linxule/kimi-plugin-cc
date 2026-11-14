@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { formatError, RuntimeError } from "../../runtime/errors.js";
 import { buildKimiCliEnvironment } from "../../runtime/cli-client.js";
-import type { KimiExecutionPlan, KimiOperationKind } from "../../runtime/kimi-engine.js";
+import { NATIVE_V2_CERTIFIED, type KimiExecutionPlan, type KimiOperationKind } from "../../runtime/kimi-engine.js";
 import { readProcessIdentity } from "../../runtime/process-tree.js";
 import {
   deactivateSwarmSession,
@@ -172,6 +172,17 @@ async function withFixture(
     await run(fixture);
   } finally {
     await destroyFixture(fixture);
+  }
+}
+
+async function withBoundedFixture(run: (fixture: Fixture) => Promise<void>): Promise<void> {
+  const matrix = NATIVE_V2_CERTIFIED as Map<KimiOperationKind, readonly string[]>;
+  const previous = matrix.get("swarm")!;
+  matrix.set("swarm", [...new Set([...previous, "2.6.2"])]);
+  try {
+    await withFixture("ws-success", run);
+  } finally {
+    matrix.set("swarm", previous);
   }
 }
 
@@ -796,6 +807,59 @@ describe("swarm web lifecycle", () => {
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
     });
   }, 15_000);
+
+  test("bounded 2.6.2 installs the native TaskStop restriction after web settlement", async () => {
+    await withBoundedFixture(async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.2";
+      const options = makeOptions(fixture, {
+        expectedVersion: "2.6.2",
+        executionPlan: { ...makePlan(fixture, "swarm"), kimiVersion: "2.6.2", certification: "certified" },
+        swarmMaxConcurrency: 2,
+        model: "chosen-model",
+      });
+      const identity = await preactivateSwarmSession(options);
+      const statePath = path.join(fixture.home, "sessions", identity.workspaceId, identity.sessionId, "tool-policy", "state.json");
+      expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual({ disabledTools: ["TaskStop"] });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.enter", trigger: "manual" });
+      const spawned = spawns(await readLog(fixture));
+      expect(spawned).toHaveLength(1);
+      expect(await readProcessIdentity(spawned[0]!.pid)).toBeUndefined();
+      await deactivateSwarmSession({ ...options, ...identity });
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+      expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual({ disabledTools: ["TaskStop"] });
+    });
+  }, 20_000);
+
+  test("bounded 2.6.2 refuses unexpected native policy and preserves activation cleanup identity", async () => {
+    await withBoundedFixture(async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.2";
+      const identity = { sessionId: "session_mock", workspaceId: "wd_mock" };
+      const policyDir = path.join(fixture.home, "sessions", identity.workspaceId, identity.sessionId, "tool-policy");
+      await mkdir(policyDir, { recursive: true });
+      const statePath = path.join(policyDir, "state.json");
+      const original = '{"disabledTools":["Read"]}\n';
+      await writeFile(statePath, original);
+      const options = makeOptions(fixture, {
+        expectedVersion: "2.6.2",
+        executionPlan: { ...makePlan(fixture, "swarm"), kimiVersion: "2.6.2", certification: "certified" },
+        swarmMaxConcurrency: 2,
+        model: "chosen-model",
+      });
+      await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.tool-policy",
+        details: { reason: "policy-already-exists", cleanup_unverified: true,
+          session_id: identity.sessionId, workspace_id: identity.workspaceId },
+      });
+      expect(await readFile(statePath, "utf8")).toBe(original);
+      const spawned = spawns(await readLog(fixture));
+      expect(spawned).toHaveLength(1);
+      expect(await readProcessIdentity(spawned[0]!.pid)).toBeUndefined();
+      await deactivateSwarmSession({ ...options, ...identity });
+      expect(await readFile(statePath, "utf8")).toBe(original);
+      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
+    });
+  }, 20_000);
 
   test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
     await withFixture("ws-success", async (fixture) => {

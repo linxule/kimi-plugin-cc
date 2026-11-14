@@ -9,6 +9,8 @@ import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
+import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
+import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
 // These exact 2.6.x activation entries support candidate integration; production scope is per operation.
 const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"];
@@ -51,6 +53,9 @@ export async function preactivateSwarmSession(options) {
         await verifySwarmStatus(web, identity, true, model, prepared.expectedVersion, options.signal, failureCode);
         await shutdownWeb(web, options.signal, failureCode);
         await requireSwarmJournal(prepared.kimiHome, identity, "enter", options.signal, failureCode);
+        if (usesBoundedSwarmPolicy(options.executionPlan) && options.swarmMaxConcurrency > 1) {
+            await installBoundedSwarmToolPolicy(prepared.kimiHome, identity, options.signal);
+        }
         throwIfAborted(options.signal, failureCode, "swarm-activation.complete");
         return identity;
     }

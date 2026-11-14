@@ -1,3 +1,5 @@
+import { BOUNDED_SWARM_POLICY, evaluateSwarmWaveInput } from "../swarm-policy.js";
+
 // Pure decision logic for the kimi-code PreToolUse hook. The entry script owns
 // stdin/stdout/exit semantics so callers can test this policy without mocking
 // process IO.
@@ -82,6 +84,10 @@ export interface PolicyContext {
   commandLabel?: string;
   /** Trusted executionPlan.operationKind, overlaid on every child spawn. */
   operationKind?: string;
+  /** Plugin-owned exact-version admission policy; absent only for older paths. */
+  swarmPolicy?: string;
+  /** Trusted maximum fresh plus resumed entries in one AgentSwarm call. */
+  swarmWaveSize?: string;
   /**
    * When `commandLabel === "rescue"` and this is undefined, the policy falls
    * back to allowing only READ_ONLY_TOOLS and denying everything else.
@@ -117,6 +123,7 @@ export async function decideHookOutcome(input: HookInput, ctx: PolicyContext): P
   const result = decideHookOutcomePure(input, ctx);
   if (!("evaluator" in result)) return result;
   const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
+
   if (ctx.rescueEvaluator !== undefined) {
     return await ctx.rescueEvaluator(result.workspaceRoot, toolName, input.tool_input);
   }
@@ -139,6 +146,27 @@ export function decideHookOutcomePure(
   }
 
   const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
+
+  if ((label === "swarm" || label === "swarm-write") &&
+    (ctx.swarmPolicy !== undefined || ctx.swarmWaveSize !== undefined)) {
+    if (toolName === AGENT_SWARM_TOOL) {
+      return evaluateSwarmWaveInput(input.tool_input, ctx.swarmPolicy, ctx.swarmWaveSize);
+    }
+    if (toolName === "Agent") {
+      return {
+        decision: "deny",
+        reason: "kimi-plugin-cc safety hook: singular Agent delegation is denied for bounded swarm jobs.",
+      };
+    }
+    const args = input.tool_input;
+    if (toolName === "Bash" && typeof args === "object" && args !== null &&
+      (args as Record<string, unknown>).run_in_background === true) {
+      return {
+        decision: "deny",
+        reason: "kimi-plugin-cc safety hook: run commands in the foreground; explicit background commands are disabled for bounded swarm execution.",
+      };
+    }
+  }
 
   if (PLAN_MODE_TOOLS.has(toolName)) {
     return {
@@ -199,14 +227,16 @@ export function decideHookOutcomePure(
       // AgentSwarm are allowed and the singular Agent stays denied. This adds
       // no direct tool-write permission within the repository/Git trust
       // boundary: read-only Git context commands still trust repository Git
-      // configuration and can execute configured helpers. Nested AgentSwarm
-      // calls remain allowed, with their cost bounded by the command budget.
+      // configuration and can execute configured helpers. Exact 2.6.2 waves
+      // pass the admission guard above; fresh children cannot activate swarm
+      // mode. Older paths retain their inherited scheduler limitations.
       if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
         return { decision: "allow" };
       }
       return {
         decision: "deny",
-        reason: denySwarmMessage(toolName),
+        reason: denySwarmMessage(toolName,
+          ctx.swarmPolicy === BOUNDED_SWARM_POLICY && ctx.swarmWaveSize === "1"),
       };
 
     case "swarm-write": {
@@ -275,8 +305,16 @@ function denyReadOnlyMessage(label: string, toolName: string): string {
   ].join(" ");
 }
 
-function denySwarmMessage(toolName: string): string {
+function denySwarmMessage(toolName: string, singleWorker: boolean): string {
   const tool = toolName.length > 0 ? toolName : "<unspecified>";
+  if (singleWorker) {
+    return [
+      "kimi-plugin-cc safety hook: swarm with concurrency 1 is a read-only review.",
+      `Tool "${tool}" is denied — use Read, Grep, or Glob to inspect the workspace.`,
+      "Complete the review yourself; delegation is denied.",
+      "Return your findings in a markdown report.",
+    ].join(" ");
+  }
   return [
     "kimi-plugin-cc safety hook: swarm is a read-only parallel review.",
     `Tool "${tool}" is denied — every subagent may use Read, Grep, or Glob to inspect the workspace,`,

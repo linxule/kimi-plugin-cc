@@ -29,5 +29,7 @@ Pass through: `[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <mode
 - For subscription auth, guide native Kimi `/login`; for API keys or other providers, guide native `/provider` and have the user enter secrets there. Only an explicit saved-default request calls for native `/model`. Re-list after setup; use `setup --check` for hook readiness. Swarm `-m` selects the coordinator; `[secondary_model]` can select different child models.
 - Require many independent review targets plus explicit fan-out intent.
 - Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.
+- On exact Kimi Code 2.6.2, concurrency 1 runs one direct worker; larger values use bounded sequential waves. Older certified versions retain their normal-launch limit and recovery limitation.
+- The bound counts simultaneous Kimi child-agent turns, not OS subprocesses. Fresh-only waves need at least two entries; group odd target counts into disjoint worker assignments.
 - If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.
 - Return the consolidated companion report verbatim.

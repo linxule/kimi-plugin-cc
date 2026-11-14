@@ -19,7 +19,9 @@ The default suite uses local fixtures and mock subprocesses. Live provider calls
 
 `audit/v2-tag-scan.test.ts` checks the source assumptions behind native-v2 enforcement. It requires an exact upstream source tree through `KIMI_CODE_SOURCE_TAG_DIR`; it is skipped without that input.
 
-`runtime/real-binary-smoke.test.ts` runs through `bun run smoke:real`. It checks real hook denials, goal continuation, native-v2 preflight and resume, swarm child enforcement, and write-swarm patch capture. On exact 2.6.0/2.6.2's narrowed production profile, the three swarm execution lanes are excluded; both production command paths must instead prove `v2-swarm-not-certified` before model spawn. Read [CI and live smoke](../docs/ci.md) before running it: the harness can copy credential-bearing seed files even when API authentication is available. It needs authorized test authentication, and runs must be sequential. A skipped lane is not a passing certification result.
+`runtime/real-binary-smoke.test.ts` runs through `bun run smoke:real`. It checks real hook denials, goal continuation, native-v2 preflight and resume, swarm child enforcement, and write-swarm patch capture. Exact 2.6.2 adds bounded-wave and direct single-worker controls. Exact 2.6.0 retains its narrowed production profile: swarm execution lanes are excluded and both commands must prove `v2-swarm-not-certified` before model spawn. Read [CI and live smoke](../docs/ci.md) before running it: the harness can copy credential-bearing seed files even when API authentication is available. Use an empty seed home for environment-model authentication. Live runs need authorized authentication and run sequentially. A skipped lane is not a passing certification result.
+
+`runtime/swarm-bounded-real.test.ts` exercises stock 2.6.2 with a local scripted provider, including retries, nesting, cancellation, wave admission and single-worker execution. It is opt-in and uses isolated homes, the canonical compiled hook and the real command paths; it requires no provider credentials.
 
 ## Test isolation
 

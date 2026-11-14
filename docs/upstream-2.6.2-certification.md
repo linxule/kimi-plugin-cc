@@ -1,4 +1,37 @@
-# Exact CLI 2.6.2 non-swarm certification — 2026-11-14
+# Exact CLI 2.6.2 certification — plugin 2.6.2
+
+## Bounded swarm release: PENDING validation
+
+**Status: PENDING.** The plugin 2.6.2 release candidate adds bounded read-only and write swarm on unmodified stock CLI 2.6.2. This section becomes a certification receipt only after the source, exact-binary, operation, repository and release gates below have recorded passing evidence. The prior published plugin 2.5.9 non-swarm certification is retained below.
+
+The exact source and binary remain commit `6a8493df3e1d796a63f7c7ca0de76c1e690cd943` and bundle SHA-256 `f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a`. The upstream rate-limit scheduler is unchanged. The plugin enforces the bound through admission and terminal cancellation:
+
+- At concurrency at least 2, the canonical managed hook counts fresh items plus resumed entries and denies a wave larger than the requested limit. It rejects forks, malformed input and fresh singleton waves; a singleton remainder needs regrouping or an own-child resume. The policy and width come from the immutable operation/version plan, overwrite ambient values and also reach the escape monitor.
+- `KIMI_CODE_SWARM_TIMEOUT_MS=2147483647` overrides saved or ambient short child timeouts. A native swarm-child timeout therefore cannot return a wave while its retry still runs. A stuck child holds the wave until completion or finite whole-job stop. Environment `0` is ignored by stock 2.6.2.
+- Parallel activation disables native `TaskStop` in the fresh owned session after web shutdown and before print. Stock 2.6.2 requires all three task tools for Bash backgrounding, so this closes automatic detachment and completion-driven child wakeups. The canonical hook also denies explicit background Bash on both bounded paths.
+- Normal exit and terminal cancellation require identity-verified owned-process quiescence before artifact or patch capture. Individual native Bash timeouts do not prove arbitrary descendant quiescence between waves.
+- Concurrency 1 runs one direct worker through fresh print without native swarm activation. Both AgentSwarm and singular Agent are denied. Native automatic Bash timeout-to-background remains possible, with sequential root turns and whole-job settlement; explicit background requests remain denied. Parallel Bash has a 60-second default and 300-second maximum foreground timeout, so longer tests should use concurrency 1. Read-only restrictions, write-worktree confinement, patch capture, operation identity and finite budgets remain unchanged.
+- The concurrency bound counts simultaneous Kimi child-agent turns, excluding the coordinator and OS subprocess counts; allowed repository tests can spawn multiple processes. `--cap` remains a soft lifetime-total hint. The existing repository-code trust boundary remains; no operating-system sandbox or spend cap is claimed.
+- The construction applies only to exact native-v2 2.6.2. Exact 2.6.0 remains non-swarm-only. Older full-operation rows retain their inherited recovery limitation; other versions gain no compatibility by implication.
+
+The native TaskStop policy persists after deactivation of the owned parallel session. A later external interactive resume of that historical session is outside the managed-job certification.
+
+### Evidence required before certification
+
+| Gate | Receipt |
+| --- | --- |
+| Exact-source audit and tag scan; no-plan/local controls | PENDING |
+| Canonical-hook, environment and emitted-runtime regression tests | PENDING |
+| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PENDING |
+| Native background-policy closure, explicit background denial, normal-exit descendant quiescence before capture | PENDING |
+| Single-worker read/write, delegation denial, patch and cancellation controls | PENDING |
+| Real-provider candidate and production operation matrices | PENDING |
+| Frozen dependency install, full repository gate, package and consumer security | PENDING |
+| Independent review, release-commit smoke, CI and publication | PENDING |
+
+The earlier prototype supplied 11 admission/recovery binary controls, 18 direct hook probes and 10 lifecycle controls. It established a real guard-only failure (three active children at width two after a short native timeout) and a protected counterpart, including process checks before provider cleanup. Those ignored research artefacts motivated the production construction; they do not replace the canonical implementation or release gates above.
+
+## Historical plugin 2.5.9 non-swarm certification — 2026-11-14
 
 ## Scope and decision
 

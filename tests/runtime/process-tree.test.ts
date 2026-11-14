@@ -1,9 +1,91 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 
-import { revalidateProcessIdentities, waitForProcessTreeExit } from "../../runtime/process-tree.js";
+import { revalidateProcessIdentities, waitForProcessTreeExit, type ProcessIdentity } from "../../runtime/process-tree.js";
 
 const captured = { pid: 4_242, processGroupId: 100, startToken: "test:start", state: "S" };
+
+describe("retained process-tree anchor identity", () => {
+  type Row = ProcessIdentity & { parentPid: number };
+  const root: Row = { pid: 101, parentPid: 1, processGroupId: 101, startToken: "proc:root", state: "S" };
+  const child: Row = { pid: 102, parentPid: 101, processGroupId: 101, startToken: "proc:child", state: "S" };
+
+  async function collector(
+    initial: Row[] | undefined,
+    verified: Row[] = initial ?? [],
+  ): Promise<{ collect: (pid: number, expectedRoot?: ProcessIdentity) => Promise<unknown[]>; verificationCount: () => number }> {
+    const source = await readFile("runtime/process-tree.ts", "utf8");
+    const code = new Bun.Transpiler({ loader: "ts" }).transformSync(
+      source.slice(source.indexOf("async function collectVerifiedDescendantIdentities("), source.indexOf("async function readCurrentSnapshotRows(")),
+    );
+    let verifications = 0;
+    const bindings = {
+      collectProcessSnapshotRows: async () => initial,
+      readCurrentSnapshotRows: async () => { verifications += 1; return verified; },
+      isQuiescentState: (state: string) => /^[ZX]/i.test(state),
+      toProcessIdentity: (identity: Row) => identity,
+      MAX_DESCENDANT_DEPTH: 8,
+      MAX_DESCENDANT_PIDS: 512,
+    };
+    const collect = new Function(...Object.keys(bindings), `${code}; return collectVerifiedDescendantIdentities;`)(
+      ...Object.values(bindings),
+    ) as (pid: number, expectedRoot?: ProcessIdentity) => Promise<unknown[]>;
+    return { collect, verificationCount: () => verifications };
+  }
+
+  test("a matching retained anchor collects and verifies its descendants", async () => {
+    const { collect, verificationCount } = await collector([root, child]);
+    await expect(collect(root.pid, { ...root, state: "R" })).resolves.toEqual([root, child]);
+    expect(verificationCount()).toBe(1);
+  });
+
+  test("a reused root PID cannot adopt replacement descendants", async () => {
+    const replacement = { ...root, startToken: "proc:replacement" };
+    const { collect, verificationCount } = await collector([replacement, child]);
+    await expect(collect(root.pid, root)).resolves.toEqual([]);
+    expect(verificationCount()).toBe(0);
+  });
+
+  test("a changed root process group cannot be used as an ownership anchor", async () => {
+    const { collect, verificationCount } = await collector([{ ...root, processGroupId: 999 }, child]);
+    await expect(collect(root.pid, root)).resolves.toEqual([]);
+    expect(verificationCount()).toBe(0);
+  });
+
+  test("an expected identity for another PID cannot authorize this root", async () => {
+    const { collect, verificationCount } = await collector([root, child]);
+    await expect(collect(root.pid, { ...root, pid: 999 })).resolves.toEqual([]);
+    expect(verificationCount()).toBe(0);
+  });
+
+  test("a missing anchor returns no new descendants without an enumeration error", async () => {
+    const { collect, verificationCount } = await collector([child]);
+    await expect(collect(root.pid, root)).resolves.toEqual([]);
+    expect(verificationCount()).toBe(0);
+  });
+
+  test("replacement observed during verification rejects the candidate ancestry", async () => {
+    const { collect } = await collector([root, child], [{ ...root, startToken: "proc:replacement" }, child]);
+    await expect(collect(root.pid, root)).resolves.toEqual([]);
+  });
+
+  test("root exit during verification preserves a previously observed stable child", async () => {
+    const reparented = { ...child, parentPid: 1 };
+    const { collect } = await collector([root, child], [reparented]);
+    await expect(collect(root.pid, root)).resolves.toEqual([reparented]);
+  });
+
+  test("omitting the expected anchor preserves fresh snapshot behavior", async () => {
+    const replacement = { ...root, startToken: "proc:replacement" };
+    const { collect } = await collector([replacement, child]);
+    await expect(collect(root.pid)).resolves.toEqual([replacement, child]);
+  });
+
+  test("an unreadable snapshot remains distinguishable from an exited anchor", async () => {
+    const { collect } = await collector(undefined);
+    await expect(collect(root.pid, root)).rejects.toThrow("process snapshot unavailable");
+  });
+});
 
 describe("process identity group changes", () => {
   test("same PID and start token under a new PGID remains active but is not signal-valid", async () => {

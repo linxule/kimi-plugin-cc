@@ -40,7 +40,7 @@ You need:
 - macOS or Linux
 - Claude Code, Codex, or DSH with plugin support
 - Node.js 22.5 or newer (24.9 or newer for DSH)
-- Kimi Code CLI 2.6.2 for review, challenge, ask, rescue, review gate, or pursue. Both swarm modes refuse on 2.6.2; full eight-operation certification ends at 2.5.3, with the [documented rate-limit limitation](./docs/safety.md). Other exact certified versions remain supported per the [runtime matrix](./docs/native-v2-certification-provenance.md).
+- Kimi Code CLI 2.6.2 with plugin 2.6.2 for bounded swarm and the six other operations. See the [certification record](./docs/upstream-2.6.2-certification.md) and [runtime matrix](./docs/native-v2-certification-provenance.md) for exact scope. Older supported versions retain their documented limits.
 
 Windows is not currently supported. Contributors can help with the [no-model Windows diagnostics checks](./docs/windows-validation.md). Check your versions in a terminal:
 
@@ -238,7 +238,7 @@ Remove the app's hook before removing its plugin. In Claude Code, run `/kimi:set
 
 If a hook check fails, follow its diagnosis. Run setup for the affected app when instructed. Do not bypass the check.
 
-If you see `KIMI_CAPABILITY_NOT_CERTIFIED`, update the plugin or select a CLI certified for the requested operation. On 2.6.2, use the six non-swarm operations; swarm requires a CLI version certified for that operation, not merely a release listed for another operation. Running setup again does not certify a new CLI or expand its operation scope.
+If you see `KIMI_CAPABILITY_NOT_CERTIFIED`, update the active host plugin or select a CLI certified for the requested operation. Plugin 2.5.9 supports only the six non-swarm operations on CLI 2.6.2; the bounded swarm implementation requires plugin 2.6.2. CLI 2.6.0 remains non-swarm-only. Running setup again does not add missing runtime policy or certify a new CLI.
 
 If you see `CLI_V2_PLAN_MODE_CONFIGURED`, set `default_plan_mode` to `false` or remove it from your Kimi `config.toml` file. Sessions run by this plugin cannot use plan mode.
 
@@ -248,7 +248,11 @@ All refusal codes and their remedies are listed in the [refusal-code catalog](./
 
 The tool rules for ask, review, challenge, and read-only swarm deny file writes and shell commands. Rescue and pursue can write files in your workspace. Swarm with `--write` works in a temporary Git worktree. It starts from your latest commit, so it does not include uncommitted changes. It returns a patch without applying it to your project.
 
-For swarm on CLI 2.3.2, 2.3.3, 2.4.0 and 2.4.1, the plugin briefly starts an authenticated loopback `kimi web` process to activate a session and another to deactivate swarm mode afterward; one ordinary `kimi -p -r` process still performs the task. Activation counts against the time limit, the access token stays in memory and out of logs, and cleanup failure prevents success. Older certified versions use `kimi -p` directly.
+On exact CLI 2.6.2, `--max-concurrency 1` runs one worker directly; larger values use waves of at most that many children. Read mode defaults to 4, write mode to 1. `--cap` remains an advisory total count. Parallel runs use brief authenticated loopback processes to activate and deactivate the session; the direct-worker path needs neither. Activation counts against the finite job budget, tokens stay out of logs, and unverified cleanup prevents success. Older certified versions retain their documented activation and recovery limits.
+
+A slow child holds its wave until completion or the finite job deadline. Fresh waves need at least two entries, so odd target counts may need regrouping. Kimi workers cannot explicitly background Bash, and parallel sessions disable automatic backgrounding. Normal exit and cancellation settle verified owned processes before results or patches are captured. Concurrency counts Kimi child-agent turns; allowed tests can start multiple OS processes, and an individual Bash timeout does not guarantee their settlement between waves.
+
+Parallel Bash commands time out after 60 seconds by default, with a maximum of 300 seconds. Use concurrency 1 for longer tests; its native automatic backgrounding remains available, with sequential agent turns and settlement before the result is returned.
 
 The plugin does not commit changes. Review changes before you keep or apply them.
 
@@ -284,7 +288,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code、Codex 或 DSH
 - Node.js 22.5 或更高版本（DSH 需要 24.9 或更高版本）
-- Kimi Code CLI 2.6.2（仅限 review、challenge、ask、rescue、review gate 和 pursue；两种 swarm 模式均会拒绝运行。完整八项操作认证止于 2.5.3，并有已披露的速率限制恢复缺陷。其他精确认证版本见[运行时矩阵](./docs/native-v2-certification-provenance.md)）
+- Kimi Code CLI 2.6.2，配合插件 2.6.2 使用有并发上限的 swarm 及其他六项操作。精确范围见[认证记录](./docs/upstream-2.6.2-certification.md)和[运行时矩阵](./docs/native-v2-certification-provenance.md)；旧版继续保留其已披露的限制。
 
 目前不支持 Windows。在终端检查版本：
 
@@ -455,7 +459,7 @@ codex plugin add kimi@kimi-marketplace
 
 如果钩子检查失败，请按诊断信息处理。提示需要重新配置时，在对应应用中运行 setup。不要绕过检查。
 
-如果出现 `KIMI_CAPABILITY_NOT_CERTIFIED`，请更新插件，或改用针对所需操作已认证的 CLI 版本。2.6.2 仅支持六项非 swarm 操作；swarm 需要选择针对该操作认证的版本，而不是仅凭其他操作已认证的版本。再次运行 setup 不能认证新的 CLI，也不能扩大其操作范围。
+如果出现 `KIMI_CAPABILITY_NOT_CERTIFIED`，请更新当前宿主的插件，或选择针对所需操作已认证的 CLI 版本。插件 2.5.9 在 CLI 2.6.2 上仅支持六项非 swarm 操作；有并发上限的 swarm 需要插件 2.6.2。CLI 2.6.0 仍仅支持非 swarm 操作。再次运行 setup 不能补上旧版缺少的运行时策略，也不能认证新的 CLI。
 
 如果出现 `CLI_V2_PLAN_MODE_CONFIGURED`，请将 Kimi 的 `config.toml` 文件中的 `default_plan_mode` 设为 `false`，或删除该项。本插件运行的会话不能使用计划模式。
 
@@ -465,7 +469,11 @@ codex plugin add kimi@kimi-marketplace
 
 Ask、review、challenge 和只读 swarm 的工具规则禁止写入文件和执行 shell 命令。Rescue 和 pursue 可以修改工作区内的文件。带 `--write` 的 swarm 在临时 Git 工作树中操作。它从最新提交开始，不包含尚未提交的修改。任务结束后返回补丁，不会自动应用到项目。
 
-在 CLI 2.3.2、2.3.3、2.4.0 和 2.4.1 上运行 swarm 时，插件会短暂启动需要认证的本地回环 `kimi web` 进程来激活会话，并在结束后再次启动以停用 swarm 模式；任务本身仍由一个普通的 `kimi -p -r` 进程执行。激活计入任务时限，访问令牌只保存在内存且不会写入日志；无法确认清理完成时，任务不会报告成功。较早的已认证版本仍直接通过 `kimi -p` 运行。
+在精确版本 CLI 2.6.2 上，`--max-concurrency 1` 直接运行一个工作代理；更大的值将任务分成多批，每批子代理数不超过该值。只读模式默认 4，写入模式默认 1。`--cap` 仍只是总数建议。并行任务通过短暂的认证本地回环进程激活和停用会话；单代理路径无需这些进程。激活计入任务时限，令牌不写入日志，无法确认清理完成时不会报告成功。旧版继续保留其已披露的激活和恢复限制。
+
+较慢的子代理会让当前批次等待，直到完成或整个任务达到时限。全新批次至少需要两个条目，因此奇数个目标可能需要重新分组。Kimi 工作代理不能显式将 Bash 放到后台，并行会话也禁用自动后台运行。正常退出和取消都必须确认所管理进程已停止，才会捕获结果或补丁。并发上限计算的是 Kimi 子代理轮次；获准的测试仍可启动多个系统进程，单次 Bash 超时也不保证这些进程在下一批开始前停止。
+
+并行 Bash 命令默认在 60 秒后超时，最长为 300 秒。更长的测试请使用并发数 1；该路径仍可由原生机制自动转入后台，代理轮次保持串行，并在返回结果前确认进程停止。
 
 插件不会提交修改。保留或应用修改前，请先审查。
 
@@ -503,7 +511,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code, Codex ou DSH prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure (24.9 ou ultérieure pour DSH)
-- Kimi Code CLI 2.6.2 (uniquement pour review, challenge, ask, rescue, review gate et pursue ; les deux modes swarm sont refusés. La certification complète des huit opérations s'arrête à 2.5.3, avec la limite connue de récupération après limitation de débit. Les autres versions exactes certifiées figurent dans la [matrice runtime](./docs/native-v2-certification-provenance.md))
+- Kimi Code CLI 2.6.2 avec le plugin 2.6.2 pour swarm à concurrence limitée et les six autres opérations. Consultez le [dossier de certification](./docs/upstream-2.6.2-certification.md) et la [matrice runtime](./docs/native-v2-certification-provenance.md) pour le périmètre exact ; les anciennes versions conservent leurs limites documentées.
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -672,7 +680,7 @@ Supprimez le hook de l'application avant d'en retirer le plugin. Dans Claude Cod
 
 Si la vérification du hook échoue, suivez le diagnostic. Relancez setup dans l'application concernée lorsque les instructions le demandent. Ne contournez pas la vérification.
 
-Si vous voyez `KIMI_CAPABILITY_NOT_CERTIFIED`, mettez à jour le plugin ou utilisez une version du CLI certifiée pour l'opération demandée. La version 2.6.2 est limitée aux six opérations non swarm ; swarm exige une version certifiée pour cette opération, pas seulement pour une autre. Relancer setup ne valide pas une nouvelle version du CLI et n'élargit pas son champ d'opérations.
+Si vous voyez `KIMI_CAPABILITY_NOT_CERTIFIED`, mettez à jour le plugin de cet hôte ou choisissez un CLI certifié pour cette opération. Le plugin 2.5.9 ne prend en charge que les six opérations non swarm sur le CLI 2.6.2 ; swarm à concurrence limitée exige le plugin 2.6.2. Le CLI 2.6.0 reste limité aux opérations non swarm. Relancer setup n’ajoute pas la politique absente d’un ancien runtime et ne certifie pas un nouveau CLI.
 
 Si vous voyez `CLI_V2_PLAN_MODE_CONFIGURED`, réglez `default_plan_mode` sur `false` ou supprimez cette option du fichier `config.toml` de Kimi. Les sessions lancées par ce plugin ne peuvent pas utiliser le mode plan.
 
@@ -682,7 +690,11 @@ Tous les codes de refus et leurs remèdes sont répertoriés dans le [catalogue 
 
 Les règles des modes ask, review, challenge et swarm en lecture seule interdisent les écritures et les commandes shell. Rescue et pursue peuvent modifier les fichiers de votre espace de travail. Swarm avec `--write` travaille dans un worktree Git temporaire. Il part du dernier commit et n'inclut donc pas les modifications non commitées. Il renvoie un patch sans l'appliquer à votre projet.
 
-Avec le CLI 2.3.2, 2.3.3, 2.4.0 et 2.4.1, les tâches swarm lancent brièvement un processus `kimi web` authentifié sur l'interface de boucle locale pour activer la session, puis un second pour désactiver le mode swarm ; un seul processus `kimi -p -r` ordinaire exécute toujours la tâche. L'activation est comptée dans la limite de temps, le jeton reste en mémoire et hors des journaux, et l'échec du nettoyage empêche de déclarer la réussite. Les versions certifiées antérieures utilisent directement `kimi -p`.
+Sur le CLI exact 2.6.2, `--max-concurrency 1` lance directement un seul agent ; une valeur supérieure répartit le travail en vagues de cette taille au maximum. Les valeurs par défaut sont 4 en lecture et 1 en écriture. `--cap` reste un conseil sur le nombre total. Les vagues parallèles utilisent de brefs processus locaux authentifiés pour activer puis désactiver la session ; le chemin à un seul agent n’en a pas besoin. L’activation compte dans la durée du job, les jetons restent hors des journaux et un nettoyage non confirmé empêche de déclarer la réussite. Les anciennes versions gardent leurs limites documentées.
+
+Un enfant lent retient sa vague jusqu’à sa fin ou à la limite de durée du job. Une vague de nouveaux enfants exige au moins deux entrées ; un nombre impair de cibles peut donc nécessiter un regroupement. Les agents Kimi ne peuvent pas lancer Bash explicitement en arrière-plan, et les sessions parallèles désactivent aussi le détachement automatique. La sortie normale et l’annulation attendent l’arrêt des processus gérés avant de capturer résultats ou patchs. La limite compte les tours des agents enfants Kimi ; un test autorisé peut lancer plusieurs processus système, dont l’arrêt entre deux vagues n’est pas garanti par le délai d’un appel Bash.
+
+Les commandes Bash parallèles expirent après 60 secondes par défaut, avec un maximum de 300 secondes. Choisissez une concurrence de 1 pour les tests plus longs : le passage automatique en arrière-plan reste disponible, avec des tours séquentiels et un arrêt vérifié avant le retour du résultat.
 
 Le plugin ne crée aucun commit. Examinez les modifications avant de les conserver ou de les appliquer.
 
@@ -718,7 +730,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code、Codex、または DSH
 - Node.js 22.5 以降（DSH では 24.9 以降）
-- Kimi Code CLI 2.6.2（対象は review、challenge、ask、rescue、review gate、pursue のみ。両 swarm モードは拒否されます。8 操作すべての認証は 2.5.3 までで、継承されたレート制限復帰時の問題も開示しています。その他の正確な認証バージョンは[ランタイムマトリックス](./docs/native-v2-certification-provenance.md)を参照）
+- Kimi Code CLI 2.6.2 とプラグイン 2.6.2。並列数を制限した swarm とほかの 6 操作に対応します。正確な範囲は[認証記録](./docs/upstream-2.6.2-certification.md)と[ランタイムマトリックス](./docs/native-v2-certification-provenance.md)を参照してください。旧バージョンの制限は引き続き適用されます。
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 
@@ -889,7 +901,7 @@ codex plugin add kimi@kimi-marketplace
 
 フックの確認に失敗した場合は、診断結果に従って対処してください。Setup の実行を指示された場合は、該当するアプリで実行します。確認を回避しないでください。
 
-`KIMI_CAPABILITY_NOT_CERTIFIED` が表示されたら、プラグインを更新するか、実行したい操作が認証された CLI バージョンを選んでください。2.6.2 では 6 つの非 swarm 操作のみ利用できます。swarm には、ほかの操作ではなく、その操作が認証されたバージョンが必要です。Setup を再実行しても、新しい CLI の互換性が検証済みになったり、対応操作が広がったりすることはありません。
+`KIMI_CAPABILITY_NOT_CERTIFIED` が表示されたら、そのホストのプラグインを更新するか、対象操作が認証された CLI を選んでください。プラグイン 2.5.9 では CLI 2.6.2 の非 swarm 6 操作のみ対応し、並列数を制限した swarm にはプラグイン 2.6.2 が必要です。CLI 2.6.0 は引き続き非 swarm 操作のみ対応します。Setup の再実行だけでは古いランタイムに新しいポリシーは追加されず、新しい CLI も認証されません。
 
 `CLI_V2_PLAN_MODE_CONFIGURED` が表示されたら、Kimi の `config.toml` で `default_plan_mode` を `false` にするか、その項目を削除してください。このプラグインが実行するセッションではプランモードを使えません。
 
@@ -899,7 +911,11 @@ codex plugin add kimi@kimi-marketplace
 
 Ask、review、challenge、読み取り専用 swarm のツールルールでは、ファイルへの書き込みとシェルコマンドを禁止しています。Rescue と pursue はワークスペース内のファイルを変更できます。`--write` を指定した swarm は、一時的な Git ワークツリーで作業します。最新のコミットから開始するため、未コミットの変更は含まれません。パッチを返すだけで、プロジェクトには自動適用しません。
 
-CLI 2.3.2 / 2.3.3 / 2.4.0 / 2.4.1 の swarm では、セッションを有効化するため、そして終了後に swarm モードを無効化するため、認証付きのローカルループバック `kimi web` プロセスをそれぞれ短時間だけ起動します。タスク自体は従来どおり 1 つの `kimi -p -r` プロセスが実行します。有効化も制限時間に含まれ、トークンはメモリー内にのみ保持されてログには出ません。後処理を確認できない場合、タスクは成功と報告されません。以前の認証済みバージョンでは、引き続き `kimi -p` を直接使います。
+正確な CLI 2.6.2 では、`--max-concurrency 1` は 1 つのワーカーを直接実行します。2 以上では、その数以下の子エージェントを 1 組として順に実行します。既定値は読み取りが 4、書き込みが 1 です。`--cap` は総数の目安のままです。並列実行では、認証付きのローカルプロセスでセッションを有効化・無効化します。単一ワーカーでは不要です。有効化もジョブの制限時間に含まれ、トークンはログに出ず、後処理を確認できなければ成功とは報告しません。旧バージョンの制限は引き続き適用されます。
+
+遅い子エージェントがある組は、完了またはジョブ全体の期限まで待機します。新規の組には最低 2 項目が必要なので、対象が奇数なら組み直す場合があります。Kimi ワーカーによる明示的な Bash のバックグラウンド実行は禁止され、並列セッションでは自動切り離しも無効です。通常終了とキャンセルのどちらも、管理対象プロセスの停止を確認してから結果やパッチを取得します。並列数は Kimi 子エージェントのターン数です。許可されたテストは複数の OS プロセスを起動でき、個々の Bash のタイムアウトは次の組の開始までにそれらが停止する保証にはなりません。
+
+並列の Bash コマンドは既定で 60 秒、最大で 300 秒でタイムアウトします。長いテストには並列数 1 を使ってください。この経路では自動バックグラウンド化を利用でき、エージェントのターンは順次進み、結果を返す前に管理対象プロセスの停止を確認します。
 
 プラグインは変更をコミットしません。変更を残す、または適用する前に内容を確認してください。
 

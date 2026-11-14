@@ -46,30 +46,32 @@ import {
 } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { usesBoundedSwarmPolicy } from "../swarm-policy.js";
 
 // /kimi:swarm — parallel fan-out, read-only by default and runtime-foreground-only.
 // A finite wall-clock budget bounds the whole run. --cap is a SOFT total-count
-// prompt hint; --max-concurrency caps normal launches on kimi-code 0.18.0+.
-// Reviewed 2.5.3/2.6.0/2.6.2 schedulers can exceed that cap during rate-limit recovery.
-// The plugin always exports the setting; older read-only swarms retain only the
-// wall-clock hard bound. Read/write modes reuse review/rescue lineage, and the
+// prompt hint. Exact native-v2 2.6.2 bounds admitted waves and prevents native
+// child timeouts from returning a continuing coordinator before children stop.
+// Concurrency 1 uses a direct worker without native fan-out. Older versions keep
+// their normal-launch setting and inherited recovery limitation. Read/write
+// modes reuse review/rescue lineage, and the
 // mandatory PreToolUse hook enforces read-only policy or trusted-worktree write
 // confinement on the coordinator and every subagent. Write mode requires
 // kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2,
 // and certified 2.5.3 activate a same-job session through a bounded loopback
-// web lifecycle, then resume it through the normal print path. Candidate-only
-// 2.6.0/2.6.2 activation uses that lifecycle too. The per-operation certification
+// web lifecycle, then resume it through the normal print path. 2.6.2 parallel
+// waves and candidate-only 2.6.0 use that lifecycle too. The per-operation certification
 // table controls whether each exact version is reachable in production.
 
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
 const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
 /**
- * Default normal-launch concurrency setting when the user passes no
- * `--max-concurrency`. The plugin always exports
+ * Default concurrency setting when the user passes no `--max-concurrency`.
+ * Exact native-v2 2.6.2 also enforces this as the admitted wave size. The plugin exports
  * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; older read-only swarms ignore it and
  * retain only the wall-clock hard bound. Rate-limit recovery can exceed it on
- * reviewed 2.5.3/2.6.0/2.6.2 sources; this is not an unconditional peak guarantee.
+ * older reviewed sources; their setting is not an unconditional peak guarantee.
  */
 export const SWARM_DEFAULT_MAX_CONCURRENCY = 4;
 
@@ -84,10 +86,10 @@ export function resolveSwarmMaxConcurrency(requested: number | undefined): numbe
 }
 
 /**
- * Default normal-launch concurrency for WRITE mode — 1 (serialized) vs read's 4.
- * Disjoint-target partitioning is prompt-only, so normal writes serialize by
- * default. Rate-limit recovery can still exceed the requested cap on reviewed
- * 2.5.3/2.6.0/2.6.2 sources; this is not an unconditional serialization guarantee.
+ * Default concurrency for WRITE mode — 1 vs read's 4. Exact native-v2 2.6.2
+ * runs one direct worker; older versions serialize normal child launches but
+ * retain the rate-limit recovery overrun. Disjoint-target partitioning remains
+ * prompt-only when parallel workers are explicitly requested.
  * Override with an explicit `--max-concurrency N`.
  */
 export const SWARM_WRITE_DEFAULT_MAX_CONCURRENCY = 1;
@@ -107,14 +109,28 @@ export function resolveSwarmWriteMaxConcurrency(requested: number | undefined): 
  * Read-only is NOT enforced by this prose — the PreToolUse hook (swarm label) at
  * policy index 0 denies every write/edit/shell for the coordinator AND every
  * subagent, so slimming this text does not move the safety boundary. The optional
- * `cap` is a SOFT subagent-count hint (the hook cannot enforce a count). The
- * normal-launch concurrency setting is separate: --max-concurrency →
- * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (see executeSwarmJob / cli-client buildKimiCliEnvironment).
- * Reviewed 2.5.3/2.6.0/2.6.2 sources can exceed it during rate-limit recovery.
- * The --budget wall-clock ceiling is the always-on hard bound on the whole run.
+ * `cap` is a SOFT total subagent-count hint. `waveSize` is supplied only for
+ * the exact bounded policy: 1 runs directly; larger values guide the model to
+ * satisfy the separately enforced admission rule. Older versions keep their
+ * existing prompt and normal-launch concurrency semantics.
  */
-export function buildSwarmPrompt(objective: string, cap?: number): string {
+export function buildSwarmPrompt(objective: string, cap?: number, waveSize?: number): string {
   const trimmed = objective.trim();
+  if (waveSize === 1) {
+    return [
+      "Review the following read-only as the single worker: inspect and report; do not modify anything.",
+      "",
+      `Objective: ${trimmed}`,
+      "",
+      "Complete every target yourself, one at a time. Do not delegate: Agent and AgentSwarm are denied.",
+      "Use the allowed read-only tools, primarily Read/Grep/Glob and ReadMediaFile where relevant;",
+      "shell/Bash and every write/edit tool are denied.",
+      "",
+      "Return a single markdown report: deduplicate findings, preserve coverage across every target,",
+      "and explicitly mention targets with no findings. Include a short verdict line, a brief summary,",
+      "then findings as `file:line — issue — severity`. No JSON wrapper or outer code fences.",
+    ].join("\n");
+  }
   const capClause =
     cap !== undefined
       ? `Use at most ${cap} subagents in total across the whole run (soft cap); split or group targets to stay within it.`
@@ -130,6 +146,7 @@ export function buildSwarmPrompt(objective: string, cap?: number): string {
     "workspace directly with the allowed read-only tools).",
     "Fan the work out across the relevant targets in parallel using your own subagent capability,",
     "as you judge best — split or group the work however fits the objective.",
+    ...boundedWaveInstructions(waveSize),
     ...(capClause ? [capClause] : []),
     "",
     "Consolidate into a single markdown report: deduplicate findings, preserve coverage across",
@@ -141,18 +158,39 @@ export function buildSwarmPrompt(objective: string, cap?: number): string {
 
 /**
  * Build the WRITE-mode coordination prompt. Unlike the read-only prompt, this
- * sets subagent_type="coder" (write-capable) and instructs DISJOINT one-target-
- * per-subagent editing with NO git and NO nested swarm. The coordinator and all
+ * sets subagent_type="coder" (write-capable) and instructs DISJOINT target
+ * assignments with NO git and NO nested swarm. The coordinator and all
  * subagents run in an ephemeral throwaway worktree; the PreToolUse hook
  * (swarm-write label) confines writes there and the plugin captures a patch the
  * user reviews. The `cap` is the same SOFT total-count hint as read mode.
  */
-export function buildSwarmWritePrompt(objective: string, cap?: number): string {
+export function buildSwarmWritePrompt(objective: string, cap?: number, waveSize?: number): string {
   const trimmed = objective.trim();
+  if (waveSize === 1) {
+    return [
+      "Perform the following CODE-EDITING task as the single worker.",
+      "",
+      `Objective: ${trimmed}`,
+      "",
+      "You are running inside a throwaway git worktree dedicated to this task.",
+      "Complete every target yourself, one at a time. Do not delegate: Agent and AgentSwarm are denied.",
+      "Your changes will be captured as a patch for the human to review and apply.",
+      "",
+      "Safety rules enforced by the PreToolUse hook:",
+      "- Writes are confined to this worktree; an out-of-worktree write is denied.",
+      "- Git mutation is denied: do not add, commit, checkout, or change repository state.",
+      "",
+      "Report what changed and why, with a short verdict and a section for each target listing edited files.",
+      "Do not paste full diffs; the patch is captured separately. Return plain markdown,",
+      "without a JSON wrapper or outer code fences.",
+    ].join("\n");
+  }
   const capClause =
     cap !== undefined
       ? `Launch at most ${cap} subagents in total across the whole run (soft cap — split or group targets to stay within it).`
-      : "Launch one subagent per distinct target; group related targets if there are many.";
+      : waveSize === undefined
+        ? "Launch one subagent per distinct target; group related targets if there are many."
+        : "Assign disjoint targets or target groups to subagents; group related targets when needed.";
   return [
     "Coordinate a parallel CODE-EDITING task using the AgentSwarm tool.",
     "",
@@ -161,8 +199,16 @@ export function buildSwarmWritePrompt(objective: string, cap?: number): string {
     "You are running inside a throwaway git worktree dedicated to this task — edit freely;",
     "your changes will be captured as a patch for the human to review and apply. Use the",
     'AgentSwarm tool to fan the work out across subagents. Set subagent_type to "coder" (the',
-    "write-capable profile). Give each subagent ONE target via prompt_template + items: a single",
-    "file or module per subagent.",
+    ...(waveSize === undefined
+      ? [
+          "write-capable profile). Give each subagent ONE target via prompt_template + items: a single",
+          "file or module per subagent.",
+        ]
+      : [
+          "write-capable profile). Give each subagent a DISJOINT target or target group via prompt_template + items.",
+          "Each file must belong to only one subagent's assignment.",
+        ]),
+    ...boundedWaveInstructions(waveSize),
     capClause,
     "",
     "Safety rules enforced by the PreToolUse hook (violations are denied):",
@@ -181,6 +227,16 @@ export function buildSwarmWritePrompt(objective: string, cap?: number): string {
     "files. Do NOT paste full diffs (the patch is captured separately). Return plain markdown —",
     "no JSON wrapper, no outer code fences.",
   ].join("\n");
+}
+
+function boundedWaveInstructions(waveSize: number | undefined): string[] {
+  return waveSize === undefined ? [] : [
+    `Each AgentSwarm call must contain at most ${waveSize} entries in total, counting both new items and resumed agents.`,
+    "A wave with no resumed agents must contain at least two new entries; a single resumed agent is allowed.",
+    "For odd target counts, group multiple targets into disjoint worker entries so the final wave is not a lone fresh entry.",
+    "Split larger work into sequential waves and wait for each wave to finish before starting the next.",
+    "Oversized calls and forks are denied; if a call is denied, group or split its targets into smaller waves.",
+  ];
 }
 
 export async function runSwarm(argv: string[], context: CommandContext): Promise<string> {
@@ -218,7 +274,10 @@ async function runReadSwarm(
       env: context.env,
     });
 
-    const prompt = buildSwarmPrompt(objective, parsed.cap);
+    const maxConcurrency = resolveSwarmMaxConcurrency(parsed.maxConcurrency);
+    const prompt = buildSwarmPrompt(
+      objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined,
+    );
     const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `swarm-${jobId}.jsonl`);
 
@@ -271,7 +330,7 @@ async function runReadSwarm(
       prompt,
       objective,
       job.budget_ms!,
-      resolveSwarmMaxConcurrency(parsed.maxConcurrency),
+      maxConcurrency,
       context,
       undefined,
       await realpath(context.cwd),
@@ -323,7 +382,7 @@ async function runWriteSwarm(
       );
     }
 
-    const prompt = buildSwarmWritePrompt(objective, parsed.cap);
+    const maxConcurrency = resolveSwarmWriteMaxConcurrency(parsed.maxConcurrency);
     const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `swarm-write-${jobId}.jsonl`);
 
@@ -352,6 +411,9 @@ async function runWriteSwarm(
         cwd: worktreePath,
         env: context.env,
       });
+      const prompt = buildSwarmWritePrompt(
+        objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined,
+      );
 
       const job = store.createJob({
         job_id: jobId,
@@ -406,7 +468,7 @@ async function runWriteSwarm(
         prompt,
         objective,
         job.budget_ms!,
-        resolveSwarmWriteMaxConcurrency(parsed.maxConcurrency),
+        maxConcurrency,
         context,
         {
           spawnCwd: worktreePath,
@@ -526,8 +588,8 @@ async function executeSwarmJob(
     throw new RuntimeError("JOB_NOT_FOUND", `Swarm job ${jobId} was not found.`, "swarm.worker");
   }
 
-  // Both modes fan out subagents and require the PreToolUse hook: read mode
-  // enforces read-only policy, while write mode confines writes to the trusted
+  // Both modes require the PreToolUse hook, including a direct single worker:
+  // read mode enforces read-only policy; write mode confines writes to its
   // worktree. Fail closed before spawning.
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
     const installStatus = await verifyHookInstalled(context.env);
@@ -537,8 +599,7 @@ async function executeSwarmJob(
         "SWARM_HOOK_NOT_INSTALLED",
         [
           "/kimi:swarm refuses to run without the kimi-plugin-cc PreToolUse hook.",
-          "Swarm fans out multiple subagents; the hook is the ONLY thing keeping every",
-          "one of them read-only, so a missing hook means no enforcement across the fan-out.",
+          "The hook enforces each worker's tool permissions, write confinement, and delegation limits.",
           `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
           "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
           hookRefusalRetryProtocol(context.env),
@@ -596,6 +657,10 @@ async function executeSwarmJob(
 
   try {
     const executionPlan = executionPlanFromPersisted(job);
+    const singleWorker = usesBoundedSwarmPolicy(executionPlan) && maxConcurrency === 1;
+    const needsPreactivation = !singleWorker && requiresSwarmPreactivation(executionPlan.kimiVersion);
+    // A direct worker still needs durable print ownership and patch recovery.
+    // Its record has no activated session and never requires web cleanup.
     if (requiresSwarmPreactivation(executionPlan.kimiVersion)) {
       const owner = await probeProcessIdentity(process.pid);
       recovery = { schema: 1, jobId: job.job_id, ownerPid: process.pid, owner: owner.identity ?? null,
@@ -619,7 +684,7 @@ async function executeSwarmJob(
       onRecoveryEvent: recovery ? (event) => recordRecoveryEvent(store, recovery!, event) : undefined,
     };
 
-    if (requiresSwarmPreactivation(executionPlan.kimiVersion)) {
+    if (needsPreactivation) {
       store.updateRunningJob(job.job_id, { phase: "turn-running" });
       const activationController = new AbortController();
       const onParentAbort = () => activationController.abort();
@@ -713,6 +778,11 @@ async function executeSwarmJob(
             recordRecoveryEvent(store, recovery, { kind: "print-processes", identities: probe.identity ? [probe.identity] : [], complete: probe.complete });
           }
         },
+        onProcessIdentities: recovery
+          ? (identities, complete) => recordRecoveryEvent(store, recovery!, {
+              kind: "print-processes", identities: [...identities], complete,
+            })
+          : undefined,
         signal: handlers.signal,
       },
       promptBudgetMs,
@@ -844,8 +914,16 @@ async function executeSwarmJob(
         `[kimi-plugin-cc] swarm session cleanup also failed: ${cleanupFailure.message}\n`,
       );
     }
+    const processCleanupUnverified = hasUnverifiedProcessCleanup(error) || hasUnverifiedProcessCleanup(cleanupFailure);
+    const patchCaptureSkipped = writeMode !== undefined && processCleanupUnverified;
+    if (patchCaptureSkipped) {
+      writeMode.onPatchCaptureFailure?.();
+      context.stderr.write(
+        `[kimi-plugin-cc] swarm-write process cleanup is unverified; no patch was captured. Worktree retained at ${writeMode.workspaceRoot}.\n`,
+      );
+    }
     let captureFailed = writeMode !== undefined && error instanceof RuntimeError && error.code === "SWARM_PATCH_CAPTURE_FAILED";
-    if (writeMode && !(error instanceof RuntimeError && error.code === "SWARM_PATCH_CAPTURE_FAILED")) {
+    if (writeMode && !patchCaptureSkipped && !(error instanceof RuntimeError && error.code === "SWARM_PATCH_CAPTURE_FAILED")) {
       const captured = await capturePatchArtifact(
         paths,
         job.job_id,
@@ -865,7 +943,9 @@ async function executeSwarmJob(
       ...(error instanceof RuntimeError && typeof error.details.exit_code === "number"
         ? { exit_code: error.details.exit_code }
         : {}),
-      ...((captureFailed || cleanupFailure) && writeMode ? { worktreePath: writeMode.workspaceRoot } : {}),
+      ...((captureFailed || cleanupFailure || patchCaptureSkipped) && writeMode ? { worktreePath: writeMode.workspaceRoot } : {}),
+      ...(processCleanupUnverified ? { process_cleanup_unverified: true } : {}),
+      ...(patchCaptureSkipped ? { patch_capture_skipped: true } : {}),
       ...(cleanupFailure
         ? {
             cleanup_error: {
@@ -884,9 +964,11 @@ async function executeSwarmJob(
       });
       const cancelledError = new RuntimeError(
         "SWARM_CANCELLED",
-        captureFailed && writeMode
-          ? `Swarm cancelled; patch capture failed and worktree retained at ${writeMode.workspaceRoot}.`
-          : "Swarm cancelled by user request.",
+        patchCaptureSkipped && writeMode
+          ? `Swarm cancelled; process cleanup is unverified. No patch was captured; worktree retained at ${writeMode.workspaceRoot}.`
+          : captureFailed && writeMode
+            ? `Swarm cancelled; patch capture failed and worktree retained at ${writeMode.workspaceRoot}.`
+            : "Swarm cancelled by user request.",
         "swarm.runtime",
         {
           ...(error instanceof Error ? { cause: error } : {}),
@@ -906,16 +988,16 @@ async function executeSwarmJob(
     const classified = classifyManagedCommandFailure(error, writeMode ? "rescue" : "review", job.job_id, {
       preserveStage: true,
     });
-    const withRecovery = captureFailed || cleanupFailure
+    const withRecovery = captureFailed || cleanupFailure || processCleanupUnverified
       ? classified instanceof RuntimeError
         ? new RuntimeError(classified.code, classified.message, classified.stage, {
             cause: classified,
             details: { ...classified.details, ...recoveryDetails },
           })
         : new RuntimeError(
-            cleanupFailure?.code ?? "SWARM_PATCH_CAPTURE_FAILED",
+            cleanupFailure?.code ?? (processCleanupUnverified ? "CLI_PROCESS_SETTLEMENT_FAILED" : "SWARM_PATCH_CAPTURE_FAILED"),
             classified.message,
-            cleanupFailure?.stage ?? "swarm.patch-capture",
+            cleanupFailure?.stage ?? (processCleanupUnverified ? "cli-client.settlement" : "swarm.patch-capture"),
             { cause: classified, details: recoveryDetails },
           )
       : classified;
@@ -934,6 +1016,20 @@ async function executeSwarmJob(
       throw error;
     } finally { store.close(); }
   }
+}
+
+function hasUnverifiedProcessCleanup(error: unknown): boolean {
+  // Budget expiry wraps teardown failures. Preserve the unsafe-settlement
+  // signal through that cause chain before considering any patch capture.
+  const seen = new Set<unknown>();
+  while (error instanceof Error && !seen.has(error)) {
+    seen.add(error);
+    if (error instanceof RuntimeError && (
+      error.code === "CLI_PROCESS_SETTLEMENT_FAILED" || error.details.process_cleanup_unverified === true
+    )) return true;
+    error = error.cause;
+  }
+  return false;
 }
 
 function shorten(text: string, max: number): string {

@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "04e19ddb4f0b41ca4e0f448d5dedf0793558dfedfcd9475f35d874b26dd2a017" },
-  { path: ".claude-plugin/marketplace.json", sha256: "883114b8cb291efdd4b4948fd1880a30aedb4f4f14dd9e904a4fc860c6007443" },
+  { path: ".claude-plugin/plugin.json", sha256: "a044ff9cf545564c23b94e06495708c2e595603942139a929a6fdfc2e789f838" },
+  { path: ".claude-plugin/marketplace.json", sha256: "c5b2c9a229024d134f304f128c04c8162fae6005a7018e9d98f1bcb068840320" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
   { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
@@ -48,14 +48,14 @@ export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
   { path: "commands/review.md", sha256: "a528a763c643f26ff9a1674c8a6c11dcea59121320d43dd4306ef9f168280604" },
   { path: "commands/setup.md", sha256: "ede6fb64d0a8b9876a2405b3685483d4db5ce9505dd724ad903cdf1b048abc44" },
   { path: "commands/status.md", sha256: "0171276cd08b9fe62893f62523c164f35b1a4df98cb7b04f14f62fc33fbc8cbc" },
-  { path: "commands/swarm.md", sha256: "0fc348344aa03ab1488cb54159499a90c089729faf834e2beb9a3dba97406aac" },
+  { path: "commands/swarm.md", sha256: "259983b892ed515adc8df32ac751d16453a383388fb9992e88e3f1ceb62d8f27" },
   { path: "agents/kimi-ask.md", sha256: "0d913d25f62cb98dce35022ada3215982828eba180b9f1e9780b2ca78116d595" },
   { path: "agents/kimi-challenge.md", sha256: "1bcd0807f770c2f6b0fa0aad4166a6cec9036e6f1c3fb792223e8db8231c3b1b" },
   { path: "agents/kimi-pursue.md", sha256: "e78747200ad51ddda29af97178308173bc82c945f8283fce74c2531ebc18fd7f" },
   { path: "agents/kimi-rescue.md", sha256: "4fe17d6522cc7891310679e25a319ab14adf1d69442a447d333232864d05db2d" },
   { path: "agents/kimi-review.md", sha256: "7134c66158f16e65e82f2d1a9ca1a755cd1d792c297171c60946f0170edbc1f1" },
-  { path: "agents/kimi-swarm-write.md", sha256: "d8a42d7f009389825705d0652d197e2c3ab7a0d220b0ea1a5fb6808fc70863d3" },
-  { path: "agents/kimi-swarm.md", sha256: "687afc0bec6a5611cd8a89588f6e504c748ba740c015a9ee3990ecb4086b59d2" },
+  { path: "agents/kimi-swarm-write.md", sha256: "4fc1c2f0070d508cf26af5b173d8e0edc55bf575d48a8b7b49b32e7c42951533" },
+  { path: "agents/kimi-swarm.md", sha256: "7ad2acdf532738f9edcbd10394c1af0a676333ede2dac59a4624392edd75408b" },
 ];
 
 export const CODEX_MCP_CONFIG = {
@@ -486,6 +486,8 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       ...MODEL_SELECTION_GUIDANCE,
       "Require many independent review targets plus explicit fan-out intent.",
       "Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.",
+      "On exact Kimi Code 2.6.2, concurrency 1 runs one direct worker; larger values use bounded sequential waves. Older certified versions retain their normal-launch limit and recovery limitation.",
+      "The bound counts simultaneous Kimi child-agent turns, not OS subprocesses. Fresh-only waves need at least two entries; group odd target counts into disjoint worker assignments.",
       "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
       "Return the consolidated companion report verbatim.",
     ],
@@ -505,6 +507,8 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       ...MODEL_SELECTION_GUIDANCE,
       "Require both many disjoint write targets and explicit parallel fan-out intent.",
       "Keep `--max-concurrency` conservative, normally 1, unless the user explicitly asks to widen it.",
+      "On exact Kimi Code 2.6.2, the default concurrency 1 runs a single worker in the throwaway worktree. Explicit concurrency 2 or higher uses bounded waves; every mode returns a patch for review.",
+      "Parallel Kimi workers cannot background shell commands; native foreground Bash has a 60-second default and 300-second maximum timeout. Choose concurrency 1 for longer tests. Owned process cleanup must finish before patch capture; failed verification retains the worktree instead.",
       "The runtime rejects `--background`, but detaching your own shell call is expected: a fan-out routinely outlives a foreground timeout, and the run is patch-only and worktree-confined. Keep `--budget` and `--max-concurrency` finite. To stop a run, use `companion.sh cancel` with NO id — it targets the latest running job for the repo, and no UUID crosses you or the user (a detached run prints nothing at launch; the id first arrives with the final report). Prefer that over an interrupt: an interrupt gives the companion only ~1.35s before SIGKILL, less than its teardown plus `git diff --binary` patch capture, so interrupting can lose the patch.",
       "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
       "Return the patch path and companion output verbatim; do not apply the patch unless the user separately asks.",

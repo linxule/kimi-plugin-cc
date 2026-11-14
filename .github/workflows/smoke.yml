@@ -36,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "kimi-code version to smoke against: an exact certified native-v2 version (default 2.6.2) runs every in-scope lane incl. v2 resume/taint; 2.6.0/2.6.2 also require both pre-spawn swarm refusals and exclude their three swarm execution lanes; an uncertified candidate requires the explicit candidate seam; a pinned <= 0.41 binary runs legacy-v1 lanes."
+        description: "Exact kimi-code version (default 2.6.2): native-v2 controls include resume/taint; 2.6.2 adds bounded waves and single-worker swarm. 2.6.0 requires swarm refusals instead. Uncertified versions require the candidate seam; pinned <=0.41 runs legacy-v1 lanes."
         type: string
         default: "2.6.2"
       goal_budget_ms:

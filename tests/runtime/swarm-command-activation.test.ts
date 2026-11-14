@@ -188,6 +188,7 @@ async function runSwarmFault(
       dispose() {},
     }),
     executionPlanFromPersisted: () => ({ command: "fake", prefixArgs: [], kimiVersion: "2.3.2" }),
+    usesBoundedSwarmPolicy: () => false,
     requiresSwarmPreactivation: () => true,
     preactivateSwarmSession: async () => { throw activationError; },
     deactivateSwarmSession: async () => {

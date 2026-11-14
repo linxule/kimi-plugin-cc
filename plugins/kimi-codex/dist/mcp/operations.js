@@ -65,7 +65,7 @@ const CAP_PROPERTY = {
 const MAX_CONCURRENCY_PROPERTY = {
     type: "integer",
     minimum: 1,
-    description: "Requested normal-launch subagent concurrency on supported Kimi Code versions. Rate-limit recovery can exceed it on reviewed 2.5.3/2.6.0/2.6.2 sources. Distinct from the soft total cap.",
+    description: "Concurrent worker limit on exact Kimi Code 2.6.2: one runs directly; larger values bound each native swarm wave. Older certified versions limit normal launches only and recovery can exceed it. Distinct from the soft total cap.",
 };
 const START_RESULT_GUIDANCE = "Task-capable clients receive an MCP task. Other clients receive a job ID immediately after launch; use kimi_job_status and kimi_job_result until terminal, and kimi_job_cancel to stop. Do not present a launch handle as the finished answer.";
 function schema(properties, required = []) {

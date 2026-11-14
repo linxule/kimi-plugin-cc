@@ -28,6 +28,7 @@
 
 import { decideHookOutcome, type HookInput } from "./approval-policy.js";
 import { evaluateRescueHookRequest } from "../rescue-approval.js";
+import { SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV } from "../swarm-policy.js";
 
 const STDIN_TIMEOUT_MS = 5_000;
 
@@ -49,6 +50,8 @@ async function main(): Promise<void> {
   const decision = await decideHookOutcome(input, {
     commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
     operationKind: process.env.KIMI_PLUGIN_CC_OPERATION,
+    swarmPolicy: process.env[SWARM_POLICY_ENV],
+    swarmWaveSize: process.env[SWARM_WAVE_SIZE_ENV],
     rescueEvaluator: evaluateRescueHookRequest,
     // Trusted root for rescue/pursue/swarm-write. Set by the plugin spawn; the
     // model inside kimi cannot forge it and hook payload cwd is not trusted.

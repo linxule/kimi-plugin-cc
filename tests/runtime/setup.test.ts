@@ -943,7 +943,7 @@ describe("setup managed-block installer", () => {
     expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
   });
 
-  test.each(["2.6.0", "2.6.2"])("%s setup reports the narrowed non-swarm certification", async (version) => {
+  test.each(["2.6.0"])("%s setup reports the narrowed non-swarm certification", async (version) => {
     if (process.platform === "win32") return;
     const { env, configPath } = await makeCase(`non-swarm-version-notice-${version}`);
     const kimiBin = path.join(path.dirname(configPath), `kimi-${version}`);
@@ -958,6 +958,27 @@ describe("setup managed-block installer", () => {
     const warnings = result.warnings.join("\n");
     expect(warnings).toContain("certified for review, challenge, ask, rescue, review gate, and pursue only");
     expect(warnings).toContain("Read-only swarm and write swarm refuse before model spawn");
+    expect(warnings).toContain("Select exact kimi-code 2.6.2");
+    expect(warnings).not.toContain("outside the versions");
+  });
+
+  test("2.6.2 setup reports bounded swarm and the single-worker path", async () => {
+    if (process.platform === "win32") return;
+    const { env, configPath } = await makeCase("bounded-swarm-version-notice-2.6.2");
+    const kimiBin = path.join(path.dirname(configPath), "kimi-2.6.2");
+    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '2.6.2'\n", "utf8");
+    await chmod(kimiBin, 0o700);
+
+    const result = await runSetup([], makeContext({
+      ...env,
+      KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
+    }));
+    expect(result.probe).toBe("ok");
+    const warnings = result.warnings.join("\n");
+    expect(warnings).toContain("certified for all operations");
+    expect(warnings).toContain("bounded waves with concurrency 2 or more");
+    expect(warnings).toContain("one direct worker at concurrency 1");
+    expect(warnings).not.toContain("refuse before model spawn");
     expect(warnings).not.toContain("outside the versions");
   });
 

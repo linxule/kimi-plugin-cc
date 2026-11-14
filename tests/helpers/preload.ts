@@ -18,6 +18,8 @@ for (const name of [
   "KIMI_PLUGIN_CC_CMD",
   "KIMI_PLUGIN_CC_OPERATION",
   "KIMI_PLUGIN_CC_WORKSPACE_ROOT",
+  "KIMI_PLUGIN_CC_SWARM_POLICY",
+  "KIMI_PLUGIN_CC_SWARM_WAVE_SIZE",
 ]) {
   delete process.env[name];
 }

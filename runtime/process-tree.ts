@@ -57,13 +57,17 @@ export interface ProcessTreeWaitOptions {
  * Capture descendant ancestry and reusable identities in the same bounded
  * process-table snapshot. There is no PID-only handoff: on Linux, PPID, PGID,
  * state, and start time come from one /proc/<pid>/stat read per row; other
- * POSIX systems use one ps invocation for the whole table.
+ * POSIX systems use one ps invocation for the whole table. Retained anchors
+ * supply expectedRoot so a reused PID cannot introduce unrelated descendants.
  */
-export async function collectDescendantIdentities(rootPid: number): Promise<ProcessIdentity[]> {
+export async function collectDescendantIdentities(
+  rootPid: number,
+  expectedRoot?: ProcessIdentity,
+): Promise<ProcessIdentity[]> {
   if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === "win32") return [];
 
   const snapshot = await raceValueWithTimeout(
-    collectVerifiedDescendantIdentities(rootPid),
+    collectVerifiedDescendantIdentities(rootPid, expectedRoot),
     PROCESS_SNAPSHOT_TIMEOUT_MS,
   );
   if (snapshot === PROBE_TIMEOUT) {
@@ -211,19 +215,41 @@ export async function waitForProcessTreeExit(
   }
 }
 
-async function collectVerifiedDescendantIdentities(rootPid: number): Promise<ProcessIdentity[]> {
+async function collectVerifiedDescendantIdentities(
+  rootPid: number,
+  expectedRoot?: ProcessIdentity,
+): Promise<ProcessIdentity[]> {
+  if (expectedRoot !== undefined && expectedRoot.pid !== rootPid) {
+    return [];
+  }
   const initialRows = await collectProcessSnapshotRows();
   if (initialRows === undefined) throw new Error("process snapshot unavailable");
 
-  const candidateRows = descendantRowsFromSnapshot(rootPid, initialRows);
   const initialRoot = initialRows.find((row) => row.pid === rootPid);
-  if (initialRoot === undefined || candidateRows.length === 0) return [];
+  if (initialRoot === undefined) return [];
+  if (
+    expectedRoot !== undefined &&
+    (initialRoot.startToken !== expectedRoot.startToken ||
+      initialRoot.processGroupId !== expectedRoot.processGroupId)
+  ) {
+    return [];
+  }
+  const candidateRows = descendantRowsFromSnapshot(rootPid, initialRows);
+  if (candidateRows.length === 0) return [];
 
   // A second, targeted snapshot closes the cross-row /proc race: each child
   // must retain its PID and start token. Reparenting and PGID changes are not exit.
   const expectedRows = [initialRoot, ...candidateRows];
   const expectedByPid = new Map(expectedRows.map((row) => [row.pid, row]));
   const verificationRows = await readCurrentSnapshotRows(expectedRows);
+  const verifiedRoot = verificationRows.find((row) => row.pid === rootPid);
+  if (
+    expectedRoot !== undefined && verifiedRoot !== undefined &&
+    (verifiedRoot.startToken !== expectedRoot.startToken ||
+      verifiedRoot.processGroupId !== expectedRoot.processGroupId)
+  ) {
+    return [];
+  }
   const stableRows = verificationRows.filter((current) => {
     const expected = expectedByPid.get(current.pid);
     return (

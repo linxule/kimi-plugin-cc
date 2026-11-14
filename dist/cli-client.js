@@ -15,6 +15,7 @@ import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
+import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
 import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
 import { collectDescendantIdentities, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
 /** Bytes of stderr retained for diagnostics on completion. Rolling buffer. */
@@ -29,6 +30,8 @@ const POST_KILL_QUIESCENCE_MS = 500;
 const DESCENDANT_SNAPSHOT_TIMEOUT_MS = 1_000;
 /** Hard bound for each batched identity revalidation pass. */
 const IDENTITY_REVALIDATION_TIMEOUT_MS = 250;
+/** Keep ownership evidence before a native Bash shell can exit ahead of its children. */
+const BOUNDED_DESCENDANT_POLL_MS = 100;
 const DESCENDANT_SNAPSHOT_TIMEOUT = Symbol("descendant-snapshot-timeout");
 function spawnErrorDetails(error) {
     const cause = error;
@@ -72,6 +75,7 @@ export async function runCliPrompt(opts) {
     const args = buildArgs(opts);
     assertPromptFitsCommandLine(opts.command, args);
     const env = buildKimiCliEnvironment(opts);
+    const boundedSwarm = usesBoundedSwarmPolicy(opts.executionPlan);
     if (opts.logPath !== undefined) {
         await mkdir(path.dirname(opts.logPath), { recursive: true }).catch(() => {
             // Best-effort; if mkdir fails the appendFile below will error and be
@@ -123,7 +127,8 @@ export async function runCliPrompt(opts) {
     let announcedCliError;
     let announcedSystemVersion;
     const hookMonitor = createHookEscapeMonitor({ commandLabel: opts.commandLabel,
-        operationKind: opts.executionPlan.operationKind, trustedWorkspaceRoot: opts.trustedWorkspaceRoot, cwd: opts.cwd });
+        operationKind: opts.executionPlan.operationKind, trustedWorkspaceRoot: opts.trustedWorkspaceRoot, cwd: opts.cwd,
+        swarmPolicy: env[SWARM_POLICY_ENV], swarmWaveSize: env[SWARM_WAVE_SIZE_ENV] });
     const hookEscapes = [];
     const noteHookEscape = (escape) => {
         hookEscapes.push(escape);
@@ -323,6 +328,8 @@ export async function runCliPrompt(opts) {
         const settle = (kind, payload) => {
             if (settlementStarted)
                 return;
+            if (boundedSwarm)
+                beginTeardown();
             // Denied calls still without a result (a cancel/budget race, an abnormal
             // exit, or a turn that ended without the denial the hook owes) are reported
             // alongside the real outcome, never instead of it.
@@ -341,9 +348,9 @@ export async function runCliPrompt(opts) {
                         event: "cancellation_teardown_error",
                         message: formatError(teardown.error),
                     });
-                    reject(new RuntimeError("CLI_CANCELLATION_TEARDOWN_FAILED", `kimi cancellation teardown failed: ${formatError(teardown.error)}`, "cli-client.cancellation", teardown.error instanceof Error
-                        ? { cause: teardown.error, details: errorDetails() }
-                        : { details: errorDetails() }));
+                    reject(new RuntimeError(boundedSwarm ? "CLI_PROCESS_SETTLEMENT_FAILED" : "CLI_CANCELLATION_TEARDOWN_FAILED", `kimi ${boundedSwarm ? "process settlement" : "cancellation teardown"} failed: ${formatError(teardown.error)}`, boundedSwarm ? "cli-client.settlement" : "cli-client.cancellation", teardown.error instanceof Error
+                        ? { cause: teardown.error, details: { ...errorDetails(), ...(boundedSwarm ? { process_cleanup_unverified: true } : {}) } }
+                        : { details: { ...errorDetails(), ...(boundedSwarm ? { process_cleanup_unverified: true } : {}) } }));
                     return;
                 }
                 if (kind === "resolve")
@@ -357,16 +364,23 @@ export async function runCliPrompt(opts) {
         let processExited = false;
         child.once("exit", () => {
             processExited = true;
+            // A descendant may still hold stdout open. Start cleanup on exit rather
+            // than waiting for close, which cannot arrive until that tail is gone.
+            if (boundedSwarm)
+                beginTeardown();
         });
-        const captureDescendantIdentities = async (childPid) => {
+        let trackingError;
+        const captureDescendantIdentities = async (childPid, expectedRoot) => {
             let snapshot;
             try {
-                const collected = await raceWithValueTimeout((opts.descendantIdentityCollector ?? collectDescendantIdentities)(childPid), DESCENDANT_SNAPSHOT_TIMEOUT_MS, DESCENDANT_SNAPSHOT_TIMEOUT);
+                const collected = await raceWithValueTimeout((opts.descendantIdentityCollector ?? collectDescendantIdentities)(childPid, expectedRoot), DESCENDANT_SNAPSHOT_TIMEOUT_MS, DESCENDANT_SNAPSHOT_TIMEOUT);
                 if (collected === DESCENDANT_SNAPSHOT_TIMEOUT) {
                     appendLogLine({
                         event: "descendant_collection_timeout",
                         timeout_ms: DESCENDANT_SNAPSHOT_TIMEOUT_MS,
                     });
+                    if (boundedSwarm)
+                        trackingError ??= new Error("descendant ownership snapshot timed out");
                     return [];
                 }
                 snapshot = collected;
@@ -376,6 +390,8 @@ export async function runCliPrompt(opts) {
                     event: "descendant_collection_error",
                     message: formatError(err),
                 });
+                if (boundedSwarm)
+                    trackingError ??= err;
                 return [];
             }
             const identities = [];
@@ -437,7 +453,108 @@ export async function runCliPrompt(opts) {
                 trySignalPid(-processGroupId, signal);
             }
         };
+        const trackedIdentities = new Map();
+        const identityKey = (identity) => `${identity.pid}:${identity.startToken}`;
+        let trackerTimer;
+        let trackerPass;
+        let publishedIdentities = "";
+        let spawnRecorded = opts.onSpawn === undefined;
+        const retainIdentities = (identities) => {
+            for (const identity of identities) {
+                // A changed PGID is not a new ownership grant. Keep the first identity
+                // so revalidation refuses to signal a process that moved groups.
+                if (!trackedIdentities.has(identityKey(identity))) {
+                    trackedIdentities.set(identityKey(identity), identity);
+                }
+            }
+        };
+        const refreshTrackedIdentities = () => {
+            if (trackerPass)
+                return trackerPass;
+            trackerPass = (async () => {
+                const childPid = child.pid;
+                if (childPid === undefined || process.platform === "win32")
+                    return;
+                const reachable = !processExited ? await captureDescendantIdentities(childPid) : [];
+                retainIdentities(reachable);
+                const reachableKeys = new Set(reachable.map(identityKey));
+                const validation = await revalidateProcessIdentities([...trackedIdentities.values()], {
+                    identityReader, timeoutMs: IDENTITY_REVALIDATION_TIMEOUT_MS,
+                });
+                if (!validation.complete) {
+                    trackingError ??= new Error("descendant ownership could not be revalidated");
+                }
+                else {
+                    const liveKeys = new Set([...validation.identities, ...(validation.groupChanged ?? [])].map(identityKey));
+                    for (const key of trackedIdentities.keys()) {
+                        if (!liveKeys.has(key))
+                            trackedIdentities.delete(key);
+                    }
+                }
+                // Once a shell exits its surviving children are no longer under the
+                // print root. Reuse their pinned identities as anchors, never bare PIDs.
+                const orphanedAnchors = validation.identities.filter((identity) => !reachableKeys.has(identityKey(identity)));
+                const additional = await Promise.all(orphanedAnchors.map((identity) => captureDescendantIdentities(identity.pid, identity)));
+                for (const identities of additional)
+                    retainIdentities(identities);
+                const current = [...trackedIdentities.values()];
+                const signature = JSON.stringify([current.map((identity) => [identity.pid, identity.startToken, identity.processGroupId]), trackingError === undefined]);
+                // Recovery stores the print root first. Capture starts immediately,
+                // but descendant publication waits for that durable root checkpoint.
+                if (spawnRecorded && signature !== publishedIdentities) {
+                    publishedIdentities = signature;
+                    try {
+                        await opts.onProcessIdentities?.(current, trackingError === undefined);
+                    }
+                    catch (error) {
+                        trackingError ??= error;
+                    }
+                }
+            })().catch((error) => {
+                trackingError ??= error;
+            }).finally(() => {
+                trackerPass = undefined;
+            });
+            return trackerPass;
+        };
+        const waitForTrackedExit = async (timeoutMs) => {
+            const deadline = Date.now() + Math.max(0, timeoutMs);
+            while (true) {
+                await refreshTrackedIdentities();
+                if (processExited && trackedIdentities.size === 0)
+                    return true;
+                if (Date.now() >= deadline)
+                    return false;
+                await new Promise((resolve) => setTimeout(resolve, Math.min(BOUNDED_DESCENDANT_POLL_MS, deadline - Date.now())));
+            }
+        };
+        const teardownBoundedTree = async () => {
+            const childPid = child.pid;
+            try {
+                await opts.cancellationTeardownHook?.();
+                if (childPid === undefined)
+                    return;
+                await refreshTrackedIdentities();
+                await signalCapturedTree(childPid, [...trackedIdentities.values()], "SIGTERM");
+                let quiescent = await waitForTrackedExit(escalationMs);
+                if (!quiescent && Number.isFinite(escalationMs)) {
+                    await signalCapturedTree(childPid, [...trackedIdentities.values()], "SIGKILL");
+                    quiescent = await waitForTrackedExit(POST_KILL_QUIESCENCE_MS);
+                }
+                if (!quiescent)
+                    throw new Error("owned descendants did not reach verified quiescence");
+                if (trackingError !== undefined)
+                    throw trackingError;
+            }
+            finally {
+                if (trackerTimer)
+                    clearInterval(trackerTimer);
+                await trackerPass;
+            }
+        };
         const teardownChildTree = async () => {
+            if (boundedSwarm && process.platform !== "win32")
+                return teardownBoundedTree();
             await opts.cancellationTeardownHook?.();
             const childPid = child.pid;
             if (childPid === undefined || processExited)
@@ -488,9 +605,43 @@ export async function runCliPrompt(opts) {
                 }
             }
         };
+        const beginTeardown = () => {
+            // Assign the shared promise before invoking callbacks that can abort.
+            cancellationTeardown ??= Promise.resolve().then(teardownChildTree).then(() => ({ ok: true }), (error) => ({ ok: false, error }));
+            void cancellationTeardown.then((outcome) => {
+                if (outcome.ok)
+                    return;
+                // Failure cannot strand the live owned root or wait forever for a
+                // descendant that still holds its pipes. Surface uncertainty instead.
+                const childPid = child.pid;
+                if (childPid !== undefined && !processExited) {
+                    if (process.platform !== "win32")
+                        trySignalPid(-childPid, "SIGKILL");
+                    try {
+                        child.kill("SIGKILL");
+                    }
+                    catch { /* Best effort. */ }
+                }
+                if (boundedSwarm) {
+                    // An unverified tail may still hold inherited pipes. Release our
+                    // handles so reporting failure does not wait on that tail.
+                    for (const stream of [child.stdin, child.stdout, child.stderr]) {
+                        try {
+                            stream.destroy();
+                        }
+                        catch { /* Preserve the settlement error. */ }
+                    }
+                    try {
+                        child.unref();
+                    }
+                    catch { /* Preserve the settlement error. */ }
+                }
+                settle("reject", new RuntimeError(boundedSwarm ? "CLI_PROCESS_SETTLEMENT_FAILED" : "CLI_CANCELLATION_TEARDOWN_FAILED", "kimi owned process teardown failed", boundedSwarm ? "cli-client.settlement" : "cli-client.cancellation"));
+            });
+        };
         const stopForPolicyFailure = (error) => {
             engineMismatchDetected = true; // Stops all further consumer output.
-            cancellationTeardown ??= teardownChildTree().then(() => ({ ok: true }), (error) => ({ ok: false, error }));
+            beginTeardown();
             settle("reject", error);
         };
         let engineMismatchError;
@@ -520,26 +671,13 @@ export async function runCliPrompt(opts) {
             if (aborted)
                 return;
             aborted = true;
-            cancellationTeardown = teardownChildTree().then(() => ({ ok: true }), (error) => ({ ok: false, error }));
-            void cancellationTeardown.then((outcome) => {
-                if (outcome.ok)
-                    return;
-                // A bug in teardown must neither strand the outer promise nor leave the
-                // owned root running. The controlled child anchors this emergency kill.
-                const childPid = child.pid;
-                if (childPid !== undefined && !processExited) {
-                    if (process.platform !== "win32")
-                        trySignalPid(-childPid, "SIGKILL");
-                    try {
-                        child.kill("SIGKILL");
-                    }
-                    catch {
-                        // Best-effort; settlement still surfaces the teardown failure.
-                    }
-                }
-                settle("reject", new RuntimeError("CLI_CANCELLATION_TEARDOWN_FAILED", "kimi cancellation teardown failed", "cli-client.cancellation"));
-            });
+            beginTeardown();
         };
+        if (boundedSwarm && process.platform !== "win32" && child.pid !== undefined) {
+            void refreshTrackedIdentities();
+            trackerTimer = setInterval(() => { void refreshTrackedIdentities(); }, BOUNDED_DESCENDANT_POLL_MS);
+            trackerTimer.unref();
+        }
         opts.signal?.addEventListener("abort", onAbort, { once: true });
         // Abort may occur during any pre-spawn await, and addEventListener does not
         // replay an already-aborted signal. Re-check after attaching the listener so
@@ -550,6 +688,7 @@ export async function runCliPrompt(opts) {
         if (child.pid !== undefined && opts.onSpawn) {
             try {
                 await opts.onSpawn(child.pid);
+                spawnRecorded = true;
             }
             catch (error) {
                 onAbort();
@@ -808,6 +947,19 @@ function buildArgs(opts) {
 }
 export function buildKimiCliEnvironment(opts) {
     const env = { ...opts.env };
+    // A previous host/job cannot opt another operation into a swarm policy or
+    // choose its bound. Only this immutable execution plan grants the policy.
+    delete env[SWARM_POLICY_ENV];
+    delete env[SWARM_WAVE_SIZE_ENV];
+    if (usesBoundedSwarmPolicy(opts.executionPlan)) {
+        if (opts.commandLabel !== opts.executionPlan.operationKind ||
+            !Number.isSafeInteger(opts.swarmMaxConcurrency) || (opts.swarmMaxConcurrency ?? 0) < 1) {
+            throw new RuntimeError("SWARM_POLICY_INVALID", "Bounded swarm requires its exact operation label and a positive safe-integer concurrency limit.", "cli-client.environment");
+        }
+        env[SWARM_POLICY_ENV] = BOUNDED_SWARM_POLICY;
+        env[SWARM_WAVE_SIZE_ENV] = String(opts.swarmMaxConcurrency);
+        env.KIMI_CODE_SWARM_TIMEOUT_MS = String(SWARM_CHILD_TIMEOUT_MS);
+    }
     if (opts.thinkingEffort !== undefined)
         env.KIMI_MODEL_THINKING_EFFORT = opts.thinkingEffort;
     // Ambient workspace trust starts project MCP stdio servers outside PreToolUse.

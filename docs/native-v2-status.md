@@ -1,16 +1,18 @@
 # Native v2 status — 2026-11-14
 
-## Exact 2.6.2 non-swarm scope
+## Exact 2.6.2 bounded swarm release candidate
 
-Plugin 2.5.9 certifies exact CLI 2.6.2 for the same six operations as 2.6.0: review, challenge, ask, rescue, review gate and pursue. Both swarm operations remain excluded and refuse before model spawn; exact 2.6.1 and 2.6.3 are not covered. The source audit passed **19 tests with 216 assertions**, and the full-scope candidate matrix passed **24 tests with 201 assertions in 327.41 seconds**. Those candidate swarm results do not restore production swarm certification. The [2.6.2 certification record](upstream-2.6.2-certification.md) owns the exact-binary evidence and production-matrix receipt.
+Plugin 2.6.2 adds a plugin-owned construction on stock CLI 2.6.2: bounded waves for concurrency at least two and a direct single-worker path for concurrency one. The canonical hook counts fresh plus resumed entries, rejects forks, invalid input and fresh singleton waves, and shares immutable policy/width with the escape monitor. The swarm-child timeout exceeds the finite job budget, so a stuck child holds its wave until completion or whole-job stop. Fresh parallel sessions disable native `TaskStop` after activation shutdown and before print to close Bash backgrounding and completion-driven child wakeups; the hook also denies explicit background Bash. Nesting stays off for fresh children. Normal exit and cancellation require owned-process quiescence before artifact or patch capture. The bound counts simultaneous Kimi child turns, not OS subprocesses; individual Bash timeouts do not establish descendant quiescence between waves.
 
-The exact 2.6.2 scheduler is byte-identical to 2.6.0. Fresh deterministic controls reproduce a third cumulative attempt at cap 1 after the initial retry and five active attempts at cap 4, so the upstream recovery defect still blocks full-swarm restoration. The full-operation export and automatic full-swarm pin behavior remain unchanged through 2.5.3. The local reference correction at `52e21c7bf` (base `8d939f7d`, not a release containing 2.6.2) passes 56 focused upstream swarm tests. The unpatched base differs from 2.6.2 only in its `TokenUsage` import and otherwise has the same scheduler logic; the correction intentionally changes that logic and is not a released fix. Upstream issue #4926 has no maintainer approval or released fix.
+**Certification and publication are PENDING** the complete [2.6.2 receipt](upstream-2.6.2-certification.md). The source and binary are unchanged: the upstream recovery scheduler is still defective. Prototype controls proved a wave-only failure at three active children with width two, then a protected counterpart with the timeout override. Production integration, direct-worker controls, full checks and operation smoke must pass before the capability matrix is expanded.
+
+Plugin 2.5.9 previously certified the six non-swarm operations on exact 2.6.2. Its source scan, candidate smoke, scoped production matrix and publication evidence remain preserved in the certification record. That history is not rewritten. Exact 2.6.1 and 2.6.3 remain untested; older full-operation rows retain the disclosed recovery limitation.
 
 ## Exact 2.6.0 non-swarm scope
 
 Plugin 2.5.8 certifies exact CLI 2.6.0 for review, challenge, ask, rescue, review gate and pursue only. Read-only swarm and write swarm are excluded and refuse before model spawn with `v2-swarm-not-certified`; neither falls back to legacy-v1. This boundary also applies to persisted plans and every host transport. Setup reports the narrowed scope. The production-table matrix passed **23 tests with 170 assertions in 241.67 seconds**, with exactly the three excluded swarm execution lanes skipped and both real command-refusal checks passing. The [2.6.0 certification record](upstream-2.6.0-certification.md) owns the exact-binary evidence.
 
-The exclusion is load-bearing: upstream rate-limit recovery can exceed `maxConcurrency` (two active attempts at cap 1 and five at cap 4). The candidate protocol/executor integration and the full 24-test candidate matrix passed, but those results do not certify production swarm use. Full swarm certification still ends at exact 2.5.3, whose inherited limitation remains disclosed. `NATIVE_V2_CERTIFIED_VERSIONS` remains the all-operation export for automatic full-swarm pins; `NATIVE_V2_ANY_OPERATION_VERSIONS` owns the scoped union, so existing pin behavior does not silently select non-swarm-only 2.6.0. The upstream correction is tracked in [issue #4926](https://github.com/MoonshotAI/kimi-code/issues/4926); restoring swarm on a later release requires fresh cap controls and full-scope matrices.
+The exclusion is load-bearing: upstream rate-limit recovery can exceed `maxConcurrency` (two active attempts at cap 1 and five at cap 4). The candidate protocol/executor integration and the full 24-test candidate matrix passed, but those results do not certify production swarm use. The older full-operation rows through exact 2.5.3 retain their inherited limitation; the 2.6.2 candidate uses the separate construction above. `NATIVE_V2_CERTIFIED_VERSIONS` remains the all-operation export for automatic full-swarm pins; `NATIVE_V2_ANY_OPERATION_VERSIONS` owns the scoped union, so full-swarm pin selection does not select non-swarm-only 2.6.0. The upstream correction is tracked in [issue #4926](https://github.com/MoonshotAI/kimi-code/issues/4926); restoring swarm on a later release requires fresh cap controls and full-scope matrices.
 
 Plugin 2.5.7 certifies exact CLI 2.5.3 for all eight operations
 (`5af9942e9fb789b6a1530830575b3768499932e9`). Candidate and production matrices
@@ -47,9 +49,11 @@ resume never receives that flag; the environment preflight rejects any persisted
 Tokens remain in memory, activation consumes the finite budget, graceful shutdown
 retains the 15-second allowance, and unverified cleanup prevents success.
 
-Swarm evidence still requires distinct child journals and each assigned
+Parallel swarm evidence requires distinct child journals and each assigned
 Write/Edit path correlated with its own toolCallId/result. A tool-call record,
-exit 0, aggregate denial or coordinator-only patch is insufficient. The 2.5.3 OFF
+exit 0, aggregate denial or coordinator-only patch is insufficient for fan-out.
+The exact-2.6.2 concurrency-1 path instead requires fresh direct-worker provenance,
+no child journals or activation, delegation denials, confinement and cancellation. The 2.5.3 OFF
 control created no children; ON produced two children with managed denials and
 verified deactivation, including with parent idle reclamation set to 1 ms. A
 separate evidence-preserving out-of-root control correlated two child Writes with

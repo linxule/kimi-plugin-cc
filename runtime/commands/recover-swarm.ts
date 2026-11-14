@@ -96,6 +96,10 @@ export async function runRecoverSwarm(argv: string[], context: CommandContext): 
       const recoveryExecutionCwd = await realpath(record.cwd);
       await deactivateSwarmSession({ cwd: recoveryExecutionCwd, env: context.env, command: current.command,
         prefixArgs: current.prefixArgs, executionPlan: current, commandLabel: expectedRoot ? "swarm-write" : "swarm",
+        // Recovery only deactivates the stopped session; it never starts a model
+        // turn. Use the strictest admission policy rather than reconstructing a
+        // prior wave limit that recovery records do not need to retain.
+        swarmMaxConcurrency: 1,
         trustedWorkspaceRoot: expectedRoot ?? undefined, ...record.session, signal,
         onRecoveryEvent: (event) => recordRecoveryEvent(store, record, event) });
     }

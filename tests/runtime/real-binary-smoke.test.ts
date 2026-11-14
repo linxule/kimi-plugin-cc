@@ -85,6 +85,7 @@ import { digestPrompt } from "../../runtime/jobs.js";
 import { recoverSessionIdFromStore } from "../../runtime/session-recovery.js";
 import { resolveKimiCliCommand } from "../../runtime/kimi-command.js";
 import {
+  assertExecutionPlanMatchesSpawn,
   NATIVE_V2_CERTIFIED,
   NATIVE_V2_ANY_OPERATION_VERSIONS,
   NATIVE_V2_NON_SWARM_VERSIONS,
@@ -92,6 +93,7 @@ import {
   type KimiExecutionPlan,
   type KimiOperationKind,
 } from "../../runtime/kimi-engine.js";
+import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
 import { parseVersionLine } from "../../runtime/kimi-version-probe.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
@@ -139,26 +141,37 @@ const WRITE_PROMPT = [
   `confirmation. If Write is denied, report the denial verbatim and stop.`,
 ].join(" ");
 
-// An engine-correct test-bypass plan: native-v2 when the resolved binary is
-// actually v2 (so cli-client requires the system.version marker and re-runs the
-// no-plan preflight at the spawn boundary), legacy-v1 for a pinned <= 0.41
-// binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1 keeps this a test-bypass plan; the
-// marker/hook behavior under test comes from the REAL binary, not the plan.
+// Native plans retain their exact probed version and certified shape so the
+// final spawn gate and version-specific overlays execute. Candidate admission
+// lives only in the test process's operation map below. Legacy controls keep
+// the explicit null-version test-bypass construction.
 function smokePlan(
   command: string,
   prefixArgs: readonly string[],
   operationKind: KimiOperationKind,
 ): KimiExecutionPlan {
+  return smokePlanForVersion(command, prefixArgs, operationKind, BINARY_VERSION, BINARY_IS_V2);
+}
+
+function smokePlanForVersion(
+  command: string,
+  prefixArgs: readonly string[],
+  operationKind: KimiOperationKind,
+  version: string | undefined,
+  nativeV2: boolean,
+): KimiExecutionPlan {
   return {
     schemaVersion: 1,
     operationKind,
-    intendedEngine: BINARY_IS_V2 ? "native-v2" : "legacy-v1",
+    intendedEngine: nativeV2 ? "native-v2" : "legacy-v1",
     command,
     prefixArgs: [...prefixArgs],
-    kimiVersion: null,
-    certification: "test-bypass",
+    // Version-specific safety overlays must see the actual binary even while
+    // certification is admitted only through this test process's candidate map.
+    kimiVersion: nativeV2 ? version ?? null : null,
+    certification: nativeV2 ? "certified" : "test-bypass",
     resumedFromJobId: null,
-    safetyProfile: BINARY_IS_V2 ? NATIVE_V2_SAFETY_PROFILE : null,
+    safetyProfile: nativeV2 ? NATIVE_V2_SAFETY_PROFILE : null,
   };
 }
 
@@ -219,16 +232,42 @@ if (SMOKE_ENABLED && V2_CANDIDATE !== undefined &&
 const BINARY_IS_V2 = BINARY_VERSION !== undefined &&
   (NATIVE_V2_ANY_OPERATION_VERSIONS.includes(BINARY_VERSION) || BINARY_VERSION === V2_CANDIDATE);
 
-// The real runRescue and write-swarm lanes call production version gates. Permit
-// the reviewed candidate only in this test process's operation map, never in the
-// shipped version list or runtime environment.
+// Every native lane crosses the final per-operation version gate. Permit the
+// reviewed candidate only in this test process's map, never in the shipped
+// version list or runtime environment.
 if (SMOKE_ENABLED && V2_CANDIDATE !== undefined) {
   const smokeMatrix = NATIVE_V2_CERTIFIED as Map<KimiOperationKind, readonly string[]>;
-  for (const operationKind of ["rescue", "swarm-write"] as const) {
-    const versions = smokeMatrix.get(operationKind)!;
-    smokeMatrix.set(operationKind, [...versions, V2_CANDIDATE]);
+  for (const [operationKind, versions] of smokeMatrix) {
+    smokeMatrix.set(operationKind, [...new Set([...versions, V2_CANDIDATE])]);
   }
 }
+
+test("smoke plans satisfy the final spawn gate and retain exact native policy selection", () => {
+  const matrix = NATIVE_V2_CERTIFIED as Map<KimiOperationKind, readonly string[]>;
+  for (const operation of ["review", "swarm", "swarm-write"] as const) {
+    const previous = matrix.get(operation)!;
+    try {
+      // Same test-only admission used by the live candidate entry point.
+      matrix.set(operation, [...new Set([...previous, "2.6.2"])]);
+      const plan = smokePlanForVersion("node", ["fixture.mjs"], operation, "2.6.2", true);
+      expect(plan.certification).toBe("certified");
+      expect(plan.kimiVersion).toBe("2.6.2");
+      expect(() => assertExecutionPlanMatchesSpawn(plan, "node", ["fixture.mjs"])).not.toThrow();
+      expect(usesBoundedSwarmPolicy(plan)).toBe(operation !== "review");
+      expect(() => assertExecutionPlanMatchesSpawn({ ...plan, certification: "test-bypass" }, "node", ["fixture.mjs"], {
+        KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+      })).toThrow("test-bypass plans must have kimi_version=null");
+    } finally {
+      matrix.set(operation, previous);
+    }
+  }
+  const legacy = smokePlanForVersion("node", ["fixture.mjs"], "review", "0.41.0", false);
+  expect(legacy.certification).toBe("test-bypass");
+  expect(legacy.kimiVersion).toBeNull();
+  expect(() => assertExecutionPlanMatchesSpawn(legacy, "node", ["fixture.mjs"], {
+    KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+  })).not.toThrow();
+});
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return { cwd, env, stdout: process.stdout, stderr: process.stderr };
@@ -287,12 +326,14 @@ interface SwarmToolCall {
   readonly name: string;
   readonly args: unknown;
   readonly toolCallId: string;
+  readonly uuid?: string;
 }
 
 interface SwarmToolResult {
   readonly toolCallId: string;
   readonly output: string;
   readonly isError: boolean;
+  readonly parentUuid?: string;
 }
 
 interface SwarmChildEvidence {
@@ -312,6 +353,7 @@ function swarmToolEvidence(wire: string): { calls: SwarmToolCall[]; results: Swa
         name: candidate.name,
         args: candidate.args,
         toolCallId: typeof candidate.toolCallId === "string" ? candidate.toolCallId : "",
+        uuid: typeof candidate.uuid === "string" ? candidate.uuid : undefined,
       });
       return;
     }
@@ -326,6 +368,7 @@ function swarmToolEvidence(wire: string): { calls: SwarmToolCall[]; results: Swa
           ? result
           : typeof resultRecord?.output === "string" ? resultRecord.output : "",
         isError: candidate.isError === true || resultRecord?.isError === true,
+        parentUuid: typeof candidate.parentUuid === "string" ? candidate.parentUuid : undefined,
       });
       return;
     }
@@ -842,6 +885,8 @@ const PRODUCTION_NON_SWARM =
 const swarmReadSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const swarmWriteSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const nonSwarmSuite = PREREQS_OK && PRODUCTION_NON_SWARM ? describe : describe.skip;
+const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && BINARY_VERSION === "2.6.2"
+  ? describe : describe.skip;
 
 suite("real-binary smoke: read-only commands cannot write (H7)", () => {
   for (const label of READ_ONLY_LABELS) {
@@ -1742,6 +1787,7 @@ swarmReadSuite("real-binary smoke: read-only swarm subagents cannot write (swarm
             prefixArgs,
             executionPlan,
             commandLabel: "swarm",
+            swarmMaxConcurrency: 2,
             prompt: SWARM_WRITE_PROMPT,
             resumeSessionId: activation?.sessionId,
             signal: controller.signal,
@@ -1965,6 +2011,74 @@ async function readFirstFileMatching(dir: string, prefix: string, suffix: string
   if (entries === null) return null;
   const hit = entries.find((name) => name.startsWith(prefix) && name.endsWith(suffix));
   return hit ? readFile(path.join(dir, hit), "utf8") : null;
+}
+
+function exactToolResult(call: SwarmToolCall, results: readonly SwarmToolResult[]): SwarmToolResult | undefined {
+  if (!call.uuid || !call.toolCallId) return undefined;
+  return results.find((result) => result.toolCallId === call.toolCallId && result.parentUuid === call.uuid);
+}
+
+test("bounded smoke evidence requires both call ID and parent UUID", () => {
+  const call: SwarmToolCall = { name: "Write", args: { path: "alpha.txt" }, toolCallId: "call-a", uuid: "event-a" };
+  const wrongParent: SwarmToolResult = { toolCallId: "call-a", parentUuid: "event-b", isError: false, output: "Wrote alpha.txt" };
+  const wrongCall: SwarmToolResult = { toolCallId: "call-b", parentUuid: "event-a", isError: false, output: "Wrote alpha.txt" };
+  const matched: SwarmToolResult = { toolCallId: "call-a", parentUuid: "event-a", isError: false, output: "Wrote alpha.txt" };
+  expect(exactToolResult(call, [wrongParent, wrongCall])).toBeUndefined();
+  expect(exactToolResult(call, [wrongParent, matched])).toBe(matched);
+  expect(exactToolResult({ ...call, uuid: undefined }, [matched])).toBeUndefined();
+});
+
+async function completedBoundedSwarmJob(env: NodeJS.ProcessEnv, workspace: string, write: boolean) {
+  const paths = resolvePluginPaths(env);
+  const { repoId } = await resolveRepoIdentity(workspace);
+  const store = new JobStore(paths);
+  try {
+    const job = store.findLatestJob({ repoId, commandType: write ? "rescue" : "review" });
+    expect(job?.status).toBe("completed");
+    if (!job) throw new Error("bounded swarm did not persist a job");
+    expect(job.operation_kind).toBe(write ? "swarm-write" : "swarm");
+    expect(job.kimi_version).toBe("2.6.2");
+    expect(job.system_version).toBe("2.6.2");
+    expect(job.intended_engine).toBe("native-v2");
+    expect(job.observed_engine).toBe("native-v2");
+    expect(job.plan_certification).toBe("certified");
+    expect(job.safety_profile).toBe(NATIVE_V2_SAFETY_PROFILE);
+    expect(job.resumed_from_job_id).toBeNull();
+    expect(job.kimi_session_id).toBeTruthy();
+    expect(job.final_output_path).toBeTruthy();
+    expect((await readFile(job.final_output_path!, "utf8")).trim().length).toBeGreaterThan(0);
+    return { job, recovery: store.getSwarmRecovery(job.job_id), paths, repoId };
+  } finally {
+    store.close();
+  }
+}
+
+async function singleWorkerJournal(
+  kimiHome: string,
+  state: Awaited<ReturnType<typeof completedBoundedSwarmJob>>,
+): Promise<string> {
+  expect(state.job.kimi_session_id_source).toBe("announced");
+  expect(state.recovery?.record.session).toBeNull();
+  expect(state.recovery?.record.sessionDirty).toBe(false);
+  expect(state.recovery?.record.launches.map((launch) => launch.kind)).toEqual(["print"]);
+  expect(state.recovery?.record.complete).toBe(true);
+  const agentsDir = await findSwarmAgentsDir(kimiHome, state.job.kimi_session_id!);
+  const agents = (await readdir(agentsDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  expect(agents, "concurrency one must use only the direct worker").toEqual(["main"]);
+  const wire = await readFile(path.join(agentsDir, "main", "wire.jsonl"), "utf8");
+  const events = wire.split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type?: string });
+  expect(events.filter((event) => event.type === "subagent.spawned" || event.type === "swarm_mode.enter")).toEqual([]);
+  return wire;
+}
+
+async function retainBoundedSmokeEvidence(name: string, evidence: Record<string, unknown>): Promise<void> {
+  const directory = process.env.KIMI_PLUGIN_CC_SMOKE_EVIDENCE_DIR;
+  if (!directory) return;
+  if (!path.isAbsolute(directory)) throw new Error("KIMI_PLUGIN_CC_SMOKE_EVIDENCE_DIR must be absolute");
+  await mkdir(directory, { recursive: true });
+  // Journals and fixture patches only: never copy the seed config or credentials.
+  await writeFile(path.join(directory, `${name}.json`), JSON.stringify(evidence, null, 2), "utf8");
 }
 
 swarmWriteSuite("real-binary smoke: write-swarm edits land in the worktree, never the user tree (--write)", () => {
@@ -2204,6 +2318,7 @@ swarmWriteSuite("real-binary smoke: write-swarm denies out-of-worktree writes (-
             prefixArgs,
             executionPlan,
             commandLabel: "swarm-write",
+            swarmMaxConcurrency: 2,
             trustedWorkspaceRoot: workspace,
             prompt: escapePrompt,
             resumeSessionId: activation?.sessionId,
@@ -2235,4 +2350,314 @@ swarmWriteSuite("real-binary smoke: write-swarm denies out-of-worktree writes (-
     },
     WRITE_ESCAPE_BUDGET_MS + 30_000,
   );
+});
+
+// These lanes test real model behavior on the exact bounded-policy release.
+// Scripted-provider tests separately force retries, cancellation tails and
+// delegation denials; these cases require useful completion without retries.
+boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave compliance (2.6.2)", () => {
+  test("concurrency one reads directly with fresh lineage and no child or web activation", async () => {
+    const kimiHome = await createTestPluginDataRoot("smoke-home-single-read");
+    const workspace = await createTestPluginDataRoot("smoke-ws-single-read");
+    const pluginData = await createTestPluginDataRoot("smoke-data-single-read");
+    const sentinel = "SINGLE_READER_EVIDENCE_8P4M";
+    try {
+      await seedKimiHome(SEED_HOME, kimiHome);
+      await initUserRepo(workspace);
+      await writeFile(path.join(workspace, "alpha.txt"), `${sentinel}\n`, "utf8");
+      gitIn(workspace, ["add", "alpha.txt"]);
+      gitIn(workspace, ["commit", "-q", "-m", "read fixture"]);
+      const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const setup = await runSetup([], makeContext(workspace, env));
+      expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
+      const report = await runSwarm([
+        "--max-concurrency", "1", "--budget", `${Math.round(PER_RUN_BUDGET_MS / 1000)}s`,
+        "Read alpha.txt using the Read tool yourself and report its exact contents. Do not delegate, use shell tools, or edit any file.",
+      ], makeContext(workspace, env));
+      const state = await completedBoundedSwarmJob(env, workspace, false);
+      const mainWire = await singleWorkerJournal(kimiHome, state);
+      const evidence = swarmToolEvidence(mainWire);
+      expect(evidence.calls.some((call) => {
+        const args = call.args as Record<string, unknown> | undefined;
+        const result = exactToolResult(call, evidence.results);
+        return call.name === "Read" && isAssignedToolPath(args?.path, "alpha.txt") &&
+          result !== undefined && !result.isError && result.output.includes(sentinel);
+      }), "the direct worker must actually read the fixture on the same journal call").toBe(true);
+      expect(report).toContain(sentinel);
+      expect(gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"]).trim()).toBe("");
+      expect(gitIn(workspace, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+      await retainBoundedSmokeEvidence("single-read", { job: state.job, recovery: state.recovery, mainWire, report });
+      console.log(`[smoke] bounded-single-read: session=${state.job.kimi_session_id} source=announced children=0 webLaunches=0`);
+    } finally {
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(pluginData);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
+
+  test("default write concurrency one returns a direct-worker patch without touching the user tree", async () => {
+    const kimiHome = await createTestPluginDataRoot("smoke-home-single-write");
+    const workspace = await createTestPluginDataRoot("smoke-ws-single-write");
+    const pluginData = await createTestPluginDataRoot("smoke-data-single-write");
+    const sentinel = "SINGLE_WRITER_EVIDENCE_9V2K";
+    try {
+      await seedKimiHome(SEED_HOME, kimiHome);
+      await initUserRepo(workspace);
+      const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const setup = await runSetup([], makeContext(workspace, env));
+      expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
+      // Omit --max-concurrency deliberately: the write default must remain one.
+      const report = await runSwarm([
+        "--write", "--budget", `${Math.round(PER_RUN_BUDGET_MS / 1000)}s`,
+        `Edit alpha.txt and beta.txt yourself so each contains exactly "${sentinel}". Use Write or Edit, do not delegate or run shell commands, and report the two edits.`,
+      ], makeContext(workspace, env));
+      const state = await completedBoundedSwarmJob(env, workspace, true);
+      const mainWire = await singleWorkerJournal(kimiHome, state);
+      const evidence = swarmToolEvidence(mainWire);
+      for (const target of WRITE_TARGETS) {
+        expect(await readFile(path.join(workspace, target), "utf8")).toBe("original\n");
+        expect(evidence.calls.some((call) => {
+          const args = call.args as Record<string, unknown> | undefined;
+          const result = exactToolResult(call, evidence.results);
+          return (call.name === "Write" || call.name === "Edit") &&
+            isAssignedToolPath(args?.path, target) && JSON.stringify(call.args).includes(sentinel) &&
+            result !== undefined && !result.isError && /\b(?:Wrote|Replaced)\b/.test(result.output);
+        }), `the direct worker must author ${target} on a successful journal call`).toBe(true);
+      }
+      const patch = (await readFirstFileMatching(state.paths.artifactsDir, "swarm-write-", ".patch")) ?? "";
+      for (const target of WRITE_TARGETS) expect(patch).toContain(target);
+      expect(patch).toContain(sentinel);
+      expect(report).toContain("Patch written to:");
+      expect(gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"]).trim()).toBe("");
+      expect(gitIn(workspace, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+      expect(await listSwarmWriteDirs(path.join(state.paths.worktreesDir, state.repoId))).toEqual([]);
+      await retainBoundedSmokeEvidence("single-write", { job: state.job, recovery: state.recovery, mainWire, report, patch });
+      console.log(`[smoke] bounded-single-write: session=${state.job.kimi_session_id} source=announced children=0 webLaunches=0 patchBytes=${patch.length}`);
+    } finally {
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(pluginData);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
+
+  test("directed: the coordinator recovers from an oversized denial and completes two bounded waves", async () => {
+    const kimiHome = await createTestPluginDataRoot("smoke-home-wave-compliance");
+    const workspace = await createTestPluginDataRoot("smoke-ws-wave-compliance");
+    const pluginData = await createTestPluginDataRoot("smoke-data-wave-compliance");
+    const targets = ["alpha.txt", "beta.txt", "gamma.txt", "delta.txt"] as const;
+    const sentinel = "WAVE_COMPLIANCE_EVIDENCE_6F3R";
+    try {
+      await seedKimiHome(SEED_HOME, kimiHome);
+      await initUserRepo(workspace);
+      for (const target of targets.slice(2)) await writeFile(path.join(workspace, target), "original\n", "utf8");
+      gitIn(workspace, ["add", "--", ...targets.slice(2)]);
+      gitIn(workspace, ["commit", "-q", "-m", "wave fixtures"]);
+      const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const setup = await runSetup([], makeContext(workspace, env));
+      expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
+      const objective = [
+        "This disposable-repository task tests recovery from a permission-hook denial. The installed hook owns admission.",
+        "As the first action, deliberately attempt ONE AgentSwarm call with exactly three items: alpha.txt, beta.txt, gamma.txt.",
+        "This first call is the required negative control; attempt it once even though the wave-size instruction says two. Let the hook deny it.",
+        "After that denial, complete the work using exactly two sequential AgentSwarm calls: first [alpha.txt, beta.txt], then [gamma.txt, delta.txt].",
+        `For every call use subagent_type coder and a prompt_template telling each child to replace only its assigned {{item}} with exactly "${sentinel}" using Write or Edit, then stop.`,
+        "Wait for each successful wave before starting the next. Do not write any target yourself, do not use Agent or fork, and do not run shell commands.",
+        "The initial denial is expected; continue with the two legal waves and summarize the four completed edits.",
+      ].join(" ");
+      const report = await runSwarm([
+        "--write", "--max-concurrency", "2", "--budget", `${Math.round(WRITE_SWARM_BUDGET_MS / 1000)}s`, objective,
+      ], makeContext(workspace, env));
+      const state = await completedBoundedSwarmJob(env, workspace, true);
+      expect(state.job.kimi_session_id_source).toBe("preactivated");
+      const agentsDir = await findSwarmAgentsDir(kimiHome, state.job.kimi_session_id!);
+      const mainWire = await readFile(path.join(agentsDir, "main", "wire.jsonl"), "utf8");
+      const main = swarmToolEvidence(mainWire);
+      const calls = main.calls.filter((call) => call.name === "AgentSwarm");
+      expect(calls).toHaveLength(3);
+      const first = calls[0]!;
+      const firstArgs = first.args as { items?: unknown[] };
+      expect(firstArgs.items).toHaveLength(3);
+      const denied = exactToolResult(first, main.results);
+      expect(denied?.isError).toBe(true);
+      expect(denied?.output).toContain(`${DENY_MARKER}: AgentSwarm denied:`);
+      expect(denied?.output).toContain("exceeding the limit 2");
+      const mainEvents = mainWire.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+      const spawned = mainEvents.filter((event) => event.type === "subagent.spawned");
+      expect(spawned.filter((event) => event.parentToolCallId === first.toolCallId)).toEqual([]);
+      expect(spawned).toHaveLength(4);
+      for (const call of calls.slice(1)) {
+        const args = call.args as { items?: unknown[]; resume_agent_ids?: Record<string, unknown> };
+        expect((args.items?.length ?? 0) + Object.keys(args.resume_agent_ids ?? {}).length).toBe(2);
+        const result = exactToolResult(call, main.results);
+        expect(result?.isError).toBe(false);
+        const children = spawned.filter((event) => event.parentToolCallId === call.toolCallId);
+        expect(children).toHaveLength(2);
+        expect(children.every((event) => event.parentAgentId === "main" && event.callerAgentId === "main")).toBe(true);
+      }
+      await assertSwarmChildEvidence({ kimiHome, sessionId: state.job.kimi_session_id!, targets, outcome: "write-success", sentinel });
+      const childWires: Record<string, string> = {};
+      for (const event of spawned) {
+        const id = String(event.subagentId);
+        const wire = await readFile(path.join(agentsDir, id, "wire.jsonl"), "utf8");
+        childWires[id] = wire;
+      }
+      const unmatchedChildren = Object.entries(childWires).map(([id, wire]) => ({ id, ...swarmToolEvidence(wire) }));
+      for (const target of targets) {
+        const matchedIndex = unmatchedChildren.findIndex((child) => child.calls.some((call) => {
+          const args = call.args as Record<string, unknown> | undefined;
+          const result = exactToolResult(call, child.results);
+          return (call.name === "Write" || call.name === "Edit") &&
+            isAssignedToolPath(args?.path, target) && JSON.stringify(call.args).includes(sentinel) &&
+            result !== undefined && !result.isError && /\b(?:Wrote|Replaced)\b/.test(result.output);
+        }));
+        expect(matchedIndex, `${target} must have a distinct child's UUID-correlated edit`).toBeGreaterThanOrEqual(0);
+        unmatchedChildren.splice(matchedIndex, 1);
+      }
+      const patch = (await readFirstFileMatching(state.paths.artifactsDir, "swarm-write-", ".patch")) ?? "";
+      for (const target of targets) {
+        expect(await readFile(path.join(workspace, target), "utf8")).toBe("original\n");
+        expect(patch).toContain(target);
+      }
+      expect(patch).toContain(sentinel);
+      expect(report).toContain("Patch written to:");
+      expect(gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"]).trim()).toBe("");
+      expect(gitIn(workspace, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+      expect(await listSwarmWriteDirs(path.join(state.paths.worktreesDir, state.repoId))).toEqual([]);
+      await retainBoundedSmokeEvidence("wave-compliance", { evidenceKind: "directed-denial-recovery", job: state.job, recovery: state.recovery, mainWire, childWires, patch, report });
+      console.log(`[smoke] directed-wave-compliance: deniedEntries=3 completedWaves=2 children=4 patchBytes=${patch.length}`);
+    } finally {
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(pluginData);
+    }
+  }, WRITE_SWARM_BUDGET_MS + 60_000);
+
+  test("uncoached: the production prompt completes five targets within width four", async () => {
+    const kimiHome = await createTestPluginDataRoot("smoke-home-wave-natural-odd");
+    const workspace = await createTestPluginDataRoot("smoke-ws-wave-natural-odd");
+    const pluginData = await createTestPluginDataRoot("smoke-data-wave-natural-odd");
+    const targets = ["alpha.txt", "beta.txt", "gamma.txt", "delta.txt", "epsilon.txt"] as const;
+    const sentinel = "NATURAL_ODD_WAVE_EVIDENCE_5H7N";
+    const width = 4;
+    try {
+      await seedKimiHome(SEED_HOME, kimiHome);
+      await initUserRepo(workspace);
+      for (const target of targets.slice(2)) await writeFile(path.join(workspace, target), "original\n", "utf8");
+      gitIn(workspace, ["add", "--", ...targets.slice(2)]);
+      gitIn(workspace, ["commit", "-q", "-m", "natural wave fixtures"]);
+      const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const setup = await runSetup([], makeContext(workspace, env));
+      expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
+      // Only the user task is supplied here. The production prompt owns all
+      // wave-size/minimum guidance; no denial, grouping or remainder is coached.
+      const objective = [
+        `Replace the contents of these five files with exactly "${sentinel}": ${targets.join(", ")}.`,
+        "Use at least one native AgentSwarm wave to delegate editing work. Keep assignments disjoint and complete all five files.",
+        "Use Write or Edit for the changes; shell commands and tests are unnecessary. Report the completed edits.",
+      ].join(" ");
+      const report = await runSwarm([
+        "--write", "--max-concurrency", String(width), "--budget", "180s", objective,
+      ], makeContext(workspace, env));
+      const state = await completedBoundedSwarmJob(env, workspace, true);
+      const agentsDir = await findSwarmAgentsDir(kimiHome, state.job.kimi_session_id!);
+      const agentIds = (await readdir(agentsDir, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      const journals: Record<string, string> = {};
+      for (const id of agentIds) journals[id] = await readFile(path.join(agentsDir, id, "wire.jsonl"), "utf8");
+      const mainWire = journals.main!;
+      const main = swarmToolEvidence(mainWire);
+      const mainEvents = mainWire.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+      const spawned = mainEvents.filter((event) => event.type === "subagent.spawned");
+      const calls = main.calls.filter((call) => call.name === "AgentSwarm");
+      const waves = calls.map((call) => {
+        const args = call.args as { items?: unknown[]; resume_agent_ids?: Record<string, unknown> };
+        return {
+          call,
+          fresh: Array.isArray(args.items) ? args.items.length : 0,
+          count: (Array.isArray(args.items) ? args.items.length : 0) + Object.keys(args.resume_agent_ids ?? {}).length,
+          result: exactToolResult(call, main.results),
+          children: spawned.filter((event) => event.parentToolCallId === call.toolCallId),
+        };
+      });
+      const edits = targets.map((target) => ({
+        target,
+        authors: Object.entries(journals).flatMap(([agent, wire]) => {
+          const evidence = swarmToolEvidence(wire);
+          return evidence.calls.flatMap((call) => {
+            const args = call.args as Record<string, unknown> | undefined;
+            const result = exactToolResult(call, evidence.results);
+            return (call.name === "Write" || call.name === "Edit") && isAssignedToolPath(args?.path, target) &&
+              JSON.stringify(call.args).includes(sentinel) && result !== undefined && !result.isError &&
+              /\b(?:Wrote|Replaced)\b/.test(result.output)
+              ? [{ agent, toolCallId: call.toolCallId, uuid: call.uuid }] : [];
+          });
+        }),
+      }));
+      const turns = Object.entries(journals).filter(([id]) => id !== "main").flatMap(([agent, wire]) =>
+        wire.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>)
+          .filter((event) => event.type === "turn.prompt" || event.type === "turn.ended")
+          .map((event) => ({ agent, type: event.type, turnId: event.turnId, time: Number(event.time) })));
+      turns.sort((left, right) => left.time - right.time || (left.type === "turn.ended" ? -1 : 1));
+      const active = new Set<string>();
+      let peakChildren = 0;
+      for (const turn of turns) {
+        const key = `${turn.agent}:${String(turn.turnId)}`;
+        if (turn.type === "turn.prompt") active.add(key);
+        else active.delete(key);
+        peakChildren = Math.max(peakChildren, active.size);
+      }
+      const patch = (await readFirstFileMatching(state.paths.artifactsDir, "swarm-write-", ".patch")) ?? "";
+      await retainBoundedSmokeEvidence("wave-natural-odd", {
+        evidenceKind: "production-prompt-uncoached", objective, width, job: state.job,
+        recovery: state.recovery, journals, waves, edits, turns, peakChildren, patch, report,
+      });
+      expect(state.job.kimi_session_id_source).toBe("preactivated");
+      expect(waves.some((wave) => wave.result !== undefined && !wave.result.isError)).toBe(true);
+      expect(spawned.length, "the natural task must launch a native wave").toBeGreaterThanOrEqual(2);
+      expect(agentIds.filter((id) => id !== "main").sort()).toEqual(
+        [...new Set(spawned.map((event) => String(event.subagentId)))].sort(),
+      );
+      for (const wave of waves) {
+        expect(wave.result, "each wave must have its UUID-correlated tool result").toBeDefined();
+        expect(wave.children.length).toBeLessThanOrEqual(wave.fresh);
+        if (wave.count > width) {
+          expect(wave.result?.isError).toBe(true);
+          expect(wave.result?.output).toContain(`${DENY_MARKER}: AgentSwarm denied:`);
+          expect(wave.children).toEqual([]);
+        } else if (!wave.result?.isError) {
+          expect(wave.count).toBeGreaterThanOrEqual(1);
+          expect(wave.count).toBeLessThanOrEqual(width);
+        }
+      }
+      expect(spawned.every((event) => event.parentAgentId === "main" && event.callerAgentId === "main" &&
+        waves.some((wave) => wave.call.toolCallId === event.parentToolCallId && wave.count <= width))).toBe(true);
+      expect(peakChildren).toBeGreaterThanOrEqual(1);
+      expect(peakChildren).toBeLessThanOrEqual(width);
+      expect([...active], "all child turns must settle before useful completion").toEqual([]);
+      for (const edit of edits) {
+        expect(edit.authors.length, `${edit.target} needs a successful UUID-correlated edit`).toBeGreaterThan(0);
+        expect(new Set(edit.authors.map((author) => author.agent)).size, `${edit.target} should have one owner`).toBe(1);
+      }
+      expect(edits.some((edit) => edit.authors.some((author) => author.agent !== "main")),
+        "at least one delegated child must author useful work").toBe(true);
+      for (const target of targets) {
+        expect(await readFile(path.join(workspace, target), "utf8")).toBe("original\n");
+        expect(patch).toContain(target);
+      }
+      expect(patch).toContain(sentinel);
+      expect(report).toContain("Patch written to:");
+      expect(gitIn(workspace, ["status", "--porcelain", "--untracked-files=all"]).trim()).toBe("");
+      expect(gitIn(workspace, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+      expect(await listSwarmWriteDirs(path.join(state.paths.worktreesDir, state.repoId))).toEqual([]);
+      console.log(`[smoke] uncoached-wave-compliance: targets=5 width=${width} acceptedWaves=${waves.filter((wave) => !wave.result?.isError).length} children=${spawned.length} peakChildren=${peakChildren} coordinatorTargets=${edits.filter((edit) => edit.authors.some((author) => author.agent === "main")).length} patchBytes=${patch.length}`);
+    } finally {
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(workspace);
+      await cleanupTestPath(pluginData);
+    }
+  }, 210_000);
 });

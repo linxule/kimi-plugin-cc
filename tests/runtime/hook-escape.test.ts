@@ -5,6 +5,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { carriesDenial, createHookEscapeMonitor } from "../../runtime/hook-escape.js";
 import { decideHookOutcomePure } from "../../runtime/hooks/approval-policy.js";
+import { BOUNDED_SWARM_POLICY } from "../../runtime/swarm-policy.js";
 import type { AssistantRecord } from "../../runtime/stream-json.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -81,6 +82,39 @@ test("goal metadata honors pursue context and normalizes malformed arguments exa
       expect(monitor.settle().length).toBe(allowed ? 0 : 1);
     }
   }
+});
+
+test("bounded swarm monitor detects admission and background-shell escapes", () => {
+  const bounded = { ...ctx, commandLabel: "swarm-write", trustedWorkspaceRoot: "/workspace",
+    swarmPolicy: BOUNDED_SWARM_POLICY, swarmWaveSize: "2" };
+  for (const [name, args] of [
+    ["AgentSwarm", { description: "oversized", items: ["one", "two", "three"] }],
+    ["AgentSwarm", { description: "fork", items: ["one", "two"], fork: true }],
+    ["Bash", { command: "git status", run_in_background: true }],
+  ] as const) {
+    const denial = decideHookOutcomePure({ tool_name: name, tool_input: args }, bounded);
+    if ("evaluator" in denial || denial.decision !== "deny") throw new Error("expected bounded denial");
+    for (const content of [denial.reason!, "executed despite the policy"]) {
+      const monitor = createHookEscapeMonitor(bounded);
+      monitor.observe(call(name, JSON.stringify(args)));
+      const finding = monitor.observe({ role: "tool", tool_call_id: "one", content });
+      if (content === denial.reason) expect(finding).toBeUndefined();
+      else expect(finding).toMatchObject({ kind: "mismatch", tool_name: name });
+      expect(monitor.settle()).toEqual([]);
+    }
+    const monitor = createHookEscapeMonitor(bounded);
+    monitor.observe(call(name, JSON.stringify(args)));
+    expect(monitor.settle()).toEqual([{ kind: "unresolved", tool_call_id: "one", tool_name: name }]);
+  }
+});
+
+test("single-worker stock swarm-off refusal remains a non-enforcing mismatch finding", () => {
+  const monitor = createHookEscapeMonitor({ ...ctx, commandLabel: "swarm", swarmPolicy: BOUNDED_SWARM_POLICY, swarmWaveSize: "1" });
+  monitor.observe(call("AgentSwarm", JSON.stringify({ description: "delegate", items: ["one", "two"] })));
+  expect(monitor.observe({ role: "tool", tool_call_id: "one",
+    content: "Swarm mode is off, so AgentSwarm did not run and no subagents were started." }))
+    .toMatchObject({ kind: "mismatch", tool_name: "AgentSwarm" });
+  expect(monitor.settle()).toEqual([]);
 });
 
 const exec = promisify(execFile);
