@@ -5,6 +5,10 @@ import path from "node:path";
 import { probeProcessIdentity, revalidateProcessIdentities, type ProcessIdentity } from "../../runtime/process-tree.js";
 
 export async function waitForSwarmRunner(child: ChildProcess, timeoutMs: number): Promise<{ status: number | null; timedOut: boolean }> {
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+  const onClose = () => resolveClosed();
+  child.once("close", onClose);
   const original = child.pid === undefined ? Promise.resolve(undefined)
     : probeProcessIdentity(child.pid).then((proof) => proof.complete ? proof.identity : undefined).catch(() => undefined);
   let timedOut = false;
@@ -44,19 +48,25 @@ export async function waitForSwarmRunner(child: ChildProcess, timeoutMs: number)
   } finally {
     if (deadline) clearTimeout(deadline);
     if (killDeadline) clearTimeout(killDeadline);
+    // exit precedes stdio closure. Drain final diagnostics, but do not wait
+    // indefinitely when a surviving descendant inherited a write end.
+    await Promise.all([
+      waitBounded(closed, 250),
+      termination === undefined ? Promise.resolve() : waitBounded(termination, 500),
+    ]);
+    child.removeListener("close", onClose);
     child.stdout?.destroy();
     child.stderr?.destroy();
     if (timedOut) child.unref();
-    if (termination) {
-      let terminationDeadline: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([termination, new Promise<void>((resolve) => {
-          terminationDeadline = setTimeout(resolve, 500);
-        })]);
-      } finally {
-        if (terminationDeadline) clearTimeout(terminationDeadline);
-      }
-    }
+  }
+}
+
+async function waitBounded(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([promise, new Promise<void>((resolve) => { deadline = setTimeout(resolve, timeoutMs); })]);
+  } finally {
+    if (deadline) clearTimeout(deadline);
   }
 }
 

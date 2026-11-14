@@ -79,12 +79,42 @@ describe("canonical Linux process identity", () => {
     expect(psCalls()).toBe(0);
   });
 
-  test("PGID zero without PF_KTHREAD remains an error rather than false process exit", async () => {
-    const { api, psCalls } = await linuxApi({ 3: stat(3, 1, 0, 2), ...users });
-    await expect(api.collectDescendantIdentities(root.pid, root)).rejects.toThrow("process snapshot unavailable");
-    await expect(api.probeProcessIdentity(3)).resolves.toEqual({ complete: false, identity: undefined });
-    expect(psCalls()).toBe(0);
-  });
+  for (const group of [0, -1]) {
+    test(`an unrelated valid PGID ${group} preserves ancestry without becoming a public identity`, async () => {
+      const { api, psCalls } = await linuxApi({ 3: stat(3, 1, group, 2), ...users });
+      await expect(api.collectDescendantIdentities(root.pid, root)).resolves.toEqual([root, child]);
+      await expect(api.collectDescendantIdentitiesForRoots([root])).resolves.toEqual([root, child]);
+      await expect(api.collectProcessGroupsIdentities([root.processGroupId, child.processGroupId, group])).resolves.toEqual([root, child]);
+      await expect(api.probeProcessIdentity(3)).resolves.toEqual({ complete: false, identity: undefined });
+      await expect(api.revalidateProcessIdentities([{ ...root, pid: 3, startToken: "proc:2" }])).resolves.toEqual({ complete: false, identities: [] });
+      expect(psCalls()).toBe(0);
+    });
+
+    test(`a requested root with PGID ${group} remains incomplete`, async () => {
+      const { api } = await linuxApi({ ...users, 101: stat(101, 1, group, 1000) });
+      await expect(api.collectDescendantIdentities(root.pid, root)).rejects.toThrow("nonsignalable owned process");
+      await expect(api.collectDescendantIdentitiesForRoots([root])).rejects.toThrow("nonsignalable owned process");
+      await expect(api.probeProcessIdentity(root.pid)).resolves.toEqual({ complete: false, identity: undefined });
+    });
+
+    test(`a reachable PGID ${group} ancestor cannot hide its positive-group descendants`, async () => {
+      const { api } = await linuxApi({
+        ...users,
+        3: stat(3, root.pid, group, 2),
+        4: stat(4, 3, 4, 3),
+      });
+      await expect(api.collectDescendantIdentities(root.pid, root)).rejects.toThrow("nonsignalable owned process");
+      await expect(api.collectDescendantIdentitiesForRoots([root])).rejects.toThrow("nonsignalable owned process");
+    });
+
+    test(`a captured descendant becoming PGID ${group} cannot be mistaken for exit`, async () => {
+      const { api } = await linuxApi({
+        ...users,
+        102: (read) => stat(102, 101, read === 1 ? 102 : group, 1001),
+      });
+      await expect(api.collectDescendantIdentities(root.pid, root)).rejects.toThrow("process identity verification failed");
+    });
+  }
 
   test("kernel rows are excluded only from full tables, never reported as a vanished target", async () => {
     const { api } = await linuxApi({ 2: stat(2, 0, 0, 1, 0x0020_0000), ...users });
@@ -101,6 +131,8 @@ describe("canonical Linux process identity", () => {
       kernel.replace(") S 0 0", ") S 1junk 0"),
       kernel.replace(") S 0 0", ") SS 0 0"),
       kernel.replace("2097152", "2097152junk"),
+      kernel.replace("2097152", "4294967296"),
+      kernel.replace(") S 0 0", ") S 0 -2"),
     ]) {
       const { api, psCalls } = await linuxApi({ 2: malformed, ...users });
       await expect(api.collectDescendantIdentities(root.pid, root)).rejects.toThrow("process snapshot unavailable");

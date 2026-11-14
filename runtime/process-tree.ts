@@ -17,6 +17,7 @@ interface ProcessSnapshotRow extends ProcessIdentity {
 
 type ProcRowRead =
   | { status: "found"; row: ProcessSnapshotRow }
+  | { status: "nonsignalable"; row: ProcessSnapshotRow }
   | { status: "kernel" }
   | { status: "missing" }
   | { status: "error" };
@@ -243,6 +244,7 @@ async function collectVerifiedDescendantIdentities(
 
   const initialRoot = initialRows.find((row) => row.pid === rootPid);
   if (initialRoot === undefined) return [];
+  assertSignalableSnapshotRows([initialRoot]);
   if (
     expectedRoot !== undefined &&
     (initialRoot.startToken !== expectedRoot.startToken ||
@@ -251,6 +253,7 @@ async function collectVerifiedDescendantIdentities(
     return [];
   }
   const candidateRows = descendantRowsFromSnapshot(rootPid, initialRows);
+  assertSignalableSnapshotRows(candidateRows);
   if (candidateRows.length === 0) return [];
 
   // A second, targeted snapshot closes the cross-row /proc race: each child
@@ -294,12 +297,14 @@ async function collectVerifiedDescendantIdentitiesForRoots(
   const expectedByPid = new Map<number, ProcessSnapshotRow>();
   for (const expected of roots) {
     const root = initialByPid.get(expected.pid);
+    if (root !== undefined) assertSignalableSnapshotRows([root]);
     if (
       root === undefined || isQuiescentState(root.state) ||
       root.startToken !== expected.startToken || root.processGroupId !== expected.processGroupId
     ) continue;
     if (candidatesByRoot.has(root.pid)) continue;
     const candidates = [root, ...descendantRowsFromSnapshot(root.pid, initialRows, childrenByParent)];
+    assertSignalableSnapshotRows(candidates);
     candidatesByRoot.set(root.pid, candidates);
     for (const row of candidates) {
       expectedByPid.set(row.pid, row);
@@ -327,6 +332,12 @@ async function collectVerifiedDescendantIdentitiesForRoots(
     return ownedPids.has(current.pid) && expected !== undefined &&
       current.startToken === expected.startToken && !isQuiescentState(current.state);
   }).map(toProcessIdentity);
+}
+
+function assertSignalableSnapshotRows(rows: readonly ProcessSnapshotRow[]): void {
+  if (rows.some((row) => row.processGroupId <= 0)) {
+    throw new Error("process snapshot contains a nonsignalable owned process");
+  }
 }
 
 function descendantRowsFromSnapshot(
@@ -389,7 +400,7 @@ async function readCurrentSnapshotRows(
     Promise.all(procPids.map((pid) => readProcRow(pid))),
     collectProcessSnapshotRowsFromPs(psPids),
   ]);
-  if (procOutcomes.some((outcome) => outcome.status === "error" || outcome.status === "kernel") || (psPids.length > 0 && psRows === undefined)) {
+  if (procOutcomes.some((outcome) => outcome.status === "error" || outcome.status === "kernel" || outcome.status === "nonsignalable") || (psPids.length > 0 && psRows === undefined)) {
     throw new Error("process identity verification failed");
   }
   return [
@@ -421,7 +432,9 @@ async function collectProcessSnapshotRowsFromProc(): Promise<ProcessSnapshotRow[
       .map((entry) => readProcRow(Number.parseInt(entry, 10))),
   );
   if (outcomes.some((outcome) => outcome.status === "error")) return undefined;
-  return outcomes.flatMap((outcome) => outcome.status === "found" ? [outcome.row] : []);
+  // Retain valid hidden/released groups for ancestry. Only a requested subtree
+  // that depends on such a row must fail; unrelated rows cannot disable capture.
+  return outcomes.flatMap((outcome) => outcome.status === "found" || outcome.status === "nonsignalable" ? [outcome.row] : []);
 }
 
 async function collectProcessSnapshotRowsFromPs(
@@ -486,7 +499,7 @@ async function readProcessIdentityBatchFromProc(
   for (const outcome of outcomes) {
     if (outcome.status === "found") {
       identities.set(outcome.row.pid, toProcessIdentity(outcome.row));
-    } else if (outcome.status === "error" || outcome.status === "kernel") {
+    } else if (outcome.status === "error" || outcome.status === "kernel" || outcome.status === "nonsignalable") {
       complete = false;
     }
   }
@@ -580,30 +593,30 @@ async function readProcRow(pid: number): Promise<ProcRowRead> {
     state === undefined || !/^[a-z]$/i.test(state) ||
     startTimeTicks === undefined || !/^\d+$/.test(startTimeTicks) ||
     !/^\d+$/.test(fields[1] ?? "") || !Number.isSafeInteger(parentPid) ||
-    !/^\d+$/.test(fields[2] ?? "") || !Number.isSafeInteger(processGroupId)
+    !/^(?:\d+|-1)$/.test(fields[2] ?? "") || !Number.isSafeInteger(processGroupId)
   ) {
     return { status: "error" };
   }
-  if (processGroupId === 0) {
+  const row: ProcessSnapshotRow = {
+    pid,
+    parentPid,
+    processGroupId,
+    startToken: `proc:${startTimeTicks}`,
+    state,
+  };
+  if (processGroupId <= 0) {
     // /proc stat field 9 carries PF_KTHREAD (Linux include/linux/sched.h).
     // Only proven kernel threads are outside the user-process ancestry;
     // a namespace-hidden user PGID of zero must remain an incomplete probe.
     const rawFlags = fields[6];
     const flags = rawFlags === undefined || !/^\d+$/.test(rawFlags) ? NaN : Number(rawFlags);
-    return fields[2] === "0" && Number.isSafeInteger(flags) && flags >= 0 && flags <= 0xffff_ffff &&
-      (flags & 0x0020_0000) !== 0
-      ? { status: "kernel" }
-      : { status: "error" };
+    if (!Number.isSafeInteger(flags) || flags < 0 || flags > 0xffff_ffff) return { status: "error" };
+    if (fields[2] === "0" && (flags & 0x0020_0000) !== 0) return { status: "kernel" };
+    return { status: "nonsignalable", row };
   }
   return {
     status: "found",
-    row: {
-      pid,
-      parentPid,
-      processGroupId,
-      startToken: `proc:${startTimeTicks}`,
-      state,
-    },
+    row,
   };
 }
 

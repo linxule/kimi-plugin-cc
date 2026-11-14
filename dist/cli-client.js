@@ -324,6 +324,7 @@ export async function runCliPrompt(opts) {
     return await new Promise(async (resolve, reject) => {
         let aborted = false;
         let cancellationTeardown;
+        let processCleanupUnverified = false;
         let settlementStarted = false;
         const settle = (kind, payload) => {
             if (settlementStarted)
@@ -346,7 +347,7 @@ export async function runCliPrompt(opts) {
                 if (!teardown.ok) {
                     const details = {
                         ...errorDetails(),
-                        ...(boundedSwarm ? { process_cleanup_unverified: true } : {}),
+                        ...(boundedSwarm || processCleanupUnverified ? { process_cleanup_unverified: true } : {}),
                         ...(boundedSwarm && kind === "resolve" ? {
                             process_exit_code: payload.exitCode,
                             process_signal: payload.signal,
@@ -611,7 +612,11 @@ export async function runCliPrompt(opts) {
                 }
                 return;
             }
-            const identities = await captureDescendantIdentities(childPid);
+            let snapshotFailure;
+            const identities = await captureDescendantIdentities(childPid, undefined, (error) => {
+                snapshotFailure ??= { error };
+                processCleanupUnverified = true;
+            });
             await signalCapturedTree(childPid, identities, "SIGTERM");
             // The grace interval starts only after SIGTERM has reached every
             // revalidated target. Slow process enumeration never consumes the grace.
@@ -633,6 +638,10 @@ export async function runCliPrompt(opts) {
                     });
                 }
             }
+            // An unreadable snapshot is not evidence of an empty descendant tree.
+            // Finish the owned-root cleanup before exposing the original failure.
+            if (snapshotFailure !== undefined)
+                throw snapshotFailure.error;
         };
         const beginTeardown = () => {
             // Assign the shared promise before invoking callbacks that can abort.
@@ -651,7 +660,7 @@ export async function runCliPrompt(opts) {
                     }
                     catch { /* Best effort. */ }
                 }
-                if (boundedSwarm) {
+                if (boundedSwarm || processCleanupUnverified) {
                     // An unverified tail may still hold inherited pipes. Release our
                     // handles so reporting failure does not wait on that tail.
                     for (const stream of [child.stdin, child.stdout, child.stderr]) {

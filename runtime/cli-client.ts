@@ -531,6 +531,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     let aborted = false;
     type TeardownOutcome = { ok: true } | { ok: false; error: unknown };
     let cancellationTeardown: Promise<TeardownOutcome> | undefined;
+    let processCleanupUnverified = false;
     let settlementStarted = false;
     const settle = (
       kind: "resolve" | "reject",
@@ -553,7 +554,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           if (!teardown.ok) {
             const details = {
               ...errorDetails(),
-              ...(boundedSwarm ? { process_cleanup_unverified: true } : {}),
+              ...(boundedSwarm || processCleanupUnverified ? { process_cleanup_unverified: true } : {}),
               ...(boundedSwarm && kind === "resolve" ? {
                 process_exit_code: (payload as CliClientResult).exitCode,
                 process_signal: (payload as CliClientResult).signal,
@@ -840,7 +841,11 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         return;
       }
 
-      const identities = await captureDescendantIdentities(childPid);
+      let snapshotFailure: { error: unknown } | undefined;
+      const identities = await captureDescendantIdentities(childPid, undefined, (error) => {
+        snapshotFailure ??= { error };
+        processCleanupUnverified = true;
+      });
       await signalCapturedTree(childPid, identities, "SIGTERM");
 
       // The grace interval starts only after SIGTERM has reached every
@@ -867,6 +872,9 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           });
         }
       }
+      // An unreadable snapshot is not evidence of an empty descendant tree.
+      // Finish the owned-root cleanup before exposing the original failure.
+      if (snapshotFailure !== undefined) throw snapshotFailure.error;
     };
 
     const beginTeardown = () => {
@@ -883,7 +891,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           if (process.platform !== "win32") trySignalPid(-childPid, "SIGKILL");
           try { child.kill("SIGKILL"); } catch { /* Best effort. */ }
         }
-        if (boundedSwarm) {
+        if (boundedSwarm || processCleanupUnverified) {
           // An unverified tail may still hold inherited pipes. Release our
           // handles so reporting failure does not wait on that tail.
           for (const stream of [child.stdin, child.stdout, child.stderr]) {

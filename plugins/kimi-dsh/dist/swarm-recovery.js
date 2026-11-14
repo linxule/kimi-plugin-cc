@@ -69,10 +69,9 @@ export async function assertRecoveryOwnerGone(record) {
     }
 }
 /**
- * Linux may fall back from /proc to ps for a whole-group snapshot while targeted
- * identity reads still use /proc. Those start tokens are different namespaces,
- * not different processes. Prove both representations current around the known
- * identity read; never accept a member based on PID/PGID equality alone.
+ * Older Linux records may retain ps start tokens while current snapshots use
+ * /proc start ticks. Prove both representations current around the known identity
+ * read; never accept a member based on PID/PGID equality alone.
  */
 export async function validateRecoveryGroupMembers(known, members, validate = revalidateProcessIdentities) {
     const membership = await validate(members);
