@@ -285,10 +285,10 @@ describe("runSwarm certified execution-plan gate", () => {
     }
   });
 
-  test.each([
+  test.each(["2.6.0", "2.6.2"].flatMap((version) => [
     { label: "swarm", args: ["review", "two", "targets"] },
     { label: "swarm-write", args: ["--write", "edit", "two", "targets"] },
-  ])("2.6.0 refuses $label before model invocation", async ({ label, args }) => {
+  ].map((entry) => ({ ...entry, version }))))("$version refuses $label before model invocation", async ({ label, args, version }) => {
     const pluginDataRoot = await createTestPluginDataRoot(`swarm-scoped-${label}-data`);
     const workspace = await createGitRepoFixture(`swarm-scoped-${label}-repo`);
     const kimiHome = await createTestPluginDataRoot(`swarm-scoped-${label}-home`);
@@ -296,7 +296,7 @@ describe("runSwarm certified execution-plan gate", () => {
     try {
       const env = {
         ...makeMockEnv(pluginDataRoot, invocationPath, kimiHome),
-        KIMI_PLUGIN_CC_MOCK_VERSION: "2.6.0",
+        KIMI_PLUGIN_CC_MOCK_VERSION: version,
       };
       const statusBefore = execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" });
       const worktreesBefore = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: workspace, encoding: "utf8" });
@@ -307,7 +307,7 @@ describe("runSwarm certified execution-plan gate", () => {
           refusal_kind: "v2-swarm-not-certified",
           certification_scope: "non-swarm",
           operation_kind: label,
-          kimi_version: "2.6.0",
+          kimi_version: version,
         },
       });
       expect(existsSync(invocationPath)).toBe(false);

@@ -783,9 +783,9 @@ function validateVersionSensitiveEvents(
   // 2.0.2 (9d07f634), 2.1.0 (52437299), 2.1.1 (f67e6398), 2.2.0 (472192c3),
   // 2.3.0 (b5e28fd6), 2.3.1 (684bae9e), 2.3.2 (b8dd3a13), 2.3.3 (ec495f0c),
   // 2.4.0 (f26e4d91), 2.4.1 (2c73f3f5), 2.5.0 (41c34143), 2.5.1 (1b02030d),
-  // 2.5.2 (1c142a00), 2.5.3 (5af9942e), and 2.6.0 (740d6c0b):
-  // the additive events and HookDefSchema are unchanged. Exact 2.6.0 schema acceptance
-  // covers the narrowed non-swarm production certification, not swarm operations.
+  // 2.5.2 (1c142a00), 2.5.3 (5af9942e), 2.6.0 (740d6c0b), and 2.6.2
+  // (6a8493df): the additive events and HookDefSchema are unchanged. Exact 2.6.x
+  // schema acceptance does not certify swarm operations.
   // Require the full version string AND matching components; no inferred 2.x compatibility.
   if (
     version.major === 2 && (
@@ -818,7 +818,8 @@ function validateVersionSensitiveEvents(
         (version.version === "2.5.3" && version.patch === 3)
       )) ||
       (version.minor === 6 && (
-        (version.version === "2.6.0" && version.patch === 0)
+        (version.version === "2.6.0" && version.patch === 0) ||
+        (version.version === "2.6.2" && version.patch === 2)
       ))
     )
   ) {

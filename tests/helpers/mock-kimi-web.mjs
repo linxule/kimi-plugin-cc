@@ -130,7 +130,7 @@ async function handle(req, res) {
       send(res, null, { code: 40001, msg: `cwd mismatch ${token}` });
       return;
     }
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
       send(res, null, { code: 40001, msg: "missing local environment binding" });
       return;
     }
@@ -329,7 +329,7 @@ function readWsFrame(buffer) {
 
 function handleWsMessage(socket, frame) {
   void record({ kind: "ws-message", frame });
-  if (version === "2.6.0") {
+  if (["2.6.0", "2.6.2"].includes(version)) {
     handleWsMessageV26(socket, frame);
     return;
   }
@@ -484,7 +484,7 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
     }
   });
-  if (version !== "2.6.0" && scenario !== "ws-no-server-hello") {
+  if (!["2.6.0", "2.6.2"].includes(version) && scenario !== "ws-no-server-hello") {
     sendWsFrame(socket, {
       type: "server_hello",
       timestamp: new Date().toISOString(),

@@ -50,7 +50,7 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 // /kimi:swarm — parallel fan-out, read-only by default and runtime-foreground-only.
 // A finite wall-clock budget bounds the whole run. --cap is a SOFT total-count
 // prompt hint; --max-concurrency caps normal launches on kimi-code 0.18.0+.
-// Reviewed 2.5.3/2.6.0 schedulers can exceed that cap during rate-limit recovery.
+// Reviewed 2.5.3/2.6.0/2.6.2 schedulers can exceed that cap during rate-limit recovery.
 // The plugin always exports the setting; older read-only swarms retain only the
 // wall-clock hard bound. Read/write modes reuse review/rescue lineage, and the
 // mandatory PreToolUse hook enforces read-only policy or trusted-worktree write
@@ -58,9 +58,8 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 // kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2,
 // and certified 2.5.3 activate a same-job session through a bounded loopback
 // web lifecycle, then resume it through the normal print path. Candidate-only
-// 2.6.0 activation uses that lifecycle too; production 2.6.0 is non-swarm
-// certified and refuses both modes before model spawn. The certification table
-// controls whether each exact version is reachable.
+// 2.6.0/2.6.2 activation uses that lifecycle too. The per-operation certification
+// table controls whether each exact version is reachable in production.
 
 const SWARM_SUMMARY_MAX = 120;
 const SWARM_AGENT_PROFILE = "<swarm>";
@@ -70,7 +69,7 @@ const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
  * `--max-concurrency`. The plugin always exports
  * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; older read-only swarms ignore it and
  * retain only the wall-clock hard bound. Rate-limit recovery can exceed it on
- * reviewed 2.5.3/2.6.0 sources; this is not an unconditional peak guarantee.
+ * reviewed 2.5.3/2.6.0/2.6.2 sources; this is not an unconditional peak guarantee.
  */
 export const SWARM_DEFAULT_MAX_CONCURRENCY = 4;
 
@@ -88,7 +87,7 @@ export function resolveSwarmMaxConcurrency(requested: number | undefined): numbe
  * Default normal-launch concurrency for WRITE mode — 1 (serialized) vs read's 4.
  * Disjoint-target partitioning is prompt-only, so normal writes serialize by
  * default. Rate-limit recovery can still exceed the requested cap on reviewed
- * 2.5.3/2.6.0 sources; this is not an unconditional serialization guarantee.
+ * 2.5.3/2.6.0/2.6.2 sources; this is not an unconditional serialization guarantee.
  * Override with an explicit `--max-concurrency N`.
  */
 export const SWARM_WRITE_DEFAULT_MAX_CONCURRENCY = 1;
@@ -111,7 +110,7 @@ export function resolveSwarmWriteMaxConcurrency(requested: number | undefined): 
  * `cap` is a SOFT subagent-count hint (the hook cannot enforce a count). The
  * normal-launch concurrency setting is separate: --max-concurrency →
  * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (see executeSwarmJob / cli-client buildKimiCliEnvironment).
- * Reviewed 2.5.3/2.6.0 sources can exceed it during rate-limit recovery.
+ * Reviewed 2.5.3/2.6.0/2.6.2 sources can exceed it during rate-limit recovery.
  * The --budget wall-clock ceiling is the always-on hard bound on the whole run.
  */
 export function buildSwarmPrompt(objective: string, cap?: number): string {

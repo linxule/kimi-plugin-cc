@@ -1,4 +1,10 @@
-# Native v2 status — 2026-11-13
+# Native v2 status — 2026-11-14
+
+## Exact 2.6.2 non-swarm scope
+
+Plugin 2.5.9 certifies exact CLI 2.6.2 for the same six operations as 2.6.0: review, challenge, ask, rescue, review gate and pursue. Both swarm operations remain excluded and refuse before model spawn; exact 2.6.1 and 2.6.3 are not covered. The source audit passed **19 tests with 216 assertions**, and the full-scope candidate matrix passed **24 tests with 201 assertions in 327.41 seconds**. Those candidate swarm results do not restore production swarm certification. The [2.6.2 certification record](upstream-2.6.2-certification.md) owns the exact-binary evidence and production-matrix receipt.
+
+The exact 2.6.2 scheduler is byte-identical to 2.6.0. Fresh deterministic controls reproduce a third cumulative attempt at cap 1 after the initial retry and five active attempts at cap 4, so the upstream recovery defect still blocks full-swarm restoration. The full-operation export and automatic full-swarm pin behavior remain unchanged through 2.5.3. The local reference correction at `52e21c7bf` (base `8d939f7d`, not a release containing 2.6.2) passes 56 focused upstream swarm tests. The unpatched base differs from 2.6.2 only in its `TokenUsage` import and otherwise has the same scheduler logic; the correction intentionally changes that logic and is not a released fix. Upstream issue #4926 has no maintainer approval or released fix.
 
 ## Exact 2.6.0 non-swarm scope
 
@@ -36,7 +42,7 @@ WebSocket main-agent state, requiring unique request IDs, an accepted
 subscription, and the latest frame through intentional bounded close. It also
 pins `environment_id:"local"` and the expected cwd before either profile mutation.
 Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
-bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0 print selects `--environment local`;
+bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2 print selects `--environment local`;
 resume never receives that flag; the environment preflight rejects any persisted nonlocal or wrong-root metadata/binding, while older sessions without environment records do not fail this check merely for lacking them.
 Tokens remain in memory, activation consumes the finite budget, graceful shutdown
 retains the 15-second allowance, and unverified cleanup prevents success.
@@ -49,7 +55,7 @@ verified deactivation, including with parent idle reclamation set to 1 ms. A
 separate evidence-preserving out-of-root control correlated two child Writes with
 rescue denials and created no files.
 
-Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.0 remove EnterPlanMode and cancel default plan mode on
+Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 remove EnterPlanMode and cancel default plan mode on
 fresh print; deterministic forced calls reject before the hook with no plan
 state. Resumed plan sessions remain possible, so every-agent journal refusal
 stays mandatory. Stream records still lack execution outcomes, and session hints
@@ -192,7 +198,7 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
 - `-r` refuses when the session's recorded cwd differs from the current cwd
   (`run-v2-print.ts:426-432`).
 - `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` caps normal launches on 0.18.0+, but **unset = no
-  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0 sources can
+  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0/2.6.2 sources can
   exceed the requested cap during rate-limit recovery, so this is not an unconditional peak
   or write-serialization guarantee. See `docs/safety.md` for the current limitation.
 - The update preflight runs on the `-p` path; every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1`.

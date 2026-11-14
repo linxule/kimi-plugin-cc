@@ -1045,6 +1045,20 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
   },
 };
 
+// 2.6.2 (6a8493df): mutable participant replay and loop-journal freezing retain
+// the same two wire-journal restore passes and raw plan-taint closure.
+PINNED_HASHES["2.6.2"] = {
+  ...PINNED_HASHES["2.6.0"],
+  [`${CORE}/state/eventDispatcherService.ts`]:
+    "76b9377fd911c0392eea135865f498ee1e593f1eeaaa9d1de4abfc5f997f7957",
+  [`${CORE}/agent/loop/journal.ts`]:
+    "17dead246642b01273cbc7cdeb5478cc561b4e3856b6d7b1ef524c94b7a177ec",
+  [`${CORE}/agent/loop/turnProjection.ts`]:
+    "226a4377822a042e0bc391b695ac0a40ac65ce35d7ba307ddd095885f59dd91a",
+  [`${SDK}/sdk-rpc-client-v2.ts`]:
+    "4c635caed581c09332ad9e54490d578bd5a30e4fe37e6b8e88720a691142638c",
+};
+
 /**
  * Every durable plan-state event type at the pinned tag. The journal taint scan
  * (runtime/native-v2-preflight.ts::scanJournalLines) treats any record whose
@@ -1144,19 +1158,19 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
   });
 
   test("2.5+ print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) return;
     const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
     const marker = runner.indexOf("writeExperimentalVersion(");
     const sdk = runner.indexOf("new SDKRpcClientV2(");
@@ -1173,7 +1187,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ environment and workspace-trust dependencies are explicitly reviewed", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) return;
     expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
       "options.environmentId === LOCAL_ENVIRONMENT_ID",
     );
@@ -1196,7 +1210,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("2.5+ WebSocket state proof remains authenticated and bound to the live main agent", () => {
     const version = upstreamVersion();
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(version)) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(version)) return;
     const schema = read(`${KAP}/protocol/ws-agent.ts`);
     for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
       expect(schema).toContain(field);
@@ -1204,7 +1218,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
     expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
     const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
-    if (version === "2.6.0") {
+    if (["2.6.0", "2.6.2"].includes(version)) {
       const control = read(`${KAP}/protocol/ws-control.ts`);
       expect(control).toContain("type: z.literal('subscribe')");
       expect(control).toContain("type: z.literal('response')");
@@ -1262,7 +1276,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
@@ -1273,13 +1287,13 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     const callers = filesContaining([CORE], "fireBeforeExecute(");
     expect(callers).toEqual([
       `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
-      ...(upstreamVersion() === "2.6.0" ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
+      ...(["2.6.0", "2.6.2"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
   });
 
   test("the before-execute subscriber population is exactly the audited set", () => {
-    if (upstreamVersion() === "2.6.0") {
+    if (["2.6.0", "2.6.2"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
         `${CORE}/agent/toolExecutor/legacyHooks.ts`,
         `${CORE}/agent/toolExecutor/toolExecutor.ts`,
@@ -1317,7 +1331,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.6 executor phases preserve managed-hook veto and execution ordering", () => {
-    if (upstreamVersion() !== "2.6.0") return;
+    if (!["2.6.0", "2.6.2"].includes(upstreamVersion())) return;
     const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
     expect(service).toContain("composeToolExecutorHooks([resetHook, legacyHook, ...hooks, internalHook])");
     const executor = read(`${CORE}/tool/executor/tool-executor.ts`);
@@ -1378,7 +1392,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(upstreamVersion())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) {
       expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
     }
     // Every append-log read in the wire service names the single wire key.
@@ -1407,7 +1421,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       expect(end, "readRestoreChains body delimiter changed").toBeGreaterThan(-1);
       const chains = body.slice(0, end);
       expect(chains).toContain("const entries = await this.readStableEntries();");
-      if (upstreamVersion() === "2.6.0") {
+      if (["2.6.0", "2.6.2"].includes(upstreamVersion())) {
         expect(chains).toContain(
           "restorable: normalizeLegacyTurnSteerRecords(restorableChain(entries, tree).map(({ record }) => record))",
         );

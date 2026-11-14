@@ -943,11 +943,11 @@ describe("setup managed-block installer", () => {
     expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
   });
 
-  test("2.6.0 setup reports the narrowed non-swarm certification", async () => {
+  test.each(["2.6.0", "2.6.2"])("%s setup reports the narrowed non-swarm certification", async (version) => {
     if (process.platform === "win32") return;
-    const { env, configPath } = await makeCase("non-swarm-version-notice");
-    const kimiBin = path.join(path.dirname(configPath), "kimi-2.6.0");
-    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '2.6.0'\n", "utf8");
+    const { env, configPath } = await makeCase(`non-swarm-version-notice-${version}`);
+    const kimiBin = path.join(path.dirname(configPath), `kimi-${version}`);
+    await writeFile(kimiBin, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`, "utf8");
     await chmod(kimiBin, 0o700);
 
     const result = await runSetup([], makeContext({
@@ -962,7 +962,7 @@ describe("setup managed-block installer", () => {
   });
 
   test.each(["PermissionRequest", "PermissionResult", "Interrupt"].flatMap((event) =>
-    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].map((version) => [event, version] as const)))(
+    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].map((version) => [event, version] as const)))(
     "exact reviewed 2.x schemas accept %s (setup %s) but refuse unreviewed versions",
     async (event, setupVersion) => {
       const contents = `[[hooks]]\nevent = "${event}"\ncommand = "foreign-hook"\n`;
@@ -983,8 +983,12 @@ describe("setup managed-block installer", () => {
       expect(validateKimiHookSet(contents, { major: 2, minor: 5, patch: 2, version: "2.5.2" }).valid).toBe(true);
       expect(validateKimiHookSet(contents, { major: 2, minor: 5, patch: 3, version: "2.5.3" }).valid).toBe(true);
       expect(validateKimiHookSet(contents, { major: 2, minor: 6, patch: 0, version: "2.6.0" }).valid).toBe(true);
+      expect(validateKimiHookSet(contents, { major: 2, minor: 6, patch: 2, version: "2.6.2" }).valid).toBe(true);
       for (const version of [
         { major: 2, minor: 6, patch: 1, version: "2.6.1" },
+        { major: 2, minor: 6, patch: 3, version: "2.6.3" },
+        { major: 2, minor: 6, patch: 2, version: "2.6.2-rc.1" },
+        { major: 2, minor: 6, patch: 2, version: "2.6.2+unreviewed" },
         { major: 2, minor: 6, patch: 0, version: "2.6.0-rc.1" },
         { major: 2, minor: 6, patch: 0, version: "2.6.0+unreviewed" },
         { major: 2, minor: 5, patch: 4, version: "2.5.4" },

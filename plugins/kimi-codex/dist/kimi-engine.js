@@ -55,7 +55,7 @@ export const NATIVE_V2_CERTIFIED_VERSIONS = Object.freeze([
  * and pursue. Their upstream rate-limit recovery can exceed AgentSwarm's
  * configured maximum, so both swarm operations refuse before model spawn.
  */
-export const NATIVE_V2_NON_SWARM_VERSIONS = Object.freeze(["2.6.0"]);
+export const NATIVE_V2_NON_SWARM_VERSIONS = Object.freeze(["2.6.0", "2.6.2"]);
 /**
  * Any-operation union used by setup and engine selection. The older
  * NATIVE_V2_CERTIFIED_VERSIONS export stays all-operation-only for consumers

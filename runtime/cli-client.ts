@@ -84,7 +84,7 @@ export interface CliClientOptions {
   /**
    * Normal-launch cap on how many AgentSwarm subagents kimi-code runs
    * CONCURRENTLY, exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
-   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0 sources can exceed it during
+   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0/2.6.2 sources can exceed it during
    * rate-limit recovery. Older binaries silently ignore the unknown env var, so
    * on < 0.18 the soft --cap prompt-count hint is the only count bound. Only
    * /kimi:swarm sets this (from --max-concurrency, distinct from the soft --cap
@@ -1091,7 +1091,7 @@ function buildArgs(opts: CliClientOptions): string[] {
     : undefined;
   if (
     opts.resumeSessionId === undefined &&
-    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
+    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
   ) {
     args.push("--environment", "local");
   }

@@ -108,7 +108,7 @@ export interface SwarmArgs extends KimiFlagState {
   /**
    * Normal-launch concurrency ceiling exported as
    * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY and enforced on kimi-code 0.18.0+;
-   * reviewed 2.5.3/2.6.0 sources can exceed it during rate-limit recovery;
+   * reviewed 2.5.3/2.6.0/2.6.2 sources can exceed it during rate-limit recovery;
    * older binaries ignore it. Distinct from `cap`: concurrency (how many run
    * simultaneously) ≠ total count (how many run over the whole life of the
    * swarm). See runtime/cli-client.ts buildKimiCliEnvironment.

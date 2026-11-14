@@ -242,7 +242,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
     const root = await createTestPluginDataRoot("cli-client-local-environment");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;

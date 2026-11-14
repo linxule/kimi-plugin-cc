@@ -128,7 +128,7 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
  * and pursue. Their upstream rate-limit recovery can exceed AgentSwarm's
  * configured maximum, so both swarm operations refuse before model spawn.
  */
-export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2.6.0"]);
+export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2.6.0", "2.6.2"]);
 
 /**
  * Any-operation union used by setup and engine selection. The older

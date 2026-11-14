@@ -10,8 +10,8 @@ import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } 
 import { resolveKimiHome } from "./kimi-home.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
-// Exact 2.6.0 is an integration candidate, not a production-certified version.
-const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"];
+// These exact 2.6.x activation entries support candidate integration; production scope is per operation.
+const PREACTIVATION_VERSIONS = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"];
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
 // Exact 2.4.0 can take longer than 5s to drain session/workspace lifecycle work.
@@ -338,7 +338,7 @@ async function resolveProfileModel(web, options, failureCode) {
 }
 async function createSession(web, options, expectedVersion, failureCode) {
     const request = { metadata: { cwd: options.cwd } };
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(expectedVersion)) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(expectedVersion)) {
         request.environment_id = "local";
         request.environment_cwd = options.cwd;
     }
@@ -349,7 +349,7 @@ async function createSession(web, options, expectedVersion, failureCode) {
     return { sessionId: data.id, workspaceId: data.workspace_id };
 }
 async function verifyLocalEnvironment(web, identity, expectedCwd, expectedVersion, signal, failureCode) {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(expectedVersion))
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(expectedVersion))
         return;
     const data = await restData(web, "GET", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/environment`, undefined, signal, failureCode);
     if (!isRecord(data)) {
@@ -369,10 +369,10 @@ async function postSwarmProfile(web, identity, active, model, signal, failureCod
     await restData(web, "POST", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/profile`, { agent_config: agentConfig }, signal, failureCode);
 }
 async function verifySwarmStatus(web, identity, active, model, expectedVersion, signal, failureCode) {
-    const data = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(expectedVersion)
+    const data = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(expectedVersion)
         ? await readWebSocketAgentState(web, identity.sessionId, expectedVersion, signal, failureCode)
         : await restData(web, "GET", `/api/v1/sessions/${encodeURIComponent(identity.sessionId)}/status`, undefined, signal, failureCode);
-    const source = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(expectedVersion) ? "agent state" : "/status";
+    const source = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(expectedVersion) ? "agent state" : "/status";
     if (!isRecord(data)) {
         throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} returned an invalid payload.`);
     }
@@ -382,10 +382,10 @@ async function verifySwarmStatus(web, identity, active, model, expectedVersion, 
     if (data.plan_mode !== false) {
         throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm plan mode is off.`);
     }
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(expectedVersion) && data.tower_mode !== false) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(expectedVersion) && data.tower_mode !== false) {
         throw failure(failureCode, "swarm-activation.status", "Kimi web agent state did not confirm tower mode is off.");
     }
-    const permission = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0"].includes(expectedVersion) ? data.permission_mode : data.permission;
+    const permission = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(expectedVersion) ? data.permission_mode : data.permission;
     if (permission !== "auto") {
         throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm auto permission mode.`);
     }
@@ -401,7 +401,7 @@ async function readWebSocketAgentState(web, sessionId, expectedVersion, signal, 
         return await new Promise((resolve, reject) => {
             let socket;
             const bearerProtocol = `kimi-code.bearer.${web.token}`;
-            const legacyControl = expectedVersion !== "2.6.0";
+            const legacyControl = !["2.6.0", "2.6.2"].includes(expectedVersion);
             const helloId = `swarm-activation-hello-${randomUUID()}`;
             const subscribeId = `swarm-activation-subscribe-${randomUUID()}`;
             try {

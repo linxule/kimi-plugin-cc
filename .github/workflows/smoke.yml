@@ -36,9 +36,9 @@ on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "kimi-code version to smoke against: an exact certified native-v2 version (default 2.6.0) runs every in-scope lane incl. v2 resume/taint; 2.6.0 also requires both pre-spawn swarm refusals and excludes its three swarm execution lanes; an uncertified candidate requires the explicit candidate seam; a pinned <= 0.41 binary runs legacy-v1 lanes."
+        description: "kimi-code version to smoke against: an exact certified native-v2 version (default 2.6.2) runs every in-scope lane incl. v2 resume/taint; 2.6.0/2.6.2 also require both pre-spawn swarm refusals and exclude their three swarm execution lanes; an uncertified candidate requires the explicit candidate seam; a pinned <= 0.41 binary runs legacy-v1 lanes."
         type: string
-        default: "2.6.0"
+        default: "2.6.2"
       goal_budget_ms:
         description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
         type: string

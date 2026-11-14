@@ -1,11 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
-**Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields); 2026-10-29 (§2/§3 exact 2.4.0 plan controls; §4/§5 capability matrix and lifecycle provenance); 2026-10-31 (§2/§3 exact 2.4.1 plan controls; §4/§5 exact 2.4.1 capability and lifecycle); 2026-11-05 (§2 local-execution closure; §2/§3 exact 2.5.0 controls; §4/§5 capability and WebSocket lifecycle); 2026-11-06 (§2/§3 exact 2.5.1 controls; §4/§5 capability and lifecycle); 2026-11-07 (§2/§3 exact 2.5.2 controls; §4/§5 capability and lifecycle); 2026-11-11 (§2/§3 exact 2.5.3 controls; §4/§5 capability and lifecycle); 2026-11-13 (§2/§3 exact 2.6.0 non-swarm scope; §4 capability matrix)
-**Current capability (plugin 2.5.8):** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2` and `2.5.3` for every operation under the §2 construction. Exact 2.6.0 is additionally certified for review, challenge, ask, rescue, review_gate and pursue only; both swarm modes refuse before model spawn. `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
+**Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields); 2026-10-29 (§2/§3 exact 2.4.0 plan controls; §4/§5 capability matrix and lifecycle provenance); 2026-10-31 (§2/§3 exact 2.4.1 plan controls; §4/§5 exact 2.4.1 capability and lifecycle); 2026-11-05 (§2 local-execution closure; §2/§3 exact 2.5.0 controls; §4/§5 capability and WebSocket lifecycle); 2026-11-06 (§2/§3 exact 2.5.1 controls; §4/§5 capability and lifecycle); 2026-11-07 (§2/§3 exact 2.5.2 controls; §4/§5 capability and lifecycle); 2026-11-11 (§2/§3 exact 2.5.3 controls; §4/§5 capability and lifecycle); 2026-11-13 (§2/§3 exact 2.6.0 non-swarm scope; §4 capability matrix); 2026-11-14 (§2/§3 exact 2.6.2 controls; §4 capability matrix)
+**Current capability (plugin 2.5.9):** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2` and `2.5.3` for every operation under the §2 construction. Exact 2.6.0 and 2.6.2 are additionally certified for review, challenge, ask, rescue, review_gate and pursue only; both swarm modes refuse before model spawn. `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
 
-Plugin 2.5.8 adds exact 2.6.0 for the six non-swarm operations and explicitly refuses both swarm modes ([evidence](upstream-2.6.0-certification.md)); its candidate activation/recovery paths are not production-certified. Plugin 2.5.7 certifies exact 2.5.0, 2.5.1, 2.5.2 and 2.5.3 with local-execution closures and authenticated WebSocket state verification. Plugin 2.5.4 restored the original bounded-close settlement after the unreliable `wasClean` trial in 2.5.3; 2.5.5 changed only setup/managed-block handling; 2.5.6 added exact 2.5.2; 2.5.7 adds exact 2.5.3. Evidence: [2.5.0](upstream-2.5.0-certification.md), [2.5.1](upstream-2.5.1-certification.md), [2.5.2](upstream-2.5.2-certification.md) and [2.5.3](upstream-2.5.3-certification.md) certification records. Publication does not update installed hosts or operator pins. Plugin 2.4.5 certified exact 2.4.1 with host-preactivated swarm sessions; plugin 2.4.4 added CLI 2.4.0 certification; plugin 2.4.0 preserved CLI 2.3.1 while adding MCP transport.
+Plugin 2.5.9 adds exact 2.6.2 for the six non-swarm operations alongside 2.6.0 and explicitly refuses both swarm modes ([evidence](upstream-2.6.2-certification.md)); their candidate activation/recovery paths are not production-certified. Plugin 2.5.8 added exact 2.6.0 with that scope. Plugin 2.5.7 certifies exact 2.5.0, 2.5.1, 2.5.2 and 2.5.3 with local-execution closures and authenticated WebSocket state verification. Plugin 2.5.4 restored the original bounded-close settlement after the unreliable `wasClean` trial in 2.5.3; 2.5.5 changed only setup/managed-block handling; 2.5.6 added exact 2.5.2; 2.5.7 adds exact 2.5.3. Evidence: [2.5.0](upstream-2.5.0-certification.md), [2.5.1](upstream-2.5.1-certification.md), [2.5.2](upstream-2.5.2-certification.md) and [2.5.3](upstream-2.5.3-certification.md) certification records. Publication does not update installed hosts or operator pins. Plugin 2.4.5 certified exact 2.4.1 with host-preactivated swarm sessions; plugin 2.4.4 added CLI 2.4.0 certification; plugin 2.4.0 preserved CLI 2.3.1 while adding MCP transport.
 
 Exact 2.1.0/2.1.1 evidence: [certification record](upstream-2.1-certification.md).
 The known active-plan bypass remains; only the no-plan construction is
@@ -58,9 +58,9 @@ later certified tag:
 2. Every route by which plan mode can become active in a `kimi -p` session is
    enumerated, and each is either unreachable from the plugin's spawn or closed
    by the plugin before spawn: the `default_plan_mode` config key under every spelling upstream normalizes to `defaultPlanMode` (pre-spawn
-   parse of the same file, `runtime/native-v2-preflight.ts`; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.0 also cancel
+   parse of the same file, `runtime/native-v2-preflight.ts`; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 also cancel
    that default on fresh print), the `EnterPlanMode`/`ExitPlanMode` tools (managed
-   hook deny; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.0 remove EnterPlanMode, so a forced call rejects before the
+   hook deny; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 remove EnterPlanMode, so a forced call rejects before the
    hook while the deny policy remains), and restored plan state (own native-v2
    lineage only, raw journal scan of every agent journal).
 3. Every tool execution passes the executor path that fires the external hook,
@@ -68,11 +68,11 @@ later certified tag:
 4. A live control on the exact binary shows the plan-file write bypassing the
    hook when plan mode IS armed (proving the refusals are load-bearing), and
    the managed hook denying an ordinary write when it is not. Through 2.3.3 a
-   separate EnterPlanMode attempt must also reach that deny hook. On exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.0,
+   separate EnterPlanMode attempt must also reach that deny hook. On exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2,
    where the tool is removed, a deterministic forced call must instead return
    `Tool "EnterPlanMode" not found` on the same call ID before any hook call,
    with no plan-enter journal or plan file.
-5. Execution remains local. Configured remote defaults and disabled workspace trust refuse before spawn; launcher environment selectors are reserved; fresh exact 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0 print explicitly selects local. Resume inspects metadata and every agent journal and refuses nonlocal or wrong-root records, using the operation's expected execution root, including swarm-write worktrees. Older sessions without environment records do not fail this environment check merely for lacking them.
+5. Execution remains local. Configured remote defaults and disabled workspace trust refuse before spawn; launcher environment selectors are reserved; fresh exact 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2 print explicitly selects local. Resume inspects metadata and every agent journal and refuses nonlocal or wrong-root records, using the operation's expected execution root, including swarm-write worktrees. Older sessions without environment records do not fail this environment check merely for lacking them.
 
 Under Basis B the headline claim is: *every executed tool call in a
 plugin-managed session passes the managed hook, and the engine's sole final
@@ -124,7 +124,7 @@ safety profile:
 3. **Non-vacuous no-plan controls:** with plan mode ON, the exact plan-file
    Write must still bypass the deny hook, proving the refusal is load-bearing.
    With plan mode OFF, an ordinary Write must reach the deny hook. Through 2.3.3,
-   a separate EnterPlanMode attempt must also reach it. Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.0 remove that
+   a separate EnterPlanMode attempt must also reach it. Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 remove that
    tool, so the corresponding control must force a raw EnterPlanMode call and
    prove `Tool "EnterPlanMode" not found` on the same call ID before any hook
    call, with no plan-enter journal or plan file. The plugin refuses default-plan
@@ -158,7 +158,7 @@ expanded production capability requires a separately authorized release.
 | Engine | Operation | Production state |
 |---|---|---|
 | `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2`, `2.5.3` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
-| `native-v2` | review, challenge, ask, rescue, review_gate, pursue | exact `2.6.0` only, under the same safety profile. Both swarm modes refuse before model spawn; neither is certified on 2.6.0 |
+| `native-v2` | review, challenge, ask, rescue, review_gate, pursue | exact `2.6.0` and `2.6.2`, under the same safety profile. Both swarm modes refuse before model spawn; neither is certified on these versions |
 | `legacy-v1` | review, challenge, ask, rescue, review_gate | certified within `KIMI_TESTED_MINORS` (≤ 0.41) for an explicitly pinned binary |
 | `legacy-v1` | pursue / swarm / swarm-write | certified from kimi-code 0.8 / 0.12 / 0.18 within `KIMI_TESTED_MINORS` |
 
