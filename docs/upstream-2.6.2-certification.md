@@ -1,8 +1,8 @@
 # Exact CLI 2.6.2 certification — plugin 2.6.2
 
-## Bounded swarm release: PENDING validation
+## Bounded swarm certification — 2026-11-14
 
-**Status: PENDING.** The plugin 2.6.2 release candidate adds bounded read-only and write swarm on unmodified stock CLI 2.6.2. This section becomes a certification receipt only after the source, exact-binary, operation, repository and release gates below have recorded passing evidence. The prior published plugin 2.5.9 non-swarm certification is retained below.
+**Status: certified for all eight operations.** Plugin 2.6.2 certifies bounded read-only and write swarm on unmodified stock CLI 2.6.2 alongside review, challenge, ask, rescue, review_gate and pursue. Exact-source, stock-binary, real-provider, repository, package and independent source-review gates passed. Linux CI and publication remain pending and are not implied by this certification. The prior published plugin 2.5.9 non-swarm certification is retained below.
 
 The exact source and binary remain commit `6a8493df3e1d796a63f7c7ca0de76c1e690cd943` and bundle SHA-256 `f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a`. The upstream rate-limit scheduler is unchanged. The plugin enforces the bound through admission and terminal cancellation:
 
@@ -18,30 +18,36 @@ The native TaskStop policy persists after deactivation of the owned parallel ses
 
 ### Validation receipts
 
-The completed receipts below cover runtime commit `d1c4fe306dd3a4f5b1496c105d937f562b856764`. Final review requires additional process-observation and recovery reliability fixes; final-tree reruns remain **PENDING**, so these passing receipts are not yet the release gate. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; those ignored logs are evidence locations, not package contents.
+The final runtime is commit `e8f7059ec211489263710dff76595b2ef80c949c`. The full repository, live-provider and package gates ran from an isolated Git clone at `/var/folders/93/qllsxfwn1tz2jbj6zt868c780000gn/T/kimi-release-2.6.2-final-odld3_2v`. The stock-binary `production-03` run verified all 184 covered files against that commit's Git blobs both before and after execution. Its manifest SHA-256 is `fe5bacb5478a2f63f5dd1651c0b8967ac6c63a142748ff3bf910c9e9229a3f79`; its covered-file digest is `47b5e0cd5186ac7d62e5df1a629935d0a852a411b64fd0fee64d6697f408b3c3`. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; ignored logs are evidence locations, not package contents.
 
 | Gate | Receipt |
 | --- | --- |
 | Exact-source audit and tag scan | PASS: 31 tests / 393 assertions, 115 source pins; exact 2.5.3 regression 19 pass / 12 version-specific skips / 153 assertions |
-| Production matrix and emitted-runtime regression tests | PASS: 37 tests / 767 assertions in 11.79s, including all three compiled distributions, canonical-hook policy, escape-monitor propagation and unsafe-settlement patch refusal |
-| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PASS: part of the 23-test stock-binary suite, 138 assertions in 270.27s; no failures |
+| Canonical policy, emitted-runtime and repository regressions | PASS in the final full gate: all three compiled distributions, canonical-hook policy, escape-monitor propagation and unsafe-settlement patch refusal |
+| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PASS: `production-03.log`, 23 tests / 138 assertions in 275.03s; no failures |
 | Native background-policy closure, explicit background denial, normal-exit descendant quiescence before capture | PASS: parallel auto-background and explicit-background controls in that same stock-binary suite |
 | Single-worker read/write, delegation denial, patch and cancellation controls | PASS: explicit/default concurrency-one, automatic-background, cancellation and budget controls in that same suite |
-| Real-provider production operation matrix, no-plan and local-execution controls | PENDING: `live-production-commit.log` is running against the frozen commit |
-| Frozen dependency install and full repository gate | PENDING final full-gate receipt: `production-full-check.log` |
-| Package and isolated consumer security | PASS: 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot; isolated npm consumer security |
-| Final independent review, CI and publication | PENDING |
+| Real-provider production operation matrix | PASS: `live-release-commit.log`, 30 pass / 2 intentional narrowed-version-refusal skips / 390 assertions in 440.53s; exit 0 at 2026-11-14T14:20:59Z. Both swarm execution paths run; the two skipped tests assert refusals that do not apply to the full 2.6.2 scope |
+| No-plan and local-execution controls | PASS: same-day exact-source and exact-binary controls retained in the historical receipt below; unchanged source/binary and safety closures are rechecked by the final tag scan and operation matrix |
+| Frozen dependency install and full repository gate | PASS: `release-full-check.log`, 1,720 pass / 75 expected opt-in skips / 0 failures / 22,490 assertions; 1,795 tests across 93 files in 541.73s |
+| Package and isolated consumer security | PASS: final `release-package.log` verifies 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot. `release-consumer-security.log` passes isolated npm consumer security |
+| Independent reviews | PASS: Codex reports no actionable findings. Fable's `FABLE-BATCH.md` finds no remaining defect in its reviewed caller/helper source scope and explicitly leaves runtime tests and emitted-artifact verification to the final gates above |
+| Linux CI and publication | PENDING; no tag, registry or installed-host result is claimed here |
 
-The 23 stock-binary controls use the untouched 2.6.2 executable with a scripted test provider. They exercise new/resumed waves, odd target grouping, both nested profiles, invalid resumes, read/write cancellation, active HTTP/tool budget expiry, and 429/context recovery beyond the native 180-second interval. Their deterministic responses prove enforcement and settlement; the separate real-provider matrix must still prove useful model behavior through the production operation paths.
+The 23 stock-binary controls use the untouched 2.6.2 executable with a scripted test provider. They exercise new/resumed waves, odd target grouping, both nested profiles, invalid resumes, read/write cancellation, active HTTP/tool budget expiry, and 429/context recovery beyond the native 180-second interval. Their deterministic responses prove enforcement and settlement; the separate passing real-provider matrix proves useful model behavior through the production operation paths.
+
+Commit `9db8e97` subsequently corrects zombie-process quiescence checks in two test helpers only; runtime and emitted artifacts are unchanged from `e8f7059`. Focused checks passed 50 tests / 218 assertions, and churn controls passed 4 tests / 36 assertions after that correction. Linux CI remains a separate release gate. Same-day source and no-plan/local controls are explicitly reused against the unchanged exact CLI; earlier prototype or pre-fix runtime passes do not replace the final receipts above.
 
 | Completed evidence file | SHA-256 |
 | --- | --- |
 | `source-scan-2.6.2.log` | `ea21898d94dba98fa68792565c6d2bb409af04307fc72446af2da58598f2e507` |
 | `source-scan-2.5.3.log` | `f04df6af7b6c2252526bba52a2df357a1f152618c4f6fc12ca6354400232723c` |
-| `production-matrix-compiled.log` | `51e44db91a8f5e57b4cbc582a8b3a0341ab0376f4333a550f358101abd660352` |
-| `production-01.log` | `bd35efeaa8ddce2397f65e41bcdb67547a74896105e6badf03e7cb44e60668fa` |
-| `production-package.log` | `4464e978ccb6f6ad9e0b37c4d9816f4ceb7ed99228315d6c8e250af373fd2e64` |
-| `production-consumer-security.log` | `3dea92a3793941ba29017dec7b3e7a7a254eb45473130349fa4502b70a817221` |
+| `production-03.log` | `d8e7dd94fd94aee7b42e20d06ffdd3735a4e16cf8a8d3fdbb2f7cb41284d9125` |
+| `release-full-check.log` | `b46be31f50499ab5947344510c6382b786538adf06a1b354e9fb3d5fbe4af636` |
+| `live-release-commit.log` | `cd8a8a3ca145d239474ca7e2e6a8576be576178cb1c67da7f3bee524666434bc` |
+| `release-package.log` | `ba151af3382fafbcbbe0a8b47fccd679f92f6a5e47642c73185fd2c8283bb1ac` |
+| `release-consumer-security.log` | `3dea92a3793941ba29017dec7b3e7a7a254eb45473130349fa4502b70a817221` |
+| `FABLE-BATCH.md` | `d27e38068eff4d241d476527471a4f7bff1ed72da11ac2d3ba7497e84b0b8e1f` |
 
 ### Counterexamples that determined the construction
 

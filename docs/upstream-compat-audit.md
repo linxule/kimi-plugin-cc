@@ -25,17 +25,12 @@ The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.4
 `1c142a007c10e881602690def96057c23a2baa12` and
 `5af9942e9fb789b6a1530830575b3768499932e9`)
 for all eight operations. Legacy-v1 remains supported through 0.41.x for an explicitly pinned binary.
-Exact 2.6.0 remains certified for review, challenge, ask, rescue, review_gate and pursue only. The published plugin 2.5.9 scope for exact 2.6.2 was equally narrow; plugin 2.6.2 adds the bounded-swarm construction, subject to the complete gates in its [certification record](upstream-2.6.2-certification.md). Do not treat the unchanged upstream scheduler as fixed.
-The most recent full-operation worked example is the 2026-11-11 exact 2.5.3 certification. Candidate and
-production matrices each passed 24 tests with 201 assertions without skips in 349.07 and
-406.19 seconds, including real `runRescue` confinement/provenance, deterministic same-call
-Bash.cwd denial, and out-of-root swarm-write denial. Both ran through the pre-authorized
-`~/.local/bin/kimi-plugin-cc-monitor-smoke` route (exact binary under `~/.cache`, read-only
-Agent Keys API key, empty seed home, redacted log). Repository and package gates are
-recorded in the [2.5.3 evidence](upstream-2.5.3-certification.md). For the scoped 2.6.2 candidate, the exact source scan passed 19 tests with 216 assertions and the candidate matrix passed 24 tests with 201 assertions in 327.41 seconds; its narrowed production and release evidence is recorded in the [2.6.2 record](upstream-2.6.2-certification.md).
+Exact 2.6.0 remains certified for review, challenge, ask, rescue, review_gate and pursue only. The published plugin 2.5.9 scope for exact 2.6.2 was equally narrow; plugin 2.6.2 certifies all eight operations using the bounded-swarm construction in its [certification record](upstream-2.6.2-certification.md). Do not treat the unchanged upstream scheduler as fixed.
+The most recent full-operation worked example is the 2026-11-14 exact 2.6.2 certification: 31 source-scan tests / 393 assertions and 115 pins, 23 stock-binary controls / 138 assertions, and 30 live-provider tests / 390 assertions, with only the two inapplicable narrowed-refusal tests skipped. The final isolated repository gate passed 1,720 tests / 75 expected skips / 22,490 assertions, and 340-file package and consumer-security checks passed. The receipt identifies immutable runtime bytes and reused same-day no-plan/local controls; CI and publication remain separate release gates.
+The [2.5.3 evidence](upstream-2.5.3-certification.md) remains a prior full-operation example: candidate and production matrices each passed 24 tests / 201 assertions without skips in 349.07 and 406.19 seconds, including real rescue confinement/provenance, same-call Bash.cwd denial and out-of-root swarm-write denial. The earlier plugin 2.5.9 scoped 2.6.2 audit passed 19 source tests / 216 assertions and a 24-test candidate matrix / 201 assertions in 327.41 seconds; that historical narrowed certification is retained separately in the 2.6.2 record.
 The [2.3.2 record](upstream-2.3.2-certification.md) retains its historical
 validation counts, published artifact hashes and CI runs; these are not evidence
-for the new candidate.
+for another version or runtime revision.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 

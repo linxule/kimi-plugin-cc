@@ -344,8 +344,8 @@ Both binaries share `~/.kimi-code` (login, config, hook), so nothing else
 changes. The full-operation certified maximum can be read from the installed
 plugin (`NATIVE_V2_CERTIFIED_VERSIONS` in `dist/kimi-engine.js`), which lets an
 upgrade script bump the full-swarm pin automatically after each full-operation
-certification. That export excludes narrowed releases such as 2.6.0; exact 2.6.2 may enter it only
-after its bounded-swarm certification gates pass. `NATIVE_V2_ANY_OPERATION_VERSIONS`
+certification. That export excludes narrowed releases such as 2.6.0 and includes exact 2.6.2
+under its certified bounded-swarm construction. `NATIVE_V2_ANY_OPERATION_VERSIONS`
 is the separate scoped union, so an automatic full-swarm pin does not silently
 become a non-swarm-only pin.
 
