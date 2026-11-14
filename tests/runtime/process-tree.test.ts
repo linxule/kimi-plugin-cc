@@ -111,25 +111,104 @@ describe("retained process-tree anchor identity", () => {
   async function collector(
     initial: Row[] | undefined,
     verified: Row[] = initial ?? [],
-  ): Promise<{ collect: (pid: number, expectedRoot?: ProcessIdentity) => Promise<unknown[]>; verificationCount: () => number }> {
+  ) {
     const source = await readFile("runtime/process-tree.ts", "utf8");
     const code = new Bun.Transpiler({ loader: "ts" }).transformSync(
       source.slice(source.indexOf("async function collectVerifiedDescendantIdentities("), source.indexOf("async function readCurrentSnapshotRows(")),
     );
     let verifications = 0;
+    let snapshots = 0;
+    let verificationPids: number[] = [];
     const bindings = {
-      collectProcessSnapshotRows: async () => initial,
-      readCurrentSnapshotRows: async () => { verifications += 1; return verified; },
+      collectProcessSnapshotRows: async () => { snapshots += 1; return initial; },
+      readCurrentSnapshotRows: async (rows: Row[]) => {
+        verifications += 1;
+        verificationPids = rows.map((row) => row.pid);
+        return verified;
+      },
       isQuiescentState: (state: string) => /^[ZX]/i.test(state),
       toProcessIdentity: (identity: Row) => identity,
       MAX_DESCENDANT_DEPTH: 8,
       MAX_DESCENDANT_PIDS: 512,
     };
-    const collect = new Function(...Object.keys(bindings), `${code}; return collectVerifiedDescendantIdentities;`)(
+    const api = new Function(...Object.keys(bindings), `${code}; return { collect: collectVerifiedDescendantIdentities, collectRoots: collectVerifiedDescendantIdentitiesForRoots };`)(
       ...Object.values(bindings),
-    ) as (pid: number, expectedRoot?: ProcessIdentity) => Promise<unknown[]>;
-    return { collect, verificationCount: () => verifications };
+    ) as {
+      collect: (pid: number, expectedRoot?: ProcessIdentity) => Promise<unknown[]>;
+      collectRoots: (roots: readonly ProcessIdentity[]) => Promise<unknown[]>;
+    };
+    return {
+      ...api,
+      verificationCount: () => verifications,
+      snapshotCount: () => snapshots,
+      verifiedPids: () => verificationPids,
+    };
   }
+
+  test("multiple live anchors share one full snapshot and one targeted verification", async () => {
+    const otherRoot = { ...root, pid: 201, processGroupId: 201, startToken: "proc:other-root" };
+    const otherChild = { ...child, pid: 202, parentPid: 201, processGroupId: 201, startToken: "proc:other-child" };
+    const rows = [root, child, otherRoot, otherChild];
+    const scan = await collector(rows);
+    await expect(scan.collectRoots([root, otherRoot])).resolves.toEqual(rows);
+    expect(scan.snapshotCount()).toBe(1);
+    expect(scan.verificationCount()).toBe(1);
+    expect(scan.verifiedPids()).toEqual([101, 102, 201, 202]);
+  });
+
+  test("batch discovery skips missing, reused and group-changed roots", async () => {
+    const moved = { ...root, pid: 201, processGroupId: 999, startToken: "proc:moved" };
+    const scan = await collector([{ ...root, startToken: "proc:replacement" }, child, moved]);
+    await expect(scan.collectRoots([root, { ...moved, processGroupId: 201 }, { ...root, pid: 301 }])).resolves.toEqual([]);
+    expect(scan.verificationCount()).toBe(0);
+  });
+
+  test("a replaced batch root cannot discard a separate valid root's descendants", async () => {
+    const otherRoot = { ...root, pid: 201, processGroupId: 201, startToken: "proc:other-root" };
+    const otherChild = { ...child, pid: 202, parentPid: 201, processGroupId: 201, startToken: "proc:other-child" };
+    const scan = await collector([root, child, otherRoot, otherChild], [
+      { ...root, startToken: "proc:replacement" }, child, otherRoot, otherChild,
+    ]);
+    await expect(scan.collectRoots([root, otherRoot])).resolves.toEqual([otherRoot, otherChild]);
+  });
+
+  test("overlapping anchors are verified once and retain another valid ownership path", async () => {
+    const grandchild = { ...child, pid: 103, parentPid: 102, startToken: "proc:grandchild" };
+    const scan = await collector([root, child, grandchild], [{ ...root, startToken: "proc:replacement" }, child, grandchild]);
+    await expect(scan.collectRoots([root, child, root])).resolves.toEqual([child, grandchild]);
+    expect(scan.verifiedPids()).toEqual([101, 102, 103]);
+    expect(scan.verificationCount()).toBe(1);
+  });
+
+  test("a leaf anchor is returned and a vanished root does not erase stable children", async () => {
+    const leaf = { ...root, pid: 201, processGroupId: 201, startToken: "proc:leaf" };
+    const orphan = { ...child, parentPid: 1 };
+    const scan = await collector([root, child, leaf], [orphan, leaf]);
+    await expect(scan.collectRoots([root, leaf])).resolves.toEqual([orphan, leaf]);
+  });
+
+  test("batch union overflow fails before any targeted verification", async () => {
+    const children = Array.from({ length: 512 }, (_, index) => ({
+      ...child, pid: index + 1_000, startToken: `proc:child-${index}`,
+    }));
+    const scan = await collector([root, ...children]);
+    await expect(scan.collectRoots([root])).rejects.toThrow("process descendant snapshot exceeded 512 identities");
+    expect(scan.verificationCount()).toBe(0);
+  });
+
+  test("too many distinct roots fail before taking a process snapshot", async () => {
+    const roots = Array.from({ length: 513 }, (_, index) => ({ ...root, pid: index + 1_000 }));
+    const scan = await collector(roots);
+    await expect(scan.collectRoots(roots)).rejects.toThrow("process descendant snapshot exceeded 512 identities");
+    expect(scan.snapshotCount()).toBe(0);
+  });
+
+  test("empty root batches do no work and unreadable batches still fail", async () => {
+    const scan = await collector(undefined);
+    await expect(scan.collectRoots([])).resolves.toEqual([]);
+    expect(scan.snapshotCount()).toBe(0);
+    await expect(scan.collectRoots([root])).rejects.toThrow("process snapshot unavailable");
+  });
 
   test("a matching retained anchor collects and verifies its descendants", async () => {
     const { collect, verificationCount } = await collector([root, child]);

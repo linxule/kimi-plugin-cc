@@ -36,6 +36,7 @@ import {
 } from "./stream-json.js";
 import {
   collectDescendantIdentities,
+  collectDescendantIdentitiesForRoots,
   revalidateProcessIdentities,
   waitForProcessTreeExit,
   type ProcessIdentity,
@@ -131,6 +132,8 @@ export interface CliClientOptions {
    * platform process-tree collector.
    */
   descendantIdentityCollector?: (pid: number, expectedRoot?: ProcessIdentity) => Promise<ProcessIdentity[]>;
+  /** Internal test seam; production shares one process snapshot across retained anchors. */
+  descendantIdentityBatchCollector?: (expectedRoots: readonly ProcessIdentity[]) => Promise<ProcessIdentity[]>;
   /** Internal test seam; production uses start-time/PGID identity reads. */
   processIdentityReader?: ProcessIdentityReader;
   /** Internal test seam for proving teardown rejection cannot strand settlement. */
@@ -548,6 +551,14 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       void (cancellationTeardown ?? Promise.resolve<TeardownOutcome>({ ok: true })).then(
         (teardown) => {
           if (!teardown.ok) {
+            const details = {
+              ...errorDetails(),
+              ...(boundedSwarm ? { process_cleanup_unverified: true } : {}),
+              ...(boundedSwarm && kind === "resolve" ? {
+                process_exit_code: (payload as CliClientResult).exitCode,
+                process_signal: (payload as CliClientResult).signal,
+              } : {}),
+            };
             appendLogLine({
               event: "cancellation_teardown_error",
               message: formatError(teardown.error),
@@ -558,8 +569,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
                 `kimi ${boundedSwarm ? "process settlement" : "cancellation teardown"} failed: ${formatError(teardown.error)}`,
                 boundedSwarm ? "cli-client.settlement" : "cli-client.cancellation",
                 teardown.error instanceof Error
-                  ? { cause: teardown.error, details: { ...errorDetails(), ...(boundedSwarm ? { process_cleanup_unverified: true } : {}) } }
-                  : { details: { ...errorDetails(), ...(boundedSwarm ? { process_cleanup_unverified: true } : {}) } },
+                  ? { cause: teardown.error, details }
+                  : { details },
               ),
             );
             return;
@@ -580,15 +591,15 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       if (boundedSwarm) beginTeardown();
     });
 
-    const captureDescendantIdentities = async (
-      childPid: number,
-      expectedRoot?: ProcessIdentity,
+    const captureProcessIdentities = async (
+      collect: () => Promise<ProcessIdentity[]>,
+      excludedPid: number | undefined,
       onFailure?: (error: unknown) => void,
     ): Promise<ProcessIdentity[]> => {
       let snapshot: ProcessIdentity[];
       try {
         const collected = await raceWithValueTimeout(
-          (opts.descendantIdentityCollector ?? collectDescendantIdentities)(childPid, expectedRoot),
+          collect(),
           DESCENDANT_SNAPSHOT_TIMEOUT_MS,
           DESCENDANT_SNAPSHOT_TIMEOUT,
         );
@@ -617,7 +628,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         if (
           Number.isInteger(identity.pid) &&
           identity.pid > 0 &&
-          identity.pid !== childPid &&
+          identity.pid !== excludedPid &&
           Number.isInteger(identity.processGroupId) &&
           identity.processGroupId > 0 &&
           identity.startToken.length > 0 &&
@@ -629,6 +640,11 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       }
       return identities;
     };
+    const captureDescendantIdentities = (childPid: number, expectedRoot?: ProcessIdentity, onFailure?: (error: unknown) => void) =>
+      captureProcessIdentities(
+        () => (opts.descendantIdentityCollector ?? collectDescendantIdentities)(childPid, expectedRoot),
+        childPid, onFailure,
+      );
 
     const trySignalPid = (pid: number, signal: NodeJS.Signals) => {
       try {
@@ -711,7 +727,6 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         const reachable = !processExited ? await captureDescendantIdentities(childPid, undefined, noteFailure) : [];
         retainIdentities(reachable);
         const reachableKeys = new Set(reachable.map(identityKey));
-        const priorIdentities = [...trackedIdentities.values()];
         const validation = await revalidateProcessIdentities([...trackedIdentities.values()], {
           identityReader, timeoutMs: IDENTITY_REVALIDATION_TIMEOUT_MS,
         });
@@ -720,15 +735,19 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         }
         // Once a shell exits its surviving children are no longer under the
         // print root. Reuse their pinned identities as anchors, never bare PIDs.
-        // Probe even an anchor reported missing by validation: only a complete
-        // pass may retire its evidence, and the expected identity rejects reuse.
-        const orphanedAnchors = priorIdentities.filter((identity) => !reachableKeys.has(identityKey(identity)));
-        const additional = await Promise.all(orphanedAnchors.map((identity) =>
-          captureDescendantIdentities(identity.pid, identity, noteFailure)));
-        for (const identities of additional) retainIdentities(identities);
+        // Dead anchors provide no discovery evidence. Incomplete validation
+        // retains earlier identities without multiplying full-table probes.
+        const orphanedAnchors = validation.complete
+          ? validation.identities.filter((identity) => !reachableKeys.has(identityKey(identity)))
+          : [];
+        const additional = orphanedAnchors.length === 0 ? [] : await captureProcessIdentities(
+          () => (opts.descendantIdentityBatchCollector ?? collectDescendantIdentitiesForRoots)(orphanedAnchors),
+          childPid, noteFailure,
+        );
+        retainIdentities(additional);
         if (passError === undefined) {
           const liveKeys = new Set([
-            ...validation.identities, ...(validation.groupChanged ?? []), ...additional.flat(),
+            ...validation.identities, ...(validation.groupChanged ?? []), ...additional,
           ].map(identityKey));
           for (const key of trackedIdentities.keys()) {
             if (!liveKeys.has(key)) trackedIdentities.delete(key);
@@ -936,16 +955,15 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         await opts.onSpawn(child.pid);
         spawnRecorded = true;
       } catch (error) {
-        onAbort();
-        settle(
-          "reject",
-          new RuntimeError(
-            "CLI_SPAWN_CALLBACK_FAILED",
-            `Failed to record the spawned kimi process: ${formatError(error)}`,
-            "cli-client.spawn",
-            error instanceof Error ? { cause: error, details: errorDetails() } : { details: errorDetails() },
-          ),
+        const spawnError = new RuntimeError(
+          "CLI_SPAWN_CALLBACK_FAILED",
+          `Failed to record the spawned kimi process: ${formatError(error)}`,
+          "cli-client.spawn",
+          error instanceof Error ? { cause: error, details: errorDetails() } : { details: errorDetails() },
         );
+        if (boundedSwarm) checkpointError = spawnError;
+        onAbort();
+        settle("reject", spawnError);
         return;
       }
     }

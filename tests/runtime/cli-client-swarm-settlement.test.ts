@@ -11,10 +11,11 @@ const posixTest = process.platform === "win32" ? test.skip : test;
 
 for (const [mode, width] of [
   ["success", "1"], ["success", "2"], ["error-exit", "2"], ["cancel", "2"],
-  ["legacy", "2"], ["snapshot-error", "2"], ["identity-error", "2"], ["persistence-error", "2"],
+  ["legacy", "2"], ["snapshot-error", "2"], ["batch-snapshot-error", "2"],
+  ["identity-error", "2"], ["persistence-error", "2"],
   ["incomplete-retention", "2"], ["snapshot-persistent", "2"],
   ["identity-persistent", "2"], ["persistence-persistent", "2"],
-  ["sticky", "2"], ["slow-spawn", "2"], ["failure", "2"],
+  ["sticky", "2"], ["slow-spawn", "2"], ["failure", "2"], ["spawn-callback-error", "2"],
 ]) {
   posixTest(`bounded swarm settlement ${mode}, concurrency ${width}`, async () => {
     const root = await createTestPluginDataRoot("cli-swarm-settlement");

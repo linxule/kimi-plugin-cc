@@ -24,6 +24,16 @@ export async function collectDescendantIdentities(rootPid, expectedRoot) {
     }
     return snapshot;
 }
+/** Collect owned roots and descendants with one shared table and targeted verification. */
+export async function collectDescendantIdentitiesForRoots(expectedRoots) {
+    if (expectedRoots.length === 0 || process.platform === "win32")
+        return [];
+    const snapshot = await raceValueWithTimeout(collectVerifiedDescendantIdentitiesForRoots(expectedRoots), PROCESS_SNAPSHOT_TIMEOUT_MS);
+    if (snapshot === PROBE_TIMEOUT) {
+        throw new Error(`process snapshot exceeded ${PROCESS_SNAPSHOT_TIMEOUT_MS}ms`);
+    }
+    return snapshot;
+}
 /** Return current members of the selected process groups, or undefined when unreadable. */
 export async function collectProcessGroupsIdentities(processGroupIds) {
     if (process.platform === "win32")
@@ -180,20 +190,61 @@ async function collectVerifiedDescendantIdentities(rootPid, expectedRoot) {
     });
     return stableRows.map(toProcessIdentity);
 }
-function descendantRowsFromSnapshot(rootPid, rows) {
+async function collectVerifiedDescendantIdentitiesForRoots(expectedRoots) {
+    const roots = expectedRoots.filter((root) => Number.isInteger(root.pid) && root.pid > 0);
+    if (roots.length === 0)
+        return [];
+    if (new Set(roots.map((root) => root.pid)).size > MAX_DESCENDANT_PIDS) {
+        throw new Error(`process descendant snapshot exceeded ${MAX_DESCENDANT_PIDS} identities`);
+    }
+    const initialRows = await collectProcessSnapshotRows();
+    if (initialRows === undefined)
+        throw new Error("process snapshot unavailable");
+    const initialByPid = new Map(initialRows.map((row) => [row.pid, row]));
+    const childrenByParent = indexChildrenByParent(initialRows);
+    const candidatesByRoot = new Map();
+    const expectedByPid = new Map();
+    for (const expected of roots) {
+        const root = initialByPid.get(expected.pid);
+        if (root === undefined || isQuiescentState(root.state) ||
+            root.startToken !== expected.startToken || root.processGroupId !== expected.processGroupId)
+            continue;
+        if (candidatesByRoot.has(root.pid))
+            continue;
+        const candidates = [root, ...descendantRowsFromSnapshot(root.pid, initialRows, childrenByParent)];
+        candidatesByRoot.set(root.pid, candidates);
+        for (const row of candidates) {
+            expectedByPid.set(row.pid, row);
+            if (expectedByPid.size > MAX_DESCENDANT_PIDS) {
+                throw new Error(`process descendant snapshot exceeded ${MAX_DESCENDANT_PIDS} identities`);
+            }
+        }
+    }
+    if (expectedByPid.size === 0)
+        return [];
+    const verificationRows = await readCurrentSnapshotRows([...expectedByPid.values()]);
+    const verifiedByPid = new Map(verificationRows.map((row) => [row.pid, row]));
+    const ownedPids = new Set();
+    for (const [rootPid, candidates] of candidatesByRoot) {
+        const expected = expectedByPid.get(rootPid);
+        const current = verifiedByPid.get(rootPid);
+        if (current !== undefined &&
+            (current.startToken !== expected.startToken || current.processGroupId !== expected.processGroupId))
+            continue;
+        for (const candidate of candidates)
+            ownedPids.add(candidate.pid);
+    }
+    return verificationRows.filter((current) => {
+        const expected = expectedByPid.get(current.pid);
+        return ownedPids.has(current.pid) && expected !== undefined &&
+            current.startToken === expected.startToken && !isQuiescentState(current.state);
+    }).map(toProcessIdentity);
+}
+function descendantRowsFromSnapshot(rootPid, rows, indexedChildren) {
     const root = rows.find((row) => row.pid === rootPid);
     if (root === undefined || isQuiescentState(root.state))
         return [];
-    const childrenByParent = new Map();
-    for (const row of rows) {
-        if (row.pid <= 0 || row.parentPid <= 0 || row.pid === row.parentPid)
-            continue;
-        const children = childrenByParent.get(row.parentPid);
-        if (children === undefined)
-            childrenByParent.set(row.parentPid, [row]);
-        else
-            children.push(row);
-    }
+    const childrenByParent = indexedChildren ?? indexChildrenByParent(rows);
     const descendants = [];
     const seen = new Set([rootPid]);
     let frontier = [rootPid];
@@ -213,6 +264,19 @@ function descendantRowsFromSnapshot(rootPid, rows) {
         frontier = next;
     }
     return descendants;
+}
+function indexChildrenByParent(rows) {
+    const childrenByParent = new Map();
+    for (const row of rows) {
+        if (row.pid <= 0 || row.parentPid <= 0 || row.pid === row.parentPid)
+            continue;
+        const children = childrenByParent.get(row.parentPid);
+        if (children === undefined)
+            childrenByParent.set(row.parentPid, [row]);
+        else
+            children.push(row);
+    }
+    return childrenByParent;
 }
 async function readCurrentSnapshotRows(expectedRows) {
     const procPids = [];

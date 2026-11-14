@@ -8,13 +8,13 @@ if (!runtimeRoot || !extension || !root) throw new Error("Missing settlement run
 const load = (name) => import(pathToFileURL(path.join(runtimeRoot, `${name}.${extension}`)).href);
 const { runCliPrompt } = await load("cli-client");
 const { NATIVE_V2_CERTIFIED } = await load("kimi-engine");
-const { collectDescendantIdentities, probeProcessIdentity } = await load("process-tree");
+const { collectDescendantIdentities, collectDescendantIdentitiesForRoots, probeProcessIdentity } = await load("process-tree");
 const fixture = path.join(import.meta.dirname, "swarm-exit-tail.mjs");
 const paths = Object.fromEntries([
-  "ready", "writes", "signals", "shellRelease", "shellExited", "rootRelease", "rootExited", "identity", "result",
+  "ready", "writes", "signals", "shellRelease", "shellExited", "rootRelease", "rootExited", "identity", "result", "spawnFailureRelease",
 ].map((name) => [name, path.join(root, `${name}.json`)]));
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const transientModes = ["snapshot-error", "identity-error", "persistence-error", "incomplete-retention"];
+const transientModes = ["snapshot-error", "batch-snapshot-error", "identity-error", "persistence-error", "incomplete-retention"];
 const persistentModes = ["snapshot-persistent", "identity-persistent", "persistence-persistent"];
 const liveTailModes = ["failure", "identity-persistent"];
 async function waitFor(read, timeoutMs = 3000) {
@@ -47,21 +47,23 @@ async function killObserved() {
 
 async function main() {
   const version = mode === "legacy" ? "2.5.3" : "2.6.2";
-  const exitCode = mode === "error-exit" ? 7 : 0;
+  const exitCode = ["error-exit", "persistence-persistent"].includes(mode) ? 7 : 0;
   const oldRow = NATIVE_V2_CERTIFIED.get("swarm");
   NATIVE_V2_CERTIFIED.set("swarm", [...new Set([...oldRow, version])]);
   const captured = new Map();
   const controller = new AbortController();
   let collectorCalls = 0;
+  let batchCollectorCalls = 0;
   let teardownCalls = 0;
   let failureInjected = false;
-  let rootCallbackComplete = mode !== "slow-spawn";
+  let rootCallbackComplete = !["slow-spawn", "spawn-callback-error"].includes(mode);
   let publishedBeforeRoot = false;
   let capturedDuringRootCallback = false;
   let faultEnabled = false;
   let incompletePassActive = false;
   let retentionBaseline = [];
   let snapshotFailures = 0;
+  let batchSnapshotFailures = 0;
   let identityFailures = 0;
   let checkpointFailures = 0;
   const checkpoints = [];
@@ -69,6 +71,23 @@ async function main() {
   let retainedDuringIncomplete = false;
   let retriedCheckpoint = false;
   let failedCheckpointSignature;
+  const injectSnapshotFailure = (batch) => {
+    if (faultEnabled && (
+      mode === "snapshot-persistent" ||
+      (mode === "snapshot-error" && !batch && !failureInjected) ||
+      (mode === "batch-snapshot-error" && batch && !failureInjected) ||
+      (mode === "incomplete-retention" && !batch && !failureInjected)
+    )) {
+      failureInjected = true;
+      snapshotFailures++;
+      if (batch) batchSnapshotFailures++;
+      if (mode === "incomplete-retention") {
+        incompletePassActive = true;
+        retentionBaseline = checkpoints.at(-1)?.identities ?? [];
+      }
+      throw new Error("scripted snapshot failure");
+    }
+  };
   let promise;
   try {
     promise = runCliPrompt({
@@ -94,18 +113,14 @@ async function main() {
         collectorCalls++;
         const identities = await collectDescendantIdentities(...args);
         for (const identity of identities) captured.set(identity.pid, identity);
-        if (faultEnabled && (
-          mode === "snapshot-persistent" ||
-          (["snapshot-error", "incomplete-retention"].includes(mode) && !failureInjected)
-        )) {
-          failureInjected = true;
-          snapshotFailures++;
-          if (mode === "incomplete-retention") {
-            incompletePassActive = true;
-            retentionBaseline = checkpoints.at(-1)?.identities ?? [];
-          }
-          throw new Error("scripted snapshot failure");
-        }
+        injectSnapshotFailure(false);
+        return identities;
+      },
+      descendantIdentityBatchCollector: async (roots) => {
+        batchCollectorCalls++;
+        const identities = await collectDescendantIdentitiesForRoots(roots);
+        for (const identity of identities) captured.set(identity.pid, identity);
+        injectSnapshotFailure(true);
         return identities;
       },
       processIdentityReader: async (pid) => {
@@ -161,10 +176,15 @@ async function main() {
         }
         if (failedCheckpointSignature === signature) retriedCheckpoint = true;
       },
-      onSpawn: mode === "slow-spawn" ? async () => {
+      onSpawn: ["slow-spawn", "spawn-callback-error"].includes(mode) ? async () => {
         const ready = await waitFor(async () => JSON.parse(await readFile(paths.ready, "utf8")));
         await waitFor(async () => captured.get(ready.pid));
         capturedDuringRootCallback = true;
+        if (mode === "spawn-callback-error") {
+          await waitFor(async () => readFile(paths.spawnFailureRelease, "utf8"));
+          failureInjected = true;
+          throw new Error("scripted root checkpoint failure");
+        }
         await pause(200);
         rootCallbackComplete = true;
       } : undefined,
@@ -214,8 +234,12 @@ async function main() {
     }
     faultEnabled = true;
     const releasedAt = Date.now();
-    await writeFile(paths.rootRelease, "release\n");
-    await waitFor(async () => JSON.parse(await readFile(paths.rootExited, "utf8")));
+    if (mode === "spawn-callback-error") {
+      await writeFile(paths.spawnFailureRelease, "release\n");
+    } else {
+      await writeFile(paths.rootRelease, "release\n");
+      await waitFor(async () => JSON.parse(await readFile(paths.rootExited, "utf8")));
+    }
 
     if (mode === "legacy") {
       let settled = false;
@@ -230,7 +254,7 @@ async function main() {
 
     const outcome = await within(promise.then((result) => ({ result }), (error) => ({ error })));
     assert.ok(Date.now() - releasedAt < 3000);
-    if ([...persistentModes, "sticky", "failure"].includes(mode)) {
+    if (["identity-persistent", "persistence-persistent", "sticky", "failure", "spawn-callback-error"].includes(mode)) {
       assert.equal(failureInjected, true);
       assert.equal(outcome.error?.code, "CLI_PROCESS_SETTLEMENT_FAILED");
       assert.equal(outcome.error?.details?.process_cleanup_unverified, true);
@@ -269,25 +293,43 @@ async function main() {
       assert.ok(incomplete.every((checkpoint) => checkpoint.identities.some((identity) =>
         identity.pid === leaf.pid && identity.startToken === leaf.startToken)),
       "persistent incomplete passes must never publish false empty ownership");
-      assert.equal(checkpoints.at(-1)?.complete, false);
+      assert.equal(checkpoints.at(-1)?.complete, mode === "snapshot-persistent");
       assert.ok((mode === "snapshot-persistent" ? snapshotFailures : identityFailures) > 1);
+      if (mode === "snapshot-persistent") {
+        assert.ok(batchSnapshotFailures > 0, "a live orphan must exercise the failing batch collector");
+        assert.equal(outcome.error, undefined, "complete dead-identity proof needs no further anchor snapshot");
+      }
     }
     if (mode === "persistence-persistent") {
       assert.ok(checkpointFailures > 1);
       assert.equal(checkpoints.at(-1)?.succeeded, false);
       assert.ok(checkpoints.some((checkpoint) => checkpoint.faultEnabled && checkpoint.identities.length === 0),
         "quiescent processes still require a successful final checkpoint");
+      assert.match(outcome.error.cause.message, /scripted persistence failure/);
+      assert.match(outcome.error.message, /scripted persistence failure/);
+      assert.equal(outcome.error.details.process_exit_code, 7);
+      assert.equal(outcome.error.details.process_signal, null);
     }
+    if (mode === "batch-snapshot-error") assert.equal(batchSnapshotFailures, 1);
     if (mode === "slow-spawn") {
       assert.equal(capturedDuringRootCallback, true);
       assert.equal(publishedBeforeRoot, false);
       assert.equal(rootCallbackComplete, true);
     }
+    if (mode === "spawn-callback-error") {
+      assert.equal(capturedDuringRootCallback, true);
+      assert.equal(publishedBeforeRoot, false);
+      assert.equal(rootCallbackComplete, false);
+      assert.equal(checkpoints.length, 0);
+      assert.equal(outcome.error.cause?.code, "CLI_SPAWN_CALLBACK_FAILED");
+      assert.match(outcome.error.cause?.cause?.message, /scripted root checkpoint failure/);
+      assert.match(outcome.error.message, /scripted root checkpoint failure/);
+    }
     await writeFile(paths.result, JSON.stringify({
-      mode, width: Number(width), version, collectorCalls, teardownCalls,
+      mode, width: Number(width), version, collectorCalls, batchCollectorCalls, teardownCalls,
       failureInjected, capturedDuringRootCallback, publishedBeforeRoot,
       recoveredComplete, retainedDuringIncomplete, retriedCheckpoint,
-      snapshotFailures, identityFailures, checkpointFailures,
+      snapshotFailures, batchSnapshotFailures, identityFailures, checkpointFailures,
       checkpoints,
       errorCode: outcome.error?.code, cleanupUnverified: outcome.error?.details?.process_cleanup_unverified,
       leafAliveAtReturn: current.identity?.startToken === leaf.startToken,

@@ -11,8 +11,8 @@ const posixTest = process.platform === "win32" ? test.skip : test;
 
 for (const distribution of ["dist", "plugins/kimi-codex/dist", "plugins/kimi-dsh/dist"]) {
   for (const mode of [
-    "success", "failure", "snapshot-error", "identity-error", "persistence-error", "incomplete-retention",
-    "snapshot-persistent", "identity-persistent", "persistence-persistent",
+    "success", "failure", "snapshot-error", "batch-snapshot-error", "identity-error", "persistence-error", "incomplete-retention",
+    "snapshot-persistent", "identity-persistent", "persistence-persistent", "spawn-callback-error",
   ]) {
     posixTest(`${distribution} settles owned tails and exits naturally after ${mode}`, async () => {
       const root = await createTestPluginDataRoot("compiled-swarm-settlement");
