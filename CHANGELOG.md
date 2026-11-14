@@ -2,15 +2,13 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
-## 2.6.2 — unreleased (Linux fix validation pending)
-
-Linux release CI failed before tagging or publication. The passes below belong to the prior macOS runtime; the process-identity correction and replacement final receipts remain pending in the [certification record](docs/upstream-2.6.2-certification.md).
+## 2.6.2 — 2026-11-14 (publication pending)
 
 - Add a bounded swarm construction for exact stock CLI 2.6.2: managed-hook wave admission counts new and resumed entries, rejects forks, and uses a plugin-owned width. Force the native child timeout beyond the finite job budget so a timed-out retry cannot overlap a later wave.
 - Disable native Bash backgrounding in owned parallel sessions and deny explicit background Bash. Settle identity-verified owned processes after normal exit as well as cancellation before capturing artifacts or patches. Concurrency bounds Kimi child-agent turns; allowed repository commands can still start multiple OS processes.
 - Run concurrency 1 as one direct worker without native swarm activation or delegation. Preserve read-only policy, temporary-worktree writes, unapplied patches, operation provenance and cancellation.
 - Keep exact 2.6.0 non-swarm-only and retain the documented recovery limitation on older full-operation rows. This change does not patch the upstream runtime or update installed hosts.
-- Certify all eight operations on exact CLI 2.6.2. Final stock-binary controls pass **23 tests / 138 assertions**; live production passes **30 tests / 390 assertions**, with only the two inapplicable narrowed-refusal tests skipped. The isolated full gate passes **1,720 tests / 75 expected skips / 22,490 assertions in 541.73s**. Source audit, 340-file package validation, isolated consumer security and independent source review pass. Linux CI and publication remain pending; exact commits and hashes are in the [2.6.2 record](docs/upstream-2.6.2-certification.md).
+- Certify all eight operations on exact CLI 2.6.2. Final stock-binary controls pass **23 tests / 138 assertions**; live production passes **30 tests / 386 assertions**, with only the two inapplicable narrowed-refusal tests skipped. The full gate passes **1,767 tests / 76 expected opt-in or platform skips / 23,008 assertions in 591.60s**. Kernel-visible Linux validation passes **130 tests / 1 macOS-specific skip / 832 assertions**. Source audit, 340-file package validation, isolated consumer security and both independent reviews pass on corrected runtime `b69a416`. Release CI and publication remain pending; exact commits, first-CI failure chronology and final hashes are in the [2.6.2 record](docs/upstream-2.6.2-certification.md).
 
 ## 2.5.9 — 2026-11-14
 

@@ -1,10 +1,14 @@
 # Exact CLI 2.6.2 certification — plugin 2.6.2
 
-## Bounded swarm certification — pending Linux fix validation
+## Bounded swarm certification — 2026-11-14
 
-**Status: PENDING final fix validation; not released.** Linux release CI run `43604995805` exposed a process-identity bug before tagging or publication and was canceled after 20 minutes with 64 recorded failures. The collector fell back to `ps` start tokens while identity probes used `/proc` start ticks after encountering a kernel process with PGID 0; the resulting timeout cascade was not a deadlock. The fix keeps Linux identity collection on `/proc` and narrowly excludes `PF_KTHREAD` entries with PGID 0, while test helpers add early-failure cleanup. Those changes and fresh release gates are still pending validation.
+**Status: certified for all eight operations.** Final source, stock-binary, live-provider, repository, package, Linux-host and independent-review gates passed on runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. Release CI, tagging and publication remain pending; no installed-host update is implied.
 
-The prior macOS source, stock-binary, real-provider, repository and package passes below are retained against their recorded runtime bytes. They do not certify the repaired runtime or replace the failed Linux gate. The published plugin 2.5.9 non-swarm certification remains historical evidence below.
+The corrected runtime is frozen at `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. Linux snapshots stay on `/proc`. Proven `PF_KTHREAD` rows with PGID 0 are excluded; valid non-kernel PGID 0/-1 rows remain available for ancestry and cause refusal only when the requested owned subtree depends on them. Genuinely unreadable or malformed rows still make the snapshot incomplete, and targeted nonpositive-group probes remain incomplete. Persisted `ps` identities still validate through their matching reader. On the legacy cancellation path, snapshot failure still stops the owned root, then returns `CLI_CANCELLATION_TEARDOWN_FAILED` with `process_cleanup_unverified` and the original cause; a wrapped budget error carries no partial prose. Test helpers now clean up early failures and bound pipe draining.
+
+Codex found no actionable defects, and `FABLE-LINUX-CLOSURE.md` closes all three source findings without new defects. New cancellation controls passed 28 tests / 420 assertions alongside 105 existing tests / 301 assertions; helper pipe-drain controls passed 5 tests / 39 assertions. The final runtime gates below verify the reviewed implementation and emitted artifacts.
+
+The published plugin 2.5.9 non-swarm certification remains historical evidence below. Earlier runtime passes and the failed first Linux gate are retained as chronology, not substituted for the final receipts.
 
 The exact source and binary remain commit `6a8493df3e1d796a63f7c7ca0de76c1e690cd943` and bundle SHA-256 `f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a`. The upstream rate-limit scheduler is unchanged. The plugin enforces the bound through admission and terminal cancellation:
 
@@ -20,38 +24,42 @@ The native TaskStop policy persists after deactivation of the owned parallel ses
 
 ### Validation receipts
 
-The prior validated macOS runtime is commit `e8f7059ec211489263710dff76595b2ef80c949c`; the Linux correction changes runtime bytes and requires replacement final receipts. The full repository, live-provider and package gates below ran from an isolated Git clone at `/var/folders/93/qllsxfwn1tz2jbj6zt868c780000gn/T/kimi-release-2.6.2-final-odld3_2v`. The stock-binary `production-03` run verified all 184 covered files against that commit's Git blobs both before and after execution. Its manifest SHA-256 is `fe5bacb5478a2f63f5dd1651c0b8967ac6c63a142748ff3bf910c9e9229a3f79`; its covered-file digest is `47b5e0cd5186ac7d62e5df1a629935d0a852a411b64fd0fee64d6697f408b3c3`. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; ignored logs are evidence locations, not package contents.
+Final gates use immutable runtime commit `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. All 184 covered files match the same Git blobs, with runtime/dist digest `d4c2844484468e7e39ff962e084980978bd25a6d9fdbbd24c23840f33a7dc836`; 174 distribution-mirror files match committed bytes. The final `production-05` manifest SHA-256 is `72b8c3e8d67e7ba4f22ae21e9e4b56b49337960fb662222f687f06eae0d9db15`. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; ignored logs are evidence locations, not package contents.
 
 | Gate | Receipt |
 | --- | --- |
 | Exact-source audit and tag scan | PASS: 31 tests / 393 assertions, 115 source pins; exact 2.5.3 regression 19 pass / 12 version-specific skips / 153 assertions |
 | Canonical policy, emitted-runtime and repository regressions | PASS in the final full gate: all three compiled distributions, canonical-hook policy, escape-monitor propagation and unsafe-settlement patch refusal |
-| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PASS: `production-03.log`, 23 tests / 138 assertions in 275.03s; no failures |
+| Scripted stock-binary waves, resume counting, nesting, recovery and timeout-tail controls | PASS: `production-05.log`, 23 tests / 138 assertions in 274.56s; no failures, including both 200-second recovery controls |
 | Native background-policy closure, explicit background denial, normal-exit descendant quiescence before capture | PASS: parallel auto-background and explicit-background controls in that same stock-binary suite |
 | Single-worker read/write, delegation denial, patch and cancellation controls | PASS: explicit/default concurrency-one, automatic-background, cancellation and budget controls in that same suite |
-| Real-provider production operation matrix | PASS: `live-release-commit.log`, 30 pass / 2 intentional narrowed-version-refusal skips / 390 assertions in 440.53s; exit 0 at 2026-11-14T14:20:59Z. Both swarm execution paths run; the two skipped tests assert refusals that do not apply to the full 2.6.2 scope |
+| Real-provider production operation matrix | PASS: `live-certified-commit.log`, 30 pass / 2 inapplicable narrowed-refusal skips / 386 assertions in 410.88s; exit 0 at 2026-11-14T15:30:22Z. Both swarm execution paths run; the two skipped tests assert refusals that do not apply to the full 2.6.2 scope |
 | No-plan and local-execution controls | PASS: same-day exact-source and exact-binary controls retained in the historical receipt below; unchanged source/binary and safety closures are rechecked by the final tag scan and operation matrix |
-| Frozen dependency install and full repository gate | PASS: `release-full-check.log`, 1,720 pass / 75 expected opt-in skips / 0 failures / 22,490 assertions; 1,795 tests across 93 files in 541.73s |
-| Package and isolated consumer security | PASS: final `release-package.log` verifies 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot. `release-consumer-security.log` passes isolated npm consumer security |
-| Independent reviews | PASS: Codex reports no actionable findings. Fable's `FABLE-BATCH.md` finds no remaining defect in its reviewed caller/helper source scope and explicitly leaves runtime tests and emitted-artifact verification to the final gates above |
-| Linux CI and publication | FAILED release gate: run `43604995805`, 64 recorded failures before cancellation; correction and final reruns PENDING. No tag, publication or installed-host result is claimed |
+| Frozen dependency install and full repository gate | PASS: `certified-full-check.log`, 1,767 pass / 76 expected opt-in or platform skips / 0 failures / 23,008 assertions; 1,843 tests across 96 files in 591.60s |
+| Kernel-visible Linux host | PASS: `linux-host-focused-final.log`, 130 pass / 1 macOS-specific skip / 0 failures / 832 assertions in 104.70s; Linux 7.0.14-linuxkit arm64, with 206 PF_KTHREAD PGID-0 rows and 8 non-kernel PGID≤0 rows |
+| Package and isolated consumer security | PASS: `certified-package.log` verifies 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot. `certified-consumer-security.log` passes isolated npm consumer security |
+| Independent reviews | PASS: Codex reports no actionable findings. Fable's final `FABLE-LINUX-CLOSURE.md` closes all three source findings with no new defect; runtime tests and emitted-artifact verification are established separately by the final gates above |
+| Release CI, tagging and publication | PENDING. No tag, publication or installed-host result is claimed |
 
 The 23 stock-binary controls use the untouched 2.6.2 executable with a scripted test provider. They exercise new/resumed waves, odd target grouping, both nested profiles, invalid resumes, read/write cancellation, active HTTP/tool budget expiry, and 429/context recovery beyond the native 180-second interval. Their deterministic responses prove enforcement and settlement; the separate passing real-provider matrix proves useful model behavior through the production operation paths.
 
-Commit `9db8e97` subsequently corrects zombie-process quiescence checks in two test helpers only; runtime and emitted artifacts are unchanged from `e8f7059`. Focused checks passed 50 tests / 218 assertions, and churn controls passed 4 tests / 36 assertions after that correction. Linux CI remains a separate release gate. Same-day source and no-plan/local controls are explicitly reused against the unchanged exact CLI; earlier prototype or pre-fix runtime passes do not replace the final receipts above.
+The uncoached live five-target control at width four grouped the targets into two children in one wave, with peak two, no coordinator-authored targets and an 899-byte patch. This is valid grouping, not proof that each target needs a separate child. The directed control completed two bounded waves and rejected a three-entry wave at width two. Same-day source and no-plan/local controls are explicitly reused against the unchanged exact CLI; earlier prototype or pre-fix runtime passes do not replace the final receipts above.
 
 | Completed evidence file | SHA-256 |
 | --- | --- |
 | `source-scan-2.6.2.log` | `ea21898d94dba98fa68792565c6d2bb409af04307fc72446af2da58598f2e507` |
 | `source-scan-2.5.3.log` | `f04df6af7b6c2252526bba52a2df357a1f152618c4f6fc12ca6354400232723c` |
-| `production-03.log` | `d8e7dd94fd94aee7b42e20d06ffdd3735a4e16cf8a8d3fdbb2f7cb41284d9125` |
-| `release-full-check.log` | `b46be31f50499ab5947344510c6382b786538adf06a1b354e9fb3d5fbe4af636` |
-| `live-release-commit.log` | `cd8a8a3ca145d239474ca7e2e6a8576be576178cb1c67da7f3bee524666434bc` |
-| `release-package.log` | `ba151af3382fafbcbbe0a8b47fccd679f92f6a5e47642c73185fd2c8283bb1ac` |
-| `release-consumer-security.log` | `3dea92a3793941ba29017dec7b3e7a7a254eb45473130349fa4502b70a817221` |
-| `FABLE-BATCH.md` | `d27e38068eff4d241d476527471a4f7bff1ed72da11ac2d3ba7497e84b0b8e1f` |
+| `production-05.log` | `bd89f7a480f93ccfc554dc70c1fb431ab6b29cda213b9608c81bcc5e908329e0` |
+| `certified-full-check.log` | `b24c2078902272389729ad0b0e2828f3282335dd43867279bcd9086c93d34d71` |
+| `live-certified-commit.log` | `b17ccb73da31c2e127eab175b7fa4289ec986942158b1daa5e9a07ba6af24ffc` |
+| `certified-package.log` | `aa125bef88a327cb9de596f0eb0862cc581d6b49544eb932b272e706ca006b57` |
+| `certified-consumer-security.log` | `3dea92a3793941ba29017dec7b3e7a7a254eb45473130349fa4502b70a817221` |
+| `linux-host-focused-final.log` | `f309adc00fdebdbf5878e34871dca4e3846822b1a4f92293c52c7e09164302ed` |
+| `FABLE-LINUX-CLOSURE.md` | `2dd16b010bd44581891a3f367c7b19b7ee08a1157dd885e1bb085e8f8a4ae81e` |
 
 ### Counterexamples that determined the construction
+
+Earlier macOS gates passed at `e8f7059`; helper-only zombie checks followed at `9db8e97`. The first release CI run `43604995805` then exposed mismatched `ps`/`proc` identity tokens after a Linux kernel PGID-0 row, recording 64 failures before cancellation after 20 minutes. This was a timeout cascade, not a deadlock, and no tag or publication occurred. CI run `43608218030` subsequently passed both check and Windows-spawn jobs at `a2001e9`. Further review required valid unrelated nonpositive-group ancestry and explicit legacy snapshot-failure reporting; the final `b69a416` source and all runtime gates above include those corrections. The earlier CI pass is not represented as final release CI.
 
 The earlier prototype supplied 11 admission/recovery binary controls, 18 direct hook probes and 10 lifecycle controls. It established a real guard-only failure (three active children at width two after a short native timeout) and a protected counterpart, including process checks before provider cleanup. Those ignored research artefacts motivated the production construction; they do not replace the canonical implementation or release gates above.
 
