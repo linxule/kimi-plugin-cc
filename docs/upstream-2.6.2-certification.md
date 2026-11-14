@@ -51,4 +51,15 @@ The focused candidate suite passed **353 tests / 4,850 assertions**. The expande
 - Final package validation (`final-package.log`): **334 files**, all three compiled distributions, isolated setup/check/version refusal, patched DSH host/profile with seven providers/tools and Web boot, terminal exit 0. Isolated npm consumer security (`final-consumer.log`) passed with exit 0.
 - Codex's final incremental verification returned **NO FINDINGS / APPROVE**, exit 0. Claude's returned **NO FINDINGS / APPROVE**, exit 0. Their findings drove the README and guidance updates, direct 2.6.2 assertions, explicit base-commit provenance and correction of the erroneous byte-identity claim. Both confirmed that full-swarm certification remains at 2.5.3 and 2.6.1/2.6.3 are excluded.
 - The required release-commit rerun passed **23 tests / 171 assertions in 225.87 seconds**, with exactly the three intentional swarm-lane exclusions and terminal exit 0. It ran on immutable release commit `1625858bf8851a26eee5f19ae6eb5bfe7666e97b`, whose runtime/test bytes are identical to the passing final gate. Both real swarm command paths again refused before model spawn. The retained log is `daily-monitor/smoke/2026-11-14-2.6.2-production.log`, SHA-256 `9d224c8063e80ea7fe02eeb672b4e44963790329e40243a2f52ffdceafce86fc`; its header records that release commit. The pre-release log is retained separately as `production-pre-release.log`.
-- Publication receipts are recorded below after publication. Publication does not update installed hosts or operator CLI pins.
+## Publication receipt
+
+Release commit `1625858bf8851a26eee5f19ae6eb5bfe7666e97b` contains the certified runtime; the immutable [v2.5.9 tag and GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.5.9) is anchored at evidence commit `6f9eaa6e145d62e7f35e5ff38d317bd7e3a673c5`. [Final CI run 43585425445](https://github.com/linxule/kimi-plugin-cc/actions/runs/43585425445) passed the full check/package pipeline and Windows spawn controls. [OIDC publication run 43585933931](https://github.com/linxule/kimi-plugin-cc/actions/runs/43585933931) passed build and publication.
+
+npm published `kimi-plugin-cc@2.5.9` at **2026-11-14T10:43:34.167Z**, and npm `latest` is 2.5.9. The 334-file registry tarball is byte-identical to the validated CI artifact:
+
+- SHA-1: `2158551b73d3408af14e2061c29e40dc60622947`
+- SHA-256: `d5c43b95c708468393f357c353c180488ae83edb56cae93e840d08ee2b3dc520`
+- Signed SLSA provenance: sigstore log index `3876002731`
+- Publish attestation: sigstore log index `3876057720`
+
+A fresh registry installation has zero production advisories and no invalid or missing signatures. Isolated setup and `setup --check` pass with the explicit non-swarm warning; the installed runtime preserves full-swarm pins through 2.5.3 and enforces the six non-swarm admissions and both swarm refusals on exact 2.6.2. The new certification record is present in the package. `DSH_PUBLISH_TIMESTAMP` is `1794653014`, recording the actual npm publication time. No installed host or operator CLI pin was changed.
