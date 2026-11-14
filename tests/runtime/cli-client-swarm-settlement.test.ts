@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { probeProcessIdentity, type ProcessIdentity } from "../../runtime/process-tree.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
+import { cleanupRecordedSwarmProcesses, readSwarmCleanupIdentities, waitForSwarmRunner } from "../helpers/swarm-runner-cleanup.js";
 
 const runner = path.join(process.cwd(), "tests/helpers/swarm-settlement-runner.mjs");
 const posixTest = process.platform === "win32" ? test.skip : test;
@@ -25,18 +26,9 @@ for (const [mode, width] of [
     let output = "";
     child.stdout.on("data", (chunk) => { output += String(chunk); });
     child.stderr.on("data", (chunk) => { output += String(chunk); });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let killedForTimeout = false;
     try {
-      const status = await new Promise<number | null>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", resolve);
-        timer = setTimeout(() => {
-          killedForTimeout = true;
-          child.kill("SIGKILL");
-        }, 7000);
-      });
-      expect(killedForTimeout, output).toBe(false);
+      const { status, timedOut } = await waitForSwarmRunner(child, 7000);
+      expect(timedOut, output).toBe(false);
       expect(status, output).toBe(0);
       const result = JSON.parse(await readFile(path.join(root, "result.json"), "utf8"));
       expect(result.mode).toBe(mode);
@@ -49,17 +41,7 @@ for (const [mode, width] of [
         expect((await probeProcessIdentity(identity.pid)).identity?.startToken).toBe(identity.startToken);
       }
     } finally {
-      if (timer) clearTimeout(timer);
-      child.kill("SIGKILL");
-      const identity = await readFile(path.join(root, "identity.json"), "utf8")
-        .then((text) => JSON.parse(text) as ProcessIdentity).catch(() => undefined);
-      if (identity) {
-        const current = await probeProcessIdentity(identity.pid);
-        if (current.complete && current.identity?.startToken === identity.startToken &&
-          current.identity.processGroupId === identity.processGroupId) {
-          try { process.kill(identity.pid, "SIGKILL"); } catch { /* Already exited. */ }
-        }
-      }
+      await cleanupRecordedSwarmProcesses(await readSwarmCleanupIdentities(root, "cleanup-identities.json"));
       await cleanupTestPath(root);
     }
   }, 10_000);

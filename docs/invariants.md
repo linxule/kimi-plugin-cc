@@ -1,5 +1,7 @@
 # Runtime invariants — long form
 
+**Release status:** the exact-2.6.2 full-operation construction below remains an unreleased candidate pending Linux process-identity correction and final validation. Earlier macOS passes do not certify the corrected runtime; the [certification record](upstream-2.6.2-certification.md) owns the current gate status.
+
 The full statement of every contract summarised in [AGENTS.md](../AGENTS.md), with the
 mechanics and the rationale that stops each one being re-broken. AGENTS.md is the
 per-turn contract sheet (kept under 24 KB so both hosts load it cheaply); this file is

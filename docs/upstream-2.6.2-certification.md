@@ -1,8 +1,10 @@
 # Exact CLI 2.6.2 certification — plugin 2.6.2
 
-## Bounded swarm certification — 2026-11-14
+## Bounded swarm certification — pending Linux fix validation
 
-**Status: certified for all eight operations.** Plugin 2.6.2 certifies bounded read-only and write swarm on unmodified stock CLI 2.6.2 alongside review, challenge, ask, rescue, review_gate and pursue. Exact-source, stock-binary, real-provider, repository, package and independent source-review gates passed. Linux CI and publication remain pending and are not implied by this certification. The prior published plugin 2.5.9 non-swarm certification is retained below.
+**Status: PENDING final fix validation; not released.** Linux release CI run `43604995805` exposed a process-identity bug before tagging or publication and was canceled after 20 minutes with 64 recorded failures. The collector fell back to `ps` start tokens while identity probes used `/proc` start ticks after encountering a kernel process with PGID 0; the resulting timeout cascade was not a deadlock. The fix keeps Linux identity collection on `/proc` and narrowly excludes `PF_KTHREAD` entries with PGID 0, while test helpers add early-failure cleanup. Those changes and fresh release gates are still pending validation.
+
+The prior macOS source, stock-binary, real-provider, repository and package passes below are retained against their recorded runtime bytes. They do not certify the repaired runtime or replace the failed Linux gate. The published plugin 2.5.9 non-swarm certification remains historical evidence below.
 
 The exact source and binary remain commit `6a8493df3e1d796a63f7c7ca0de76c1e690cd943` and bundle SHA-256 `f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a`. The upstream rate-limit scheduler is unchanged. The plugin enforces the bound through admission and terminal cancellation:
 
@@ -18,7 +20,7 @@ The native TaskStop policy persists after deactivation of the owned parallel ses
 
 ### Validation receipts
 
-The final runtime is commit `e8f7059ec211489263710dff76595b2ef80c949c`. The full repository, live-provider and package gates ran from an isolated Git clone at `/var/folders/93/qllsxfwn1tz2jbj6zt868c780000gn/T/kimi-release-2.6.2-final-odld3_2v`. The stock-binary `production-03` run verified all 184 covered files against that commit's Git blobs both before and after execution. Its manifest SHA-256 is `fe5bacb5478a2f63f5dd1651c0b8967ac6c63a142748ff3bf910c9e9229a3f79`; its covered-file digest is `47b5e0cd5186ac7d62e5df1a629935d0a852a411b64fd0fee64d6697f408b3c3`. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; ignored logs are evidence locations, not package contents.
+The prior validated macOS runtime is commit `e8f7059ec211489263710dff76595b2ef80c949c`; the Linux correction changes runtime bytes and requires replacement final receipts. The full repository, live-provider and package gates below ran from an isolated Git clone at `/var/folders/93/qllsxfwn1tz2jbj6zt868c780000gn/T/kimi-release-2.6.2-final-odld3_2v`. The stock-binary `production-03` run verified all 184 covered files against that commit's Git blobs both before and after execution. Its manifest SHA-256 is `fe5bacb5478a2f63f5dd1651c0b8967ac6c63a142748ff3bf910c9e9229a3f79`; its covered-file digest is `47b5e0cd5186ac7d62e5df1a629935d0a852a411b64fd0fee64d6697f408b3c3`. Local evidence lives under `.claude/kimi-code-research/cert-2.6.2-bounded/`; ignored logs are evidence locations, not package contents.
 
 | Gate | Receipt |
 | --- | --- |
@@ -32,7 +34,7 @@ The final runtime is commit `e8f7059ec211489263710dff76595b2ef80c949c`. The full
 | Frozen dependency install and full repository gate | PASS: `release-full-check.log`, 1,720 pass / 75 expected opt-in skips / 0 failures / 22,490 assertions; 1,795 tests across 93 files in 541.73s |
 | Package and isolated consumer security | PASS: final `release-package.log` verifies 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot. `release-consumer-security.log` passes isolated npm consumer security |
 | Independent reviews | PASS: Codex reports no actionable findings. Fable's `FABLE-BATCH.md` finds no remaining defect in its reviewed caller/helper source scope and explicitly leaves runtime tests and emitted-artifact verification to the final gates above |
-| Linux CI and publication | PENDING; no tag, registry or installed-host result is claimed here |
+| Linux CI and publication | FAILED release gate: run `43604995805`, 64 recorded failures before cancellation; correction and final reruns PENDING. No tag, publication or installed-host result is claimed |
 
 The 23 stock-binary controls use the untouched 2.6.2 executable with a scripted test provider. They exercise new/resumed waves, odd target grouping, both nested profiles, invalid resumes, read/write cancellation, active HTTP/tool budget expiry, and 429/context recovery beyond the native 180-second interval. Their deterministic responses prove enforcement and settlement; the separate passing real-provider matrix proves useful model behavior through the production operation paths.
 

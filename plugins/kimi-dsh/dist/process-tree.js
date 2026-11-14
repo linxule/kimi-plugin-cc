@@ -293,7 +293,7 @@ async function readCurrentSnapshotRows(expectedRows) {
         Promise.all(procPids.map((pid) => readProcRow(pid))),
         collectProcessSnapshotRowsFromPs(psPids),
     ]);
-    if (procOutcomes.some((outcome) => outcome.status === "error") || (psPids.length > 0 && psRows === undefined)) {
+    if (procOutcomes.some((outcome) => outcome.status === "error" || outcome.status === "kernel") || (psPids.length > 0 && psRows === undefined)) {
         throw new Error("process identity verification failed");
     }
     return [
@@ -302,12 +302,11 @@ async function readCurrentSnapshotRows(expectedRows) {
     ];
 }
 async function collectProcessSnapshotRows() {
-    if (process.platform === "linux") {
-        const procRows = await collectProcessSnapshotRowsFromProc();
-        if (procRows !== undefined)
-            return procRows;
-    }
-    return collectProcessSnapshotRowsFromPs();
+    // Linux probes use start ticks. Switching a failed table read to ps would
+    // give the same process a different identity, so genuine proc errors fail closed.
+    return process.platform === "linux"
+        ? collectProcessSnapshotRowsFromProc()
+        : collectProcessSnapshotRowsFromPs();
 }
 async function collectProcessSnapshotRowsFromProc() {
     let entries;
@@ -377,7 +376,7 @@ async function readProcessIdentityBatchFromProc(pids) {
         if (outcome.status === "found") {
             identities.set(outcome.row.pid, toProcessIdentity(outcome.row));
         }
-        else if (outcome.status === "error") {
+        else if (outcome.status === "error" || outcome.status === "kernel") {
             complete = false;
         }
     }
@@ -450,19 +449,30 @@ async function readProcRow(pid) {
     const openParen = stat.indexOf("(");
     if (openParen < 1 || closeParen < openParen)
         return { status: "error" };
-    const parsedPid = Number.parseInt(stat.slice(0, openParen).trim(), 10);
+    const rawPid = stat.slice(0, openParen).trim();
+    const parsedPid = Number(rawPid);
     const fields = stat.slice(closeParen + 1).trim().split(/\s+/);
     const state = fields[0];
-    const parentPid = Number.parseInt(fields[1] ?? "", 10);
-    const processGroupId = Number.parseInt(fields[2] ?? "", 10);
+    const parentPid = Number(fields[1]);
+    const processGroupId = Number(fields[2]);
     const startTimeTicks = fields[19];
-    if (parsedPid !== pid ||
-        state === undefined ||
-        startTimeTicks === undefined ||
-        !Number.isInteger(parentPid) ||
-        !Number.isInteger(processGroupId) ||
-        processGroupId <= 0) {
+    if (!/^\d+$/.test(rawPid) || !Number.isSafeInteger(parsedPid) || parsedPid !== pid ||
+        state === undefined || !/^[a-z]$/i.test(state) ||
+        startTimeTicks === undefined || !/^\d+$/.test(startTimeTicks) ||
+        !/^\d+$/.test(fields[1] ?? "") || !Number.isSafeInteger(parentPid) ||
+        !/^\d+$/.test(fields[2] ?? "") || !Number.isSafeInteger(processGroupId)) {
         return { status: "error" };
+    }
+    if (processGroupId === 0) {
+        // /proc stat field 9 carries PF_KTHREAD (Linux include/linux/sched.h).
+        // Only proven kernel threads are outside the user-process ancestry;
+        // a namespace-hidden user PGID of zero must remain an incomplete probe.
+        const rawFlags = fields[6];
+        const flags = rawFlags === undefined || !/^\d+$/.test(rawFlags) ? NaN : Number(rawFlags);
+        return fields[2] === "0" && Number.isSafeInteger(flags) && flags >= 0 && flags <= 0xffff_ffff &&
+            (flags & 0x0020_0000) !== 0
+            ? { status: "kernel" }
+            : { status: "error" };
     }
     return {
         status: "found",

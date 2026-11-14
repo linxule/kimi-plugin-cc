@@ -21,12 +21,14 @@ if (process.argv[2] === "leaf") {
 } else {
   const version = required("SWARM_TEST_VERSION");
   const shellExited = required("SWARM_TEST_SHELL_EXITED");
+  const shellReady = required("SWARM_TEST_SHELL_READY");
   const rootRelease = required("SWARM_TEST_ROOT_RELEASE");
   const rootExited = required("SWARM_TEST_ROOT_EXITED");
   process.stdout.write(`${JSON.stringify({ role: "meta", type: "system.version", version })}\n`);
   const shell = spawn("/bin/sh", ["-c", [
     '"$SWARM_TEST_NODE" "$SWARM_TEST_FIXTURE" leaf &',
-    'while [ ! -f "$SWARM_TEST_SHELL_RELEASE" ]; do sleep 0.02; done',
+    "remaining=300",
+    'while [ ! -f "$SWARM_TEST_SHELL_RELEASE" ] && [ "$remaining" -gt 0 ]; do sleep 0.02; remaining=$((remaining - 1)); done',
     "exit 0",
   ].join("\n")], {
     detached: true,
@@ -37,6 +39,7 @@ if (process.argv[2] === "leaf") {
       SWARM_TEST_FIXTURE: fileURLToPath(import.meta.url),
     },
   });
+  writeFileSync(shellReady, JSON.stringify({ pid: shell.pid }));
   shell.on("error", (error) => { throw error; });
   shell.once("exit", () => {
     writeFileSync(shellExited, JSON.stringify({ pid: shell.pid }));

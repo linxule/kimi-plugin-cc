@@ -1,24 +1,30 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [runtimeRoot, extension, root, mode = "success", width = "2"] = process.argv.slice(2);
 if (!runtimeRoot || !extension || !root) throw new Error("Missing settlement runner arguments");
+setTimeout(() => { console.error("Settlement fixture runner exceeded its lifetime"); process.exit(91); }, 6_500).unref();
 const load = (name) => import(pathToFileURL(path.join(runtimeRoot, `${name}.${extension}`)).href);
 const { runCliPrompt } = await load("cli-client");
 const { NATIVE_V2_CERTIFIED } = await load("kimi-engine");
-const { collectDescendantIdentities, collectDescendantIdentitiesForRoots, probeProcessIdentity } = await load("process-tree");
+const { collectDescendantIdentities, collectDescendantIdentitiesForRoots, probeProcessIdentity, revalidateProcessIdentities } = await load("process-tree");
 const fixture = path.join(import.meta.dirname, "swarm-exit-tail.mjs");
 const paths = Object.fromEntries([
-  "ready", "writes", "signals", "shellRelease", "shellExited", "rootRelease", "rootExited", "identity", "result", "spawnFailureRelease",
+  "ready", "writes", "signals", "shellReady", "shellRelease", "shellExited", "rootRelease", "rootExited", "identity", "result", "spawnFailureRelease",
 ].map((name) => [name, path.join(root, `${name}.json`)]));
+paths.cleanupIdentities = path.join(root, "cleanup-identities.json");
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const transientModes = ["snapshot-error", "batch-snapshot-error", "identity-error", "persistence-error", "incomplete-retention"];
 const persistentModes = ["snapshot-persistent", "identity-persistent", "persistence-persistent"];
+const persistenceMode = mode === "persistence-error" || mode === "persistence-persistent";
 const liveTailModes = ["failure", "identity-persistent"];
 const isQuiescent = (identity) => identity === undefined || /^[ZX]/.test(identity.state.trim().toUpperCase());
 const isObservedAlive = (identity, expected) => identity?.startToken === expected.startToken && !isQuiescent(identity);
+const persistenceIdentity = (identity) => persistenceMode && identity && /^[RS]/.test(identity.state.trim().toUpperCase())
+  ? { ...identity, state: "S" } : identity;
 async function waitFor(read, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -38,6 +44,30 @@ async function within(promise, timeoutMs = 4000) {
 }
 
 let leaf;
+let printRoot;
+const cleanupIdentities = new Map();
+async function rememberCleanupIdentity(pid) {
+  const state = await probeProcessIdentity(pid);
+  assert.equal(state.complete, true);
+  assert.ok(state.identity);
+  cleanupIdentities.set(`${state.identity.pid}:${state.identity.startToken}`, state.identity);
+  writeFileSync(paths.cleanupIdentities, JSON.stringify([...cleanupIdentities.values()]));
+  return state.identity;
+}
+async function killRecordedProcesses() {
+  const identities = [...cleanupIdentities.values()];
+  const validation = await revalidateProcessIdentities(identities, { timeoutMs: 500 });
+  if (!validation.complete) return;
+  for (const identity of validation.identities) {
+    try { process.kill(identity.pid, "SIGKILL"); } catch { /* Already exited. */ }
+  }
+  const deadline = Date.now() + 1_000;
+  do {
+    const current = await revalidateProcessIdentities(identities, { timeoutMs: 250 });
+    if (current.complete && current.identities.length === 0 && !current.groupChanged?.length) return;
+    await pause(10);
+  } while (Date.now() < deadline);
+}
 async function killObserved() {
   if (!leaf) return;
   const current = await probeProcessIdentity(leaf.pid);
@@ -91,6 +121,8 @@ async function main() {
     }
   };
   let promise;
+  let settled = false;
+  let completed = false;
   try {
     promise = runCliPrompt({
       cwd: root,
@@ -100,6 +132,7 @@ async function main() {
         SWARM_TEST_VERSION: version, SWARM_TEST_EXIT_CODE: String(exitCode),
         SWARM_TEST_LEAF_READY: paths.ready, SWARM_TEST_WRITES: paths.writes,
         SWARM_TEST_SIGNALS: paths.signals, SWARM_TEST_SHELL_RELEASE: paths.shellRelease,
+        SWARM_TEST_SHELL_READY: paths.shellReady,
         SWARM_TEST_SHELL_EXITED: paths.shellExited, SWARM_TEST_ROOT_RELEASE: paths.rootRelease,
         SWARM_TEST_ROOT_EXITED: paths.rootExited,
       },
@@ -113,14 +146,14 @@ async function main() {
       swarmMaxConcurrency: Number(width), signal: controller.signal, escalationMs: 75,
       descendantIdentityCollector: async (...args) => {
         collectorCalls++;
-        const identities = await collectDescendantIdentities(...args);
+        const identities = (await collectDescendantIdentities(...args)).map(persistenceIdentity);
         for (const identity of identities) captured.set(identity.pid, identity);
         injectSnapshotFailure(false);
         return identities;
       },
       descendantIdentityBatchCollector: async (roots) => {
         batchCollectorCalls++;
-        const identities = await collectDescendantIdentitiesForRoots(roots);
+        const identities = (await collectDescendantIdentitiesForRoots(roots)).map(persistenceIdentity);
         for (const identity of identities) captured.set(identity.pid, identity);
         injectSnapshotFailure(true);
         return identities;
@@ -142,7 +175,7 @@ async function main() {
             return { ...leaf, processGroupId: leaf.processGroupId + 1 };
           }
         }
-        return actual.identity;
+        return persistenceIdentity(actual.identity);
       },
       onProcessIdentities: async (identities, complete) => {
         publishedBeforeRoot ||= !rootCallbackComplete;
@@ -150,8 +183,15 @@ async function main() {
         const signature = JSON.stringify([snapshot, complete]);
         const checkpoint = { identities: snapshot, complete, faultEnabled, succeeded: false };
         checkpoints.push(checkpoint);
+        // Begin persistence faults only after the release shell and its sleep
+        // have gone. The live leaf's ownership then stays fixed until we release
+        // the root; scheduler R/S changes are normalized by the injected readers.
+        const stableLeafOwnership = complete && snapshot.length === 1 && leaf !== undefined &&
+          snapshot[0].pid === leaf.pid && snapshot[0].startToken === leaf.startToken &&
+          snapshot[0].processGroupId === leaf.processGroupId && !isQuiescent(snapshot[0]);
         if (faultEnabled && (
-          mode === "persistence-persistent" || (mode === "persistence-error" && !failureInjected)
+          (mode === "persistence-persistent" && (failureInjected || stableLeafOwnership)) ||
+          (mode === "persistence-error" && !failureInjected && stableLeafOwnership)
         )) {
           failureInjected = true;
           checkpointFailures++;
@@ -178,7 +218,9 @@ async function main() {
         }
         if (failedCheckpointSignature === signature) retriedCheckpoint = true;
       },
-      onSpawn: ["slow-spawn", "spawn-callback-error"].includes(mode) ? async () => {
+      onSpawn: async (pid) => {
+        printRoot = await rememberCleanupIdentity(pid);
+        if (!["slow-spawn", "spawn-callback-error"].includes(mode)) return;
         const ready = await waitFor(async () => JSON.parse(await readFile(paths.ready, "utf8")));
         await waitFor(async () => captured.get(ready.pid));
         capturedDuringRootCallback = true;
@@ -189,7 +231,7 @@ async function main() {
         }
         await pause(200);
         rootCallbackComplete = true;
-      } : undefined,
+      },
       cancellationTeardownHook: async () => {
         teardownCalls++;
         if (mode === "cancel") {
@@ -198,24 +240,26 @@ async function main() {
         }
       },
     });
+    void promise.then(() => { settled = true; }, () => { settled = true; });
     void promise.catch(() => undefined);
     const ready = await waitFor(async () => JSON.parse(await readFile(paths.ready, "utf8")));
-    const observed = await probeProcessIdentity(ready.pid);
-    assert.equal(observed.complete, true);
-    assert.ok(observed.identity);
-    leaf = observed.identity;
+    leaf = await rememberCleanupIdentity(ready.pid);
+    const shell = await waitFor(async () => JSON.parse(await readFile(paths.shellReady, "utf8")));
+    await rememberCleanupIdentity(shell.pid);
+    await waitFor(async () => printRoot);
     await writeFile(paths.identity, JSON.stringify(leaf));
+    if (process.env.SWARM_TEST_PRECONDITION_FAILURE === "1") throw new Error("scripted fixture precondition failure");
     if (version === "2.6.2") {
       await waitFor(async () => captured.get(leaf.pid));
       assert.equal(captured.get(leaf.pid).startToken, leaf.startToken);
     }
     await pause(700);
-    // Arm before the shell disappears so checkpoint errors occur on a changed,
-    // nonempty snapshot. Keep the root alive until transient recovery is proved.
+    // Arm before the shell disappears so persistence injection catches its
+    // first stable leaf-only checkpoint. Keep the root until retry is proved.
     if ([...transientModes, ...persistentModes].includes(mode)) faultEnabled = true;
     await writeFile(paths.shellRelease, "release\n");
-    const shell = await waitFor(async () => JSON.parse(await readFile(paths.shellExited, "utf8")));
-    const shellState = await probeProcessIdentity(shell.pid);
+    const exitedShell = await waitFor(async () => JSON.parse(await readFile(paths.shellExited, "utf8")));
+    const shellState = await probeProcessIdentity(exitedShell.pid);
     assert.equal(shellState.complete, true);
     assert.equal(isQuiescent(shellState.identity), true);
     assert.equal(isObservedAlive((await probeProcessIdentity(leaf.pid)).identity, leaf), true);
@@ -336,14 +380,19 @@ async function main() {
       errorCode: outcome.error?.code, cleanupUnverified: outcome.error?.details?.process_cleanup_unverified,
       leafAliveAtReturn: isObservedAlive(current.identity, leaf),
     }));
+    completed = true;
   } finally {
-    if (!liveTailModes.includes(mode)) await killObserved();
+    if (!completed) {
+      if (!settled) controller.abort();
+      if (promise) await within(promise.catch(() => undefined), 1_500).catch(() => undefined);
+      await killRecordedProcesses();
+    } else if (!liveTailModes.includes(mode)) await killObserved();
     NATIVE_V2_CERTIFIED.set("swarm", oldRow);
   }
 }
 
-// Deliberately no process.exit(): a failed settlement must release inherited
-// stdio handles so this runner exits even while its separately owned test leaf lives.
+// Normal completion must exit naturally, including expected settlement errors
+// with a live test leaf. The unref'ed lifetime guard is failure-only insurance.
 main().catch((error) => {
   console.error(error);
   process.exitCode = 1;

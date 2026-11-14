@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const filename = fileURLToPath(import.meta.url);
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const pathsFor = (root) => Object.fromEntries([
-  "wave", "done", "leaf", "writes", "signals", "orphanRelease", "orphanExited", "rootRelease", "identities", "result",
+  "wave", "done", "leaf", "writes", "signals", "orphanReady", "orphanRelease", "orphanExited", "rootRelease", "identities", "result",
 ].map((name) => [name, path.join(root, `${name}.json`)]));
 
 async function waitFor(read, timeoutMs = 8000) {
@@ -23,10 +23,12 @@ async function waitFor(read, timeoutMs = 8000) {
 
 async function fixture(root) {
   const paths = pathsFor(root);
+  setTimeout(() => process.exit(90), 18_000).unref();
   process.stdout.write(`${JSON.stringify({ role: "meta", type: "system.version", version: "2.6.2" })}\n`);
   const intermediary = spawn("/bin/sh", ["-c", [
     '"$CHURN_NODE" "$CHURN_FIXTURE" --leaf "$CHURN_ROOT" &',
-    'while [ ! -f "$CHURN_ORPHAN_RELEASE" ]; do sleep 0.02; done',
+    "remaining=750",
+    'while [ ! -f "$CHURN_ORPHAN_RELEASE" ] && [ "$remaining" -gt 0 ]; do sleep 0.02; remaining=$((remaining - 1)); done',
     "exit 0",
   ].join("\n")], {
     detached: true,
@@ -34,6 +36,7 @@ async function fixture(root) {
     env: { ...process.env, CHURN_NODE: process.execPath, CHURN_FIXTURE: filename,
       CHURN_ROOT: root, CHURN_ORPHAN_RELEASE: paths.orphanRelease },
   });
+  writeFileSync(paths.orphanReady, JSON.stringify({ pid: intermediary.pid }));
   intermediary.once("error", (error) => { throw error; });
   intermediary.once("exit", () => writeFileSync(paths.orphanExited, JSON.stringify({ pid: intermediary.pid })));
   for (let index = 0; index < 11; index++) {
@@ -43,8 +46,11 @@ async function fixture(root) {
       child.once("close", resolve);
     }));
     writeFileSync(paths.wave, JSON.stringify({ index, pids: children.map((child) => child.pid) }));
-    await waitFor(async () => existsSync(path.join(root, `ack-${index}`)) ? true : undefined);
-    for (const child of children) child.kill("SIGTERM");
+    try {
+      await waitFor(async () => existsSync(path.join(root, `ack-${index}`)) ? true : undefined);
+    } finally {
+      for (const child of children) child.kill("SIGTERM");
+    }
     await Promise.all(exited);
   }
   writeFileSync(paths.done, "done\n");
@@ -70,6 +76,7 @@ async function runner(runtimeRoot, extension, root) {
   const controller = new AbortController();
   let currentIdentities = new Map();
   let rootIdentity;
+  let shellIdentity;
   let leaf;
   let pass = 0;
   let injectPending = false;
@@ -86,9 +93,10 @@ async function runner(runtimeRoot, extension, root) {
   const oldRow = NATIVE_V2_CERTIFIED.get("swarm");
   NATIVE_V2_CERTIFIED.set("swarm", [...new Set([...oldRow, "2.6.2"])]);
   let promise;
-  const persistIdentities = () => writeFile(paths.identities, JSON.stringify([
-    ...(rootIdentity ? [rootIdentity] : []), ...captured.values(),
-  ]));
+  const knownIdentities = () => [...new Map([
+    ...[rootIdentity, shellIdentity, leaf].filter(Boolean), ...captured.values(),
+  ].map((identity) => [identityKey(identity), identity])).values()];
+  const persistIdentities = () => writeFileSync(paths.identities, JSON.stringify(knownIdentities()));
   try {
     promise = runCliPrompt({
       cwd: root, env: { PATH: process.env.PATH, KIMI_CODE_HOME: path.join(root, "home") },
@@ -191,6 +199,14 @@ async function runner(runtimeRoot, extension, root) {
     assert.equal(observed.complete, true);
     assert.ok(observed.identity);
     leaf = observed.identity;
+    const shell = await waitFor(async () => JSON.parse(await readFile(paths.orphanReady, "utf8")));
+    const observedShell = await probeProcessIdentity(shell.pid);
+    assert.equal(observedShell.complete, true);
+    assert.ok(observedShell.identity);
+    shellIdentity = observedShell.identity;
+    await waitFor(async () => rootIdentity);
+    persistIdentities();
+    if (process.env.SWARM_TEST_PRECONDITION_FAILURE === "1") throw new Error("scripted fixture precondition failure");
     await waitFor(async () => existsSync(paths.done) ? true : undefined);
     assert.equal(ephemeral.size, 220);
     assert.equal(acknowledged.size, 11);
@@ -240,14 +256,25 @@ async function runner(runtimeRoot, extension, root) {
   } finally {
     rootReleased = true;
     if (!settled) controller.abort();
-    const validation = await revalidateProcessIdentities([
-      ...(rootIdentity ? [rootIdentity] : []), ...captured.values(),
-    ]);
+    if (promise) {
+      let timer;
+      try {
+        await Promise.race([promise.catch(() => undefined), new Promise((resolve) => { timer = setTimeout(resolve, 1_500); })]);
+      } finally { clearTimeout(timer); }
+    }
+    const identities = knownIdentities();
+    const validation = await revalidateProcessIdentities(identities, { timeoutMs: 500 });
     if (validation.complete) {
       for (const identity of validation.identities) {
         try { process.kill(identity.pid, "SIGKILL"); } catch { /* Already exited. */ }
       }
     }
+    const deadline = Date.now() + 1_000;
+    do {
+      const current = await revalidateProcessIdentities(identities, { timeoutMs: 250 });
+      if (current.complete && current.identities.length === 0 && !current.groupChanged?.length) break;
+      await pause(10);
+    } while (Date.now() < deadline);
     NATIVE_V2_CERTIFIED.set("swarm", oldRow);
   }
 }
@@ -261,6 +288,7 @@ if (process.argv[2] === "--leaf") {
 } else if (process.argv[2] === "--fixture") {
   fixture(process.argv[3]).catch((error) => { console.error(error); process.exitCode = 1; });
 } else {
+  setTimeout(() => { console.error("Churn fixture runner exceeded its lifetime"); process.exit(91); }, 19_000).unref();
   const [runtimeRoot, extension, root] = process.argv.slice(2);
   runner(runtimeRoot, extension, root).catch((error) => { console.error(error); process.exitCode = 1; });
 }

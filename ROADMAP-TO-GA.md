@@ -1,6 +1,6 @@
 # Roadmap
 
-Current direction for plugin 2.6.2, updated 2026-11-14: bounded swarm is certified on exact stock CLI 2.6.2, with a direct worker at concurrency one. Linux CI and publication remain pending; the [2.6.2 record](docs/upstream-2.6.2-certification.md) contains the final runtime evidence. The original filename remains for existing links; release notes and the [registry release log](docs/registry-releases.md) stay separate.
+Current direction for plugin 2.6.2, updated 2026-11-14: bounded swarm on exact stock CLI 2.6.2 remains unreleased after Linux CI exposed a process-identity bug. The fix and fresh final validation are pending; prior macOS passes in the [2.6.2 record](docs/upstream-2.6.2-certification.md) do not certify the corrected runtime. The original filename remains for existing links; release notes and the [registry release log](docs/registry-releases.md) stay separate.
 
 For installation, start with the [multilingual README](./README.md). For release details, see the [changelog](./CHANGELOG.md). The exact compatibility table lives in [runtime/kimi-engine.ts](./runtime/kimi-engine.ts); the standing safety contracts live in [AGENTS.md](./AGENTS.md) and [docs/invariants.md](./docs/invariants.md).
 

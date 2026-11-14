@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "check": "bun run build && bun run check:contracts && bun run check:surfaces && bunx tsc --noEmit && bun test && git diff --exit-code -- dist plugins/kimi-codex plugins/kimi-dsh && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist plugins/kimi-codex plugins/kimi-dsh)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked dist/codex/dsh files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
+    "check": "bun run build && bun run check:contracts && bun run check:surfaces && bunx tsc --noEmit && bun test --bail && git diff --exit-code -- dist plugins/kimi-codex plugins/kimi-dsh && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist plugins/kimi-codex plugins/kimi-dsh)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked dist/codex/dsh files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
     "check:surfaces": "bun run scripts/generate-surfaces.ts --check",
     "generate:surfaces": "bun run scripts/generate-surfaces.ts",
     "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && mkdir -p dist/vendor/shell-quote dist/vendor/smol-toml && cp runtime/vendor/shell-quote/LICENSE dist/vendor/shell-quote/LICENSE && cp runtime/vendor/smol-toml/*.js runtime/vendor/smol-toml/LICENSE dist/vendor/smol-toml/ && echo '{\"type\":\"module\"}' > dist/package.json",

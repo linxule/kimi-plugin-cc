@@ -2,7 +2,9 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
-## 2.6.2 — 2026-11-14 (publication pending)
+## 2.6.2 — unreleased (Linux fix validation pending)
+
+Linux release CI failed before tagging or publication. The passes below belong to the prior macOS runtime; the process-identity correction and replacement final receipts remain pending in the [certification record](docs/upstream-2.6.2-certification.md).
 
 - Add a bounded swarm construction for exact stock CLI 2.6.2: managed-hook wave admission counts new and resumed entries, rejects forks, and uses a plugin-owned width. Force the native child timeout beyond the finite job budget so a timed-out retry cannot overlap a later wave.
 - Disable native Bash backgrounding in owned parallel sessions and deny explicit background Bash. Settle identity-verified owned processes after normal exit as well as cancellation before capturing artifacts or patches. Concurrency bounds Kimi child-agent turns; allowed repository commands can still start multiple OS processes.
