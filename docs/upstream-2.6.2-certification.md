@@ -2,7 +2,7 @@
 
 ## Bounded swarm certification — 2026-11-14
 
-**Status: certified for all eight operations.** Final source, stock-binary, live-provider, repository, package, Linux-host and independent-review gates passed on runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. Release CI, tagging and publication remain pending; no installed-host update is implied.
+**Status: certified for all eight operations.** Final source, stock-binary, live-provider, repository, package, Linux-host and independent-review gates passed on runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. Release CI passed and the immutable GitHub release is published; npm 2.6.2 is published with verified fresh installs and cryptographic signatures; no installed-host update is implied.
 
 The corrected runtime is frozen at `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. Linux snapshots stay on `/proc`. Proven `PF_KTHREAD` rows with PGID 0 are excluded; valid non-kernel PGID 0/-1 rows remain available for ancestry and cause refusal only when the requested owned subtree depends on them. Genuinely unreadable or malformed rows still make the snapshot incomplete, and targeted nonpositive-group probes remain incomplete. Persisted `ps` identities still validate through their matching reader. On the legacy cancellation path, snapshot failure still stops the owned root, then returns `CLI_CANCELLATION_TEARDOWN_FAILED` with `process_cleanup_unverified` and the original cause; a wrapped budget error carries no partial prose. Test helpers now clean up early failures and bound pipe draining.
 
@@ -39,7 +39,9 @@ Final gates use immutable runtime commit `b69a416d8588ed12239148ccc9f120e3dbfe0d
 | Kernel-visible Linux host | PASS: `linux-host-focused-final.log`, 130 pass / 1 macOS-specific skip / 0 failures / 832 assertions in 104.70s; Linux 7.0.14-linuxkit arm64, with 206 PF_KTHREAD PGID-0 rows and 8 non-kernel PGID≤0 rows |
 | Package and isolated consumer security | PASS: `certified-package.log` verifies 340 files, all three distributions, isolated setup/check, version refusal and MCP checks; audited DSH host/profile, seven providers/tools and Web boot. `certified-consumer-security.log` passes isolated npm consumer security |
 | Independent reviews | PASS: Codex reports no actionable findings. Fable's final `FABLE-LINUX-CLOSURE.md` closes all three source findings with no new defect; runtime tests and emitted-artifact verification are established separately by the final gates above |
-| Release CI, tagging and publication | PENDING. No tag, publication or installed-host result is claimed |
+| Release CI and GitHub release | PASS: CI run `43610889478`; immutable tag and GitHub release `v2.6.2` published at commit `0f78ade6840dc7eab27da0790c5163082b103e6d` on 2026-11-14T15:43:08Z |
+| npm publication | PASS: OIDC run `43611675167`; npm `latest` is 2.6.2, published at 2026-11-14T15:54:45.985Z. The 340-file registry archive is byte-identical to the workflow artifact |
+| Fresh install and cryptographic signatures | PASS at 2026-11-14T15:55:59Z: all 340 files match the tag, all three runtime capability maps pass, and isolated Claude/Codex/DSH setup plus setup-check pass against stock CLI. Zero production advisories; `npm audit signatures` exits 0 with no invalid or missing signatures |
 
 The 23 stock-binary controls use the untouched 2.6.2 executable with a scripted test provider. They exercise new/resumed waves, odd target grouping, both nested profiles, invalid resumes, read/write cancellation, active HTTP/tool budget expiry, and 429/context recovery beyond the native 180-second interval. Their deterministic responses prove enforcement and settlement; the separate passing real-provider matrix proves useful model behavior through the production operation paths.
 
@@ -56,6 +58,16 @@ The uncoached live five-target control at width four grouped the targets into tw
 | `certified-consumer-security.log` | `3dea92a3793941ba29017dec7b3e7a7a254eb45473130349fa4502b70a817221` |
 | `linux-host-focused-final.log` | `f309adc00fdebdbf5878e34871dca4e3846822b1a4f92293c52c7e09164302ed` |
 | `FABLE-LINUX-CLOSURE.md` | `2dd16b010bd44581891a3f367c7b19b7ee08a1157dd885e1bb085e8f8a4ae81e` |
+| `registry-verification.json` | `febd5bc20fac5c25e6832ef4879ec51ee8ebca2b040c5142cb3f02f92ab0b6c4` |
+| `registry-consumer/verification.json` | `0ef48d66228ea913aeb980de210a0e24be1422a9724bb503e07f1944b4da69e7` |
+
+### Release status
+
+The immutable [v2.6.2 tag and GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.6.2) is anchored at `0f78ade6840dc7eab27da0790c5163082b103e6d`, published at `2026-11-14T15:43:08Z` after [release CI 43610889478](https://github.com/linxule/kimi-plugin-cc/actions/runs/43610889478) passed. [OIDC publication run 43611675167](https://github.com/linxule/kimi-plugin-cc/actions/runs/43611675167) passed; npm `latest` is 2.6.2, published at `2026-11-14T15:54:45.985Z`.
+
+The 340-file registry archive is byte-identical to the workflow artifact, with SHA-1 `6eecaf4803b8ebbed5f114c3b17e7f2b4f017fca` and SHA-256 `be9362451456278812c9678c208fde56357c47e147a39103ee11a610e9655f3d`. SLSA provenance log index `3881457879` and publish-attestation log index `3881517151` match the tag and workflow. The local receipt is `registry-verification.json` under the evidence root above.
+
+Fresh-install verification completed at `2026-11-14T15:55:59Z`: all 340 published files match the tag, all three compiled capability maps pass, and isolated Claude Code, Codex and DSH setup/check pass against the actual stock CLI. There are zero production advisories. Cryptographic verification with `npm audit signatures` exits 0 with `invalid:[]` and `missing:[]`; the receipt is `registry-consumer/verification.json`. These installation checks made no model calls and changed no installed host or operator CLI pin.
 
 ### Counterexamples that determined the construction
 

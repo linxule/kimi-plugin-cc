@@ -305,7 +305,7 @@ Host identity, workspace, hook path, Node binary, and bypass variables are provi
 - Rescue and pursue edit the real selected workspace. Swarm-write works from born HEAD in a temporary worktree, excludes uncommitted changes, and returns a patch without applying or committing it.
 `;
 
-export const DSH_PUBLISH_TIMESTAMP = 1794653014;
+export const DSH_PUBLISH_TIMESTAMP = 1794671685;
 
 export const DSH_DISCOVERY_INDEX = {
   format: 1,

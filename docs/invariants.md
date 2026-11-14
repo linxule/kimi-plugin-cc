@@ -1,6 +1,6 @@
 # Runtime invariants — long form
 
-**Release status:** the exact-2.6.2 construction below is certified for all eight operations on the corrected runtime, with final Linux-host and runtime gates passed. Release CI, tagging and publication remain separate pending steps in the [certification record](upstream-2.6.2-certification.md).
+**Release status:** the exact-2.6.2 construction below is certified for all eight operations on the corrected runtime, with final Linux-host and runtime gates passed. Release CI passed and the immutable v2.6.2 tag/GitHub release is published; npm 2.6.2 is published with verified fresh installs and cryptographic signatures in the [certification record](upstream-2.6.2-certification.md).
 
 The full statement of every contract summarised in [AGENTS.md](../AGENTS.md), with the
 mechanics and the rationale that stops each one being re-broken. AGENTS.md is the
