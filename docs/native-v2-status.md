@@ -1,4 +1,10 @@
-# Native v2 status — 2026-11-14
+# Native v2 status — 2026-11-18
+
+## Exact 2.6.3 certification — plugin 2.6.3 release candidate
+
+Exact CLI 2.6.3 (`b0de2fbd2de04d87689225aafd3912e5d193b62d`, bundle SHA-256 `a360023b6814ffdf05bc87e40925df5e0442ae3076ad9e7b6ea6f771e2a1857c`) is admitted for all eight operations in this checkout under the same no-plan and bounded-swarm construction as 2.6.2. Exact source scanning passes 31 tests / 404 assertions, all plan/local controls pass, the deterministic stock-binary suite passes 23 tests / 138 assertions, and both candidate and production real-provider matrices pass 30 tests / 390 assertions with only the two inapplicable narrowed-refusal tests skipped. The [2.6.3 record](upstream-2.6.3-certification.md) preserves the initial monitor failure and its candidate-activation root cause. The final full gate passes 1,797 tests / 23,469 assertions with 76 expected opt-in or platform skips, and 341-file package, consumer-security and post-edit review gates pass. This release candidate does not republish plugin 2.6.2 or update installed hosts; release CI, tagging and npm publication remain pending.
+
+The 2.6.3 scheduler is byte-identical to 2.6.2; no upstream scheduler fix is claimed. New loop/subagent task reconciliation waits for loop and active-task quiescence, and cancellation stops child tasks. The source scan pins and asserts this new implementation explicitly.
 
 ## Exact 2.6.2 bounded swarm certification
 
@@ -6,7 +12,7 @@ Plugin 2.6.2 adds a plugin-owned construction on stock CLI 2.6.2: bounded waves 
 
 **Exact CLI 2.6.2 is certified for all eight operations** on final runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`: 23 stock-binary controls / 138 assertions, 30 live-provider tests / 386 assertions, 1,767 full-suite passes / 23,008 assertions, and 130 Linux-host passes / 832 assertions. Source, package, consumer-security and independent-review gates pass. The [certification record](upstream-2.6.2-certification.md) retains the first failed Linux CI, the later intermediate CI pass and final correction evidence. Release CI passed and the immutable v2.6.2 tag/GitHub release is published; npm 2.6.2 is published with verified fresh installs and cryptographic signatures. Stock CLI source and binary remain unchanged, including the upstream recovery defect.
 
-Plugin 2.5.9 previously certified the six non-swarm operations on exact 2.6.2. Its source scan, candidate smoke, scoped production matrix and publication evidence remain preserved in the certification record. That history is not rewritten. Exact 2.6.1 and 2.6.3 remain untested; older full-operation rows retain the disclosed recovery limitation.
+Plugin 2.5.9 previously certified the six non-swarm operations on exact 2.6.2. Its source scan, candidate smoke, scoped production matrix and publication evidence remain preserved in the certification record. That history is not rewritten. Exact 2.6.1 remains untested; exact 2.6.3 is covered by the checkout section above; older full-operation rows retain the disclosed recovery limitation.
 
 ## Exact 2.6.0 non-swarm scope
 
@@ -37,14 +43,14 @@ captured a 278-byte child-authored patch with a clean user tree and removed
 worktree. Repository and package evidence is recorded separately in the
 [2.5.3 certification record](upstream-2.5.3-certification.md).
 
-Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3 require host-preactivated swarm
-sessions. Short-lived authenticated loopback lifecycles bracket one ordinary
+Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3, plus 2.6.2/2.6.3 parallel runs, require host-preactivated swarm sessions. Exact 2.6.0 activation remains candidate-only.
+Short-lived authenticated loopback lifecycles bracket one ordinary
 `kimi -p -r` runner. Exact 2.5.0/2.5.1/2.5.2/2.5.3 replaces removed `/status` with protocol-v2
 WebSocket main-agent state, requiring unique request IDs, an accepted
 subscription, and the latest frame through intentional bounded close. It also
 pins `environment_id:"local"` and the expected cwd before either profile mutation.
 Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
-bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2 print selects `--environment local`;
+bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2/2.6.3 print selects `--environment local`;
 resume never receives that flag; the environment preflight rejects any persisted nonlocal or wrong-root metadata/binding, while older sessions without environment records do not fail this check merely for lacking them.
 Tokens remain in memory, activation consumes the finite budget, graceful shutdown
 retains the 15-second allowance, and unverified cleanup prevents success.
@@ -52,14 +58,14 @@ retains the 15-second allowance, and unverified cleanup prevents success.
 Parallel swarm evidence requires distinct child journals and each assigned
 Write/Edit path correlated with its own toolCallId/result. A tool-call record,
 exit 0, aggregate denial or coordinator-only patch is insufficient for fan-out.
-The exact-2.6.2 concurrency-1 path instead requires fresh direct-worker provenance,
+The exact-2.6.2/2.6.3 concurrency-1 path instead requires fresh direct-worker provenance,
 no child journals or activation, delegation denials, confinement and cancellation. The 2.5.3 OFF
 control created no children; ON produced two children with managed denials and
 verified deactivation, including with parent idle reclamation set to 1 ms. A
 separate evidence-preserving out-of-root control correlated two child Writes with
 rescue denials and created no files.
 
-Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 remove EnterPlanMode and cancel default plan mode on
+Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2 and 2.6.3 remove EnterPlanMode and cancel default plan mode on
 fresh print; deterministic forced calls reject before the hook with no plan
 state. Resumed plan sessions remain possible, so every-agent journal refusal
 stays mandatory. Stream records still lack execution outcomes, and session hints
@@ -202,7 +208,7 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
 - `-r` refuses when the session's recorded cwd differs from the current cwd
   (`run-v2-print.ts:426-432`).
 - `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` caps normal launches on 0.18.0+, but **unset = no
-  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0/2.6.2 sources can
+  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3 sources can
   exceed the requested cap during rate-limit recovery, so this is not an unconditional peak
   or write-serialization guarantee. See `docs/safety.md` for the current limitation.
 - The update preflight runs on the `-p` path; every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1`.

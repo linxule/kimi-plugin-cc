@@ -14,7 +14,10 @@ const { runSwarm } = await import(new URL('../../dist/commands/swarm.js', import
 const { NATIVE_V2_CERTIFIED } = await import(new URL('../../dist/kimi-engine.js', import.meta.url).href) as typeof import('../../runtime/kimi-engine.js');
 
 export const BIN = process.env.KIMI_PLUGIN_CC_KIMI_BIN ?? '';
-export const STOCK_SHA = 'f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a';
+export const EXPECTED_VERSION = process.env.KIMI_PLUGIN_CC_BOUNDED_SMOKE_VERSION ?? '2.6.2';
+const STOCK_SHA = EXPECTED_VERSION === '2.6.2'
+ ? 'f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a'
+ : process.env.KIMI_PLUGIN_CC_BOUNDED_SMOKE_SHA256 ?? '';
 export const BASE = process.env.KIMI_PLUGIN_CC_BOUNDED_SMOKE_OUTPUT ?? '';
 export type RequestInfo = { body: any; worker: string | null; index: number; workerAttempt: number; elapsed: number; root: string; last: any };
 export type Reply = { status?: number; headers?: Record<string,string>; text?: string; tool?: { name:string; args:any; id?:string }; usage?: {prompt_tokens:number;completion_tokens:number;total_tokens:number}; rawEvents?:any[]; delayMs?:number };
@@ -62,9 +65,10 @@ export async function runLane(options:Options) {
  const root=path.join(BASE,options.name);await mkdir(root);const home=path.join(root,'home');const workspace=path.join(root,'workspace');const data=path.join(root,'data');
  const implementationHashes=await implementationFingerprints();
  await Promise.all([mkdir(home,{mode:0o700}),mkdir(workspace),mkdir(data)]);
- if(execFileSync(BIN,['--version'],{encoding:'utf8'}).trim()!=='2.6.2')throw Error('binary not exact2.6.2');
+ if(execFileSync(BIN,['--version'],{encoding:'utf8'}).trim()!==EXPECTED_VERSION)throw Error(`binary not exact ${EXPECTED_VERSION}`);
  const binaryMain=await realpath(BIN);const sha=createHash('sha256').update(await readFile(binaryMain)).digest('hex');
- if(sha!=='f07d4f0d28ba1dd3397cb070aa757f7b7610a51bb15164f1e158fad7809cb36a')throw Error(`binary hash mismatch ${sha}`);
+ if(!/^[a-f0-9]{64}$/.test(STOCK_SHA))throw Error('explicit candidate bundle SHA-256 required');
+ if(sha!==STOCK_SHA)throw Error(`binary hash mismatch ${sha}`);
  const gitEnv={PATH:process.env.PATH,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null',GIT_AUTHOR_NAME:'retry-control',GIT_AUTHOR_EMAIL:'retry@test',GIT_COMMITTER_NAME:'retry-control',GIT_COMMITTER_EMAIL:'retry@test'};
  const git=(args:string[])=>execFileSync('git',args,{cwd:workspace,env:gitEnv,encoding:'utf8'});
  git(['init','-q']);await writeFile(path.join(workspace,'seed.txt'),'original\n');git(['add','seed.txt']);git(['commit','-q','-m','initial']);
@@ -100,7 +104,7 @@ export async function runLane(options:Options) {
  const address=server.address() as any;
  const env:NodeJS.ProcessEnv={HOME:root,TMPDIR:process.env.TMPDIR,KIMI_CODE_HOME:home,KIMI_PLUGIN_CC_DATA:data,KIMI_PLUGIN_CC_KIMI_BIN:BIN,KIMI_PLUGIN_CC_NODE_BIN:execFileSync('which',['node'],{encoding:'utf8'}).trim(),KIMI_CODE_NO_AUTO_UPDATE:'1',KIMI_MODEL_API_KEY:'scripted-test-only',KIMI_CODE_API_KEY:'scripted-test-only',KIMI_MODEL_NAME:'swarm-retry-control',KIMI_MODEL_PROVIDER_TYPE:'kimi',KIMI_MODEL_BASE_URL:`http://127.0.0.1:${address.port}/v1`,KIMI_MODEL_CAPABILITIES:'tool_use',KIMI_CODE_INFINITE_RETRY:options.retry?'1':'0',KIMI_LOOP_MAX_ATTEMPTS_PER_STEP:'1',...gitEnv,...options.env};
  const context={cwd:workspace,env,stdout:process.stdout,stderr:process.stderr};
- if(process.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE==='2.6.2'){const matrix=NATIVE_V2_CERTIFIED as Map<any,readonly string[]>;for(const op of ['swarm','swarm-write'])matrix.set(op,[...new Set([...(matrix.get(op)??[]),'2.6.2'])]);}
+ if(process.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE===EXPECTED_VERSION){const matrix=NATIVE_V2_CERTIFIED as Map<any,readonly string[]>;for(const op of ['swarm','swarm-write'])matrix.set(op,[...new Set([...(matrix.get(op)??[]),EXPECTED_VERSION])]);}
  let report='';let error:any;let setup:any;let settledAt:number|undefined;let settledMonoMs:number|undefined;let afterSettleReport:unknown;
  const snapshots:any[]=[];let polling=false;const observedProcesses=new Map<string,ProcessIdentity>();
  const poll=setInterval(()=>{if(polling)return;polling=true;void journalEvidence(home).then(j=>{snapshots.push({time:Date.now(),workers:j.workers.length,active:j.remaining.length,peak:j.peakActiveTurns});}).then(async()=>{const db=await collectDatabase(data);for(const job of db.jobs){if(typeof job.kimi_pid==='number'){const probe=await probeProcessIdentity(job.kimi_pid);if(probe.identity)observedProcesses.set(`${probe.identity.pid}:${probe.identity.startToken}`,probe.identity);}}}).finally(()=>polling=false);},250);

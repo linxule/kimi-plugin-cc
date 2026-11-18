@@ -56,7 +56,8 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
     for (const unboundedPlan of [
       { ...plan, kimiVersion: '2.5.3' },
       { ...plan, kimiVersion: '2.6.0' },
-      { ...plan, kimiVersion: '2.6.3' },
+      { ...plan, kimiVersion: '2.6.1' },
+      { ...plan, kimiVersion: '2.6.4' },
       { ...plan, kimiVersion: '2.6.2+build' },
       { ...plan, intendedEngine: 'legacy-v1' },
       { ...plan, operationKind: 'rescue' },

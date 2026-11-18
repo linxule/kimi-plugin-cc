@@ -1112,6 +1112,43 @@ PINNED_HASHES["2.6.2"] = {
     "6afed948b81bb0850c7b165fe65908141b5af40eec54a548a9dec444a3b197ee",
 };
 
+// 2.6.3 (b0de2fbd): tool origins, queued Stop hooks and task reconciliation
+// preserve the no-plan gate and two-journal restore. Child completion now waits
+// for loop and task quiescence; cancellation stops active child tasks.
+PINNED_HASHES["2.6.3"] = {
+  ...PINNED_HASHES["2.6.2"],
+  [`${CLI}/cli/v2/run-v2-print.ts`]:
+    "88335492c4f606324ee352dee1e07ae070d89056bc8ba6432ae7d955f50e12a0",
+  [`${CORE}/agent/loop/core/loop-actor.ts`]:
+    "70c0a30886a2d95868ff676d5bee9d3cbd6f9e8c3431428965e148d176d2458e",
+  [`${CORE}/agent/loop/loopService.ts`]:
+    "12645003f352427a52a9b044f423a50174533ff52407395e5c29721235e0f2d5",
+  [`${CORE}/agent/loop/turnProjection.ts`]:
+    "22c1836bda136477ed45ddabd21c893d10e9602ff52a54593ea4d23ec656836f",
+  [`${CORE}/agent/shellCommand/shellCommandService.ts`]:
+    "a0eb450606c102990eceab7ac8fa2f01bd5939b66ab8959c67f597fc125ac601",
+  [`${CORE}/agent/toolExecutor/toolExecutorService.ts`]:
+    "7d1085580914f19e67e7c04d5a3ebb3280f09fc3c35f963d0b7e5c3579e11242",
+  [`${CORE}/agent/toolSelect/toolSelectService.ts`]:
+    "146f5479544e3fa42c04179ce5a1bccc44d9504fc1b0634685660c9658d25356",
+  [`${CORE}/app/config/configService.ts`]:
+    "afa300f75bb7f5be6636bc95686390e5554af36d600b5c77313027c6d2470b7b",
+  [`${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`]:
+    "7ecdc7925e098d64c5fd718da4496fde9d58cd40751f94edecf12afd67e2fc52",
+  [`${CORE}/features/tower/towerService.ts`]:
+    "4838643fc451f3cf0905416dc4cdfd6841305ad989101ceb51d97a888030a92c",
+  [`${CORE}/session/agentLifecycle/agentLifecycleService.ts`]:
+    "2d85833edfaf587c8301de45f06f2d9c80538a56aa00cb97bda9254a6313bb2c",
+  [`${CORE}/session/subagent/runAgentTurn.ts`]:
+    "5400f150cea1b812bb4e24692091c3a29d0f2807229911be2cc8b6c93a5d6b5f",
+  [`${CORE}/tool/executor/legacy-adapter.ts`]:
+    "79d7629528fad29204c0e4c1865d49340e746b27a568115770611a13cb4e1792",
+  [`${KAP}/start.ts`]:
+    "4993879aa2f36af0fe0d2992eeb777853e0c46e40cb7d7f37ff4edc20da21aee",
+  [`${SDK}/sdk-rpc-client-v2.ts`]:
+    "3e5e59a86c76e9bae335100600c12903964fe67f61f19cb7d7d32a02283796cd",
+};
+
 /**
  * Every durable plan-state event type at the pinned tag. The journal taint scan
  * (runtime/native-v2-preflight.ts::scanJournalLines) treats any record whose
@@ -1211,19 +1248,19 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
   });
 
   test("2.5+ print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) return;
     const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
     const marker = runner.indexOf("writeExperimentalVersion(");
     const sdk = runner.indexOf("new SDKRpcClientV2(");
@@ -1240,7 +1277,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ environment and workspace-trust dependencies are explicitly reviewed", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) return;
     expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
       "options.environmentId === LOCAL_ENVIRONMENT_ID",
     );
@@ -1263,7 +1300,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("2.5+ WebSocket state proof remains authenticated and bound to the live main agent", () => {
     const version = upstreamVersion();
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(version)) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(version)) return;
     const schema = read(`${KAP}/protocol/ws-agent.ts`);
     for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
       expect(schema).toContain(field);
@@ -1271,7 +1308,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
     expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
     const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
-    if (["2.6.0", "2.6.2"].includes(version)) {
+    if (["2.6.0", "2.6.2", "2.6.3"].includes(version)) {
       const control = read(`${KAP}/protocol/ws-control.ts`);
       expect(control).toContain("type: z.literal('subscribe')");
       expect(control).toContain("type: z.literal('response')");
@@ -1329,7 +1366,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
@@ -1340,13 +1377,13 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     const callers = filesContaining([CORE], "fireBeforeExecute(");
     expect(callers).toEqual([
       `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
-      ...(["2.6.0", "2.6.2"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
+      ...(["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
   });
 
   test("the before-execute subscriber population is exactly the audited set", () => {
-    if (["2.6.0", "2.6.2"].includes(upstreamVersion())) {
+    if (["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
         `${CORE}/agent/toolExecutor/legacyHooks.ts`,
         `${CORE}/agent/toolExecutor/toolExecutor.ts`,
@@ -1384,7 +1421,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.6 executor phases preserve managed-hook veto and execution ordering", () => {
-    if (!["2.6.0", "2.6.2"].includes(upstreamVersion())) return;
+    if (!["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) return;
     const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
     expect(service).toContain("composeToolExecutorHooks([resetHook, legacyHook, ...hooks, internalHook])");
     const executor = read(`${CORE}/tool/executor/tool-executor.ts`);
@@ -1445,7 +1482,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(upstreamVersion())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
       expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
     }
     // Every append-log read in the wire service names the single wire key.
@@ -1474,7 +1511,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       expect(end, "readRestoreChains body delimiter changed").toBeGreaterThan(-1);
       const chains = body.slice(0, end);
       expect(chains).toContain("const entries = await this.readStableEntries();");
-      if (["2.6.0", "2.6.2"].includes(upstreamVersion())) {
+      if (["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
         expect(chains).toContain(
           "restorable: normalizeLegacyTurnSteerRecords(restorableChain(entries, tree).map(({ record }) => record))",
         );
@@ -1559,11 +1596,11 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 // These assertions pin the upstream premises of the plugin's bounded-wave
 // construction, including the cancellation weakness it must close. They do
 // not assert that native maxConcurrency is repaired or replace binary controls.
-const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && upstreamVersion() === "2.6.2"
+const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3"].includes(upstreamVersion())
   ? describe
   : describe.skip;
 
-boundedSwarmSuite("exact 2.6.2 bounded-swarm source premises", () => {
+boundedSwarmSuite("exact bounded-swarm source premises", () => {
   function section(source: string, start: string, end: string): string {
     const first = source.indexOf(start);
     const last = source.indexOf(end, first + start.length);
@@ -1601,8 +1638,15 @@ boundedSwarmSuite("exact 2.6.2 bounded-swarm source premises", () => {
     expect(batch).toContain("this.pending.unshift(state);");
     expect(batch).toContain("this.launcher.retry(attempt.state.retryAgentId, runOptions)");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    expect(runner).toContain("const result = await turn.result;");
-    expect(runner).toContain("await abortable(loop.retry(), controller.signal)");
+    if (upstreamVersion() === "2.6.3") {
+      expect(runner).toContain("return awaitRunCompletion(target, loop, loop.retry(), options);");
+      const quiescent = section(runner, "async function awaitQuiescent(", "async function stopChildTasks(");
+      expect(quiescent).toContain("const result = await loop.settled();");
+      expect(quiescent).toContain("await Promise.all(active.map((task) => tasks.wait(task.taskId)));");
+    } else {
+      expect(runner).toContain("const result = await turn.result;");
+      expect(runner).toContain("await abortable(loop.retry(), controller.signal)");
+    }
     const loop = read(`${CORE}/agent/loop/loopService.ts`);
     expect(section(loop, "async retry():", "private maybeSettle()")).toContain("await this.settled();");
     expect(loop).toContain("await loop.waitForIdle();\n    await this.turns.drain();");
@@ -1700,7 +1744,17 @@ boundedSwarmSuite("exact 2.6.2 bounded-swarm source premises", () => {
     const abort = read(`${CORE}/_base/utils/abort.ts`);
     expect(section(abort, "export function abortable<T>(", "export function linkAbortSignal(")).toContain("reject(abortReason(signal));");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    expect(runner).toContain("await abortable(loop.retry(), controller.signal)");
+    if (upstreamVersion() === "2.6.3") {
+      const completion = section(runner, "async function awaitRunCompletion(", "async function awaitQuiescent(");
+      expect(completion).toContain("loop.cancel(undefined, reason);");
+      expect(completion).toContain("abortCleanup ??= stopChildTasks(target, loop, reason);");
+      expect(completion).toContain("lastResult = await awaitQuiescent(target, loop);");
+      const stop = section(runner, "async function stopChildTasks(", "function classifyTurnResult(");
+      expect(stop).toContain("loop.suppressTaskNotifications(active.map((task) => task.taskId));");
+      expect(stop).toContain("await Promise.all(active.map((task) => tasks.stop(task.taskId, message)));");
+    } else {
+      expect(runner).toContain("await abortable(loop.retry(), controller.signal)");
+    }
     const mirror = read(`${CORE}/session/subagent/mirrorAgentRun.ts`);
     expect(mirror.indexOf("await subagents?.hooks.onWillStartAgentTask.run(")).toBeLessThan(mirror.indexOf("const result = await run.completion;"));
     const hooks = read(`${CORE}/features/externalHooks/session/sessionExternalHooksService.ts`);

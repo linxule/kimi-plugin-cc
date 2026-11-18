@@ -2,6 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.6.3 — 2026-11-18 (publication pending)
+
+- Certify exact kimi-code 2.6.3 for all eight native-v2 operations under the existing no-plan and bounded-swarm/direct-worker construction. Exact source commit `b0de2fbd2de04d87689225aafd3912e5d193b62d` and bundle SHA-256 `a360023b6814ffdf05bc87e40925df5e0442ae3076ad9e7b6ea6f771e2a1857c` are verified; the upstream scheduler remains byte-identical to 2.6.2 and is not represented as fixed.
+- Review and pin the release's tool-origin, queued Stop-hook and task-reconciliation changes, including additional loop/subagent lifecycle files outside the monitor's scoped filters. The exact 2.6.3 source scan passes **31 tests / 404 assertions**, and the 2.6.2 regression retains **393 assertions** across 115 source pins.
+- Fix candidate smoke activation: the operation-map admission now has matching exact-version preactivation and bounded-policy selection. Retained journals proved the initial zero-child lanes were same-call `Swarm mode is off` results, not upstream child-creation failures. New smoke assertions prevent recurrence.
+- Pass sequential plan-ON/OFF, forced removed-tool and local-environment controls, **23 deterministic stock-binary tests / 138 assertions**, and candidate plus production real-provider matrices each with **30 passes / 390 assertions** and only the two inapplicable narrowed-refusal skips. Real child denials, child-authored patches, out-of-root confinement, direct workers and bounded waves are required evidence.
+- Pass the final full gate with **1,797 tests / 76 expected opt-in or platform skips / 0 failures / 23,469 assertions in 623.26 seconds**, plus 341-file package/DSH and isolated consumer-security checks. Runtime review returned NO FINDINGS; all five documentation findings were corrected and re-reviewed with no new must-fix. Release CI, tagging and npm publication remain pending; no installed-host update is implied. See the [2.6.3 record](docs/upstream-2.6.3-certification.md).
+
 ## 2.6.2 — 2026-11-14
 
 - Add a bounded swarm construction for exact stock CLI 2.6.2: managed-hook wave admission counts new and resumed entries, rejects forks, and uses a plugin-owned width. Force the native child timeout beyond the finite job budget so a timed-out retry cannot overlap a later wave.

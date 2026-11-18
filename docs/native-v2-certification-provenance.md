@@ -1,9 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
-**Current 2.6.2 release status:** all eight operations are certified on corrected runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`, including final Linux-host, stock-binary, live-provider, repository and package gates. Release CI passed and the immutable v2.6.2 tag/GitHub release is published; npm 2.6.2 is published with verified fresh installs and cryptographic signatures. See the [current receipt](upstream-2.6.2-certification.md).
+**Plugin 2.6.3 release-candidate status:** exact CLI 2.6.3 is certified for all eight operations under the bounded-wave/direct-worker construction. Release CI, tagging and npm publication remain pending; no installed-host update is implied. Its [receipt](upstream-2.6.3-certification.md) records the source, exact-binary, deterministic stock-binary, candidate and production operation evidence, plus 1,797 full-suite passes / 23,469 assertions, 341-file package validation, consumer security and resolved post-edit reviews. This does not republish plugin 2.6.2 or update installed hosts.
 
-**Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields); 2026-10-29 (§2/§3 exact 2.4.0 plan controls; §4/§5 capability matrix and lifecycle provenance); 2026-10-31 (§2/§3 exact 2.4.1 plan controls; §4/§5 exact 2.4.1 capability and lifecycle); 2026-11-05 (§2 local-execution closure; §2/§3 exact 2.5.0 controls; §4/§5 capability and WebSocket lifecycle); 2026-11-06 (§2/§3 exact 2.5.1 controls; §4/§5 capability and lifecycle); 2026-11-07 (§2/§3 exact 2.5.2 controls; §4/§5 capability and lifecycle); 2026-11-11 (§2/§3 exact 2.5.3 controls; §4/§5 capability and lifecycle); 2026-11-13 (§2/§3 exact 2.6.0 non-swarm scope; §4 capability matrix); 2026-11-14 (§2/§3 exact 2.6.2 controls; §4 capability matrix)
-**Current certification baseline:** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2`, `2.5.3` and `2.6.2` for every operation under §2. Plugin 2.6.2 uses bounded waves or a direct worker for exact CLI 2.6.2 swarm ([evidence](upstream-2.6.2-certification.md)); older rows retain their disclosed recovery limitation. Exact 2.6.0 covers review, challenge, ask, rescue, review_gate and pursue only. Legacy-v1 remains limited to pinned binaries ≤0.41.x.
+**Published 2.6.2 release status:** all eight operations are certified on corrected runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`, including final Linux-host, stock-binary, live-provider, repository and package gates. Release CI passed and the immutable v2.6.2 tag/GitHub release is published; npm 2.6.2 is published with verified fresh installs and cryptographic signatures. See the [current receipt](upstream-2.6.2-certification.md).
+
+**Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields); 2026-10-29 (§2/§3 exact 2.4.0 plan controls; §4/§5 capability matrix and lifecycle provenance); 2026-10-31 (§2/§3 exact 2.4.1 plan controls; §4/§5 exact 2.4.1 capability and lifecycle); 2026-11-05 (§2 local-execution closure; §2/§3 exact 2.5.0 controls; §4/§5 capability and WebSocket lifecycle); 2026-11-06 (§2/§3 exact 2.5.1 controls; §4/§5 capability and lifecycle); 2026-11-07 (§2/§3 exact 2.5.2 controls; §4/§5 capability and lifecycle); 2026-11-11 (§2/§3 exact 2.5.3 controls; §4/§5 capability and lifecycle); 2026-11-13 (§2/§3 exact 2.6.0 non-swarm scope; §4 capability matrix); 2026-11-14 (§2/§3 exact 2.6.2 controls; §4 capability matrix); 2026-11-18 (§2/§3 exact 2.6.3 controls; §4 capability matrix)
+**Current certification baseline:** native v2 is certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2`, `2.5.3`, `2.6.2` and `2.6.3` for every operation under §2. The current checkout uses bounded waves or a direct worker for exact CLI 2.6.2/2.6.3 swarm ([2.6.2 release evidence](upstream-2.6.2-certification.md), [2.6.3 checkout evidence](upstream-2.6.3-certification.md)); older rows retain their disclosed recovery limitation. Exact 2.6.0 covers review, challenge, ask, rescue, review_gate and pursue only. Legacy-v1 remains limited to pinned binaries ≤0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
 
@@ -60,9 +62,9 @@ later certified tag:
 2. Every route by which plan mode can become active in a `kimi -p` session is
    enumerated, and each is either unreachable from the plugin's spawn or closed
    by the plugin before spawn: the `default_plan_mode` config key under every spelling upstream normalizes to `defaultPlanMode` (pre-spawn
-   parse of the same file, `runtime/native-v2-preflight.ts`; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 also cancel
+   parse of the same file, `runtime/native-v2-preflight.ts`; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2 and 2.6.3 also cancel
    that default on fresh print), the `EnterPlanMode`/`ExitPlanMode` tools (managed
-   hook deny; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 remove EnterPlanMode, so a forced call rejects before the
+   hook deny; exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2 and 2.6.3 remove EnterPlanMode, so a forced call rejects before the
    hook while the deny policy remains), and restored plan state (own native-v2
    lineage only, raw journal scan of every agent journal).
 3. Every tool execution passes the executor path that fires the external hook,
@@ -70,11 +72,11 @@ later certified tag:
 4. A live control on the exact binary shows the plan-file write bypassing the
    hook when plan mode IS armed (proving the refusals are load-bearing), and
    the managed hook denying an ordinary write when it is not. Through 2.3.3 a
-   separate EnterPlanMode attempt must also reach that deny hook. On exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2,
+   separate EnterPlanMode attempt must also reach that deny hook. On exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2 and 2.6.3,
    where the tool is removed, a deterministic forced call must instead return
    `Tool "EnterPlanMode" not found` on the same call ID before any hook call,
    with no plan-enter journal or plan file.
-5. Execution remains local. Configured remote defaults and disabled workspace trust refuse before spawn; launcher environment selectors are reserved; fresh exact 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2 print explicitly selects local. Resume inspects metadata and every agent journal and refuses nonlocal or wrong-root records, using the operation's expected execution root, including swarm-write worktrees. Older sessions without environment records do not fail this environment check merely for lacking them.
+5. Execution remains local. Configured remote defaults and disabled workspace trust refuse before spawn; launcher environment selectors are reserved; fresh exact 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2/2.6.3 print explicitly selects local. Resume inspects metadata and every agent journal and refuses nonlocal or wrong-root records, using the operation's expected execution root, including swarm-write worktrees. Older sessions without environment records do not fail this environment check merely for lacking them.
 
 Under Basis B the headline claim is: *every executed tool call in a
 plugin-managed session passes the managed hook, and the engine's sole final
@@ -126,7 +128,7 @@ safety profile:
 3. **Non-vacuous no-plan controls:** with plan mode ON, the exact plan-file
    Write must still bypass the deny hook, proving the refusal is load-bearing.
    With plan mode OFF, an ordinary Write must reach the deny hook. Through 2.3.3,
-   a separate EnterPlanMode attempt must also reach it. Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 and 2.6.2 remove that
+   a separate EnterPlanMode attempt must also reach it. Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2 and 2.6.3 remove that
    tool, so the corresponding control must force a raw EnterPlanMode call and
    prove `Tool "EnterPlanMode" not found` on the same call ID before any hook
    call, with no plan-enter journal or plan file. The plugin refuses default-plan
@@ -155,21 +157,21 @@ Only then may that single operation/version pair be added to the native-v2
 matrix. The certification table controls routing in that checkout; shipping the
 expanded production capability requires a separately authorized release.
 
-### Exact 2.6.2 swarm construction
+### Exact 2.6.2/2.6.3 swarm construction
 
 The plugin bounds simultaneous Kimi child-agent turns by counting all new and resumed entries in the canonical hook; it excludes the coordinator and OS subprocess counts. Fresh singleton waves are denied, so a singleton remainder requires regrouping or own-child resume. The immutable spawn policy supplies the width to both hook and escape monitor and forces native swarm-child timeout `2147483647`, greater than the plugin's maximum finite budget. A stuck child holds its wave until completion or finite whole-job stop. Fresh own-session lineage, fork denial and disabled nested activation are part of the proof.
 
-After activation web shutdown and before print, the fresh owned parallel session disables native `TaskStop`. Stock 2.6.2 requires `TaskList`, `TaskOutput` and `TaskStop` together for Bash backgrounding, so that policy closes automatic detachment and completion-triggered child wakeups. The canonical hook also denies explicit background Bash. Normal exit and terminal cancellation require identity-verified owned-process settlement before artifact or patch capture. Individual Bash timeouts do not prove arbitrary descendant quiescence between waves; allowed repository tests can create multiple OS processes. A native mode-off rejection at concurrency one can produce a harmless escape-monitor mismatch, which remains detection evidence only.
+After activation web shutdown and before print, the fresh owned parallel session disables native `TaskStop`. Stock 2.6.2/2.6.3 requires `TaskList`, `TaskOutput` and `TaskStop` together for Bash backgrounding, so that policy closes automatic detachment and completion-triggered child wakeups. The canonical hook also denies explicit background Bash. Normal exit and terminal cancellation require identity-verified owned-process settlement before artifact or patch capture. Individual Bash timeouts do not prove arbitrary descendant quiescence between waves; allowed repository tests can create multiple OS processes. A native mode-off rejection at concurrency one can produce a harmless escape-monitor mismatch, which remains detection evidence only.
 
 Requested concurrency 1 selects a fresh direct worker without swarm activation. It retains `operation_kind` swarm or swarm-write and the same read-only or temporary-worktree policy; both delegation tools are denied. Native automatic Bash timeout-to-background remains possible at one, but root-agent turns stay sequential and whole-job settlement gates the result. Parallel evidence requires child journals and per-call work correlation; single-worker evidence instead requires no child journals or web activation, main-agent confinement, delegation rejection, patch provenance and cancellation. Neither mode inherits certification from the other's smoke. The native TaskStop policy persists in owned parallel sessions after deactivation; external interactive resume is outside this certification.
 
-Older full-operation rows retain their documented recovery limitation. An exact later version may establish the hard bound through an audited upstream fix or a verified plugin construction; no particular upstream implementation is required. The [2.6.2 receipt](upstream-2.6.2-certification.md) owns the validation state.
+Older full-operation rows retain their documented recovery limitation. An exact later version may establish the hard bound through an audited upstream fix or a verified plugin construction; no particular upstream implementation is required. The [2.6.2 receipt](upstream-2.6.2-certification.md) and [2.6.3 checkout receipt](upstream-2.6.3-certification.md) own their respective validation states.
 
 ## 4. Current capability matrix
 
 | Engine | Operation | Production state |
 |---|---|---|
-| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2`, `2.5.3`, `2.6.2` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1`; exact 2.6.2 swarm additionally requires the bounded-wave/direct-worker construction |
+| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2`, `2.5.3`, `2.6.2`, `2.6.3` for all eight operations (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1`; exact 2.6.2/2.6.3 swarm additionally requires the bounded-wave/direct-worker construction |
 | `native-v2` | review, challenge, ask, rescue, review_gate, pursue | exact `2.6.0` only; the published plugin 2.5.9 scope for `2.6.2` was similarly narrow before plugin 2.6.2 added bounded swarm |
 | `legacy-v1` | review, challenge, ask, rescue, review_gate | certified within `KIMI_TESTED_MINORS` (≤ 0.41) for an explicitly pinned binary |
 | `legacy-v1` | pursue / swarm / swarm-write | certified from kimi-code 0.8 / 0.12 / 0.18 within `KIMI_TESTED_MINORS` |

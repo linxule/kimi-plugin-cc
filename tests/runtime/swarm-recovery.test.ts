@@ -50,6 +50,7 @@ describe("durable swarm recovery", () => {
     { alreadyTerminal: false, version: "2.3.2" },
     { alreadyTerminal: true, version: "2.3.2" },
     { alreadyTerminal: false, version: "2.6.2" },
+    { alreadyTerminal: false, version: "2.6.3" },
   ])("compiled hard-kill recovery preserves work and terminal outcomes %j", async ({ alreadyTerminal, version }) => {
     const root = await createTestPluginDataRoot("swarm-crash");
     const repo = await createGitRepoFixture("swarm-crash-repo");
@@ -59,14 +60,14 @@ describe("durable swarm recovery", () => {
       KIMI_PLUGIN_CC_KIMI_BIN: node, KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mock]),
       KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", MOCK_KIMI_WEB_LOG: log,
       MOCK_KIMI_WEB_VERSION: version,
-      MOCK_KIMI_WEB_SCENARIO: version === "2.6.2" ? "ws-no-state" : "success",
+      MOCK_KIMI_WEB_SCENARIO: (version === "2.6.2" || version === "2.6.3") ? "ws-no-state" : "success",
       MOCK_KIMI_WEB_TOKEN: "never-persist-this-token", MOCK_KIMI_WEB_STATUS_DELAY_MS: "10000" };
     await mkdir(home, { recursive: true });
     const paths = resolvePluginPaths(env);
     await ensurePluginPaths(paths);
     const store = new JobStore(paths);
     const running = launch(["task", "swarm", "--write", "--budget", "20s",
-      ...(version === "2.6.2" ? ["--max-concurrency", "2"] : []), "crash recovery fixture"], repo, env);
+      ...((version === "2.6.2" || version === "2.6.3") ? ["--max-concurrency", "2"] : []), "crash recovery fixture"], repo, env);
     let worktree: string | undefined;
     let orphanPid: number | undefined;
     try {
@@ -75,7 +76,7 @@ describe("durable swarm recovery", () => {
         const job = store.findLatestJob({ repoId });
         const recovery = job && store.getSwarmRecovery(job.job_id)?.record;
         const entries = (await readFile(log, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
-        const waitingForStatus = entries.some((entry) => version === "2.6.2"
+        const waitingForStatus = entries.some((entry) => (version === "2.6.2" || version === "2.6.3")
           ? entry.frame?.type === "subscribe" : entry.path?.endsWith("/status"));
         if (!job || !recovery?.sessionDirty || !waitingForStatus) return;
         return { job, recovery };
@@ -129,7 +130,7 @@ describe("durable swarm recovery", () => {
       const recoverySpawns = logAfter.split("\n").filter(Boolean).map((line) => JSON.parse(line))
         .filter((entry) => entry.kind === "spawn");
       expect(recoverySpawns.at(-1).env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY).toBe("1");
-      if (version === "2.6.2") {
+      if ((version === "2.6.2" || version === "2.6.3")) {
         expect(recoverySpawns[0].env.KIMI_PLUGIN_CC_SWARM_WAVE_SIZE).toBe("2");
         expect(recoverySpawns.at(-1).env.KIMI_PLUGIN_CC_SWARM_POLICY).toBe("bounded-waves/1");
         expect(recoverySpawns.at(-1).env.KIMI_PLUGIN_CC_SWARM_WAVE_SIZE).toBe("1");

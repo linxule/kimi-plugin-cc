@@ -146,7 +146,7 @@ export function decideHookOutcomePure(input, ctx) {
             // AgentSwarm are allowed and the singular Agent stays denied. This adds
             // no direct tool-write permission within the repository/Git trust
             // boundary: read-only Git context commands still trust repository Git
-            // configuration and can execute configured helpers. Exact 2.6.2 waves
+            // configuration and can execute configured helpers. Exact 2.6.2/2.6.3 waves
             // pass the admission guard above; fresh children cannot activate swarm
             // mode. Older paths retain their inherited scheduler limitations.
             if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {

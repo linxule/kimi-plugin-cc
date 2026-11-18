@@ -22,8 +22,10 @@ function plan(overrides: Partial<KimiExecutionPlan> = {}): KimiExecutionPlan {
 describe("bounded swarm environment", () => {
   test("selects only the exact engine, version and swarm operation", () => {
     for (const operationKind of ["swarm", "swarm-write"] as const) {
-      expect(usesBoundedSwarmPolicy(plan({ operationKind }))).toBe(true);
-      for (const kimiVersion of ["2.5.3", "2.6.0", "2.6.3", "2.6.2+local", "2.6.2-rc.1", null]) {
+      for (const kimiVersion of ["2.6.2", "2.6.3"]) {
+        expect(usesBoundedSwarmPolicy(plan({ operationKind, kimiVersion }))).toBe(true);
+      }
+      for (const kimiVersion of ["2.5.3", "2.6.0", "2.6.1", "2.6.4", "2.6.2+local", "2.6.2-rc.1", null]) {
         expect(usesBoundedSwarmPolicy(plan({ operationKind, kimiVersion }))).toBe(false);
       }
       expect(usesBoundedSwarmPolicy(plan({ operationKind, intendedEngine: "legacy-v1" }))).toBe(false);

@@ -7,6 +7,7 @@ import path from "node:path";
 import { probeProcessIdentity } from "../../runtime/process-tree.js";
 import {
   collectDatabase,
+  EXPECTED_VERSION,
   pairedCalls,
   runLane,
   textContent,
@@ -262,7 +263,7 @@ export async function runLifecycleCase(mode: LifecycleMode): Promise<void> {
   const job = output.database.jobs[0];
   assert.equal(job.operation_kind, write ? "swarm-write" : "swarm");
   assert.equal(job.intended_engine, "native-v2");
-  assert.equal(job.kimi_version, "2.6.2");
+  assert.equal(job.kimi_version, EXPECTED_VERSION);
   const children = output.rawJournals.filter((journal) => journal.agent !== "main");
   const patch = output.patches.map((entry) => entry.text).join("\n");
   if (nested) {

@@ -106,7 +106,7 @@ export interface SwarmArgs extends KimiFlagState {
   cap?: number;
   /**
    * Requested concurrency exported as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY.
-   * Exact native-v2 2.6.2 also enforces bounded waves, or a direct single worker
+   * Exact native-v2 2.6.2/2.6.3 also enforces bounded waves, or a direct single worker
    * at one. Older certified versions cap normal launches only; rate-limit
    * recovery can exceed that setting. Distinct from `cap`: concurrency (how many run
    * simultaneously) ≠ total count (how many run over the whole life of the

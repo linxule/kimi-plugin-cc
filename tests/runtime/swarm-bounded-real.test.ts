@@ -1,4 +1,4 @@
-// Opt-in deterministic certification controls against the untouched 2.6.2 binary.
+// Opt-in deterministic certification controls against an exact stock binary.
 // Every case runs in a dedicated process so cancellation cannot hit a sibling.
 // No provider credentials, personal Kimi configuration or network model calls.
 import { describe, expect, test } from 'bun:test';
@@ -17,7 +17,7 @@ const getOutput=()=>outputPromise??=(process.env.KIMI_PLUGIN_CC_BOUNDED_SMOKE_OU
  ?Promise.resolve(process.env.KIMI_PLUGIN_CC_BOUNDED_SMOKE_OUTPUT)
  :mkdtemp(path.join(os.tmpdir(),'kimi-bounded-cert-')));
 
-suite('real stock 2.6.2 bounded swarm, canonical hook',()=>{
+suite('real stock bounded swarm, canonical hook',()=>{
  for(const name of cases)test(name,async()=>{
   expect(process.platform).not.toBe('win32');
   expect(path.isAbsolute(process.env.KIMI_PLUGIN_CC_KIMI_BIN??'')).toBe(true);

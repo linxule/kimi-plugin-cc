@@ -91,8 +91,8 @@ export interface CliClientOptions {
   /**
    * Normal-launch cap on how many AgentSwarm subagents kimi-code runs
    * CONCURRENTLY, exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
-   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0/2.6.2 sources can exceed it during
-   * rate-limit recovery. Exact 2.6.2 additionally uses this as the trusted wave
+   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3 sources can exceed it during
+   * rate-limit recovery. Exact 2.6.2/2.6.3 additionally uses this as the trusted wave
    * admission limit (or a direct worker at 1), with native child timeouts moved
    * beyond the whole-job budget. Older binaries ignore the unknown env var, so
    * on < 0.18 the soft --cap prompt-count hint is the only count bound. Only
@@ -1261,7 +1261,7 @@ function buildArgs(opts: CliClientOptions): string[] {
     : undefined;
   if (
     opts.resumeSessionId === undefined &&
-    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
+    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
   ) {
     args.push("--environment", "local");
   }

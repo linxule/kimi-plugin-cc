@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
-import { runLane, textContent, journalEvidence, pairedCalls, collectDatabase, delay, BASE, type Reply, type RunResult } from './swarm-bounded-harness.js';
+import { runLane, textContent, journalEvidence, pairedCalls, collectDatabase, delay, BASE, EXPECTED_VERSION, type Reply, type RunResult } from './swarm-bounded-harness.js';
 import { probeProcessIdentity } from '../../runtime/process-tree.js';
 import { LIFECYCLE_MODES, runLifecycleCase } from './swarm-bounded-lifecycle.js';
 
@@ -19,7 +19,7 @@ function assertCommon(result:RunResult,write:boolean,children:number,cap:number)
  assert.equal(result.setup.probe,'ok');assert.equal(result.rejected,0);assert.equal(result.userStatus,'');
  assert(result.afterSettleReport,'quiescence must be proved before closing provider');
  assert.equal(result.database.jobs.length,1);
- const job=result.database.jobs[0];assert.equal(job.status,'completed');assert.equal(job.kimi_version,'2.6.2');
+ const job=result.database.jobs[0];assert.equal(job.status,'completed');assert.equal(job.kimi_version,EXPECTED_VERSION);
  assert.equal(job.operation_kind,write?'swarm-write':'swarm');assert.equal(job.intended_engine,'native-v2');
  assert.equal(result.rawJournals.filter(j=>j.agent!=='main').length,children);
  assert.equal(result.rawJournals.filter(j=>j.agent==='main').length,1);

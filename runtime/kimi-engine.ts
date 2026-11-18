@@ -122,6 +122,7 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
   "2.5.2",
   "2.5.3",
   "2.6.2",
+  "2.6.3",
 ]);
 
 /**
@@ -827,7 +828,7 @@ function nativeV2NotCertified(
   ) {
     return new RuntimeError(
       "KIMI_CAPABILITY_NOT_CERTIFIED",
-      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code 2.6.2 for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
+      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code 2.6.2 or 2.6.3 for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
       "kimi-engine.capability",
       {
         details: {

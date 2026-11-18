@@ -6,7 +6,8 @@ export const BOUNDED_SWARM_POLICY = "bounded-waves/1";
 // terminal whole-job cancellation can interrupt a wave. Environment 0 is ignored.
 export const SWARM_CHILD_TIMEOUT_MS = 2_147_483_647;
 export function usesBoundedSwarmPolicy(plan) {
-    return plan.intendedEngine === "native-v2" && plan.kimiVersion === "2.6.2" &&
+    return plan.intendedEngine === "native-v2" &&
+        (plan.kimiVersion === "2.6.2" || plan.kimiVersion === "2.6.3") &&
         (plan.operationKind === "swarm" || plan.operationKind === "swarm-write");
 }
 function plainObject(value) {

@@ -261,6 +261,13 @@ test("smoke plans satisfy the final spawn gate and retain exact native policy se
       matrix.set(operation, previous);
     }
   }
+  if (BINARY_VERSION === "2.6.2" || BINARY_VERSION === "2.6.3") {
+    for (const operation of ["swarm", "swarm-write"] as const) {
+      const plan = smokePlan("node", ["fixture.mjs"], operation);
+      expect(usesBoundedSwarmPolicy(plan)).toBe(true);
+      expect(requiresSwarmPreactivation(BINARY_VERSION)).toBe(true);
+    }
+  }
   const legacy = smokePlanForVersion("node", ["fixture.mjs"], "review", "0.41.0", false);
   expect(legacy.certification).toBe("test-bypass");
   expect(legacy.kimiVersion).toBeNull();
@@ -885,7 +892,7 @@ const PRODUCTION_NON_SWARM =
 const swarmReadSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const swarmWriteSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const nonSwarmSuite = PREREQS_OK && PRODUCTION_NON_SWARM ? describe : describe.skip;
-const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && BINARY_VERSION === "2.6.2"
+const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && ["2.6.2", "2.6.3"].includes(BINARY_VERSION ?? "")
   ? describe : describe.skip;
 
 suite("real-binary smoke: read-only commands cannot write (H7)", () => {
@@ -2037,8 +2044,8 @@ async function completedBoundedSwarmJob(env: NodeJS.ProcessEnv, workspace: strin
     expect(job?.status).toBe("completed");
     if (!job) throw new Error("bounded swarm did not persist a job");
     expect(job.operation_kind).toBe(write ? "swarm-write" : "swarm");
-    expect(job.kimi_version).toBe("2.6.2");
-    expect(job.system_version).toBe("2.6.2");
+    expect(job.kimi_version).toBe(BINARY_VERSION!);
+    expect(job.system_version).toBe(BINARY_VERSION!);
     expect(job.intended_engine).toBe("native-v2");
     expect(job.observed_engine).toBe("native-v2");
     expect(job.plan_certification).toBe("certified");
@@ -2355,7 +2362,7 @@ swarmWriteSuite("real-binary smoke: write-swarm denies out-of-worktree writes (-
 // These lanes test real model behavior on the exact bounded-policy release.
 // Scripted-provider tests separately force retries, cancellation tails and
 // delegation denials; these cases require useful completion without retries.
-boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave compliance (2.6.2)", () => {
+boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave compliance", () => {
   test("concurrency one reads directly with fresh lineage and no child or web activation", async () => {
     const kimiHome = await createTestPluginDataRoot("smoke-home-single-read");
     const workspace = await createTestPluginDataRoot("smoke-ws-single-read");
