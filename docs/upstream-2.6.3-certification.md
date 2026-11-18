@@ -2,9 +2,9 @@
 
 ## Scope and decision
 
-**Status: certified for all eight operations; plugin 2.6.3 release candidate.** Exact `@moonshot-ai/kimi-code@2.6.3` passed the source, exact-binary, real-provider candidate, deterministic stock-binary, production-table operation, full repository, package, consumer-security and post-edit review gates on the final implementation. The production operation table contains 2.6.3 for review, challenge, ask, rescue, review_gate, pursue, swarm and swarm-write. Release CI, tagging and npm publication remain pending.
+**Status: certified and published for all eight operations.** Exact `@moonshot-ai/kimi-code@2.6.3` passed the source, exact-binary, real-provider candidate, deterministic stock-binary, production-table operation, full repository, package, consumer-security and post-edit review gates. Plugin 2.6.3 release commit `597210fe888e045c15577dbfc112188075bf1ac5` passed exact-commit validation and release CI `44406363750`; immutable tag `v2.6.3` and the GitHub release are published. npm OIDC run `44407749059` published plugin 2.6.3, and fresh registry/archive/signature/attestation verification passed.
 
-This release candidate does not change an installed host cache or move an operator CLI pin. Plugin 2.6.2 remains the latest published plugin release until plugin 2.6.3 publication completes.
+Plugin 2.6.3 is the latest published plugin release. Certification and publication do not change an installed host cache or move an operator CLI pin.
 
 Exact source: `@moonshot-ai/kimi-code@2.6.3`, commit `b0de2fbd2de04d87689225aafd3912e5d193b62d` (annotated tag object `a9df46689649824abfdfff1528d7708a23fd3cf3`). The isolated npm binary reports 2.6.3; `dist/main.mjs` SHA-256 is `a360023b6814ffdf05bc87e40925df5e0442ae3076ad9e7b6ea6f771e2a1857c`.
 
@@ -81,7 +81,19 @@ Final validation receipts:
 - **Consumer security:** PASS. `bun run check:consumer-security` verified an isolated npm consumer installation without host credentials or model calls.
 - **Post-edit review:** PASS. The independent runtime/test reviewer returned NO FINDINGS. The documentation reviewer returned two major and three minor findings; all were verified and corrected, and narrow re-review found all five resolved with no new must-fix. Final source/docs diff review preserved the pre-existing user edit in the 2.6.2 historical record.
 
-The release commit must pass CI and the exact-release-commit production matrix before tagging. No installed-host setup or operator pin change is implied by certification or publication.
+## Release and registry receipt
+
+The exact release commit `597210fe888e045c15577dbfc112188075bf1ac5` passed the isolated full gate with **1,797 passes / 76 expected skips / 0 failures / 23,469 assertions in 580.54 seconds**, the 341-file package/DSH and consumer-security gates, and the production real-provider matrix with **30 passes / 390 assertions in 481.45 seconds**. Release CI run `44406363750` passed both Linux and Windows jobs.
+
+The immutable [v2.6.3 GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.6.3) is published at that commit. OIDC run `44407749059` passed build and publication; npm `latest` is 2.6.3, published at `2026-11-18T22:14:06.914Z`. The 341-file registry tarball is byte-identical to the Actions artifact, and every published file matches the release tag:
+
+- SHA-1: `63047ceab5c0b84da362788609e6f644b56a3414`
+- SHA-256: `a64386f3cebf0f77d40f8d767f5533652f2fa91ba647b816876d8935bb2b1721`
+- SHA-512: `37f68e1e0f53fe658a9801418d748067eb84849be76e53988231e2b81efdac18cc4a9eea0496677e9f6af584a1e5709ca6aeba7a1198135d1b12910245017e90`
+
+SLSA provenance log index `3979478928` and publish attestation log index `3979539697` match the package subject, SHA-512, `refs/tags/v2.6.3`, release commit and publish workflow run. Fresh registry installation has zero production advisories and no invalid or missing signatures. Isolated Claude Code, Codex and DSH setup/check pass against stock CLI 2.6.3, and all three installed runtime maps enforce full 2.6.3 certification with 2.6.0 non-swarm-only scope. Verification made no model calls and changed no installed host or operator pin.
+
+The DSH Discover timestamp is `1795040046`, recording the actual npm publication time. No installed-host setup or operator pin change is implied by certification or publication.
 
 ## Residual boundaries
 
