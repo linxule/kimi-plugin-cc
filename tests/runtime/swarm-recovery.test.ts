@@ -17,10 +17,13 @@ const mock = path.resolve("tests/helpers/mock-kimi-web.mjs");
 function launch(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   // Candidate admission stays inside this test process; no production flag
   // bypasses certification before the reviewed version enters the matrix.
-  const nodeArgs = env.MOCK_KIMI_WEB_VERSION === "2.6.2" ? ["--input-type=module", "-e", `
+  const candidate = env.MOCK_KIMI_WEB_VERSION === "2.6.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.2"
+    ? env.MOCK_KIMI_WEB_VERSION
+    : undefined;
+  const nodeArgs = candidate !== undefined ? ["--input-type=module", "-e", `
     import { NATIVE_V2_CERTIFIED } from ${JSON.stringify(pathToFileURL(path.resolve("dist/kimi-engine.js")).href)};
     for (const op of ['swarm', 'swarm-write']) {
-      NATIVE_V2_CERTIFIED.set(op, [...new Set([...NATIVE_V2_CERTIFIED.get(op), '2.6.2'])]);
+      NATIVE_V2_CERTIFIED.set(op, [...new Set([...NATIVE_V2_CERTIFIED.get(op), ${JSON.stringify(candidate)}])]);
     }
     process.argv = [process.execPath, ${JSON.stringify(companion)}, ...process.argv.slice(1)];
     await import(${JSON.stringify(pathToFileURL(companion).href)});
@@ -51,7 +54,9 @@ describe("durable swarm recovery", () => {
     { alreadyTerminal: true, version: "2.3.2" },
     { alreadyTerminal: false, version: "2.6.2" },
     { alreadyTerminal: false, version: "2.6.3" },
+    { alreadyTerminal: false, version: "2.7.2" },
   ])("compiled hard-kill recovery preserves work and terminal outcomes %j", async ({ alreadyTerminal, version }) => {
+    const bounded = ["2.6.2", "2.6.3", "2.7.2"].includes(version);
     const root = await createTestPluginDataRoot("swarm-crash");
     const repo = await createGitRepoFixture("swarm-crash-repo");
     const home = path.join(root, "home");
@@ -60,14 +65,14 @@ describe("durable swarm recovery", () => {
       KIMI_PLUGIN_CC_KIMI_BIN: node, KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mock]),
       KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", MOCK_KIMI_WEB_LOG: log,
       MOCK_KIMI_WEB_VERSION: version,
-      MOCK_KIMI_WEB_SCENARIO: (version === "2.6.2" || version === "2.6.3") ? "ws-no-state" : "success",
+      MOCK_KIMI_WEB_SCENARIO: bounded ? "ws-no-state" : "success",
       MOCK_KIMI_WEB_TOKEN: "never-persist-this-token", MOCK_KIMI_WEB_STATUS_DELAY_MS: "10000" };
     await mkdir(home, { recursive: true });
     const paths = resolvePluginPaths(env);
     await ensurePluginPaths(paths);
     const store = new JobStore(paths);
     const running = launch(["task", "swarm", "--write", "--budget", "20s",
-      ...((version === "2.6.2" || version === "2.6.3") ? ["--max-concurrency", "2"] : []), "crash recovery fixture"], repo, env);
+      ...(bounded ? ["--max-concurrency", "2"] : []), "crash recovery fixture"], repo, env);
     let worktree: string | undefined;
     let orphanPid: number | undefined;
     try {
@@ -76,7 +81,7 @@ describe("durable swarm recovery", () => {
         const job = store.findLatestJob({ repoId });
         const recovery = job && store.getSwarmRecovery(job.job_id)?.record;
         const entries = (await readFile(log, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
-        const waitingForStatus = entries.some((entry) => (version === "2.6.2" || version === "2.6.3")
+        const waitingForStatus = entries.some((entry) => bounded
           ? entry.frame?.type === "subscribe" : entry.path?.endsWith("/status"));
         if (!job || !recovery?.sessionDirty || !waitingForStatus) return;
         return { job, recovery };
@@ -130,7 +135,7 @@ describe("durable swarm recovery", () => {
       const recoverySpawns = logAfter.split("\n").filter(Boolean).map((line) => JSON.parse(line))
         .filter((entry) => entry.kind === "spawn");
       expect(recoverySpawns.at(-1).env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY).toBe("1");
-      if ((version === "2.6.2" || version === "2.6.3")) {
+      if (bounded) {
         expect(recoverySpawns[0].env.KIMI_PLUGIN_CC_SWARM_WAVE_SIZE).toBe("2");
         expect(recoverySpawns.at(-1).env.KIMI_PLUGIN_CC_SWARM_POLICY).toBe("bounded-waves/1");
         expect(recoverySpawns.at(-1).env.KIMI_PLUGIN_CC_SWARM_WAVE_SIZE).toBe("1");

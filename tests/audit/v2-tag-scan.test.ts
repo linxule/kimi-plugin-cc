@@ -30,9 +30,12 @@ const SOURCE = process.env.KIMI_CODE_SOURCE_TAG_DIR;
 const suite = SOURCE !== undefined && existsSync(SOURCE) ? describe : describe.skip;
 
 const CORE = "packages/agent-core-v2/src";
+const CORE_RUNTIME = "packages/core/src";
 const CLI = "apps/kimi-code/src";
 const KAP = "packages/kap-server/src";
 const SDK = "packages/node-sdk/src";
+const KLIENT = "packages/klient/src";
+const ACP = "packages/acp-server/src";
 
 /**
  * Per-version pins for files whose exact bytes decide the construction. A new
@@ -1149,6 +1152,199 @@ PINNED_HASHES["2.6.3"] = {
     "3e5e59a86c76e9bae335100600c12903964fe67f61f19cb7d7d32a02283796cd",
 };
 
+// 2.7.2 (56145f84): fifty-three inherited pins changed and the loop actor moved
+// to the DI-free core. Pin the real executor, hook composer, and loop actor as
+// well as the compatibility re-exports, shared retry code, CLI boundaries, and
+// authenticated JSON/KAP route composition.
+PINNED_HASHES["2.7.2"] = {
+  ...PINNED_HASHES["2.6.3"],
+  [`${CORE}/features/externalHooks/internal/types.ts`]:
+    "eb697379c4efdc48b0ee5ac00256d1205b85d99eefb7b19843218d35107852dc",
+  [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]:
+    "54d52bb02917cebbc97df66e92aa67ea0aab2768fe1b759c9a3f53f27571841b",
+  [`${CORE}/features/plan/planService.ts`]:
+    "acddcf426b3716b93701dd9153e0c7d7c21c9156a1e762b3e94090ec392e4604",
+  [`${CORE}/state/eventDispatcherService.ts`]:
+    "d8b74a5001eb6ec4567e674013c002ddad650f1f815f45aca2d1057962821094",
+  [`${CORE}/features/plan/planOps.ts`]:
+    "37b3d018746da238686733b66d9e9328248897859ca45f96ae28c26533564637",
+  [`${CORE}/wire/wireService.ts`]:
+    "04fcdaf00ce688c2cc4e9e5d243569cee3e7a2717b19a89391d0671bdac995aa",
+  [`${CORE}/wire/record.ts`]:
+    "68357abd44314ff757cd049155f35bf772f2310c2bc7dd65b793a05e417fea88",
+  [`${CLI}/cli/v2/run-v2-print.ts`]:
+    "c7e724748b238245407f6f29e6af42ac41cf84f08a90f382eee51854b1b8ccb3",
+  [`${CORE}/session/sessionActivity/sessionRunGateService.ts`]:
+    "2ed8303ec3d042f3c613ca6e1c62d264178752609128dad710102e54ae523a01",
+  [`${SDK}/sdk-rpc-client-v2.ts`]:
+    "84cf2005986471f9b33c73ac7d86dc121f14a1588acfb3ecf0fb0f6648e89cb9",
+  [`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`]:
+    "801dc7b9fe3baa05b455a8615a8b7b16bcf373f9e44da5173dcd57f60146edda",
+  [`${CORE}/session/agentLifecycle/agentLifecycleService.ts`]:
+    "28861d60b9f425f2ecdf46d754e909201af9a88f8958a90f05d3548da7ba86e4",
+  [`${CORE}/agent/environmentBinding/environmentBindingOps.ts`]:
+    "2f65bebb17455c435603520f73089bfdf239864742df86124e3bd8acf2aa5269",
+  [`${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`]:
+    "2847e3f3f75247e71bc0fd9139a28a34f7dfca8d9d0cbff87df8d395b3c64222",
+  [`${CORE}/agent/tools/os/bash/bashTool.ts`]:
+    "c8ee4ef1db609700dac06519e40b022c9f3d0fb1c0dd9ab1b0af0e6210aaf6bf",
+  [`${CLI}/cli/prompt-render.ts`]:
+    "ddfc890858766e43d635a37268d6131baf3f82fbab8bd06bd5e16e3d3397265d",
+  [`${CLI}/cli/goal-prompt.ts`]:
+    "4db3c76ccdca5bf68bbb34cd083a7ff8bc0ce0363c2630bd0daef4895fd5a801",
+  [`${CLI}/cli/headless-exit.ts`]:
+    "d6a77ec31627583ab7acec016fa66070524b72b0a4730d81b7d5ec5f46cfec5c",
+  [`${KAP}/protocol/ws-agent.ts`]:
+    "0fda7f2f53f5cf73ba1b8c9fe93573bd1ba926c23c8bc4e194f6d051ae29682e",
+  [`${KAP}/transport/ws/v1/agentState.ts`]:
+    "c54c9633cad62aa32c05a5612bc9e3002b7accc1be3693dbbaa395dfb99cc293",
+  [`${KAP}/transport/ws/v1/sessionAgentFeed.ts`]:
+    "bdceb5d5e0481a897f8a096c73e356927b85e8b7723521a4bb33f4d46801bd69",
+  [`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`]:
+    "1b3bb299538d60e3d9d49f6dc400fc66a4b2722927693e0742d9f5256cad733a",
+  [`${KAP}/routes/sessions.ts`]:
+    "7a0733411c4b7a44a199c895fbcd40b16a93ff7215e87f32d99a93f1a9ad62ec",
+  [`${KAP}/start.ts`]:
+    "25803707bd6797c93b3382f1840d3df0788489ebf6f5e1a6d119b261b75afa2c",
+  [`${CORE}/agent/toolExecutor/legacyHooks.ts`]:
+    "e900c7bb1028dab051bfa94f7e5b3c5f60b5049f4d490a2b7e2bad8b75622c0f",
+  [`${CORE}/agent/toolExecutor/toolExecutor.ts`]:
+    "efb780931c8a690927279dfdd4c4b236709084f1a7f81cd5e6036df721936543",
+  [`${CORE_RUNTIME}/tool/tool-executor.ts`]:
+    "35b03edcb0afa5e6451f906945cb328bfe7458de33b4982ad2cf9c7bb9ed8fa7",
+  [`${CORE_RUNTIME}/tool/hook-composer.ts`]:
+    "87fbe3ee4b66c257deb3f697d5e1eddf1edbbdac4f8087dd04190700a8488fda",
+  [`${CORE}/tool/executor/legacy-adapter.ts`]:
+    "c1369c9217608e2bb0b45e7ab6cb60ed2bb36e59731f931ebe2bff3acae09da6",
+  [`${CORE_RUNTIME}/loop/loop-actor.ts`]:
+    "899238c3e9f7c6f85dc7383eed8c3d056b406944c960c5d1a6af59802c7c1dd4",
+  [`${CORE}/agent/shellCommand/shellCommandService.ts`]:
+    "412b926a7df371c613b5006423d5b6d0062bb9052f0d34fbe7a26663d9e68006",
+  [`${CORE}/features/swarm/session/agentRunBatch.ts`]:
+    "6fc11370e81cb68ca1ae6dd89406790127dc3d2631d524bc0f3db908e050e5e4",
+  [`${CORE}/features/swarm/session/sessionSwarmService.ts`]:
+    "2c19fcf7b497dd899c46b255c71e17453374379bc529597f082c9fc4eafc68ab",
+  [`${CORE}/features/swarm/swarmOps.ts`]:
+    "d7fbf7172ceb102398caaf34293c6c0851efc171d66ffb4a9201807b4d72c15a",
+  [`${CORE}/agent/loop/journal.ts`]:
+    "1f0d65e07140ca5d016ebee288b9d7e5bbeedd34e966e514a0e3659bc198ec0b",
+  [`${CORE}/agent/loop/turnOps.ts`]:
+    "5d51992972fd82d864872421323753b07183c21241396128d3cb76eb20728c14",
+  [`${CORE}/agent/loop/loopService.ts`]:
+    "ebba5ac8bf3568b12c1322848530fef9a434628a780b9543198462d73b208f27",
+  [`${CORE}/agent/loop/turnProjection.ts`]:
+    "dac511ca6d22713d8cc9d23dc592f6ae2f3f517802f43cfb5ebaff5bad1867bc",
+  [`${CORE}/agent/contextMemory/loopEventFold.ts`]:
+    "a6e5faad0f894f3c8b2a9c41577b1a3c49ed0fcdd73374f5940db893ea1fe12a",
+  [`${CORE}/session/subagent/mirrorAgentRun.ts`]:
+    "7611459fe8b7bebc839dfae8157b8fdb65bdd08971efb5fb429bb45924bbb915",
+  [`${CORE}/_base/di/scope.ts`]:
+    "62118f732d5b27cf784a801b8cc46d51a202d2e690d5cc16003774d62d50b6ff",
+  [`${CORE}/agent/loop/profileAdapter.ts`]:
+    "66440bf899aa19e4a499235cae55f70ea4813061365ddec2b184e0ba4457cd2a",
+  [`${CORE}/features/goal/goalService.ts`]:
+    "cce679d4cfc51b8b1cb59ad632cb13e1c4f64d59de23d4f5ef620ac4e034a051",
+  [`${CORE}/agent/toolDedupe/toolDedupeService.ts`]:
+    "4d47d0d798946652571fc6f653a235ba0de6cb3088a37878eb37e6ad9a33cb98",
+  [`${CORE}/agent/toolSelect/toolSelectService.ts`]:
+    "bf2d7a745614f466a10d03b228b84123764ae76bf8614f30a28e0cbc60dca212",
+  [`${CORE}/agent/mcp/mcpService.ts`]:
+    "da1752847adbefd8ad9d15d4b85e82bb54271280c6b96e40a07b5434a62dfd30",
+  [`${KAP}/protocol/ws-control.ts`]:
+    "91cabbf7af237eb11437d6884ca9bb94d8a736e95afbf744cd14b46442eb2cc4",
+  [`${KAP}/routes/sessionAgentConfig.ts`]:
+    "6f9c15167ef1696d8726da70b01786fc0040eb0a098689ae1edfbd68c77e99e7",
+  [`${CORE}/session/subagent/runAgentTurn.ts`]:
+    "2e9769aa29c080a9513d8996ef68888607ade1779bab6d5357e4a6b0346265cb",
+  [`${CORE}/_base/utils/abort.ts`]:
+    "e8acf6b9bd0fadddfda105a64a2c5ad1cfb1b735b3dfb15736487e4a43db8991",
+  [`${CORE}/agent/task/taskOutput.ts`]:
+    "bf03ba076185fb141383f940f7b83ab5e9b26702bae8f3c0333561e3062425a2",
+  [`${CORE}/features/tower/tools/spawn/spawnTool.ts`]:
+    "ead25a16ac5da12646f1053dd91d7333f9b70f233ffe919c07312041a2bb0225",
+  [`${CORE}/agent/tools/agent/agentTool.ts`]:
+    "8a5fae16626e42892630e8c94f7cf46ead909c314cb1ab83eaa55705dc72f1f7",
+  [`${CLI}/cli/sub/web/run.ts`]:
+    "04b05b28ac88652779aee73f9e61bd959f5b7c3db1a326d12f09c5d0b66699a8",
+  [`${KAP}/routes/meta.ts`]:
+    "a959d04d8b97c6fee45e50b2a4fd40403f954c0b85e87fa60514b9484795974d",
+  [`${KAP}/protocol/rest-meta.ts`]:
+    "90c476fc3128f9741a6b23e2283444a245f6cbf4c995d4ea951bf93fb6859461",
+  [`${KAP}/routes/registerApiV1Routes.ts`]:
+    "06429bdf1c28fd9ee8863adfec7d621a6b449d75be9aeba67a7e3fbc0c2e981a",
+  [`${KAP}/index.ts`]:
+    "ac37b26fdec8937f8b9d8ccf0cd449e1ab0c080cce75633c6eef2c88bac25a5b",
+  [`${CORE}/tool/executor/tool-executor.ts`]:
+    "f4920ab7e585d545525291dab916a16f595ca4b64695f4dc18db7c9d0f29ac94",
+  [`${CORE}/tool/executor/hook-composer.ts`]:
+    "a59be3760c444a94fa8a4e1a6546fbc4eb2249c745e2b4f449dfa333c111609a",
+  [`${CORE_RUNTIME}/tool/types.ts`]:
+    "fa805ac6b8d4046e114440c1a7029c3fe4623b7bcd63ca198b825bd4da9fec2e",
+  [`${CORE_RUNTIME}/tool/args.ts`]:
+    "99360f02a783e65425f668dc3f8bd050fd36a2479a9945a9880d20c1ab905a83",
+  [`${CORE_RUNTIME}/tool/output-store.ts`]:
+    "7dd29fcbbadd66abe78d52452b7e4b0ebeb90a6554003f91f1e5480d555d0987",
+  [`${CORE_RUNTIME}/tool/validate.ts`]:
+    "5fc3d7906972395ab086425158ac9f691444deaac71a852f038ee31bbbcb1db1",
+  [`${CORE_RUNTIME}/loop/create-loop.ts`]:
+    "9f59c8b1ba1c8f5fceab450c2d0c45a52192638f55b2e019c1bfe5bada4e2814",
+  [`${CORE_RUNTIME}/loop/hook/run.ts`]:
+    "542d70e23711083dc0fd183a0976d1884e4710e7d1d9c68306ab1f9aac749d50",
+  [`${CORE_RUNTIME}/loop/contract/emitted.ts`]:
+    "255f5726604caaecf2b89f8b18edb90d7844227c3627724f29e9eeda488bafb2",
+  [`${CORE_RUNTIME}/llm/policy/policy.ts`]:
+    "9a099a68c991eae31f38de7fce6396e325a4fab027c7b5c2fed2c9b919accd96",
+  [`${CORE_RUNTIME}/llm/policy/retry.ts`]:
+    "8804d648c0f6b9208d4f3673a35d3c7456152a9d44bb3f1424b2fd1bc9adc864",
+  [`${CORE_RUNTIME}/llm/policy/settle.ts`]:
+    "cae307c86473943d71613f3021af72a981d0cc515e6be0c8fb4197e42ca61772",
+  [`${CORE_RUNTIME}/llm/policy/recovery.ts`]:
+    "a735e0e1cac0a3b890c8fb261282cb68ca15592f68af85f71a498d6b0d0357a8",
+  [`${CORE_RUNTIME}/llm/policy/credentials.ts`]:
+    "6a173360e94ce46a99f5714b11e15839000809adc4f0b8f4cb9261aa32832bf6",
+  [`${CORE}/llm-adapter/contract/errors.ts`]:
+    "7540ee2b673d2096be685ec8a3c635a711e20de29b819dc787dcbe16c47186c4",
+  [`${CORE_RUNTIME}/llm/response.ts`]:
+    "b67a243fe04142da5d6b0cefb53ceba4d3f9dcdde50b6bbe80b843f66aed752d",
+  [`${CORE_RUNTIME}/llm/protocol/errors.ts`]:
+    "f808584bebf6d3089752ad58193fb609dad67b3e63dbb19e08b58d228faec505",
+  [`${CORE_RUNTIME}/llm/protocol/rules/status.ts`]:
+    "5b04243211ca5dd683fe19b52055cb271acf880d59783590a248aa66727bea8d",
+  [`${CORE_RUNTIME}/llm/requester.ts`]:
+    "f10ad24cf1dccc7eb04b6bf71e352989207028629f187673f1f3ba333d626387",
+  [`${CORE_RUNTIME}/utils/abort.ts`]:
+    "d1b20d9f1862842419f49c5b259bbc6276ab13ad17a7d7abfc52eeffd56ac911",
+  [`${CORE}/agent/loop/loopOps.ts`]:
+    "b004538f156c0519c00fd1ab6e932837444c74cc90b90dfc86227a78df8ab070",
+  [`${CORE}/features/promptPrediction/promptPrediction.ts`]:
+    "aa6d0ede11af5df15407d8811c3ec655537573d0e562cc028b93ad23698c6cd5",
+  [`${CORE}/features/promptPrediction/promptPredictionService.ts`]:
+    "3d621b1f240a810385cb517df75466c25d2f4cd69ccfbbf42796a74f5ccf95cd",
+  [`${SDK}/v2/resume-replay.ts`]:
+    "9755904af88307320013d230fb2f8860cc7d563693a42d1ed1746b369175e31f",
+  [`${KAP}/transport/ws/v1/taskRequests.ts`]:
+    "ba3b5fff35fc372e94a69f3388616c8f1166823121256e096c980433219dda78",
+  [`${KAP}/transport/ws/v1/registerWsV1.ts`]:
+    "f0b2e5b8b65bc70c9ee7df92eb993ab1f64e36d717128083849fca772cfea50b",
+  [`${CLI}/cli/commands.ts`]:
+    "c801169c5a33b239f82795f9a5774090a79af0ca945225d7192da8f255a49873",
+  [`${CLI}/cli/options.ts`]:
+    "ffcbde708de9c4730814f246450f2bd211a51641e83b8dcd4d5b8e4d8f2832e2",
+  [`${CLI}/cli/main.ts`]:
+    "e0bccbe77e49768e4d85a4b5317226afc9faeecfdfbf711114b80f76ac4c8105",
+  [`${CLI}/cli/update/preflight.ts`]:
+    "5a72c0c69f846f2dfb2cd01862fb143cfe8735bbc6a681856f8bc80a00191cdb",
+  [`${CLI}/cli/update/forced.ts`]:
+    "3337af0706eb882fd56b2245a7491375c67ffe357f0730b8bd99e9d033377749",
+  [`${CLI}/cli/update/native-swap.ts`]:
+    "8aa424c2d9ae19e506c85bc917ff1deebf35562186152d57dddee4b8e1453739",
+  [`${KLIENT}/core/facade/agent.ts`]:
+    "4cf24cb790111b0fe7a0ac266198938d3b6023f6e2ec2d12804aa5b0436f314e",
+  [`${ACP}/session.ts`]:
+    "df7805cf2b677f6990720dcc0d3e072589c071db132777076dc90ee8c7f4fddc",
+};
+delete PINNED_HASHES["2.7.2"][`${CORE}/agent/loop/core/loop-actor.ts`];
+
 /**
  * Every durable plan-state event type at the pinned tag. The journal taint scan
  * (runtime/native-v2-preflight.ts::scanJournalLines) treats any record whose
@@ -1229,7 +1425,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("the plan-file guard is the ONLY final allow in the engine, CLI, and SDK", () => {
-    const sites = filesContaining([CORE, CLI, SDK], ".allow()");
+    const sites = filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], ".allow()");
     expect(sites).toEqual([`${CORE}/features/plan/planService.ts`]);
     const guard = read(`${CORE}/features/plan/planService.ts`);
     // The allow must stay gated on an active plan: `if (plan === null) return;`
@@ -1241,26 +1437,36 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("plan service entry callers match the exact audited tool surface", () => {
-    expect(filesContaining([CORE, CLI, KAP, SDK], "new PlanModeEnter(")).toEqual([
+    expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], "new PlanModeEnter(")).toEqual([
       `${CORE}/features/plan/planService.ts`,
     ]);
-    const enterCallers = filesContaining([CORE, CLI, KAP, SDK], "IAgentPlanService").filter((rel) =>
+    const enterCallers = filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], "IAgentPlanService").filter((rel) =>
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
   });
 
+  test("2.7.2 host plan entry stays explicit and outside the print runner", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    expect(read(`${SDK}/sdk-rpc-client-v2.ts`)).toContain("return agent.enterPlan()");
+    expect(read(`${KLIENT}/core/facade/agent.ts`)).toContain(
+      "enterPlan: () => call(scope, 'agentPlanService', 'enter', []) as Promise<void>",
+    );
+    expect(read(`${ACP}/session.ts`)).toContain("await this.agent.enterPlan();");
+    expect(read(`${CLI}/cli/v2/run-v2-print.ts`)).not.toContain("setPlanMode(");
+  });
+
   test("2.5+ print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) return;
     const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
     const marker = runner.indexOf("writeExperimentalVersion(");
     const sdk = runner.indexOf("new SDKRpcClientV2(");
@@ -1277,7 +1483,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ environment and workspace-trust dependencies are explicitly reviewed", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) return;
     expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
       "options.environmentId === LOCAL_ENVIRONMENT_ID",
     );
@@ -1300,7 +1506,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("2.5+ WebSocket state proof remains authenticated and bound to the live main agent", () => {
     const version = upstreamVersion();
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(version)) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) return;
     const schema = read(`${KAP}/protocol/ws-agent.ts`);
     for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
       expect(schema).toContain(field);
@@ -1308,7 +1514,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
     expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
     const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
-    if (["2.6.0", "2.6.2", "2.6.3"].includes(version)) {
+    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) {
       const control = read(`${KAP}/protocol/ws-control.ts`);
       expect(control).toContain("type: z.literal('subscribe')");
       expect(control).toContain("type: z.literal('response')");
@@ -1339,6 +1545,45 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
+  test("2.7.2 JSON bootstrap and meta preserve authenticated direct-subscription discovery", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    const web = read(`${CLI}/cli/sub/web/run.ts`);
+    expect(web).toContain("randomBytes(32).toString('base64url')");
+    expect(web).toContain("timingSafeEqual(actual, expected)");
+    expect(web).toContain("'--json cannot be combined with --dangerous-bypass-auth.'");
+    expect(web).toContain("'--json cannot be combined with --socket.'");
+    expect(web).toContain("authTokenService: createEphemeralAuthTokenService(ephemeralToken!)");
+    expect(web).toContain("skipInstanceRegistry: true");
+    expect(web).toContain("logToStderr: true");
+    expect(web).toContain("origin: normalizedOrigin");
+    expect(web).toContain("ws_url: wsUrl");
+    expect(web).toContain("kimi_agent_protocol_version: KIMI_AGENT_PROTOCOL_VERSION");
+    expect(web).toContain("authTokenService: options.authTokenService");
+    expect(web).toContain("disableAuth: options.dangerousBypassAuth");
+    const meta = read(`${KAP}/routes/meta.ts`);
+    expect(meta).toContain("KIMI_AGENT_PROTOCOL_VERSION = '1.0.0'");
+    expect(meta).toContain("kimi_agent_protocol_version: KIMI_AGENT_PROTOCOL_VERSION");
+    expect(meta).toContain("websocket: true as const");
+    expect(meta).toContain("interactions_list: true as const");
+    expect(meta).toContain("session_wait: true as const");
+    expect(meta).toContain("dangerous_bypass_auth: opts.dangerousBypassAuth");
+    const schema = read(`${KAP}/protocol/rest-meta.ts`);
+    expect(schema).toContain("kimi_agent_protocol_version: z.string().min(1)");
+    expect(schema).toContain("product: z.string().min(1).optional()");
+    expect(schema).toContain("interactions_list: z.literal(true)");
+    expect(schema).toContain("session_wait: z.literal(true)");
+    const routes = read(`${KAP}/routes/registerApiV1Routes.ts`);
+    expect(routes).toContain("product: opts.hostIdentity.productName");
+    expect(routes).toContain("serverId: opts.serverId ?? ulid()");
+    expect(read(`${KAP}/index.ts`)).toContain("export { KIMI_AGENT_PROTOCOL_VERSION } from './routes/meta';");
+    const start = read(`${KAP}/start.ts`);
+    expect(start).toContain("const disableAuth = opts.disableAuth === true || opts.socketPath !== undefined;");
+    expect(start).toContain("if (!disableAuth) {");
+    expect(start.indexOf("createAuthHook(authTokenService")).toBeLessThan(
+      start.indexOf("await registerApiV1Routes("),
+    );
+  });
+
   test("default_plan_mode is a plain optional boolean with default false and no env binding", () => {
     const section = read(`${CORE}/features/plan/configSection.ts`);
     expect(section).toContain("z.boolean().optional()");
@@ -1366,24 +1611,50 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
     }
   });
 
+  test("2.7.2 print and update boundaries remain local, noninteractive, and goal-scoped", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    const options = read(`${CLI}/cli/options.ts`);
+    for (const flag of ["--yolo", "--auto", "--plan"]) {
+      expect(options).toContain(`Cannot combine --prompt with ${flag}.`);
+    }
+    expect(options).toContain("Cannot combine --environment with --session/--continue:");
+    const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
+    expect(runner).toContain("nonInteractive: true");
+    expect(runner).not.toMatch(/promptPrediction|predictNextPrompt/);
+    const prediction = read(`${CORE}/features/promptPrediction/promptPredictionService.ts`);
+    expect(prediction).toContain("type: 'operation'");
+    expect(prediction).toContain("requestKind: 'prompt_prediction'");
+    expect(prediction).toContain("if (plan !== null || !this.stillCurrent(active, scope, contextSnapshot))");
+    const goal = read(`${CLI}/cli/goal-prompt.ts`);
+    expect(goal).toContain("complete: 0");
+    expect(goal).toContain("blocked: 3");
+    expect(goal).toContain("paused: 6");
+    expect(goal).toContain("if (parsed.kind !== 'create') return undefined;");
+    expect(read(`${CLI}/cli/update/preflight.ts`)).toContain("env['KIMI_CODE_NO_AUTO_UPDATE']");
+    expect(read(`${CLI}/cli/update/forced.ts`)).toContain("if (!isInteractive) return 'continue';");
+    const swap = read(`${CLI}/cli/update/native-swap.ts`);
+    expect(swap).toContain("staged.manual !== true &&");
+    expect(swap).toContain("isAutoUpdateDisabledByEnv(deps.env)");
+  });
+
   test("every tool execution passes the reviewed before-execute emitter composition", () => {
     const callers = filesContaining([CORE], "fireBeforeExecute(");
     expect(callers).toEqual([
       `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
-      ...(["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
+      ...(["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
   });
 
   test("the before-execute subscriber population is exactly the audited set", () => {
-    if (["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
+    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
         `${CORE}/agent/toolExecutor/legacyHooks.ts`,
         `${CORE}/agent/toolExecutor/toolExecutor.ts`,
@@ -1420,23 +1691,53 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
-  test("2.6 executor phases preserve managed-hook veto and execution ordering", () => {
-    if (!["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) return;
+  test("2.7.2 generic executors are constructed only inside the managed agent composition", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], "new ToolExecutor(")).toEqual([
+      `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
+    ]);
+    const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
+    expect(service.indexOf("this.legacyStarting.fireBeforeExecute(")).toBeGreaterThan(-1);
+    expect(service.indexOf("this.legacyStarting.fireBeforeExecute(")).toBeLessThan(service.indexOf("new ToolExecutor("));
+    const loop = read(`${CORE_RUNTIME}/loop/loop-actor.ts`);
+    expect(loop).toContain("executor.execute(");
+  });
+
+  test("2.6+ executor phases preserve managed-hook veto and execution ordering", () => {
+    const version = upstreamVersion();
+    if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) return;
     const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
     expect(service).toContain("composeToolExecutorHooks([resetHook, legacyHook, ...hooks, internalHook])");
-    const executor = read(`${CORE}/tool/executor/tool-executor.ts`);
-    const starting = executor.indexOf("await decide('starting'");
-    const permitting = executor.indexOf("await decide('permitting'");
-    const beforeExecute = executor.indexOf("await hook?.beforeExecute");
-    const execute = executor.indexOf("returned = await tool.execute");
-    expect(starting).toBeGreaterThan(-1);
-    expect(permitting).toBeGreaterThan(starting);
-    expect(beforeExecute).toBeGreaterThan(permitting);
-    expect(execute).toBeGreaterThan(beforeExecute);
+    if (version === "2.7.2") {
+      const executor = read(`${CORE_RUNTIME}/tool/tool-executor.ts`);
+      const starting = executor.indexOf("const starting = await this.decide('starting'");
+      const conditional = executor.indexOf("if (starting === undefined || !('skipPermitting' in starting))");
+      const permitting = executor.indexOf("const permitting = await this.decide('permitting'");
+      const beforeExecute = executor.indexOf("await this.host.hook?.beforeExecute?.(this.decisionContext())");
+      const execute = executor.indexOf("returned = await tool.execute(toolContext)");
+      expect(starting).toBeGreaterThan(-1);
+      expect(conditional).toBeGreaterThan(starting);
+      expect(permitting).toBeGreaterThan(conditional);
+      expect(beforeExecute).toBeGreaterThan(permitting);
+      expect(execute).toBeGreaterThan(beforeExecute);
+    } else {
+      const executor = read(`${CORE}/tool/executor/tool-executor.ts`);
+      const starting = executor.indexOf("await decide('starting'");
+      const permitting = executor.indexOf("await decide('permitting'");
+      const beforeExecute = executor.indexOf("await hook?.beforeExecute");
+      const execute = executor.indexOf("returned = await tool.execute");
+      expect(starting).toBeGreaterThan(-1);
+      expect(permitting).toBeGreaterThan(starting);
+      expect(beforeExecute).toBeGreaterThan(permitting);
+      expect(execute).toBeGreaterThan(beforeExecute);
+    }
     const legacy = read(`${CORE}/agent/toolExecutor/legacyHooks.ts`);
     expect(legacy).toContain("if (decision?.allow === true) return { skipPermitting: true };");
     expect(legacy).toContain("if (decision?.veto !== undefined)");
-    expect(read(`${CORE}/tool/executor/hook-composer.ts`)).toContain("if ('skipPermitting' in decision)");
+    const composer = version === "2.7.2"
+      ? `${CORE_RUNTIME}/tool/hook-composer.ts`
+      : `${CORE}/tool/executor/hook-composer.ts`;
+    expect(read(composer)).toContain("if ('skipPermitting' in decision)");
     expect(read(`${CORE}/agent/permissionGate/permissionGateService.ts`)).toContain("event.pass(");
   });
 
@@ -1482,7 +1783,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
       expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
     }
     // Every append-log read in the wire service names the single wire key.
@@ -1511,7 +1812,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       expect(end, "readRestoreChains body delimiter changed").toBeGreaterThan(-1);
       const chains = body.slice(0, end);
       expect(chains).toContain("const entries = await this.readStableEntries();");
-      if (["2.6.0", "2.6.2", "2.6.3"].includes(upstreamVersion())) {
+      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
         expect(chains).toContain(
           "restorable: normalizeLegacyTurnSteerRecords(restorableChain(entries, tree).map(({ record }) => record))",
         );
@@ -1563,7 +1864,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     // source the scan does not know about.
     expect(ops).toContain("defineState('plan'");
     const otherDeclarers = filesContaining(
-      [CORE, CLI, KAP],
+      [CORE, CORE_RUNTIME, CLI, KAP],
       /static override readonly type = '(plan_mode|plan)\./,
     ).filter((rel) => rel !== `${CORE}/features/plan/planOps.ts`);
     expect(otherDeclarers).toEqual([]);
@@ -1596,7 +1897,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 // These assertions pin the upstream premises of the plugin's bounded-wave
 // construction, including the cancellation weakness it must close. They do
 // not assert that native maxConcurrency is repaired or replace binary controls.
-const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3"].includes(upstreamVersion())
+const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())
   ? describe
   : describe.skip;
 
@@ -1638,7 +1939,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("this.pending.unshift(state);");
     expect(batch).toContain("this.launcher.retry(attempt.state.retryAgentId, runOptions)");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    if (upstreamVersion() === "2.6.3") {
+    if (["2.6.3", "2.7.2"].includes(upstreamVersion())) {
       expect(runner).toContain("return awaitRunCompletion(target, loop, loop.retry(), options);");
       const quiescent = section(runner, "async function awaitQuiescent(", "async function stopChildTasks(");
       expect(quiescent).toContain("const result = await loop.settled();");
@@ -1744,7 +2045,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     const abort = read(`${CORE}/_base/utils/abort.ts`);
     expect(section(abort, "export function abortable<T>(", "export function linkAbortSignal(")).toContain("reject(abortReason(signal));");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    if (upstreamVersion() === "2.6.3") {
+    if (["2.6.3", "2.7.2"].includes(upstreamVersion())) {
       const completion = section(runner, "async function awaitRunCompletion(", "async function awaitQuiescent(");
       expect(completion).toContain("loop.cancel(undefined, reason);");
       expect(completion).toContain("abortCleanup ??= stopChildTasks(target, loop, reason);");
@@ -1766,17 +2067,30 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
   });
 
   test("detached completion can wake a finished child and must be prevented", () => {
-    const loop = read(`${CORE}/agent/loop/core/loop-actor.ts`);
+    const version = upstreamVersion();
+    const loop = read(version === "2.7.2"
+      ? `${CORE_RUNTIME}/loop/loop-actor.ts`
+      : `${CORE}/agent/loop/core/loop-actor.ts`);
     const finish = section(loop, "private finishTurn(", "private appendPendingReminders(");
     expect(finish).toContain("if (slot.turnId !== turn.id || slot.detached) continue;");
     expect(finish).toContain("this.phase = this.phase === 'closed' ? 'closed' : 'idle';");
     const completion = section(loop, "private drainDetachedCompletions():", "private deferForCompletion(");
     expect(completion).toContain("type: 'tool.async_ended'");
-    expect(completion).toContain("this.mailbox.queue([entry]);");
+    expect(completion).toContain(version === "2.7.2"
+      ? "this.mailbox.queue([message]);"
+      : "this.mailbox.queue([entry]);");
     expect(completion).toContain("if (!this.resetting) this.held = false;");
     expect(completion).toContain("this.schedule();");
     expect(loop).toContain("return this.normal.length > 0 || this.notifyEntries.length > 0;");
-    expect(loop).toContain("this.phase === 'idle' && !this.held && !this.hasPendingCompletions && this.mailbox.hasTrigger");
+    if (version === "2.7.2") {
+      const schedule = section(loop, "private canSchedule(): boolean {", "private schedule(): boolean {");
+      expect(schedule).toContain("this.phase === 'idle' &&");
+      expect(schedule).toContain("!this.held &&");
+      expect(schedule).toContain("!this.hasPendingCompletions &&");
+      expect(schedule).toContain("(this.mailbox.hasTrigger || this.mailbox.hasReminders)");
+    } else {
+      expect(loop).toContain("this.phase === 'idle' && !this.held && !this.hasPendingCompletions && this.mailbox.hasTrigger");
+    }
     expect(read(`${CORE}/agent/task/taskOutput.ts`)).toContain("source: 'async-tool'");
   });
 
@@ -1816,6 +2130,59 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(store).toContain("JSON.parse(textDecoder.decode(bytes))");
     expect(store).toContain("await this.storage.write(scope, key, this.codec.encode(value), { atomic: true });");
     expect(read(`${CORE}/persistence/backends/node-fs/fileStorageService.ts`)).toContain("return join(this.baseDir, scope, key);");
+  });
+
+  test("2.7.2 moved retry code preserves per-attempt settlement and cancellation", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    const policy = read(`${CORE_RUNTIME}/llm/policy/policy.ts`);
+    const settled = policy.indexOf("const result = await settleLlmRequest(resolvedRequest, { signal, onEvent });");
+    const retryIndex = policy.indexOf("if (shouldRetry(policy.retry, attempt, result.error, listOf(policy.retryables)))");
+    const delayed = policy.indexOf("if (!(await delay(delayMs, signal)))");
+    expect(settled).toBeGreaterThan(-1);
+    expect(retryIndex).toBeGreaterThan(settled);
+    expect(delayed).toBeGreaterThan(retryIndex);
+    expect(policy).toContain("return abortedOf(result, signal.reason);");
+    expect(policy.indexOf("attempt += 1;")).toBeGreaterThan(delayed);
+    const retrySource = read(`${CORE_RUNTIME}/llm/policy/retry.ts`);
+    expect(retrySource).toContain("return isRetryableError(error, extras) && attempt < resolveMaxAttempts(options);");
+    expect(retrySource).toContain("error.kind === 'syntax' || error.kind === 'abort' || error.kind === 'context_overflow';");
+    const settle = read(`${CORE_RUNTIME}/llm/policy/settle.ts`);
+    expect(settle).toContain("if (isAbortError(error) || signal.aborted)");
+    expect(settle).toContain("return aborted();");
+    expect(read(`${CORE_RUNTIME}/llm/policy/credentials.ts`)).toContain(
+      "appliedRecoveries.some((record) => record.strategy === 'credentials')",
+    );
+    const batch = read(`${CORE}/features/swarm/session/agentRunBatch.ts`);
+    expect(batch).toContain("this.maxConcurrency !== undefined && this.active.size >= this.maxConcurrency");
+    expect(batch).toContain("this.rateLimitCapacity += 1;");
+  });
+
+  test("2.7.2 structured errors retain swarm rate-limit classification", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    const errors = read(`${CORE}/llm-adapter/contract/errors.ts`);
+    expect(errors).toContain("if (error instanceof APIProviderQuotaExhaustedError) return false;");
+    expect(errors).toContain("if (error instanceof APIProviderRateLimitError) return true;");
+    expect(errors).toContain("if (statusCode !== undefined) return statusCode === 429;");
+    const turn = read(`${CORE}/session/subagent/runAgentTurn.ts`);
+    const direct = turn.indexOf("if (isProviderRateLimitError(error)) throw error;");
+    const converted = turn.indexOf("if (payload.code === ErrorCodes.PROVIDER_RATE_LIMIT)");
+    expect(direct).toBeGreaterThan(-1);
+    expect(converted).toBeGreaterThan(direct);
+    const response = read(`${CORE_RUNTIME}/llm/response.ts`);
+    expect(response).toContain("| 'rate_limit'");
+    expect(response).toContain("case 'rate_limit':");
+    expect(response).toContain("return 'APIProviderRateLimitError';");
+    const batch = read(`${CORE}/features/swarm/session/agentRunBatch.ts`);
+    expect(batch).toContain("import { isProviderRateLimitError } from '#/llm-adapter/contract/errors';");
+    expect(batch).toContain("if (isProviderRateLimitError(error)) {");
+  });
+
+  test("2.7.2 host task.background remains outside the model-tool detachment census", () => {
+    if (upstreamVersion() !== "2.7.2") return;
+    const requests = read(`${KAP}/transport/ws/v1/taskRequests.ts`);
+    expect(requests).toContain("const background = taskBackgroundMessageSchema.safeParse(frame);");
+    expect(requests).toContain("handler?.detach();");
+    expect(read(`${KAP}/transport/ws/v1/registerWsV1.ts`)).toContain("const taskSource = createTaskSource(core);");
   });
 
   test("other builtin model detachment callers remain the separately denied delegation and question tools", () => {

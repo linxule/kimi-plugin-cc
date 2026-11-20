@@ -17,6 +17,7 @@ const token = process.env.MOCK_KIMI_WEB_TOKEN ?? "mock-ready-token";
 const configCanary = process.env.MOCK_KIMI_WEB_CONFIG_CANARY ?? "mock-config-canary";
 const scenario = process.env.MOCK_KIMI_WEB_SCENARIO ?? "success";
 const version = process.env.MOCK_KIMI_WEB_VERSION ?? "2.3.2";
+const jsonReady = version === "2.7.2";
 const defaultModel = process.env.MOCK_KIMI_WEB_DEFAULT_MODEL ?? "configured-default";
 const readyDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_READY_DELAY_MS ?? "0", 10);
 const statusDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_STATUS_DELAY_MS ?? "0", 10);
@@ -108,9 +109,20 @@ async function handle(req, res) {
   if (method === "GET" && url.pathname === "/api/v1/meta") {
     send(res, {
       server_version: scenario === "meta-version-mismatch" ? "2.3.1" : version,
-      backend: scenario === "meta-backend-mismatch" ? "v1" : "v2",
+      ...(jsonReady
+        ? {
+            kimi_agent_protocol_version: scenario === "meta-kap-missing"
+              ? undefined
+              : scenario === "meta-kap-mismatch" ? "2.0.0" : "1.0.0",
+            ...(scenario === "meta-unexpected-backend" ? { backend: "v2" } : {}),
+          }
+        : { backend: scenario === "meta-backend-mismatch" ? "v1" : "v2" }),
       dangerous_bypass_auth: scenario === "dangerous-auth",
-      capabilities: {},
+      capabilities: jsonReady
+        ? scenario === "meta-websocket-missing"
+          ? {}
+          : { websocket: scenario === "meta-websocket-mismatch" ? false : true }
+        : {},
       server_id: "mock-server",
       started_at: new Date().toISOString(),
       open_in_apps: [],
@@ -133,7 +145,7 @@ async function handle(req, res) {
       send(res, null, { code: 40001, msg: `cwd mismatch ${token}` });
       return;
     }
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
       send(res, null, { code: 40001, msg: "missing local environment binding" });
       return;
     }
@@ -332,7 +344,7 @@ function readWsFrame(buffer) {
 
 function handleWsMessage(socket, frame) {
   void record({ kind: "ws-message", frame });
-  if (["2.6.0", "2.6.2", "2.6.3"].includes(version)) {
+  if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) {
     handleWsMessageV26(socket, frame);
     return;
   }
@@ -487,7 +499,7 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
     }
   });
-  if (!["2.6.0", "2.6.2", "2.6.3"].includes(version) && scenario !== "ws-no-server-hello") {
+  if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version) && scenario !== "ws-no-server-hello") {
     sendWsFrame(socket, {
       type: "server_hello",
       timestamp: new Date().toISOString(),
@@ -563,8 +575,37 @@ server.listen(0, "127.0.0.1", async () => {
     process.stdout.write(`diagnostic ${token} ${configCanary}\n`);
     process.stderr.write(`diagnostic ${token} ${configCanary}\n`);
   }
-  const tokenless = scenario === "tokenless-ready" || scenario === "late-fork-after-parent-exit";
-  process.stdout.write(`Kimi server: http://127.0.0.1:${address.port}/${tokenless ? "" : `#token=${token}`}\n`);
+  const tokenless = scenario === "tokenless-ready" || scenario === "json-tokenless-ready" || scenario === "late-fork-after-parent-exit";
+  if (jsonReady) {
+    if (scenario === "json-malformed-ready") {
+      process.stdout.write("{not-json\n");
+    } else {
+      const origin = `http://127.0.0.1:${address.port}`;
+      const ready = {
+        origin,
+        ws_url: `ws://127.0.0.1:${address.port}/api/v1/ws`,
+        token: tokenless ? "" : token,
+        kimi_agent_protocol_version: "1.0.0",
+      };
+      if (scenario === "json-token-missing-ready") delete ready.token;
+      if (scenario === "json-mismatched-ready") {
+        const otherPort = address.port === 65_535 ? address.port - 1 : address.port + 1;
+        ready.ws_url = `ws://127.0.0.1:${otherPort}/api/v1/ws`;
+      }
+      if (scenario === "json-kap-mismatch-ready") ready.kimi_agent_protocol_version = "2.0.0";
+      if (scenario === "json-origin-host-ready") ready.origin = `http://localhost:${address.port}`;
+      if (scenario === "json-origin-port-ready") ready.origin = "http://127.0.0.1";
+      if (scenario === "json-origin-credentials-ready") ready.origin = `http://user:pass@127.0.0.1:${address.port}`;
+      if (scenario === "json-origin-query-ready") ready.origin = `${origin}/?ready=1`;
+      if (scenario === "json-origin-path-ready") ready.origin = `${origin}/nested`;
+      if (scenario === "json-origin-fragment-ready") ready.origin = `${origin}/#ready=1`;
+      if (scenario === "json-ws-path-ready") ready.ws_url = `ws://127.0.0.1:${address.port}/api/v1/ws/`;
+      if (scenario === "json-ws-query-ready") ready.ws_url = `ws://127.0.0.1:${address.port}/api/v1/ws?ready=1`;
+      process.stdout.write(`${JSON.stringify(ready)}\n`);
+    }
+  } else {
+    process.stdout.write(`Kimi server: http://127.0.0.1:${address.port}/${tokenless ? "" : `#token=${token}`}\n`);
+  }
   if (scenario === "late-fork-after-parent-exit") {
     setTimeout(() => process.exit(1), 200);
   }

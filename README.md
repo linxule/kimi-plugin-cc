@@ -40,7 +40,7 @@ You need:
 - macOS or Linux
 - Claude Code, Codex, or DSH with plugin support
 - Node.js 22.5 or newer (24.9 or newer for DSH)
-- Kimi Code CLI 2.6.3 with plugin 2.6.3 for bounded swarm and the six other operations. Exact CLI 2.6.2 remains supported under the same construction. See the [2.6.3 certification record](./docs/upstream-2.6.3-certification.md) and [runtime matrix](./docs/native-v2-certification-provenance.md) for exact scope. Older supported versions retain their documented limits.
+- Kimi Code CLI 2.7.2 with plugin 2.7.2 for bounded swarm and the six other operations. Exact CLI 2.6.2 and 2.6.3 remain supported under the same construction. See the [2.7.2 certification record](./docs/upstream-2.7.2-certification.md) and [runtime matrix](./docs/native-v2-certification-provenance.md) for exact scope. Older supported versions retain their documented limits.
 
 Windows is not currently supported. Contributors can help with the [no-model Windows diagnostics checks](./docs/windows-validation.md). Check your versions in a terminal:
 
@@ -248,7 +248,7 @@ All refusal codes and their remedies are listed in the [refusal-code catalog](./
 
 The tool rules for ask, review, challenge, and read-only swarm deny file writes and shell commands. Rescue and pursue can write files in your workspace. Swarm with `--write` works in a temporary Git worktree. It starts from your latest commit, so it does not include uncommitted changes. It returns a patch without applying it to your project.
 
-On exact CLI 2.6.2/2.6.3, `--max-concurrency 1` runs one worker directly; larger values use waves of at most that many children. Read mode defaults to 4, write mode to 1. `--cap` remains an advisory total count. Parallel runs use brief authenticated loopback processes to activate and deactivate the session; the direct-worker path needs neither. Activation counts against the finite job budget, tokens stay out of logs, and unverified cleanup prevents success. Older certified versions retain their documented activation and recovery limits.
+On exact CLI 2.6.2/2.6.3/2.7.2, `--max-concurrency 1` runs one worker directly; larger values use waves of at most that many children. Read mode defaults to 4, write mode to 1. `--cap` remains an advisory total count. Parallel runs use brief authenticated loopback processes to activate and deactivate the session; the direct-worker path needs neither. Activation counts against the finite job budget, tokens stay out of logs, and unverified cleanup prevents success. Older certified versions retain their documented activation and recovery limits.
 
 A slow child holds its wave until completion or the finite job deadline. Fresh waves need at least two entries, so odd target counts may need regrouping. Kimi workers cannot explicitly background Bash, and parallel sessions disable automatic backgrounding. Normal exit and cancellation settle verified owned processes before results or patches are captured. Concurrency counts Kimi child-agent turns; allowed tests can start multiple OS processes, and an individual Bash timeout does not guarantee their settlement between waves.
 
@@ -288,7 +288,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code、Codex 或 DSH
 - Node.js 22.5 或更高版本（DSH 需要 24.9 或更高版本）
-- Kimi Code CLI 2.6.3，配合插件 2.6.3 使用有并发上限的 swarm 及其他六项操作。精确版本 CLI 2.6.2 仍按同一机制获得支持。精确范围见[2.6.3 认证记录](./docs/upstream-2.6.3-certification.md)和[运行时矩阵](./docs/native-v2-certification-provenance.md)；旧版继续保留其已披露的限制。
+- Kimi Code CLI 2.7.2，配合插件 2.7.2 使用有并发上限的 swarm 及其他六项操作。精确版本 CLI 2.6.2 和 2.6.3 仍按同一机制获得支持。精确范围见[2.7.2 认证记录](./docs/upstream-2.7.2-certification.md)和[运行时矩阵](./docs/native-v2-certification-provenance.md)；旧版继续保留其已披露的限制。
 
 目前不支持 Windows。在终端检查版本：
 
@@ -469,7 +469,7 @@ codex plugin add kimi@kimi-marketplace
 
 Ask、review、challenge 和只读 swarm 的工具规则禁止写入文件和执行 shell 命令。Rescue 和 pursue 可以修改工作区内的文件。带 `--write` 的 swarm 在临时 Git 工作树中操作。它从最新提交开始，不包含尚未提交的修改。任务结束后返回补丁，不会自动应用到项目。
 
-在精确版本 CLI 2.6.2/2.6.3 上，`--max-concurrency 1` 直接运行一个工作代理；更大的值将任务分成多批，每批子代理数不超过该值。只读模式默认 4，写入模式默认 1。`--cap` 仍只是总数建议。并行任务通过短暂的认证本地回环进程激活和停用会话；单代理路径无需这些进程。激活计入任务时限，令牌不写入日志，无法确认清理完成时不会报告成功。旧版继续保留其已披露的激活和恢复限制。
+在精确版本 CLI 2.6.2/2.6.3/2.7.2 上，`--max-concurrency 1` 直接运行一个工作代理；更大的值将任务分成多批，每批子代理数不超过该值。只读模式默认 4，写入模式默认 1。`--cap` 仍只是总数建议。并行任务通过短暂的认证本地回环进程激活和停用会话；单代理路径无需这些进程。激活计入任务时限，令牌不写入日志，无法确认清理完成时不会报告成功。旧版继续保留其已披露的激活和恢复限制。
 
 较慢的子代理会让当前批次等待，直到完成或整个任务达到时限。全新批次至少需要两个条目，因此奇数个目标可能需要重新分组。Kimi 工作代理不能显式将 Bash 放到后台，并行会话也禁用自动后台运行。正常退出和取消都必须确认所管理进程已停止，才会捕获结果或补丁。并发上限计算的是 Kimi 子代理轮次；获准的测试仍可启动多个系统进程，单次 Bash 超时也不保证这些进程在下一批开始前停止。
 
@@ -511,7 +511,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code, Codex ou DSH prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure (24.9 ou ultérieure pour DSH)
-- Kimi Code CLI 2.6.3 avec le plugin 2.6.3 pour swarm à concurrence limitée et les six autres opérations. Le CLI exact 2.6.2 reste pris en charge selon la même construction. Consultez le [dossier de certification 2.6.3](./docs/upstream-2.6.3-certification.md) et la [matrice runtime](./docs/native-v2-certification-provenance.md) pour le périmètre exact ; les anciennes versions conservent leurs limites documentées.
+- Kimi Code CLI 2.7.2 avec le plugin 2.7.2 pour swarm à concurrence limitée et les six autres opérations. Les CLI exacts 2.6.2 et 2.6.3 restent pris en charge selon la même construction. Consultez le [dossier de certification 2.7.2](./docs/upstream-2.7.2-certification.md) et la [matrice runtime](./docs/native-v2-certification-provenance.md) pour le périmètre exact ; les anciennes versions conservent leurs limites documentées.
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -690,7 +690,7 @@ Tous les codes de refus et leurs remèdes sont répertoriés dans le [catalogue 
 
 Les règles des modes ask, review, challenge et swarm en lecture seule interdisent les écritures et les commandes shell. Rescue et pursue peuvent modifier les fichiers de votre espace de travail. Swarm avec `--write` travaille dans un worktree Git temporaire. Il part du dernier commit et n'inclut donc pas les modifications non commitées. Il renvoie un patch sans l'appliquer à votre projet.
 
-Sur les CLI exacts 2.6.2/2.6.3, `--max-concurrency 1` lance directement un seul agent ; une valeur supérieure répartit le travail en vagues de cette taille au maximum. Les valeurs par défaut sont 4 en lecture et 1 en écriture. `--cap` reste un conseil sur le nombre total. Les vagues parallèles utilisent de brefs processus locaux authentifiés pour activer puis désactiver la session ; le chemin à un seul agent n’en a pas besoin. L’activation compte dans la durée du job, les jetons restent hors des journaux et un nettoyage non confirmé empêche de déclarer la réussite. Les anciennes versions gardent leurs limites documentées.
+Sur les CLI exacts 2.6.2/2.6.3/2.7.2, `--max-concurrency 1` lance directement un seul agent ; une valeur supérieure répartit le travail en vagues de cette taille au maximum. Les valeurs par défaut sont 4 en lecture et 1 en écriture. `--cap` reste un conseil sur le nombre total. Les vagues parallèles utilisent de brefs processus locaux authentifiés pour activer puis désactiver la session ; le chemin à un seul agent n’en a pas besoin. L’activation compte dans la durée du job, les jetons restent hors des journaux et un nettoyage non confirmé empêche de déclarer la réussite. Les anciennes versions gardent leurs limites documentées.
 
 Un enfant lent retient sa vague jusqu’à sa fin ou à la limite de durée du job. Une vague de nouveaux enfants exige au moins deux entrées ; un nombre impair de cibles peut donc nécessiter un regroupement. Les agents Kimi ne peuvent pas lancer Bash explicitement en arrière-plan, et les sessions parallèles désactivent aussi le détachement automatique. La sortie normale et l’annulation attendent l’arrêt des processus gérés avant de capturer résultats ou patchs. La limite compte les tours des agents enfants Kimi ; un test autorisé peut lancer plusieurs processus système, dont l’arrêt entre deux vagues n’est pas garanti par le délai d’un appel Bash.
 
@@ -730,7 +730,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code、Codex、または DSH
 - Node.js 22.5 以降（DSH では 24.9 以降）
-- Kimi Code CLI 2.6.3 とプラグイン 2.6.3。並列数を制限した swarm とほかの 6 操作に対応します。正確な CLI 2.6.2 も同じ仕組みで引き続き対応します。正確な範囲は[2.6.3 認証記録](./docs/upstream-2.6.3-certification.md)と[ランタイムマトリックス](./docs/native-v2-certification-provenance.md)を参照してください。旧バージョンの制限は引き続き適用されます。
+- Kimi Code CLI 2.7.2 とプラグイン 2.7.2。並列数を制限した swarm とほかの 6 操作に対応します。正確な CLI 2.6.2 と 2.6.3 も同じ仕組みで引き続き対応します。正確な範囲は[2.7.2 認証記録](./docs/upstream-2.7.2-certification.md)と[ランタイムマトリックス](./docs/native-v2-certification-provenance.md)を参照してください。旧バージョンの制限は引き続き適用されます。
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 
@@ -911,7 +911,7 @@ codex plugin add kimi@kimi-marketplace
 
 Ask、review、challenge、読み取り専用 swarm のツールルールでは、ファイルへの書き込みとシェルコマンドを禁止しています。Rescue と pursue はワークスペース内のファイルを変更できます。`--write` を指定した swarm は、一時的な Git ワークツリーで作業します。最新のコミットから開始するため、未コミットの変更は含まれません。パッチを返すだけで、プロジェクトには自動適用しません。
 
-正確な CLI 2.6.2/2.6.3 では、`--max-concurrency 1` は 1 つのワーカーを直接実行します。2 以上では、その数以下の子エージェントを 1 組として順に実行します。既定値は読み取りが 4、書き込みが 1 です。`--cap` は総数の目安のままです。並列実行では、認証付きのローカルプロセスでセッションを有効化・無効化します。単一ワーカーでは不要です。有効化もジョブの制限時間に含まれ、トークンはログに出ず、後処理を確認できなければ成功とは報告しません。旧バージョンの制限は引き続き適用されます。
+正確な CLI 2.6.2/2.6.3/2.7.2 では、`--max-concurrency 1` は 1 つのワーカーを直接実行します。2 以上では、その数以下の子エージェントを 1 組として順に実行します。既定値は読み取りが 4、書き込みが 1 です。`--cap` は総数の目安のままです。並列実行では、認証付きのローカルプロセスでセッションを有効化・無効化します。単一ワーカーでは不要です。有効化もジョブの制限時間に含まれ、トークンはログに出ず、後処理を確認できなければ成功とは報告しません。旧バージョンの制限は引き続き適用されます。
 
 遅い子エージェントがある組は、完了またはジョブ全体の期限まで待機します。新規の組には最低 2 項目が必要なので、対象が奇数なら組み直す場合があります。Kimi ワーカーによる明示的な Bash のバックグラウンド実行は禁止され、並列セッションでは自動切り離しも無効です。通常終了とキャンセルのどちらも、管理対象プロセスの停止を確認してから結果やパッチを取得します。並列数は Kimi 子エージェントのターン数です。許可されたテストは複数の OS プロセスを起動でき、個々の Bash のタイムアウトは次の組の開始までにそれらが停止する保証にはなりません。
 

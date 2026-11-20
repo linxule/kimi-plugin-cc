@@ -597,8 +597,8 @@ function validateVersionSensitiveEvents(events, version) {
     // 2.3.0 (b5e28fd6), 2.3.1 (684bae9e), 2.3.2 (b8dd3a13), 2.3.3 (ec495f0c),
     // 2.4.0 (f26e4d91), 2.4.1 (2c73f3f5), 2.5.0 (41c34143), 2.5.1 (1b02030d),
     // 2.5.2 (1c142a00), 2.5.3 (5af9942e), 2.6.0 (740d6c0b), 2.6.2
-    // (6a8493df), and 2.6.3 (b0de2fbd): the additive events and HookDefSchema are
-    // unchanged. Exact 2.6.x schema acceptance does not certify swarm operations.
+    // (6a8493df), 2.6.3 (b0de2fbd), and 2.7.2 (56145f84): the additive events
+    // and HookDefSchema are unchanged. Schema acceptance does not certify operations.
     // Require the full version string AND matching components; no inferred 2.x compatibility.
     if (version.major === 2 && ((version.minor === 0 && ((version.version === "2.0.0" && version.patch === 0) ||
         (version.version === "2.0.1" && version.patch === 1) ||
@@ -618,7 +618,8 @@ function validateVersionSensitiveEvents(events, version) {
             (version.version === "2.5.3" && version.patch === 3))) ||
         (version.minor === 6 && ((version.version === "2.6.0" && version.patch === 0) ||
             (version.version === "2.6.2" && version.patch === 2) ||
-            (version.version === "2.6.3" && version.patch === 3))))) {
+            (version.version === "2.6.3" && version.patch === 3))) ||
+        (version.minor === 7 && version.version === "2.7.2" && version.patch === 2))) {
         return { valid: true };
     }
     if (version.major !== 0) {

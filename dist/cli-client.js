@@ -966,7 +966,7 @@ function buildArgs(opts) {
         ? opts.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE
         : undefined;
     if (opts.resumeSessionId === undefined &&
-        ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
+        ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
         args.push("--environment", "local");
     }
     if (opts.resumeSessionId !== undefined) {
@@ -1012,8 +1012,9 @@ export function buildKimiCliEnvironment(opts) {
     if (opts.executionPlan.intendedEngine === "legacy-v1") {
         env[KIMI_LEGACY_ENV] = KIMI_LEGACY_FORCED_VALUE;
     }
-    // The update preflight runs on the `-p` path too; a plugin spawn must never
-    // swap the certified binary underneath the execution plan.
+    // Suppress passive update checks on the `-p` path. Manually staged native
+    // swaps remain an upstream exception, so the exact probe and first-line
+    // version marker must still prove the spawned artifact's identity.
     env.KIMI_CODE_NO_AUTO_UPDATE = "1";
     // Plugin-owned web lifecycles must not inherit ambient idle-session reclamation.
     env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS = "0";

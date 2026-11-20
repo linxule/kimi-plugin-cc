@@ -261,11 +261,24 @@ test("smoke plans satisfy the final spawn gate and retain exact native policy se
       matrix.set(operation, previous);
     }
   }
-  if (BINARY_VERSION === "2.6.2" || BINARY_VERSION === "2.6.3") {
+  for (const operation of ["review", "swarm", "swarm-write"] as const) {
+    const previous = matrix.get(operation)!;
+    try {
+      matrix.set(operation, [...new Set([...previous, "2.7.2"])]);
+      const plan = smokePlanForVersion("node", ["fixture.mjs"], operation, "2.7.2", true);
+      expect(plan.certification).toBe("certified");
+      expect(plan.kimiVersion).toBe("2.7.2");
+      expect(() => assertExecutionPlanMatchesSpawn(plan, "node", ["fixture.mjs"])).not.toThrow();
+      expect(usesBoundedSwarmPolicy(plan)).toBe(operation !== "review");
+    } finally {
+      matrix.set(operation, previous);
+    }
+  }
+  if (["2.6.2", "2.6.3", "2.7.2"].includes(BINARY_VERSION ?? "")) {
     for (const operation of ["swarm", "swarm-write"] as const) {
       const plan = smokePlan("node", ["fixture.mjs"], operation);
       expect(usesBoundedSwarmPolicy(plan)).toBe(true);
-      expect(requiresSwarmPreactivation(BINARY_VERSION)).toBe(true);
+      expect(requiresSwarmPreactivation(BINARY_VERSION ?? null)).toBe(true);
     }
   }
   const legacy = smokePlanForVersion("node", ["fixture.mjs"], "review", "0.41.0", false);
@@ -892,7 +905,7 @@ const PRODUCTION_NON_SWARM =
 const swarmReadSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const swarmWriteSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const nonSwarmSuite = PREREQS_OK && PRODUCTION_NON_SWARM ? describe : describe.skip;
-const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && ["2.6.2", "2.6.3"].includes(BINARY_VERSION ?? "")
+const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && ["2.6.2", "2.6.3", "2.7.2"].includes(BINARY_VERSION ?? "")
   ? describe : describe.skip;
 
 suite("real-binary smoke: read-only commands cannot write (H7)", () => {

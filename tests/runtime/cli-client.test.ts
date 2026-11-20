@@ -242,7 +242,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
     const root = await createTestPluginDataRoot("cli-client-local-environment");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;
@@ -321,7 +321,6 @@ describe("runCliPrompt", () => {
       };
       options.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE = "1";
       options.env.KIMI_PLUGIN_CC_SMOKE = "1";
-      options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = "2.5.0";
       const home = path.join(root, "kimi-home");
       options.env.KIMI_CODE_HOME = home;
       const sessionId = "26242650-d95f-4805-80d9-c947d309b2c6";
@@ -330,23 +329,27 @@ describe("runCliPrompt", () => {
       await writeFile(path.join(agentDir, "wire.jsonl"), `${JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: root })}\n`);
       await writeFile(path.join(agentDir, "..", "..", "state.json"), JSON.stringify({ environmentCwd: root }));
       options.resumeSessionId = sessionId;
-      await runCliPrompt(options);
-      expect(capturedArgs).toEqual([
-        "run", mockKimiStreamPath,
-        "--output-format", "stream-json",
-        "-r", sessionId,
-        "-p", "test prompt",
-      ]);
+      for (const candidate of ["2.5.0", "2.7.2"]) {
+        options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
+        await runCliPrompt(options);
+        expect(capturedArgs).toEqual([
+          "run", mockKimiStreamPath,
+          "--output-format", "stream-json",
+          "-r", sessionId,
+          "-p", "test prompt",
+        ]);
+      }
 
       options.resumeSessionId = undefined;
-      options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = "2.4.1";
-      await runCliPrompt(options);
-      const completedArgs: string[] | undefined = capturedArgs;
-      expect(completedArgs).toEqual([
-        "run", mockKimiStreamPath,
-        "--output-format", "stream-json",
-        "-p", "test prompt",
-      ]);
+      for (const candidate of ["2.4.1", "2.7.0", "2.7.1", "2.7.3"]) {
+        options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
+        await runCliPrompt(options);
+        expect(capturedArgs).toEqual([
+          "run", mockKimiStreamPath,
+          "--output-format", "stream-json",
+          "-p", "test prompt",
+        ]);
+      }
     } finally {
       spawnSpy.mockRestore();
       await cleanupTestPath(root);

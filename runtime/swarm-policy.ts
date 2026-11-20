@@ -14,7 +14,7 @@ export function usesBoundedSwarmPolicy(
   plan: Pick<KimiExecutionPlan, "intendedEngine" | "kimiVersion" | "operationKind">,
 ): boolean {
   return plan.intendedEngine === "native-v2" &&
-    (plan.kimiVersion === "2.6.2" || plan.kimiVersion === "2.6.3") &&
+    (plan.kimiVersion === "2.6.2" || plan.kimiVersion === "2.6.3" || plan.kimiVersion === "2.7.2") &&
     (plan.operationKind === "swarm" || plan.operationKind === "swarm-write");
 }
 

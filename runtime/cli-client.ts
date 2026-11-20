@@ -91,8 +91,8 @@ export interface CliClientOptions {
   /**
    * Normal-launch cap on how many AgentSwarm subagents kimi-code runs
    * CONCURRENTLY, exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
-   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3 sources can exceed it during
-   * rate-limit recovery. Exact 2.6.2/2.6.3 additionally uses this as the trusted wave
+   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3/2.7.2 sources can exceed it during
+   * rate-limit recovery. Exact 2.6.2/2.6.3/2.7.2 additionally uses this as the trusted wave
    * admission limit (or a direct worker at 1), with native child timeouts moved
    * beyond the whole-job budget. Older binaries ignore the unknown env var, so
    * on < 0.18 the soft --cap prompt-count hint is the only count bound. Only
@@ -1261,7 +1261,7 @@ function buildArgs(opts: CliClientOptions): string[] {
     : undefined;
   if (
     opts.resumeSessionId === undefined &&
-    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
+    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
   ) {
     args.push("--environment", "local");
   }
@@ -1318,8 +1318,9 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
   if (opts.executionPlan.intendedEngine === "legacy-v1") {
     env[KIMI_LEGACY_ENV] = KIMI_LEGACY_FORCED_VALUE;
   }
-  // The update preflight runs on the `-p` path too; a plugin spawn must never
-  // swap the certified binary underneath the execution plan.
+  // Suppress passive update checks on the `-p` path. Manually staged native
+  // swaps remain an upstream exception, so the exact probe and first-line
+  // version marker must still prove the spawned artifact's identity.
   env.KIMI_CODE_NO_AUTO_UPDATE = "1";
   // Plugin-owned web lifecycles must not inherit ambient idle-session reclamation.
   env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS = "0";

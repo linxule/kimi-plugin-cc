@@ -50,7 +50,7 @@ import { usesBoundedSwarmPolicy } from "../swarm-policy.js";
 
 // /kimi:swarm — parallel fan-out, read-only by default and runtime-foreground-only.
 // A finite wall-clock budget bounds the whole run. --cap is a SOFT total-count
-// prompt hint. Exact native-v2 2.6.2/2.6.3 bounds admitted waves and prevents native
+// prompt hint. Exact native-v2 2.6.2/2.6.3/2.7.2 bounds admitted waves and prevents native
 // child timeouts from returning a continuing coordinator before children stop.
 // Concurrency 1 uses a direct worker without native fan-out. Older versions keep
 // their normal-launch setting and inherited recovery limitation. Read/write
@@ -60,7 +60,7 @@ import { usesBoundedSwarmPolicy } from "../swarm-policy.js";
 // kimi-code 0.18.0+. Exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2,
 // and certified 2.5.3 activate a same-job session through a bounded loopback
 // web lifecycle, then resume it through the normal print path. 2.6.2/2.6.3 parallel
-// waves and candidate-only 2.6.0 use that lifecycle too. The per-operation certification
+// waves, 2.7.2 JSON-authenticated waves, and candidate-only 2.6.0 use that lifecycle too. The per-operation certification
 // table controls whether each exact version is reachable in production.
 
 const SWARM_SUMMARY_MAX = 120;
@@ -68,7 +68,7 @@ const SWARM_AGENT_PROFILE = "<swarm>";
 const SWARM_WRITE_AGENT_PROFILE = "<swarm-write>";
 /**
  * Default concurrency setting when the user passes no `--max-concurrency`.
- * Exact native-v2 2.6.2/2.6.3 also enforces this as the admitted wave size. The plugin exports
+ * Exact native-v2 2.6.2/2.6.3/2.7.2 also enforces this as the admitted wave size. The plugin exports
  * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY; older read-only swarms ignore it and
  * retain only the wall-clock hard bound. Rate-limit recovery can exceed it on
  * older reviewed sources; their setting is not an unconditional peak guarantee.
@@ -86,7 +86,7 @@ export function resolveSwarmMaxConcurrency(requested: number | undefined): numbe
 }
 
 /**
- * Default concurrency for WRITE mode — 1 vs read's 4. Exact native-v2 2.6.2/2.6.3
+ * Default concurrency for WRITE mode — 1 vs read's 4. Exact native-v2 2.6.2/2.6.3/2.7.2
  * runs one direct worker; older versions serialize normal child launches but
  * retain the rate-limit recovery overrun. Disjoint-target partitioning remains
  * prompt-only when parallel workers are explicitly requested.

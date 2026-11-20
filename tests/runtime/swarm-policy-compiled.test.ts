@@ -23,20 +23,22 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
       KIMI_CODE_SWARM_TIMEOUT_MS: '3', KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '9999',
       KIMI_PLUGIN_CC_OPERATION: 'rescue', KIMI_PLUGIN_CC_CMD: 'rescue',
     };
-    for (const operationKind of ['swarm', 'swarm-write']) {
-      for (const concurrency of [1, 4]) {
-        const env = buildKimiCliEnvironment({
-          cwd: process.cwd(), env: ambient,
-          executionPlan: { ...plan, operationKind }, commandLabel: operationKind,
-          swarmMaxConcurrency: concurrency, trustedWorkspaceRoot: process.cwd(),
-        });
-        assert.equal(env[SWARM_POLICY_ENV], BOUNDED_SWARM_POLICY);
-        assert.equal(env[SWARM_WAVE_SIZE_ENV], String(concurrency));
-        assert.equal(env.KIMI_CODE_SWARM_TIMEOUT_MS, '2147483647');
-        assert.equal(SWARM_CHILD_TIMEOUT_MS, 2147483647);
-        assert.equal(env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY, String(concurrency));
-        assert.equal(env.KIMI_PLUGIN_CC_OPERATION, operationKind);
-        assert.equal(env.KIMI_PLUGIN_CC_CMD, operationKind);
+    for (const kimiVersion of ['2.6.2', '2.7.2']) {
+      for (const operationKind of ['swarm', 'swarm-write']) {
+        for (const concurrency of [1, 4]) {
+          const env = buildKimiCliEnvironment({
+            cwd: process.cwd(), env: ambient,
+            executionPlan: { ...plan, operationKind, kimiVersion }, commandLabel: operationKind,
+            swarmMaxConcurrency: concurrency, trustedWorkspaceRoot: process.cwd(),
+          });
+          assert.equal(env[SWARM_POLICY_ENV], BOUNDED_SWARM_POLICY);
+          assert.equal(env[SWARM_WAVE_SIZE_ENV], String(concurrency));
+          assert.equal(env.KIMI_CODE_SWARM_TIMEOUT_MS, '2147483647');
+          assert.equal(SWARM_CHILD_TIMEOUT_MS, 2147483647);
+          assert.equal(env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY, String(concurrency));
+          assert.equal(env.KIMI_PLUGIN_CC_OPERATION, operationKind);
+          assert.equal(env.KIMI_PLUGIN_CC_CMD, operationKind);
+        }
       }
     }
     assert.equal(ambient[SWARM_POLICY_ENV], 'disabled');
@@ -58,6 +60,11 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
       { ...plan, kimiVersion: '2.6.0' },
       { ...plan, kimiVersion: '2.6.1' },
       { ...plan, kimiVersion: '2.6.4' },
+      { ...plan, kimiVersion: '2.7.0' },
+      { ...plan, kimiVersion: '2.7.1' },
+      { ...plan, kimiVersion: '2.7.3' },
+      { ...plan, kimiVersion: '2.7.x' },
+      { ...plan, kimiVersion: '2.7.2-rc.1' },
       { ...plan, kimiVersion: '2.6.2+build' },
       { ...plan, intendedEngine: 'legacy-v1' },
       { ...plan, operationKind: 'rescue' },
@@ -89,9 +96,9 @@ test.each(distributions)("%s enforces bounded waves through the compiled hook pr
       command: process.execPath, prefixArgs: [], kimiVersion: '2.6.2',
       certification: 'certified', resumedFromJobId: null, safetyProfile: 'native-v2-no-plan/1',
     };
-    const makeEnv = (operationKind, width) => buildKimiCliEnvironment({
+    const makeEnv = (operationKind, width, kimiVersion = plan.kimiVersion) => buildKimiCliEnvironment({
       cwd: process.cwd(), env: { KIMI_CODE_HOME: process.cwd() },
-      executionPlan: { ...plan, operationKind }, commandLabel: operationKind,
+      executionPlan: { ...plan, operationKind, kimiVersion }, commandLabel: operationKind,
       swarmMaxConcurrency: width, trustedWorkspaceRoot: process.cwd(),
     });
     const hook = path.resolve('${root}/hooks/approval-hook.js');
@@ -139,6 +146,12 @@ test.each(distributions)("%s enforces bounded waves through the compiled hook pr
         assert.match(denial, /Read, Grep, or Glob/);
         assert.doesNotMatch(denial, /coordinator|fan out|subagents/);
       }
+    }
+    for (const operationKind of ['swarm', 'swarm-write']) {
+      const env = makeEnv(operationKind, 4, '2.7.2');
+      invoke(env, 'AgentSwarm', four, 0);
+      invoke(env, 'AgentSwarm', { ...four, items: ['a', 'b', 'c'] }, 2, /exceeding the limit 4/);
+      invoke(makeEnv(operationKind, 1, '2.7.2'), 'AgentSwarm', four, 2, /one worker directly/);
     }
     // Missing both new overlays remains the explicitly older-version behavior.
     const oldEnv = buildKimiCliEnvironment({

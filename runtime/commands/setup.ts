@@ -1294,7 +1294,7 @@ async function collectKimiVersionWarnings(
     warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION, NATIVE_V2_ANY_OPERATION_VERSIONS));
     return;
   }
-  if (probe.version === "2.6.2" || probe.version === "2.6.3") {
+  if (probe.version === "2.6.2" || probe.version === "2.6.3" || probe.version === "2.7.2") {
     warnings.push(
       `NOTE: kimi-code ${probe.version} is certified for all operations. Swarm uses bounded waves with concurrency 2 or more, and one direct worker at concurrency 1. The finite job budget stops the whole run.`,
     );
@@ -1302,7 +1302,7 @@ async function collectKimiVersionWarnings(
   }
   if (NATIVE_V2_NON_SWARM_VERSIONS.includes(probe.version)) {
     warnings.push(
-      `NOTE: kimi-code ${probe.version} is certified for review, challenge, ask, rescue, review gate, and pursue only. Read-only swarm and write swarm refuse before model spawn on this exact release. Select exact kimi-code 2.6.2 or 2.6.3 for this plugin's certified bounded waves and single-worker path.`,
+      `NOTE: kimi-code ${probe.version} is certified for review, challenge, ask, rescue, review gate, and pursue only. Read-only swarm and write swarm refuse before model spawn on this exact release. Select exact kimi-code 2.6.2, 2.6.3 or 2.7.2 for this plugin's certified bounded waves and single-worker path.`,
     );
   }
 }

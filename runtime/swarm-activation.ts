@@ -28,8 +28,10 @@ import {
   type ProcessIdentity,
 } from "./process-tree.js";
 
-// These exact 2.6.x activation entries support candidate integration; production scope is per operation.
-const PREACTIVATION_VERSIONS: readonly string[] = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"];
+// These exact activation entries support candidate integration; production scope is per operation.
+const PREACTIVATION_VERSIONS: readonly string[] = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"];
+const JSON_READY_VERSION = "2.7.2";
+const KIMI_AGENT_PROTOCOL_VERSION = "1.0.0";
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
 // Exact 2.4.0 can take longer than 5s to drain session/workspace lifecycle work.
@@ -115,7 +117,7 @@ export async function preactivateSwarmSession(
   try {
     const prepared = await prepareWebSpawn(options, failureCode);
     throwIfAborted(options.signal, failureCode, "swarm-activation.pre-spawn");
-    web = await startWebChild(options, prepared.env, failureCode);
+    web = await startWebChild(options, prepared.env, prepared.expectedVersion, failureCode);
     await verifyMeta(web, prepared.expectedVersion, options.signal, failureCode);
     const model = await resolveProfileModel(web, options, failureCode);
     identity = await createSession(web, options, prepared.expectedVersion, failureCode);
@@ -199,7 +201,7 @@ export async function deactivateSwarmSession(
     // the print spawn owns resume plan-taint refusal.
     const prepared = await prepareWebSpawn(options, failureCode);
     throwIfAborted(options.signal, failureCode, "swarm-deactivation.pre-spawn");
-    web = await startWebChild(options, prepared.env, failureCode);
+    web = await startWebChild(options, prepared.env, prepared.expectedVersion, failureCode);
     await verifyMeta(web, prepared.expectedVersion, options.signal, failureCode);
     await verifyLocalEnvironment(
       web,
@@ -313,12 +315,13 @@ async function prepareWebSpawn(
 async function startWebChild(
   options: SwarmActivationOptions,
   env: NodeJS.ProcessEnv,
+  expectedVersion: string,
   failureCode: FailureCode,
 ): Promise<ReadyWebChild> {
   const args = [
     ...(options.prefixArgs ?? []),
     "web",
-    "--no-open",
+    expectedVersion === JSON_READY_VERSION ? "--json" : "--no-open",
     "--host",
     "127.0.0.1",
     "--port",
@@ -387,7 +390,7 @@ async function startWebChild(
   startDescendantTracking(owned);
 
   try {
-    const ready = await waitForReadyLine(owned, options.signal, failureCode);
+    const ready = await waitForReadyLine(owned, expectedVersion, options.signal, failureCode);
     await refreshOwnedDescendants(owned);
     if (owned.recoveryFailed) throw failure(failureCode, "swarm-activation.recovery", "Cannot persist web ownership; refusing session mutation.");
     return Object.assign(owned, ready);
@@ -407,6 +410,7 @@ async function startWebChild(
 
 async function waitForReadyLine(
   owned: OwnedWebChild,
+  expectedVersion: string,
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<{ origin: string; token: string }> {
@@ -468,6 +472,19 @@ async function waitForReadyLine(
         const newline = buffered.indexOf("\n");
         const line = buffered.slice(0, newline).replace(/\r$/, "");
         buffered = buffered.slice(newline + 1);
+        if (expectedVersion === JSON_READY_VERSION) {
+          if (line.trim().length === 0) continue;
+          try {
+            settle(parseJsonReadyLine(line));
+          } catch {
+            settle(failure(
+              failureCode,
+              "swarm-activation.ready",
+              "The Kimi web JSON ready line did not confirm the authenticated KAP loopback contract.",
+            ));
+          }
+          return;
+        }
         if (!line.startsWith("Kimi server: ")) continue;
         try {
           settle(parseReadyLine(line));
@@ -513,6 +530,48 @@ function parseReadyLine(line: string): { origin: string; token: string } {
   };
 }
 
+function parseJsonReadyLine(line: string): { origin: string; token: string } {
+  const data: unknown = JSON.parse(line);
+  if (
+    !isRecord(data) ||
+    typeof data.origin !== "string" ||
+    typeof data.ws_url !== "string" ||
+    typeof data.token !== "string" ||
+    data.token.trim().length === 0 ||
+    data.kimi_agent_protocol_version !== KIMI_AGENT_PROTOCOL_VERSION
+  ) {
+    throw new Error("invalid JSON ready payload");
+  }
+  const origin = new URL(data.origin);
+  if (
+    origin.protocol !== "http:" ||
+    origin.hostname !== "127.0.0.1" ||
+    origin.port.length === 0 ||
+    origin.pathname !== "/" ||
+    origin.search.length > 0 ||
+    origin.hash.length > 0 ||
+    origin.username.length > 0 ||
+    origin.password.length > 0 ||
+    (data.origin !== origin.origin && data.origin !== `${origin.origin}/`)
+  ) {
+    throw new Error("invalid JSON ready origin");
+  }
+  const websocket = new URL(data.ws_url);
+  if (
+    websocket.protocol !== "ws:" ||
+    websocket.host !== origin.host ||
+    websocket.pathname !== "/api/v1/ws" ||
+    websocket.search.length > 0 ||
+    websocket.hash.length > 0 ||
+    websocket.username.length > 0 ||
+    websocket.password.length > 0 ||
+    data.ws_url !== websocket.href
+  ) {
+    throw new Error("invalid JSON ready WebSocket URL");
+  }
+  return { origin: origin.origin, token: data.token };
+}
+
 async function verifyMeta(
   web: ReadyWebChild,
   expectedVersion: string,
@@ -523,7 +582,16 @@ async function verifyMeta(
   if (!isRecord(data)) {
     throw failure(failureCode, "swarm-activation.meta", "Kimi web /meta returned an invalid payload.");
   }
-  if (data.backend !== "v2") {
+  if (expectedVersion === JSON_READY_VERSION) {
+    if (
+      data.kimi_agent_protocol_version !== KIMI_AGENT_PROTOCOL_VERSION ||
+      !isRecord(data.capabilities) ||
+      data.capabilities.websocket !== true ||
+      "backend" in data
+    ) {
+      throw failure(failureCode, "swarm-activation.meta", "Kimi web /meta did not confirm the KAP 1.0.0 WebSocket contract without a legacy backend.");
+    }
+  } else if (data.backend !== "v2") {
     throw failure(failureCode, "swarm-activation.meta", "Kimi web /meta did not confirm the v2 backend.");
   }
   if (data.dangerous_bypass_auth !== false) {
@@ -567,7 +635,7 @@ async function createSession(
   failureCode: FailureCode,
 ): Promise<SwarmSessionIdentity> {
   const request: Record<string, unknown> = { metadata: { cwd: options.cwd } };
-  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion)) {
+  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion)) {
     request.environment_id = "local";
     request.environment_cwd = options.cwd;
   }
@@ -593,7 +661,7 @@ async function verifyLocalEnvironment(
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<void> {
-  if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion)) return;
+  if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion)) return;
   const data = await restData(
     web,
     "GET",
@@ -646,7 +714,7 @@ async function verifySwarmStatus(
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<void> {
-  const data = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion)
+  const data = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion)
     ? await readWebSocketAgentState(web, identity.sessionId, expectedVersion, signal, failureCode)
     : await restData(
         web,
@@ -656,7 +724,7 @@ async function verifySwarmStatus(
         signal,
         failureCode,
       );
-  const source = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion) ? "agent state" : "/status";
+  const source = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion) ? "agent state" : "/status";
   if (!isRecord(data)) {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} returned an invalid payload.`);
   }
@@ -671,10 +739,10 @@ async function verifySwarmStatus(
   if (data.plan_mode !== false) {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm plan mode is off.`);
   }
-  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion) && data.tower_mode !== false) {
+  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion) && data.tower_mode !== false) {
     throw failure(failureCode, "swarm-activation.status", "Kimi web agent state did not confirm tower mode is off.");
   }
-  const permission = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion) ? data.permission_mode : data.permission;
+  const permission = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion) ? data.permission_mode : data.permission;
   if (permission !== "auto") {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm auto permission mode.`);
   }
@@ -697,7 +765,7 @@ async function readWebSocketAgentState(
     return await new Promise((resolve, reject) => {
       let socket: WebSocket;
       const bearerProtocol = `kimi-code.bearer.${web.token}`;
-      const legacyControl = !["2.6.0", "2.6.2", "2.6.3"].includes(expectedVersion);
+      const legacyControl = !["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(expectedVersion);
       const helloId = `swarm-activation-hello-${randomUUID()}`;
       const subscribeId = `swarm-activation-subscribe-${randomUUID()}`;
       try {

@@ -23,7 +23,7 @@ export const KIMI_PURSUE_DEFAULT_BUDGET_MS = 2_700_000; // 45 minutes
  * Swarm (read-only parallel fan-out) DEFAULT wall-clock ceiling when the user
  * passes no `--budget`. Read-only swarm opens no write surface, so the only new
  * risk is cost/runaway from repeated model work. This AbortController bounds
- * the whole job; `--cap` remains a soft lifetime-count hint. Exact 2.6.2/2.6.3 also
+ * the whole job; `--cap` remains a soft lifetime-count hint. Exact 2.6.2/2.6.3/2.7.2 also
  * bounds wave cardinality and prevents child timeouts from overlapping waves;
  * a requested concurrency of one runs a direct worker. Sized like the single-turn
  * review budget — a swarm fans review work out in parallel within one process,

@@ -4,7 +4,7 @@
 
 **Status: certified and published for all eight operations.** Exact `@moonshot-ai/kimi-code@2.6.3` passed the source, exact-binary, real-provider candidate, deterministic stock-binary, production-table operation, full repository, package, consumer-security and post-edit review gates. Plugin 2.6.3 release commit `597210fe888e045c15577dbfc112188075bf1ac5` passed exact-commit validation and release CI `44406363750`; immutable tag `v2.6.3` and the GitHub release are published. npm OIDC run `44407749059` published plugin 2.6.3, and fresh registry/archive/signature/attestation verification passed.
 
-Plugin 2.6.3 is the latest published plugin release. Certification and publication do not change an installed host cache or move an operator CLI pin.
+Plugin 2.6.3 is a published plugin release. Certification and publication do not change an installed host cache or move an operator CLI pin.
 
 Exact source: `@moonshot-ai/kimi-code@2.6.3`, commit `b0de2fbd2de04d87689225aafd3912e5d193b62d` (annotated tag object `a9df46689649824abfdfff1528d7708a23fd3cf3`). The isolated npm binary reports 2.6.3; `dist/main.mjs` SHA-256 is `a360023b6814ffdf05bc87e40925df5e0442ae3076ad9e7b6ea6f771e2a1857c`.
 

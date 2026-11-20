@@ -314,7 +314,8 @@ describe("requiresSwarmPreactivation", () => {
     expect(requiresSwarmPreactivation("2.6.0")).toBe(true);
     expect(requiresSwarmPreactivation("2.6.2")).toBe(true);
     expect(requiresSwarmPreactivation("2.6.3")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.4", "2.6.1", "2.6.4", "2.5.2-beta.1", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.7.2")).toBe(true);
+    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.4", "2.6.1", "2.6.4", "2.7.0", "2.7.1", "2.7.3", "2.7", "2.7.x", ">=2.7.2", "2.7.2-rc.1", "2.7.2+local", "2.5.2-beta.1", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
   });
@@ -468,6 +469,63 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
+  test("exact 2.7.2 rejects a token-less JSON ready line before any REST call", async () => {
+    await withFixture("json-tokenless-ready", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }))).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.ready",
+      });
+      const log = await readLog(fixture);
+      expect(spawns(log)).toHaveLength(1);
+      expect(requests(log)).toEqual([]);
+    });
+  }, 15_000);
+
+  test.each([
+    "json-malformed-ready",
+    "json-token-missing-ready",
+    "json-mismatched-ready",
+    "json-kap-mismatch-ready",
+    "json-origin-host-ready",
+    "json-origin-port-ready",
+    "json-origin-credentials-ready",
+    "json-origin-query-ready",
+    "json-origin-path-ready",
+    "json-origin-fragment-ready",
+    "json-ws-path-ready",
+    "json-ws-query-ready",
+  ])("exact 2.7.2 rejects an invalid JSON ready line before any REST call: %s", async (scenario) => {
+    await withFixture(scenario, async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }))).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.ready",
+      });
+      const log = await readLog(fixture);
+      expect(spawns(log)).toHaveLength(1);
+      expect(requests(log)).toEqual([]);
+    });
+  }, 15_000);
+
+  test("exact 2.7.2 JSON ready failures never expose the token", async () => {
+    await withFixture("json-mismatched-ready", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      let caught: unknown;
+      try {
+        await preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(RuntimeError);
+      const error = caught as RuntimeError;
+      const rendered = `${formatError(error)}\n${error.stack ?? ""}\n${JSON.stringify(error.details)}`;
+      expect(rendered).not.toContain(tokenCanary);
+      expect(rendered).not.toContain(configCanary);
+      expect(requests(await readLog(fixture))).toEqual([]);
+    });
+  }, 15_000);
+
   test.each(["meta-version-mismatch", "meta-backend-mismatch", "dangerous-auth"])(
     "refuses unsafe or inexact /meta: %s",
     async (scenario) => {
@@ -483,6 +541,27 @@ describe("swarm web lifecycle", () => {
     },
     15_000,
   );
+
+  test.each([
+    "meta-version-mismatch",
+    "dangerous-auth",
+    "meta-kap-missing",
+    "meta-kap-mismatch",
+    "meta-websocket-missing",
+    "meta-websocket-mismatch",
+    "meta-unexpected-backend",
+  ])("exact 2.7.2 refuses unsafe or inexact KAP /meta: %s", async (scenario) => {
+    await withFixture(scenario, async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }))).rejects.toMatchObject({
+        code: "SWARM_ACTIVATION_FAILED",
+        stage: "swarm-activation.meta",
+      });
+      const log = await readLog(fixture);
+      expect(requests(log).map((entry) => entry.path)).toEqual(["/api/v1/meta"]);
+      expect(spawns(log)).toHaveLength(1);
+    });
+  }, 15_000);
 
   test.each(["status-swarm-mismatch", "status-plan-mismatch", "status-model-mismatch"])(
     "rejects unconfirmed status and preserves identity for caller cleanup: %s",
@@ -862,12 +941,17 @@ describe("swarm web lifecycle", () => {
     });
   }, 20_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
     await withFixture("ws-success", async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_VERSION = version;
       const options = makeOptions(fixture, { expectedVersion: version, model: "chosen-model" });
       const identity = await preactivateSwarmSession(options);
       const activationLog = await readLog(fixture);
+      if (version === "2.7.2") {
+        expect(spawns(activationLog)[0]?.argv).toEqual([
+          "web", "--json", "--host", "127.0.0.1", "--port", "0", "--log-level", "error",
+        ]);
+      }
       expect(requests(activationLog).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
         "GET /api/v1/meta",
         "POST /api/v1/sessions",
@@ -882,9 +966,9 @@ describe("swarm web lifecycle", () => {
       });
       const control = activationLog.filter((entry) => entry.kind === "ws-message");
       expect(control.map((entry) => entry.frame.type)).toEqual(
-        ["2.6.0", "2.6.2", "2.6.3"].includes(version) ? ["subscribe"] : ["client_hello", "subscribe_v2"],
+        ["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version) ? ["subscribe"] : ["client_hello", "subscribe_v2"],
       );
-      if (["2.6.0", "2.6.2", "2.6.3"].includes(version)) {
+      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) {
         expect(control[0]?.frame).toMatchObject({
           session_id: "session_mock",
           agent_ids: ["main"],
@@ -905,7 +989,7 @@ describe("swarm web lifecycle", () => {
         "POST /api/v1/shutdown",
       ]);
       expect(requests(fullLog).some((entry) => entry.path?.endsWith("/status"))).toBe(false);
-      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(["2.6.0", "2.6.2", "2.6.3"].includes(version) ? 2 : 4);
+      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version) ? 2 : 4);
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
     });
   }, 15_000);
@@ -961,7 +1045,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.6.0", "2.6.2", "2.6.3"].flatMap((version) => [
+  test.each(["2.6.0", "2.6.2", "2.6.3", "2.7.2"].flatMap((version) => [
     "ws-auth-reject",
     "ws-subscription-reject",
     "ws-unacknowledged-state",
@@ -1008,7 +1092,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3"].flatMap((version) =>
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].flatMap((version) =>
     ["ws-environment-remote", "ws-environment-workspace", "ws-environment-cwd"].map((scenario) => [version, scenario] as const)))(
     "exact %s rejects an invalid local binding before profile mutation: %s",
     async (version, scenario) => {

@@ -2,6 +2,15 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.7.2 — 2026-11-20
+
+- Certify exact kimi-code 2.7.2 for all eight native-v2 operations under the no-plan and bounded-swarm/direct-worker construction. Exact source commit `56145f849caa305d42acd09b67fb65d11146f887` and bundle SHA-256 `dafef22f56c4c1fff755eb3af5e42a76d32d09a9dc858ebdc055a6d1a6008e67` are verified; exact 2.7.0, 2.7.1 and 2.7.3 remain excluded.
+- Diagnose the 2.7.0 monitor's zero-child/no-patch lanes as candidate-harness selector omissions, not an upstream scheduler regression. Extend exact-version production, preactivation, bounded-policy, direct-worker, schema and recovery coverage to 2.7.2 without inheriting a version range.
+- Adapt 2.7.2 activation to KAP `/meta` without `backend: "v2"`: use an ephemeral-token JSON ready line, strict loopback origin and `/api/v1/ws` validation, KAP 1.0.0 and WebSocket proof, exact server-version checks, and fresh explicit local selection. Older activation formats remain unchanged.
+- Expand source review from seven to nine scopes for the moved `packages/core` executor, loop, retry/settlement/recovery and structured error conversion, plus KAP, Klient and ACP host plan-entry routes. Final source scans pass **38 tests / 527 assertions on 2.7.2** and **38 / 404 on 2.6.3**, with 153 pins.
+- Pass plan ON/OFF, forced removed-tool and local/trust/resume controls, **23 deterministic stock-binary tests / 138 assertions**, and candidate plus production real-provider matrices each with **30 passes / 406 assertions** and only the two inapplicable narrowed-refusal skips. Real child journals, confined writes, child-authored patches, direct workers and bounded waves are required evidence. Both final independent reviews returned NO FINDINGS. See the [2.7.2 record](docs/upstream-2.7.2-certification.md).
+- Pass the plugin 2.7.2 frozen-install release gate with **1,848 tests / 83 expected opt-in or platform skips / 0 failures / 24,260 assertions in 611.46 seconds**, plus **342-file** package/DSH validation and isolated consumer security. The independent release-diff review's version-headline finding was corrected before the release commit. Publication receipts are recorded separately after CI and registry verification.
+
 ## 2.6.3 — 2026-11-18
 
 - Certify exact kimi-code 2.6.3 for all eight native-v2 operations under the existing no-plan and bounded-swarm/direct-worker construction. Exact source commit `b0de2fbd2de04d87689225aafd3912e5d193b62d` and bundle SHA-256 `a360023b6814ffdf05bc87e40925df5e0442ae3076ad9e7b6ea6f771e2a1857c` are verified; the upstream scheduler remains byte-identical to 2.6.2 and is not represented as fixed.
