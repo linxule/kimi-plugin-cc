@@ -2,7 +2,7 @@
 
 ## Scope and decision
 
-**Status: certified for all eight operations; packaged as plugin 2.7.2.** Exact `@moonshot-ai/kimi-code@2.7.2` passed the source, exact-binary, deterministic stock-binary, real-provider candidate and production-table operation gates. Certification was completed before release authorization. GitHub and registry publication receipts are recorded separately after verification; neither certification nor publication updates installed hosts or operator pins.
+**Status: certified and published for all eight operations.** Exact `@moonshot-ai/kimi-code@2.7.2` passed the source, exact-binary, deterministic stock-binary, real-provider candidate and production-table operation gates. Certification was completed before release authorization. Plugin 2.7.2 release commit `e2bba0e2d4e1745e4155eb5c6ddf3f4dabaffb66` passed release CI `44799772434`; the immutable GitHub release, recovery npm OIDC run `44803040496`, and fresh registry/attestation verification are complete. Neither certification nor publication updates installed hosts or operator pins.
 
 Exact source commit: `56145f849caa305d42acd09b67fb65d11146f887` (annotated tag object `1781dbd74bc7fabf23ac4721a570397f278817f1`). The isolated npm binary reports 2.7.2; `dist/main.mjs` SHA-256 is `dafef22f56c4c1fff755eb3af5e42a76d32d09a9dc858ebdc055a6d1a6008e67`. npm `latest` was rechecked as 2.7.2 during the production gate.
 
@@ -92,7 +92,21 @@ Full repository, package, consumer-security, and final independent code/document
 - **Consumer security:** PASS, exit 0. `bun run check:consumer-security` verified the isolated npm consumer security of `kimi-plugin-cc@2.7.2`. Receipt: `.claude/kimi-code-research/release-2.7.2/consumer-security.log`.
 - **Independent release-diff review:** PASS after correction. The reviewer found the stale 2.6.3 version headline in `docs/invariants.md`; it was corrected to 2.7.2. No other release-blocking finding was returned.
 
-Release-commit CI, immutable tag, GitHub release, npm OIDC and registry/attestation verification are separate subsequent receipts. They are not inferred from this local validation.
+## Release and registry receipt
+
+Release commit `e2bba0e2d4e1745e4155eb5c6ddf3f4dabaffb66` passed release CI run `44799772434`, including both Linux/full-package and Windows jobs. The immutable [v2.7.2 GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.7.2) is anchored at that commit with annotated tag object `cdbd0d179a8fafd41019230a655887e035453670`.
+
+Initial OIDC run `44801159950` passed the full tag build, package/DSH checks, consumer audit and artifact upload, but npm rejected publication with `TLOG_CREATE_ENTRY_ERROR`; registry inspection confirmed it published nothing. The documented manual-dispatch recovery [run 44803040496](https://github.com/linxule/kimi-plugin-cc/actions/runs/44803040496) validated the same immutable tag and published npm `latest` 2.7.2 at `2026-11-20T19:44:23.172Z`.
+
+The **342-file** registry tarball is byte-identical to the successful Actions artifact, and every published file matches the release tag:
+
+- SHA-1: `c78a89fa5ea199c6605c7453ca50b2c23ee3cb3f`
+- SHA-256: `0a0bcba76513adac3448776d4f8df9ec73b60987edac0ca5e6535db428b91f33`
+- SHA-512: `2e7dfe8043c2c05447a28dbfc17c6124c6b08444efb864c5b5f5f3f586f338ff4b77d35e3b769168b570a32c08bec48e8f78aa6e11b958e9f22257cda29616f1`
+
+SLSA provenance log index `4028226284` and publish attestation log index `4028244850` match the package subject, SHA-512, recovery run and release commit. Their workflow ref is `refs/heads/main` because recovery used `workflow_dispatch`; the artifact and all published bytes independently match `refs/tags/v2.7.2`. Fresh registry installation has zero production advisories and no invalid or missing signatures. Isolated Claude Code, Codex and DSH setup/check pass against exact stock CLI 2.7.2, and all three installed runtime maps enforce full 2.7.2 certification with 2.6.0 non-swarm-only scope. Verification made no model calls and changed no installed host or operator pin. Receipts are under `.claude/kimi-code-research/release-2.7.2/registry/`.
+
+The post-publication DSH Discover timestamp is `1795203863`, recording the actual npm publication time.
 
 ## Residual boundaries
 
