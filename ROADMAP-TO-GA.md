@@ -40,7 +40,7 @@ These are maintenance commitments and open investigations, not promised release 
 
 ## Contribution recovery checkpoint: PR review and redaction (2026-11-23)
 
-This is an unreleased contribution candidate on local branch `feature/pr-review-redaction`, intended for `fedroraddict/kimi-plugin-cc-contrib` and an upstream draft PR. The private `fedroraddict/kimi-plugin-cc` repository remains the separate structured-review rig; do not rename it or install both plugins in one host. No plugin version bump or compatibility-certification change is included.
+This is an unreleased contribution candidate published as commit `1013bd0` on `feature/pr-review-redaction` at `fedroraddict/kimi-plugin-cc-contrib`, with upstream draft PR [#26](https://github.com/linxule/kimi-plugin-cc/pull/26). The private `fedroraddict/kimi-plugin-cc` repository remains the separate structured-review rig; do not rename it or install both plugins in one host. No plugin version bump or compatibility-certification change is included.
 
 Implemented scope:
 
@@ -64,7 +64,7 @@ cd /mnt/c/Users/Lucas/github-audit/kimi-plugin-cc-upstream
 bun run check:package
 ```
 
-Next useful work: make the existing ask polling helper wait for plugin-path initialization without racing `JobStore`, then rerun the unchanged full gate. After it passes, commit any separate test-only fix, regenerate/stage distributions if runtime changed, push `feature/pr-review-redaction` to `https://github.com/fedroraddict/kimi-plugin-cc-contrib`, and open a draft PR to `linxule/kimi-plugin-cc:main`. Native Windows remains unsupported; use WSL. Do not claim live-model or real-posting coverage without running those explicit tests.
+Next useful work: make the existing ask polling helper wait for plugin-path initialization without racing `JobStore`, then rerun the unchanged full gate. After it passes, commit and push any separate test-only fix to the existing contribution branch, regenerate/stage distributions if runtime changed, and mark draft PR #26 ready for review. Native Windows remains unsupported; use WSL. Do not claim live-model or real-posting coverage without running those explicit tests.
 
 ## Deliberate boundaries
 
