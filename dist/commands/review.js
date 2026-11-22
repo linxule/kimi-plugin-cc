@@ -20,15 +20,17 @@ import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, ver
 import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 const REVIEW_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
-export async function runReview(argv, context, commandType) {
-    const parsed = parseReviewArgs(argv, commandType);
+export async function runReview(argv, context, commandType, prepared) {
+    const parsed = prepared?.args ?? parseReviewArgs(argv, commandType);
     if (parsed.background || parsed.wait) {
         throw new RuntimeError("INVALID_FLAGS", `${commandType} does not support --background or --wait in v1; review runs foreground-synchronously.`, `${commandType}.parse`);
     }
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
         await requireReadOnlyHookInstalled(context, commandType);
     }
-    const reviewContext = await collectReviewContext(context.cwd, parsed.base);
+    const reviewContext = prepared === undefined
+        ? await collectReviewContext(context.cwd, parsed.base)
+        : undefined;
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
@@ -43,7 +45,7 @@ export async function runReview(argv, context, commandType) {
     // one that no on-disk session matches.
     const reviewSessionId = null;
     const logPath = path.join(paths.logsDir, `${commandType}-${jobId}.jsonl`);
-    const previewPrompt = buildReviewPrompt(commandType, reviewContext, parsed.focus);
+    const previewPrompt = prepared?.prompt ?? buildReviewPrompt(commandType, reviewContext, parsed.focus);
     const job = store.createJob({
         job_id: jobId,
         repo_id: repoIdentity.repoId,
@@ -88,6 +90,7 @@ export async function runReview(argv, context, commandType) {
             model: parsed.model,
             thinkingEffort: parsed.thinkingEffort,
             logPath,
+            stderr: context.stderr,
             onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             signal: handlers.signal,
         }, job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`);
@@ -109,7 +112,7 @@ export async function runReview(argv, context, commandType) {
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,
-            title: buildKimiSessionTitle(commandType, parsed.focus ?? reviewContext.targetDescription),
+            title: prepared?.title ?? buildKimiSessionTitle(commandType, parsed.focus ?? reviewContext.targetDescription),
             stderr: context.stderr,
         });
         // Match ask/rescue: gate on the JOB row's pre-call session id so that

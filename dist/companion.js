@@ -88,7 +88,7 @@ async function main(argv) {
             await runWorker(rest, context);
             return;
         default:
-            throw new RuntimeError("INVALID_COMMAND", `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm.`, "companion");
+            throw new RuntimeError("INVALID_COMMAND", `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, review-pr, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm.`, "companion");
     }
 }
 main(process.argv.slice(2)).catch((error) => {

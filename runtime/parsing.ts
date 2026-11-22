@@ -21,6 +21,7 @@ export const RESCUE_SUPPORTED_FLAGS =
   "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
 
 export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>";
+export const PR_REVIEW_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --post-comment";
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
 
 export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags)";
@@ -581,6 +582,83 @@ export function parseReviewArgs(argv: string[], commandName: string = "review"):
     model: parsed.model,
     thinkingEffort: parsed.thinkingEffort,
     focus: parsed.trailingText,
+  };
+}
+
+export interface PullRequestReviewArgs extends KimiFlagState {
+  ref: string;
+  budgetMs?: number;
+  postComment: boolean;
+  focus?: string;
+}
+
+export function parsePullRequestReviewArgs(argv: string[]): PullRequestReviewArgs {
+  let ref: string | undefined;
+  let budgetMs: number | undefined;
+  let model: string | undefined;
+  let thinkingEffort: string | undefined;
+  let postComment = false;
+  const focus: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (token === "--") {
+      focus.push(...argv.slice(index + 1));
+      break;
+    }
+    if (token === "--thinking" || token.startsWith("--thinking=")) {
+      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+      continue;
+    }
+    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "review-pr.parse");
+    }
+    if (token === "--post-comment") {
+      postComment = true;
+      continue;
+    }
+    if (token === "--base" || token === "--background" || token === "--wait") {
+      throw new RuntimeError("INVALID_ARGS", `${token} is unsupported for review-pr; reviews use the fetched PR diff and run in the foreground.`, "review-pr.parse");
+    }
+    if (token === "--budget") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("-")) {
+        throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "review-pr.parse");
+      }
+      budgetMs = parseDurationMs(value, "--budget", "review-pr.parse", "response");
+      index += 1;
+      continue;
+    }
+    if (token === "-m" || token === "--model") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("-")) {
+        throw new RuntimeError("INVALID_ARGS", `${token} requires a model name that does not start with '-'.`, "review-pr.parse");
+      }
+      model = value;
+      index += 1;
+      continue;
+    }
+    if (looksLikeFlag(token)) {
+      throw new RuntimeError(
+        "INVALID_ARGS",
+        `Unknown flag ${token} for review-pr. Supported flags: ${PR_REVIEW_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped focus text.`,
+        "review-pr.parse",
+      );
+    }
+    if (ref === undefined) ref = token;
+    else focus.push(token);
+  }
+
+  if (ref === undefined) {
+    throw new RuntimeError("INVALID_ARGS", "review-pr requires a PR reference: owner/repo#123, a full GitHub PR URL, or #123 inside a GitHub repository.", "review-pr.parse");
+  }
+  return {
+    ref,
+    budgetMs,
+    model,
+    thinkingEffort,
+    postComment,
+    focus: focus.length > 0 ? focus.join(" ") : undefined,
   };
 }
 

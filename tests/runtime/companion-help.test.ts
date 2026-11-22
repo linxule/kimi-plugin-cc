@@ -9,7 +9,7 @@ import { companionHelp } from "../../runtime/help.js";
 
 const exec = promisify(execFile);
 const companion = path.resolve("dist/companion.js");
-const commands = [[], ["setup"], ["review"], ["ask"], ["task"], ["task", "rescue"], ["task", "challenge"], ["task", "pursue"], ["task", "swarm"], ["status"], ["result"], ["cancel"], ["replay"], ["repair-sessions"], ["recover-swarm"], ["worker"]];
+const commands = [[], ["setup"], ["review"], ["review-pr"], ["ask"], ["task"], ["task", "rescue"], ["task", "challenge"], ["task", "pursue"], ["task", "swarm"], ["status"], ["result"], ["cancel"], ["replay"], ["repair-sessions"], ["recover-swarm"], ["worker"]];
 for (const command of commands) {
   for (const flag of ["--help", "-h"]) {
     test(`compiled ${command.join(" ")} ${flag} is side-effect-free stdout`, async () => {
@@ -46,7 +46,7 @@ test("direct ask/rescue commands return parser help before hook or state access"
 });
 
 test("thinking value is skipped by help scanning and appears in all model command usage", () => {
-  for (const cmd of [["ask"], ["review"], ["task", "challenge"], ["task", "rescue"], ["task", "pursue"], ["task", "swarm"]]) {
+  for (const cmd of [["ask"], ["review"], ["review-pr"], ["task", "challenge"], ["task", "rescue"], ["task", "pursue"], ["task", "swarm"]]) {
     expect(companionHelp([...cmd, "--thinking", "off", "--help"])).toContain("--thinking <off|low|medium|high>");
   }
 });

@@ -1,10 +1,10 @@
 import {
-  hasHelpFlag, ASK_SUPPORTED_FLAGS, RESCUE_SUPPORTED_FLAGS, REVIEW_SUPPORTED_FLAGS,
+  hasHelpFlag, ASK_SUPPORTED_FLAGS, RESCUE_SUPPORTED_FLAGS, REVIEW_SUPPORTED_FLAGS, PR_REVIEW_SUPPORTED_FLAGS,
   PURSUE_SUPPORTED_FLAGS, SWARM_SUPPORTED_FLAGS, JOB_LOOKUP_SUPPORTED_FLAGS,
   SETUP_SUPPORTED_FLAGS, REPAIR_SESSIONS_SUPPORTED_FLAGS, REPLAY_SUPPORTED_FLAGS, RECOVER_SWARM_SUPPORTED_FLAGS,
 } from "./parsing.js";
 
-const SUBCOMMANDS = "setup, review, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm";
+const SUBCOMMANDS = "setup, review, review-pr, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm";
 const TASK_KINDS = "rescue, challenge, pursue, swarm";
 
 /** Help is a dispatch-only, side-effect-free exception to normal argument parsing. */
@@ -33,6 +33,7 @@ export function companionHelp(argv: string[]): string | undefined {
       }
     case "ask": return usage(command, "[options] [--] [prompt]", ASK_SUPPORTED_FLAGS, "Read-only question; default budget 30m. Backgrounding does not extend the budget.");
     case "review": return usage(command, "[options] [--] [focus]", REVIEW_SUPPORTED_FLAGS, "Read-only review; default budget 30m. Foreground-only (no --background/--wait).");
+    case "review-pr": return usage(command, "[options] <owner/repo#123|PR URL|#123> [--] [focus]", PR_REVIEW_SUPPORTED_FLAGS, "Read-only GitHub PR review; default budget 30m. --post-comment explicitly posts one summary comment after completion.");
     case "setup": return usage(command, "[options]", SETUP_SUPPORTED_FLAGS, "Install, check, or remove this host's managed hook, or list configured models.");
     case "status": case "result": case "cancel":
       return usage(command, "[job-id] [options]", JOB_LOOKUP_SUPPORTED_FLAGS,

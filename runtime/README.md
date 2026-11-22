@@ -11,6 +11,7 @@ The dispatcher in `companion.ts` exposes:
 - `setup` to install or check the current host's hook, uninstall it, or manage the review gate
 - `setup --models [--json]` to list configured models without contacting a provider or exposing credentials
 - `review` and `task challenge` to review changes without write tools
+- `review-pr` to review a fetched GitHub PR diff, with optional explicit summary-comment posting
 - `ask` to answer repository questions, with a fresh session by default and explicit resume support
 - `task rescue` to make workspace changes under the rescue allowlist
 - `task pursue` to run an experimental goal with a finite time budget and the rescue policy
@@ -28,7 +29,9 @@ The dispatcher in `companion.ts` exposes:
 | `companion.ts` | Dispatch companion subcommands |
 | `dsh/` | Register all seven DSH providers and human commands, isolate host state, and manage subprocess lifecycles |
 | `mcp/` | Define typed tools, frame stdio, negotiate tasks, supervise fixed-ID children, and bind job ownership |
-| `cli-client.ts` | Build the child environment and arguments, parse output, enforce provenance, and cancel the process tree |
+| `cli-client.ts` | Redact the provider-bound prompt, build the child environment and arguments, parse output, enforce provenance, and cancel the process tree |
+| `github.ts` | Fetch PR data and post explicitly requested comments through bounded `gh` subprocesses |
+| `redaction.ts` | Validate workspace regex policy and apply replacements in a timeout-bound worker |
 | `kimi-engine.ts` | Select a certified engine and persist the execution plan |
 | `native-v2-preflight.ts` | Refuse plan-mode settings, unsafe experimental selectors, and unsafe resume journals |
 | `stream-json.ts` | Parse assistant, tool, and metadata records |
@@ -45,7 +48,7 @@ The dispatcher in `companion.ts` exposes:
 
 ## Runtime behavior
 
-Every model command verifies the current host's hook before spawning the Kimi CLI. The review gate skips visibly if enforcement is unavailable. Native-v2 sessions also pass the independent no-plan checks before the Kimi CLI spawn and at the spawn boundary.
+Every model command verifies the current host's hook before spawning the Kimi CLI. Before provider submission, an optional workspace `.kimi-plugin.toml` `[redaction] patterns` regex policy replaces matches in the spawned argv and log. Invalid or timed-out policies fail closed; local state, titles, and earlier prompt digests are not scrubbed. The review gate skips visibly if enforcement is unavailable. Native-v2 sessions also pass the independent no-plan checks before the Kimi CLI spawn and at the spawn boundary.
 
 MCP launches attach only after cancellation handlers are installed, with a 60-second bound. Verified teardown can close a stalled launch; missing identity or inconclusive termination evidence keeps it starting and recoverable by ID. `kimi_pid` is recorded at actual spawn. Host workspace defaults are containment boundaries, not arbitrary overrides.
 

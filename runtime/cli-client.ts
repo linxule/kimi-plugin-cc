@@ -10,6 +10,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { assertPromptFitsCommandLine } from "./prompt-size.js";
+import { redactPromptForWorkspace } from "./redaction.js";
 import { createHookEscapeMonitor, type HookEscape } from "./hook-escape.js";
 import { RuntimeError, formatError } from "./errors.js";
 import {
@@ -124,6 +125,8 @@ export interface CliClientOptions {
   thinkingEffort?: string;
   /** Optional absolute path for an append-only JSONL diagnostics log. */
   logPath?: string;
+  /** Human diagnostics; defaults to the companion process stderr. */
+  stderr?: NodeJS.WriteStream;
   /** Optional cancellation. */
   signal?: AbortSignal;
   /**
@@ -267,7 +270,14 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     });
   }
 
-  const args = buildArgs(opts);
+  const redaction = await redactPromptForWorkspace(opts.cwd, opts.prompt);
+  if (redaction.replacements > 0) {
+    (opts.stderr ?? process.stderr).write(
+      `Redacted ${redaction.replacements} match(es) before starting Kimi.\n`,
+    );
+  }
+  const redactedOpts = redaction.replacements > 0 ? { ...opts, prompt: redaction.text } : opts;
+  const args = buildArgs(redactedOpts);
   assertPromptFitsCommandLine(opts.command, args);
   const env = buildKimiCliEnvironment(opts);
   const boundedSwarm = usesBoundedSwarmPolicy(opts.executionPlan);
@@ -368,6 +378,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     plan_certification: opts.executionPlan.certification,
     safety_profile: opts.executionPlan.safetyProfile,
     swarm_max_concurrency: opts.swarmMaxConcurrency ?? null,
+    redaction_replacements: redaction.replacements,
     legacy_v1_forced: env.KIMI_CODE_LEGACY_FLAG === KIMI_LEGACY_FORCED_VALUE,
   });
 

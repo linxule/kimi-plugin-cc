@@ -38,6 +38,34 @@ These are maintenance commitments and open investigations, not promised release 
 | Plan-mode safety | Current no-plan contract remains in force | An upstream ordering change needs source proof and real lifecycle tests before any relaxation. See the [native-v2 status](./docs/native-v2-status.md). |
 | Multilingual onboarding | Delivered in this documentation follow-up; ongoing upkeep | Keep all four guides aligned when setup, commands, model selection or safety boundaries change. Detailed engineering docs remain in English. |
 
+## Contribution recovery checkpoint: PR review and redaction (2026-11-23)
+
+This is an unreleased contribution candidate on local branch `feature/pr-review-redaction`, intended for `fedroraddict/kimi-plugin-cc-contrib` and an upstream draft PR. The private `fedroraddict/kimi-plugin-cc` repository remains the separate structured-review rig; do not rename it or install both plugins in one host. No plugin version bump or compatibility-certification change is included.
+
+Implemented scope:
+
+- `review-pr` for Claude Code and Codex fetches a GitHub PR through authenticated `gh`, treats PR content as untrusted evidence, reviews only the supplied bounded diff through the ordinary read-only review job path, and returns normal prose. Explicit `--post-comment` alone publishes one summary comment after success; there are no inline/formal reviews and no MCP/DSH operation expansion.
+- Workspace `.kimi-plugin.toml` `[redaction] patterns` applies ordered, bounded JavaScript regex replacements at the final Kimi spawn boundary. Invalid, failing, or timed-out policy prevents the model call. Provider-bound argv/logs are redacted; local titles/state/digests are not scrubbed.
+- Runtime contracts, four README languages, Claude/Codex surfaces, generated distributions, and focused GitHub/redaction/PR-review tests are included. TypeScript source and emitted Node worker paths are both covered.
+
+Verification and recovery state at this checkpoint: focused tests, build, typecheck, contract-size and Claude/Codex surface gates passed. `bun run check:package` passed completely with Bun 1.4.5 and native Linux pnpm: the root package, all three compiled distributions, isolated setup/version refusal, audited DSH host/profile, seven live providers/tools, and Web boot were verified. Real model calls, live GitHub posting, and host hook setup were not run. Local Claude/Codex plugin copies were refreshed; no further deployment is required for this checkpoint.
+
+The complete `bun run check` is not green yet and must not be represented as passing. Bun 1.3.9 cannot resolve the suite's `node:sqlite` imports; use the separately installed Bun 1.4.5 shims. With that runtime, the full suite reaches `ask session resume > resume with a running ask job throws ASK_ALREADY_RUNNING`, where its polling helper opens SQLite before the asynchronous command has created the data directory. That focused test passes alone, but the full run fails consistently at this pre-existing startup race. Do not change the candidate's production code to hide it. A separate `/mnt/c` run also exposed DrvFs directory mtimes over one second older than child `createdAt` in the existing native-v2 recovery prefilter; use a native WSL filesystem for the full suite and do not weaken that production invariant.
+
+Recovery commands from the upstream checkout:
+
+```sh
+export PATH="$HOME/.local/opt/bun-1.4.5-shims:$HOME/.local/opt/pnpm-shims:$HOME/.local/bin:$PATH"
+cd /home/lucas/kimi-plugin-cc-check
+bun install --frozen-lockfile
+bun test tests/runtime/ask-session.test.ts -t "running ask" --bail
+bun run check
+cd /mnt/c/Users/Lucas/github-audit/kimi-plugin-cc-upstream
+bun run check:package
+```
+
+Next useful work: make the existing ask polling helper wait for plugin-path initialization without racing `JobStore`, then rerun the unchanged full gate. After it passes, commit any separate test-only fix, regenerate/stage distributions if runtime changed, push `feature/pr-review-redaction` to `https://github.com/fedroraddict/kimi-plugin-cc-contrib`, and open a draft PR to `linxule/kimi-plugin-cc:main`. Native Windows remains unsupported; use WSL. Do not claim live-model or real-posting coverage without running those explicit tests.
+
 ## Deliberate boundaries
 
 - **POSIX first:** macOS/Linux shell entrypoints; Windows support is not currently offered.

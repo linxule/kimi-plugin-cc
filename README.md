@@ -148,6 +148,7 @@ use the GitHub marketplace instructions above. Maintainers: see
 | --- | --- | --- | --- |
 | Explain code | `/kimi:ask` | `$kimi-ask` | Read-only |
 | Review code changes | `/kimi:review` | `$kimi-review` | Read-only |
+| Review a GitHub pull request | `/kimi:review-pr` | `$kimi-review-pr` | Read-only; optional explicit comment posting |
 | Challenge a design or approach | `/kimi:challenge` | `$kimi-challenge` | Read-only |
 | Make a focused fix | `/kimi:rescue` | `$kimi-rescue` | Can edit your project |
 | Review several areas at once | `/kimi:swarm` | `$kimi-swarm` | Read-only |
@@ -155,6 +156,8 @@ use the GitHub marketplace instructions above. Maintainers: see
 | Work toward a goal over several turns | `/kimi:pursue` | `$kimi-pursue` | Can edit your project; experimental |
 
 Review and challenge inspect your Git diff. Use ask for general questions about your repository.
+
+PR review uses authenticated `gh` to fetch the PR and returns prose by default. Add `--post-comment` only when you explicitly want one summary comment published after completion; it does not create inline comments or a formal approve/request-changes review. See [PR review options](./commands/review-pr.md).
 
 Pursue and swarm have time limits. Swarm runs tasks in parallel, so it can use more tokens than a single task.
 
@@ -257,6 +260,8 @@ Parallel Bash commands time out after 60 seconds by default, with a maximum of 3
 The plugin does not commit changes. Review changes before you keep or apply them.
 
 Only use tasks that can write files in repositories you trust. Rescue, pursue, and swarm with `--write` can run tests and similar commands. These commands execute code from your repository. The hook restricts tool use; it is not an operating-system sandbox.
+
+To redact secrets before a prompt is sent to the provider, add JavaScript regexes under `[redaction] patterns` in the workspace `.kimi-plugin.toml` file, for example `patterns = ['ghp_[A-Za-z0-9]+']`. Replacements apply in order to provider-bound argv and spawn logs, with a bounded worker timeout; invalid policies stop the model call. Local titles, state, and prompt digests are not scrubbed, so this is not a complete local-data erasure mechanism.
 
 See [safety and limitations](./docs/safety.md), [release history](./CHANGELOG.md), and [planned work](./ROADMAP-TO-GA.md).
 
@@ -373,6 +378,7 @@ DSH 需要 Node.js 24.9 或更高版本，以及 DSH `>=0.2.1-rc.5 <0.3.0`。配
 | --- | --- | --- | --- |
 | 解释代码 | `/kimi:ask` | `$kimi-ask` | 只读 |
 | 审查代码修改 | `/kimi:review` | `$kimi-review` | 只读 |
+| 审查 GitHub 拉取请求 | `/kimi:review-pr` | `$kimi-review-pr` | 只读；可选的显式评论发布 |
 | 检查设计或方案中的问题 | `/kimi:challenge` | `$kimi-challenge` | 只读 |
 | 完成一项范围明确的修复 | `/kimi:rescue` | `$kimi-rescue` | 可以修改项目文件 |
 | 同时审查多个部分 | `/kimi:swarm` | `$kimi-swarm` | 只读 |
@@ -380,6 +386,8 @@ DSH 需要 Node.js 24.9 或更高版本，以及 DSH `>=0.2.1-rc.5 <0.3.0`。配
 | 通过多轮任务推进目标 | `/kimi:pursue` | `$kimi-pursue` | 可以修改项目文件，属于实验性功能 |
 
 Review 和 challenge 检查 Git 差异。关于仓库的一般问题，使用 ask。
+
+PR 审查通过已认证的 `gh` 获取拉取请求，默认只返回文本。只有明确要求发布时，才添加 `--post-comment`，在审查完成后发布一条总结评论；它不会创建行内评论或正式的 approve/request-changes 审查。参见 [PR 审查选项](./commands/review-pr.md)。
 
 Pursue 和 swarm 都有运行时限。Swarm 并行执行多个任务，可能比单个任务消耗更多 token。
 
@@ -478,6 +486,8 @@ Ask、review、challenge 和只读 swarm 的工具规则禁止写入文件和执
 插件不会提交修改。保留或应用修改前，请先审查。
 
 只在你信任的仓库中运行能修改文件的任务。Rescue、pursue 和带 `--write` 的 swarm 可以运行测试等命令。这些命令会执行仓库中的代码。钩子限制的是工具调用，它不是操作系统沙箱。
+
+如需在提示词发送给服务商前隐藏敏感信息，请在工作区的 `.kimi-plugin.toml` 中配置 `[redaction] patterns` JavaScript 正则表达式，例如 `patterns = ['ghp_[A-Za-z0-9]+']`。替换按顺序应用于发往服务商的 argv 和启动日志，工作线程有超时限制；无效策略会阻止模型调用。本地标题、状态和提示词摘要不会被清除，因此这不是完整的本地数据擦除机制。
 
 参见[安全与限制](./docs/safety.md)、[版本记录](./CHANGELOG.md)和[后续计划](./ROADMAP-TO-GA.md)。
 
@@ -594,6 +604,7 @@ Le plugin complet est aussi disponible sur [npm sous le nom `kimi-plugin-cc`](ht
 | --- | --- | --- | --- |
 | Expliquer du code | `/kimi:ask` | `$kimi-ask` | Lecture seule |
 | Faire une revue des modifications | `/kimi:review` | `$kimi-review` | Lecture seule |
+| Examiner une pull request GitHub | `/kimi:review-pr` | `$kimi-review-pr` | Lecture seule ; publication d’un commentaire uniquement sur demande explicite |
 | Remettre en question une conception ou une approche | `/kimi:challenge` | `$kimi-challenge` | Lecture seule |
 | Corriger un problème précis | `/kimi:rescue` | `$kimi-rescue` | Peut modifier votre projet |
 | Examiner plusieurs parties à la fois | `/kimi:swarm` | `$kimi-swarm` | Lecture seule |
@@ -601,6 +612,8 @@ Le plugin complet est aussi disponible sur [npm sous le nom `kimi-plugin-cc`](ht
 | Poursuivre un objectif sur plusieurs tours | `/kimi:pursue` | `$kimi-pursue` | Peut modifier votre projet ; fonction expérimentale |
 
 Review et challenge examinent votre diff Git. Utilisez ask pour les questions générales sur votre dépôt.
+
+La revue de PR utilise `gh` authentifié pour récupérer la pull request et renvoie du texte par défaut. Ajoutez `--post-comment` uniquement si vous voulez explicitement publier un commentaire récapitulatif après la revue ; aucun commentaire en ligne ni avis formel approve/request-changes n’est créé. Consultez les [options de revue de PR](./commands/review-pr.md).
 
 Pursue et swarm ont une durée limitée. Swarm exécute des tâches en parallèle et peut donc consommer plus de tokens qu'une tâche seule.
 
@@ -699,6 +712,8 @@ Les commandes Bash parallèles expirent après 60 secondes par défaut, avec un 
 Le plugin ne crée aucun commit. Examinez les modifications avant de les conserver ou de les appliquer.
 
 N'utilisez les tâches pouvant écrire des fichiers que dans des dépôts auxquels vous faites confiance. Rescue, pursue et swarm avec `--write` peuvent lancer des tests et des commandes similaires. Ces commandes exécutent du code du dépôt. Le hook limite l'utilisation des outils ; ce n'est pas un bac à sable du système d'exploitation.
+
+Pour masquer des secrets avant l’envoi d’un prompt au fournisseur, ajoutez des regex JavaScript sous `[redaction] patterns` dans le fichier `.kimi-plugin.toml` de l’espace de travail, par exemple `patterns = ['ghp_[A-Za-z0-9]+']`. Les remplacements s’appliquent dans l’ordre aux argv destinés au fournisseur et aux journaux de lancement, avec un worker à durée limitée ; une politique invalide bloque l’appel au modèle. Les titres, états et empreintes de prompts locaux ne sont pas nettoyés : ce mécanisme n’efface donc pas toutes les données locales.
 
 Consultez les [limites de sécurité](./docs/safety.md), l'[historique des versions](./CHANGELOG.md) et les [travaux prévus](./ROADMAP-TO-GA.md).
 
@@ -815,6 +830,7 @@ DSH には Node.js 24.9 以降と、DSH `>=0.2.1-rc.5 <0.3.0` が必要です。
 | --- | --- | --- | --- |
 | コードを説明する | `/kimi:ask` | `$kimi-ask` | 読み取り専用 |
 | コードの変更をレビューする | `/kimi:review` | `$kimi-review` | 読み取り専用 |
+| GitHub プルリクエストをレビューする | `/kimi:review-pr` | `$kimi-review-pr` | 読み取り専用。明示時のみコメント投稿 |
 | 設計や方針の問題点を検討する | `/kimi:challenge` | `$kimi-challenge` | 読み取り専用 |
 | 範囲を絞って修正する | `/kimi:rescue` | `$kimi-rescue` | プロジェクトのファイルを変更可能 |
 | 複数の箇所を同時にレビューする | `/kimi:swarm` | `$kimi-swarm` | 読み取り専用 |
@@ -822,6 +838,8 @@ DSH には Node.js 24.9 以降と、DSH `>=0.2.1-rc.5 <0.3.0` が必要です。
 | 複数ターンにわたって目標に取り組む | `/kimi:pursue` | `$kimi-pursue` | プロジェクトのファイルを変更可能（実験的機能） |
 
 Review と challenge は Git の差分を確認します。リポジトリ全般に関する質問には ask を使ってください。
+
+PR レビューでは認証済みの `gh` でプルリクエストを取得し、既定では本文を返すだけです。完了後に要約コメントを 1 件公開する場合だけ `--post-comment` を明示してください。行内コメントや正式な approve/request-changes レビューは作成しません。[PR レビューのオプション](./commands/review-pr.md)を参照してください。
 
 Pursue と swarm には実行時間の上限があります。Swarm はタスクを並行して実行するため、単一のタスクよりトークンを多く消費する場合があります。
 
@@ -920,6 +938,8 @@ Ask、review、challenge、読み取り専用 swarm のツールルールでは�
 プラグインは変更をコミットしません。変更を残す、または適用する前に内容を確認してください。
 
 ファイルを書き換えるタスクは、信頼できるリポジトリでのみ実行してください。Rescue、pursue、`--write` 付きの swarm は、テストなどのコマンドを実行できます。これらのコマンドはリポジトリ内のコードを実行します。フックはツールの使用を制限しますが、OS のサンドボックスではありません。
+
+プロンプトをプロバイダーへ送る前に機密情報を隠すには、ワークスペースの `.kimi-plugin.toml` で `[redaction] patterns` に JavaScript 正規表現を設定します（例：`patterns = ['ghp_[A-Za-z0-9]+']`）。置換は順番にプロバイダー向け argv と起動ログへ適用され、ワーカーにはタイムアウトがあります。無効なポリシーではモデル呼び出しを行いません。ローカルのタイトル、状態、プロンプトダイジェストは消去されないため、完全なローカルデータ消去機能ではありません。
 
 [安全上の制限](./docs/safety.md)、[リリース履歴](./CHANGELOG.md)、[今後の予定](./ROADMAP-TO-GA.md)も参照してください。
 

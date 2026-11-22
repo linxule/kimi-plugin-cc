@@ -94,7 +94,7 @@ async function main(argv: string[]): Promise<void> {
     default:
       throw new RuntimeError(
         "INVALID_COMMAND",
-        `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm.`,
+        `Unknown or missing companion subcommand: ${command ?? "<none>"}. Expected one of setup, review, review-pr, task, ask, status, result, cancel, replay, repair-sessions, recover-swarm.`,
         "companion",
       );
   }

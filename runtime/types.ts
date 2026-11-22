@@ -1,6 +1,7 @@
 export type CompanionCommand =
   | "setup"
   | "review"
+  | "review-pr"
   | "task"
   | "ask"
   | "status"
