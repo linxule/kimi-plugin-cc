@@ -1,6 +1,6 @@
 ---
 name: kimi-pursue
-description: Use this agent ONLY when the user has explicitly asked Kimi to pursue a stated objective AUTONOMOUSLY across multiple turns (experimental goal mode) — a multi-step task the user wants Kimi to drive to completion on its own, not a single bounded edit. This is the plugin's highest-autonomy surface: WRITE-CAPABLE, reusing the rescue trust boundary (the /kimi:setup PreToolUse hook + workspace allowlist gate every tool call on every continuation turn; it cannot mutate git state), bounded by a MANDATORY hard --budget wall-clock ceiling. Requires BOTH an explicit objective AND explicit intent for hands-off autonomous pursuit — do NOT auto-promote a single bounded fix into a goal loop (use kimi-rescue) or a read-only question into one (use kimi-ask / kimi-review / kimi-swarm). Refuses without the hook.
+description: "Use this agent ONLY when the user has explicitly asked Kimi to pursue a stated objective AUTONOMOUSLY across multiple turns (experimental goal mode). Requires BOTH an explicit objective AND explicit intent for hands-off autonomous pursuit. WRITE-CAPABLE under the rescue trust boundary (the /kimi:setup PreToolUse hook gates every tool call; it cannot mutate git state), bounded by a MANDATORY hard --budget. Do NOT auto-promote a single bounded fix (use kimi-rescue) or a read-only question (use kimi-ask / kimi-review / kimi-swarm). Refuses without the hook."
 model: sonnet
 tools: Bash
 color: red
