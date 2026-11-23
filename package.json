@@ -26,7 +26,7 @@
     "check:contracts": "node scripts/check-contract-size.mjs"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis": "4.1.0",
     "@deepseek-ai/dsh-commands": "0.2.1-rc.5",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.5",
     "@deepseek-ai/dsh-session": "0.2.1-rc.5",
@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-brand": "0.2.1-rc.5",
-    "@deepseek-ai/schemastery": "3.18.5"
+    "@deepseek-ai/schemastery": "3.19.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
