@@ -9,6 +9,8 @@
 - Review the optional TurnEnded feedback attribution, authenticated host-only feedback routes and missing-model KAP behavior. Print, hook, plan, executor, tool, swarm and local-backend surfaces are unchanged; missing main-agent models remain fail-closed during activation.
 - Pass the expanded source scan with **38 tests / 533 assertions and 159 pins**, plan ON/OFF, forced removed-tool and local/trust/resume controls, **23 deterministic stock-binary tests / 138 assertions**, and candidate plus production real-provider matrices each with **30 passes / 402 assertions** and only the two inapplicable narrowed-refusal skips. See the [2.7.3 record](docs/upstream-2.7.3-certification.md).
 
+- Publish release commit `8e2187d1826952440e18f870eaae52bb765f385b` after CI run `45418692870`, then tag and release [v2.7.3](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.7.3). OIDC run `45420498664` validated the same tag and published npm `latest` 2.7.3 at `2026-11-24T15:13:17.012Z`. The **343-file** registry tarball matches the Actions artifact and every tag file, with SHA-256 `d23e4742d6c5c5337e5ae98c1d8435c3c3409b6cf4f7b36bd61054327c41836f`. Fresh registry setup/checks, zero-advisory, signature and attestation checks pass, including SLSA log index `4080883768` and publish log index `4080953677`. No installed-host update is implied.
+
 ## 2.7.2 — 2026-11-20
 
 - Certify exact kimi-code 2.7.2 for all eight native-v2 operations under the no-plan and bounded-swarm/direct-worker construction. Exact source commit `56145f849caa305d42acd09b67fb65d11146f887` and bundle SHA-256 `dafef22f56c4c1fff755eb3af5e42a76d32d09a9dc858ebdc055a6d1a6008e67` are verified; exact 2.7.0, 2.7.1 and 2.7.3 remain excluded.

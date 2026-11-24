@@ -2,7 +2,7 @@
 
 ## Scope and decision
 
-**All eight operation gates and the full local repository check pass for plugin 2.7.3.** Exact `@moonshot-ai/kimi-code@2.7.3` passed the source, exact-binary, deterministic stock-binary, real-provider candidate and production-table operation gates. Certification is separate from release authorization. CI, GitHub and npm publication receipts are recorded only after those steps complete; neither certification nor publication updates installed hosts or operator pins.
+**Status: certified and published for all eight operations.** Exact `@moonshot-ai/kimi-code@2.7.3` passed the source, exact-binary, deterministic stock-binary, real-provider candidate and production-table operation gates. Certification was completed before release authorization. The release commit, immutable GitHub release, npm OIDC publication and fresh registry/attestation verification are now complete. Neither certification nor publication updates installed hosts or operator pins.
 
 Exact source commit: `a8f643ad2e7f197d6ec4409b7cdad8a544afad86` (annotated tag object `f27c2321c7eabafc00ad8581b12a4d60138bc6ac`). A fresh isolated npm binary reports 2.7.3; `dist/main.mjs` SHA-256 is `747dbb1fd3ad0789194e0181cfaf036a795c8c6d6b3a9204c152aee8db10de16`. npm `latest` was rechecked as 2.7.3 during certification.
 
@@ -76,7 +76,19 @@ Exact 2.7.2 and 2.7.3 use `web --json` with an in-memory ephemeral token, strict
 - **Consumer security:** PASS. `bun run check:consumer-security` verified the isolated npm consumer security of `kimi-plugin-cc@2.7.3`. Receipt: `consumer-security.log`.
 - **Final diff review:** no runtime defect, stale current exclusion, duplicate version list or generated-surface drift was found.
 
-Release-commit CI, tagging, GitHub and npm publication, and registry attestation verification remain pending.
+## Release and registry receipt
+
+Release commit `8e2187d1826952440e18f870eaae52bb765f385b` passed CI run `45418692870`, including Linux/full-package and Windows jobs. The immutable [v2.7.3 GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.7.3) is anchored at that commit with annotated tag object `bb019411da1deb73c8a17ba8eba314004a610377`.
+
+OIDC run `45420498664` validated the same immutable tag and published npm `latest` 2.7.3 at `2026-11-24T15:13:17.012Z`. The **343-file** registry tarball is byte-identical to the successful Actions artifact, and every published file matches the release tag:
+
+- SHA-1: `bbb42f48fe2f620be6a89b588561905c235a715f`
+- SHA-256: `d23e4742d6c5c5337e5ae98c1d8435c3c3409b6cf4f7b36bd61054327c41836f`
+- SHA-512: `21b30f741417c117c95f7afdef0fe11368d30fbe21ec3489509d9a4bb543851b35cc83f24ae6db1dfe90ad6cd58a4b4bb1af1ee7ab83d804a9271c7e52e497a3`
+
+SLSA provenance log index `4080883768` and publish attestation log index `4080953677` match the package subject, SHA-512, release commit, run and `refs/tags/v2.7.3`. Fresh registry installation has zero production advisories and no invalid or missing signatures. Isolated Claude Code, Codex and DSH setup/checks pass against exact stock CLI 2.7.3, and all three installed runtime maps enforce full 2.7.3 certification with 2.6.0 non-swarm-only scope. Verification made no model calls and changed no installed host or operator pin. Receipts are under `.claude/kimi-code-research/release-2.7.3/registry/`.
+
+The post-publication DSH Discover timestamp is `1795533197`, recording actual npm publication.
 
 ## Residual boundaries
 

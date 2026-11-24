@@ -4,7 +4,7 @@
 
 **Plugin 2.7.2 release status:** exact CLI 2.7.2 is certified for all eight operations with separate [certification evidence](upstream-2.7.2-certification.md). Release commit `e2bba0e2d4e1745e4155eb5c6ddf3f4dabaffb66`, CI `44799772434`, the immutable v2.7.2 GitHub release and recovery npm OIDC run `44803040496` are published and verified. Neither certification nor publication updates installed hosts.
 
-**Plugin 2.7.3 certification status:** exact CLI 2.7.3 is certified for all eight operations with separate [certification evidence](upstream-2.7.3-certification.md). Release CI and publication receipts are recorded only after verification; certification does not update installed hosts.
+**Plugin 2.7.3 release status:** exact CLI 2.7.3 is certified for all eight operations with separate [certification evidence](upstream-2.7.3-certification.md). Release commit `8e2187d1826952440e18f870eaae52bb765f385b` passed CI `45418692870`; the immutable v2.7.3 GitHub release and npm OIDC run `45420498664` are published and registry-verified. Neither certification nor publication updates installed hosts.
 
 **Published 2.6.2 release status:** all eight operations are certified on corrected runtime `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`, including final Linux-host, stock-binary, live-provider, repository and package gates. Release CI passed and the immutable v2.6.2 tag/GitHub release is published; npm 2.6.2 is published with verified fresh installs and cryptographic signatures. See the [current receipt](upstream-2.6.2-certification.md).
 
