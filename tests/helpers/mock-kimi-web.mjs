@@ -17,7 +17,7 @@ const token = process.env.MOCK_KIMI_WEB_TOKEN ?? "mock-ready-token";
 const configCanary = process.env.MOCK_KIMI_WEB_CONFIG_CANARY ?? "mock-config-canary";
 const scenario = process.env.MOCK_KIMI_WEB_SCENARIO ?? "success";
 const version = process.env.MOCK_KIMI_WEB_VERSION ?? "2.3.2";
-const jsonReady = version === "2.7.2";
+const jsonReady = ["2.7.2", "2.7.3"].includes(version);
 const defaultModel = process.env.MOCK_KIMI_WEB_DEFAULT_MODEL ?? "configured-default";
 const readyDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_READY_DELAY_MS ?? "0", 10);
 const statusDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_STATUS_DELAY_MS ?? "0", 10);
@@ -145,7 +145,7 @@ async function handle(req, res) {
       send(res, null, { code: 40001, msg: `cwd mismatch ${token}` });
       return;
     }
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
       send(res, null, { code: 40001, msg: "missing local environment binding" });
       return;
     }
@@ -344,7 +344,7 @@ function readWsFrame(buffer) {
 
 function handleWsMessage(socket, frame) {
   void record({ kind: "ws-message", frame });
-  if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) {
+  if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) {
     handleWsMessageV26(socket, frame);
     return;
   }
@@ -499,7 +499,7 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
     }
   });
-  if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version) && scenario !== "ws-no-server-hello") {
+  if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version) && scenario !== "ws-no-server-hello") {
     sendWsFrame(socket, {
       type: "server_hello",
       timestamp: new Date().toISOString(),

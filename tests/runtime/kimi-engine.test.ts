@@ -83,12 +83,13 @@ describe("kimi execution plan", () => {
   });
 
   test("native-v2 certifies only the exact per-operation version set, under the no-plan profile", async () => {
-    expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"]);
+    expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"]);
     for (const operationKind of ["swarm", "swarm-write"] as const) {
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).not.toContain("2.6.0");
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).toContain("2.6.2");
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).toContain("2.6.3");
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).toContain("2.7.2");
+      expect(NATIVE_V2_CERTIFIED.get(operationKind)).toContain("2.7.3");
     }
     expect([...NATIVE_V2_CERTIFIED.keys()].sort()).toEqual(
       ["ask", "challenge", "pursue", "rescue", "review", "review_gate", "swarm", "swarm-write"],
@@ -180,7 +181,7 @@ describe("kimi execution plan", () => {
         }
       }
 
-      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.2", "2.6.3", "2.7.2"]) {
+      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.2", "2.6.3", "2.7.2", "2.7.3"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           const majorTwo = await prepareKimiExecutionPlan({
             operationKind,
@@ -195,7 +196,7 @@ describe("kimi execution plan", () => {
         }
       }
 
-      for (const version of ["0.41.0", "0.42.1", "0.43.2", "2.0.3", "2.1.2", "2.2.1", "2.3.4", "2.3.3-rc.1", "2.3.3+unreviewed", "2.5.4", "2.5.3-rc.1", "2.5.3+unreviewed", "2.5.2-rc.1", "2.5.2+unreviewed", "2.5.0-rc.1", "2.5.0+unreviewed", "2.4.2", "2.4.1-rc.1", "2.4.1+unreviewed", "2.4.0-rc.1", "2.4.0+unreviewed", "2.3.0-rc.1", "2.3.0+unreviewed", "2.2.0-rc.1", "2.2.0+unreviewed", "2.1.0-rc.1", "2.1.1+unreviewed", "2.0.2-rc.1", "2.0.2+unreviewed", "2.6.1", "2.6.4", "2.6.3-rc.1", "2.6.3+unreviewed", "2.6.2-rc.1", "2.6.2+unreviewed", "2.6.0-rc.1", "2.6.0+unreviewed", "2.7.0", "2.7.1", "2.7.3", "2.7.2-rc.1", "2.7.2+unreviewed"]) {
+      for (const version of ["0.41.0", "0.42.1", "0.43.2", "2.0.3", "2.1.2", "2.2.1", "2.3.4", "2.3.3-rc.1", "2.3.3+unreviewed", "2.5.4", "2.5.3-rc.1", "2.5.3+unreviewed", "2.5.2-rc.1", "2.5.2+unreviewed", "2.5.0-rc.1", "2.5.0+unreviewed", "2.4.2", "2.4.1-rc.1", "2.4.1+unreviewed", "2.4.0-rc.1", "2.4.0+unreviewed", "2.3.0-rc.1", "2.3.0+unreviewed", "2.2.0-rc.1", "2.2.0+unreviewed", "2.1.0-rc.1", "2.1.1+unreviewed", "2.0.2-rc.1", "2.0.2+unreviewed", "2.6.1", "2.6.4", "2.6.3-rc.1", "2.6.3+unreviewed", "2.6.2-rc.1", "2.6.2+unreviewed", "2.6.0-rc.1", "2.6.0+unreviewed", "2.7.0", "2.7.1", "2.7.4", "2.7.2-rc.1", "2.7.2+unreviewed"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           await expect(
             prepareKimiExecutionPlan({
@@ -267,11 +268,12 @@ describe("kimi execution plan", () => {
     expect(isNativeV2CertifiedVersion("2.6.2")).toBe(true);
     expect(isNativeV2CertifiedVersion("2.6.3")).toBe(true);
     expect(isNativeV2CertifiedVersion("2.7.2")).toBe(true);
+    expect(isNativeV2CertifiedVersion("2.7.3")).toBe(true);
     expect(isNativeV2CertifiedVersion("2.6.1")).toBe(false);
     expect(isNativeV2CertifiedVersion("2.6.4")).toBe(false);
     expect(isNativeV2CertifiedVersion("2.7.0")).toBe(false);
     expect(isNativeV2CertifiedVersion("2.7.1")).toBe(false);
-    expect(isNativeV2CertifiedVersion("2.7.3")).toBe(false);
+    expect(isNativeV2CertifiedVersion("2.7.4")).toBe(false);
     expect(isNativeV2CertifiedVersion("0.41.0")).toBe(false);
     expect(isNativeV2CertifiedVersion("0.42.1")).toBe(false);
     expect(isNativeV2CertifiedVersion("garbage")).toBe(false);

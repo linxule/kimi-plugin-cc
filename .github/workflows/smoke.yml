@@ -36,9 +36,9 @@ on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "Exact kimi-code version (default 2.7.2): native-v2 controls include resume/taint; 2.6.2/2.6.3/2.7.2 add bounded waves and single-worker swarm. 2.6.0 requires swarm refusals instead. Uncertified versions require the candidate seam; pinned <=0.41 runs legacy-v1 lanes."
+        description: "Exact kimi-code version (default 2.7.3): native-v2 controls include resume/taint; 2.6.2/2.6.3/2.7.2/2.7.3 add bounded waves and single-worker swarm. 2.6.0 requires swarm refusals instead. Uncertified versions require the candidate seam; pinned <=0.41 runs legacy-v1 lanes."
         type: string
-        default: "2.7.2"
+        default: "2.7.3"
       goal_budget_ms:
         description: "Goal-mode smoke wall-clock budget in ms (bounds token spend)"
         type: string

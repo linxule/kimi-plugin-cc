@@ -331,10 +331,13 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
 
   test("bounds success deactivation by the remaining budget and preserves cleanup evidence", async () => {
     await withFixture("success", true, async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS = "5000";
+      // Leave four seconds for real process startup and the profile request.
+      // The two mock delays together exceed the job budget only during cleanup.
+      fixture.env.MOCK_KIMI_WEB_PRINT_DELAY_MS = "2000";
+      fixture.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS = "4500";
       let caught: unknown;
       try {
-        await runSwarm(["--write", "--budget", "1s", "bounded", "cleanup"], context(fixture));
+        await runSwarm(["--write", "--budget", "6s", "bounded", "cleanup"], context(fixture));
       } catch (error) {
         caught = error;
       }
@@ -349,7 +352,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
         code: "RESCUE_KIMI_RESPONSE_TIMEOUT",
         stage: "swarm.cleanup",
         details: {
-          budget_ms: 1_000,
+          budget_ms: 6_000,
           cleanup_error: { code: "SWARM_SESSION_CLEANUP_FAILED", unverified: true },
           rawOutput: proseSentinel,
         },
@@ -525,9 +528,9 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
 
   test("deactivates after a print budget timeout", async () => {
     await withFixture("success", false, async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_PRINT_DELAY_MS = "4000";
+      fixture.env.MOCK_KIMI_WEB_PRINT_DELAY_MS = "10000";
       fixture.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS = "0";
-      await runSwarm(["--budget", "1s", "print", "timeout", "cleanup"], context(fixture));
+      await runSwarm(["--budget", "4s", "print", "timeout", "cleanup"], context(fixture));
       const job = await latestJob(fixture);
       expect(job.error).toMatchObject({ code: "REVIEW_KIMI_RESPONSE_TIMEOUT", stage: "swarm.prompt" });
       expect(job.error?.details?.cleanup_error).toBeUndefined();
@@ -545,11 +548,10 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
   }, 20_000);
 
   test("preserves a nonzero print failure when cleanup also fails", async () => {
-    await withFixture("success", false, async (fixture) => {
+    await withFixture("deactivate-rest-failure", false, async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_PRINT_EXIT_CODE = "7";
       fixture.env.MOCK_KIMI_WEB_PRINT_STDERR = "print-failure-sentinel";
-      fixture.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS = "5000";
-      await runSwarm(["--budget", "1s", "print", "failure", "cleanup"], context(fixture));
+      await runSwarm(["print", "failure", "cleanup"], context(fixture));
       const job = await latestJob(fixture);
       expect(job.error).toMatchObject({
         code: "REVIEW_KIMI_STARTUP_FAILED",

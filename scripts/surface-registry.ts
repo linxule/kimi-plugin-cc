@@ -34,8 +34,8 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "351c4cdfef17f26d91d6a957341f0b419a68697ed5479444ab1971654c84a606" },
-  { path: ".claude-plugin/marketplace.json", sha256: "1e9393eed9401cae97b6e7d3eff4e60fe00cd3f6ae78f9478bfb2a6ced9103ae" },
+  { path: ".claude-plugin/plugin.json", sha256: "5df035c107409780cbff49d3698e2204497689fba426ab5249002e22306a4ecc" },
+  { path: ".claude-plugin/marketplace.json", sha256: "fb06f1e4f1b7b3881f39c021f2e93c911833e76c373d16ff274e3bc479691fdc" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
   { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
@@ -48,14 +48,14 @@ export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
   { path: "commands/review.md", sha256: "a528a763c643f26ff9a1674c8a6c11dcea59121320d43dd4306ef9f168280604" },
   { path: "commands/setup.md", sha256: "ede6fb64d0a8b9876a2405b3685483d4db5ce9505dd724ad903cdf1b048abc44" },
   { path: "commands/status.md", sha256: "0171276cd08b9fe62893f62523c164f35b1a4df98cb7b04f14f62fc33fbc8cbc" },
-  { path: "commands/swarm.md", sha256: "90d8f9f6d9e331f1348c944f5476f92c81a06e8fa89e5190cb77cdd8e6db34cc" },
+  { path: "commands/swarm.md", sha256: "da89f4fa49cbe2d7bb9500b40eb91117aaef73eebb44c281919fcaf192759ade" },
   { path: "agents/kimi-ask.md", sha256: "0d913d25f62cb98dce35022ada3215982828eba180b9f1e9780b2ca78116d595" },
   { path: "agents/kimi-challenge.md", sha256: "1bcd0807f770c2f6b0fa0aad4166a6cec9036e6f1c3fb792223e8db8231c3b1b" },
   { path: "agents/kimi-pursue.md", sha256: "cae3b3ca39f53770d005ce5821558179692926f9fe93088c4febded7efcd5bcb" },
   { path: "agents/kimi-rescue.md", sha256: "4fe17d6522cc7891310679e25a319ab14adf1d69442a447d333232864d05db2d" },
   { path: "agents/kimi-review.md", sha256: "7134c66158f16e65e82f2d1a9ca1a755cd1d792c297171c60946f0170edbc1f1" },
-  { path: "agents/kimi-swarm-write.md", sha256: "1e8a0b46cd7f96f706802894832d848f7105f2a6a0d368b4843cff4c3d037390" },
-  { path: "agents/kimi-swarm.md", sha256: "119627224c6823764bcb909db819347de325685494c8ee6c703d6631873ce2c1" },
+  { path: "agents/kimi-swarm-write.md", sha256: "030a68503ee55c0a4a9151d133602e42e9ea16ec965ed9ee41331d9b25ba6e5f" },
+  { path: "agents/kimi-swarm.md", sha256: "b59c82cabcc299643b64e452ff9c096fffe033df0307b5538bfc75c8b048a3d2" },
 ];
 
 export const CODEX_MCP_CONFIG = {

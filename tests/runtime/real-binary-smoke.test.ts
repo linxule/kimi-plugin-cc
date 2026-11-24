@@ -274,7 +274,7 @@ test("smoke plans satisfy the final spawn gate and retain exact native policy se
       matrix.set(operation, previous);
     }
   }
-  if (["2.6.2", "2.6.3", "2.7.2"].includes(BINARY_VERSION ?? "")) {
+  if (["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(BINARY_VERSION ?? "")) {
     for (const operation of ["swarm", "swarm-write"] as const) {
       const plan = smokePlan("node", ["fixture.mjs"], operation);
       expect(usesBoundedSwarmPolicy(plan)).toBe(true);
@@ -905,7 +905,7 @@ const PRODUCTION_NON_SWARM =
 const swarmReadSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const swarmWriteSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const nonSwarmSuite = PREREQS_OK && PRODUCTION_NON_SWARM ? describe : describe.skip;
-const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && ["2.6.2", "2.6.3", "2.7.2"].includes(BINARY_VERSION ?? "")
+const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && ["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(BINARY_VERSION ?? "")
   ? describe : describe.skip;
 
 suite("real-binary smoke: read-only commands cannot write (H7)", () => {

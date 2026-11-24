@@ -2,6 +2,13 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.7.3 — 2026-11-24
+
+- Certify exact kimi-code 2.7.3 for all eight native-v2 operations under the no-plan and bounded-swarm/direct-worker construction. Exact source commit `a8f643ad2e7f197d6ec4409b7cdad8a544afad86` and bundle SHA-256 `747dbb1fd3ad0789194e0181cfaf036a795c8c6d6b3a9204c152aee8db10de16` are verified; exact 2.7.0, 2.7.1 and 2.7.4 remain excluded.
+- Diagnose the monitor's zero-child/no-patch lanes as candidate-harness selector omissions, not an upstream scheduler regression. Extend exact-version preactivation, bounded-policy, direct-worker, schema and recovery coverage to 2.7.3 without inheriting a version range.
+- Review the optional TurnEnded feedback attribution, authenticated host-only feedback routes and missing-model KAP behavior. Print, hook, plan, executor, tool, swarm and local-backend surfaces are unchanged; missing main-agent models remain fail-closed during activation.
+- Pass the expanded source scan with **38 tests / 533 assertions and 159 pins**, plan ON/OFF, forced removed-tool and local/trust/resume controls, **23 deterministic stock-binary tests / 138 assertions**, and candidate plus production real-provider matrices each with **30 passes / 402 assertions** and only the two inapplicable narrowed-refusal skips. See the [2.7.3 record](docs/upstream-2.7.3-certification.md).
+
 ## 2.7.2 — 2026-11-20
 
 - Certify exact kimi-code 2.7.2 for all eight native-v2 operations under the no-plan and bounded-swarm/direct-worker construction. Exact source commit `56145f849caa305d42acd09b67fb65d11146f887` and bundle SHA-256 `dafef22f56c4c1fff755eb3af5e42a76d32d09a9dc858ebdc055a6d1a6008e67` are verified; exact 2.7.0, 2.7.1 and 2.7.3 remain excluded.

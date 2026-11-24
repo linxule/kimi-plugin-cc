@@ -33,7 +33,7 @@ test("compiled distributions preserve the stdout-only CLI refusal", () => {
 
 
 // Execute full and narrowed operation scopes through all three emitted runtimes.
-test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2 and retain the 2.6.0 non-swarm scope", () => {
+test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2/2.7.3 and retain the 2.6.0 non-swarm scope", () => {
   for (const root of ["./dist", "./plugins/kimi-codex/dist", "./plugins/kimi-dsh/dist"]) {
     const script = `
       import assert from 'node:assert/strict';
@@ -50,7 +50,8 @@ test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2 and retain the 2.6.
       assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.6.2'), true);
       assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.6.3'), true);
       assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.7.2'), true);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.at(-1), '2.7.2');
+      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.7.3'), true);
+      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.at(-1), '2.7.3');
       for (const operationKind of ['swarm', 'swarm-write']) {
         const versions = NATIVE_V2_CERTIFIED.get(operationKind).filter(
           version => version.localeCompare('2.5.3', 'en', { numeric: true }) > 0,
@@ -62,7 +63,7 @@ test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2 and retain the 2.6.
           }), true, operationKind + ' ' + kimiVersion + ' must use the bounded execution policy');
         }
       }
-      for (const version of ['2.6.0', '2.6.2', '2.6.3', '2.7.2']) {
+      for (const version of ['2.6.0', '2.6.2', '2.6.3', '2.7.2', '2.7.3']) {
         assert.equal(NATIVE_V2_ANY_OPERATION_VERSIONS.includes(version), true);
         const base = {
           schemaVersion: 1,
@@ -82,7 +83,7 @@ test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2 and retain the 2.6.
         }
         for (const operationKind of ['swarm', 'swarm-write']) {
           assert.equal(selectIntendedEngine(operationKind, { version }), 'native-v2');
-          if (version === '2.6.2' || version === '2.6.3' || version === '2.7.2') {
+          if (version === '2.6.2' || version === '2.6.3' || version === '2.7.2' || version === '2.7.3') {
             assert.doesNotThrow(() => assertExecutionPlanMatchesSpawn(
               { ...base, operationKind }, process.execPath, [],
             ));
@@ -101,7 +102,7 @@ test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2 and retain the 2.6.
           );
         }
       }
-      for (const version of ['2.6.1', '2.6.4', '2.6.2-rc.1', '2.6.2+unreviewed', '2.6.3-rc.1', '2.6.3+unreviewed', '2.7.0', '2.7.1', '2.7.3', '2.7.2-rc.1', '2.7.2+unreviewed']) {
+      for (const version of ['2.6.1', '2.6.4', '2.6.2-rc.1', '2.6.2+unreviewed', '2.6.3-rc.1', '2.6.3+unreviewed', '2.7.0', '2.7.1', '2.7.4', '2.7.2-rc.1', '2.7.2+unreviewed']) {
         assert.equal(NATIVE_V2_ANY_OPERATION_VERSIONS.includes(version), false);
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           assert.throws(() => assertExecutionPlanMatchesSpawn({

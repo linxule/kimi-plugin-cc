@@ -1345,6 +1345,41 @@ PINNED_HASHES["2.7.2"] = {
 };
 delete PINNED_HASHES["2.7.2"][`${CORE}/agent/loop/core/loop-actor.ts`];
 
+// 2.7.3 (a8f643ad): feedback attribution adds optional turn-end fields, and
+// KAP reports a missing configured main-agent model as unset. Pin the new
+// attribution/model helpers as well as every changed inherited file.
+PINNED_HASHES["2.7.3"] = {
+  ...PINNED_HASHES["2.7.2"],
+  [`${CORE}/agent/loop/loopService.ts`]:
+    "faad1999ef8bc95b56040ade9ae61c1749864bd3931190a7b320a7198964862e",
+  [`${CORE}/agent/loop/turnOps.ts`]:
+    "986b89448055a028345f78243b9f0db0652209cbe622a355b735590aaa1d73cb",
+  [`${CORE}/agent/loop/turnProjection.ts`]:
+    "7f229805e52735008b4ccb0f21668269f24b3493abe130695e859d0927b9e96f",
+  [`${KAP}/transport/ws/v1/agentState.ts`]:
+    "15efa5e8e7a1a037abbdf9f7df6c4d9c5db11646b403c2d2840f96869549ee35",
+  [`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`]:
+    "3eae1631a0df7dbe0ee275dad97002a5ca0baa586dc63c68c8ffc499c10867f3",
+  [`${KAP}/routes/meta.ts`]:
+    "9a66ce6710d237212d0b3dd1dbb21eb334efa0e6cbf385cecae51898088b5c8b",
+  [`${KAP}/protocol/rest-meta.ts`]:
+    "3d4f0c7ff33d8e400007782d60e10c2774042b851e9e21b3626bb12baafa80dd",
+  [`${KAP}/routes/registerApiV1Routes.ts`]:
+    "a125cb85f0c054b93361662b05d878d2c14c059f7efdbabc819d76b02806d9cb",
+  [`${CORE}/agent/loop/requestMetadata.ts`]:
+    "25bd79507736a66045859350268b3114020fc13bf5fabcb53f972c91b8e49bbb",
+  [`${CORE}/agent/loop/requestObservation.ts`]:
+    "06c0491d935fa212c80f8ab0f89b326bf4adae617380bb3926e6b7973795bef4",
+  [`${CORE}/session/requestAttribution/requestAttribution.ts`]:
+    "3a59320b98c5c1a16813c60eea605286ac812eb58079f75517e7120d5435bb48",
+  [`${CORE}/session/requestAttribution/requestAttributionService.ts`]:
+    "1f233b5ffc01c9929d5c13012ea8f14d49afd6a264ce7fd0bc606ad047802453",
+  [`${KAP}/services/legacyStatus/legacyStatus.ts`]:
+    "d4602a45ae2975b4fb55dfd888c21954a0b912fbc68780bda0bc57d8777a9e77",
+  [`${KAP}/services/conversation/conversationFold.ts`]:
+    "d1cce637f48de6e86f57d7185027b4135683a9f80a0bdc47d9677792642563db",
+};
+
 /**
  * Every durable plan-state event type at the pinned tag. The journal taint scan
  * (runtime/native-v2-preflight.ts::scanJournalLines) treats any record whose
@@ -1444,19 +1479,19 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
   });
 
-  test("2.7.2 host plan entry stays explicit and outside the print runner", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 host plan entry stays explicit and outside the print runner", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     expect(read(`${SDK}/sdk-rpc-client-v2.ts`)).toContain("return agent.enterPlan()");
     expect(read(`${KLIENT}/core/facade/agent.ts`)).toContain(
       "enterPlan: () => call(scope, 'agentPlanService', 'enter', []) as Promise<void>",
@@ -1466,7 +1501,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
     const marker = runner.indexOf("writeExperimentalVersion(");
     const sdk = runner.indexOf("new SDKRpcClientV2(");
@@ -1483,7 +1518,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ environment and workspace-trust dependencies are explicitly reviewed", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
       "options.environmentId === LOCAL_ENVIRONMENT_ID",
     );
@@ -1506,7 +1541,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("2.5+ WebSocket state proof remains authenticated and bound to the live main agent", () => {
     const version = upstreamVersion();
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) return;
     const schema = read(`${KAP}/protocol/ws-agent.ts`);
     for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
       expect(schema).toContain(field);
@@ -1514,7 +1549,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
     expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
     const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
-    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) {
+    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) {
       const control = read(`${KAP}/protocol/ws-control.ts`);
       expect(control).toContain("type: z.literal('subscribe')");
       expect(control).toContain("type: z.literal('response')");
@@ -1545,8 +1580,8 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
-  test("2.7.2 JSON bootstrap and meta preserve authenticated direct-subscription discovery", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 JSON bootstrap and meta preserve authenticated direct-subscription discovery", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     const web = read(`${CLI}/cli/sub/web/run.ts`);
     expect(web).toContain("randomBytes(32).toString('base64url')");
     expect(web).toContain("timingSafeEqual(actual, expected)");
@@ -1611,15 +1646,15 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
     }
   });
 
-  test("2.7.2 print and update boundaries remain local, noninteractive, and goal-scoped", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 print and update boundaries remain local, noninteractive, and goal-scoped", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     const options = read(`${CLI}/cli/options.ts`);
     for (const flag of ["--yolo", "--auto", "--plan"]) {
       expect(options).toContain(`Cannot combine --prompt with ${flag}.`);
@@ -1648,13 +1683,13 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     const callers = filesContaining([CORE], "fireBeforeExecute(");
     expect(callers).toEqual([
       `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
-      ...(["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
+      ...(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
   });
 
   test("the before-execute subscriber population is exactly the audited set", () => {
-    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
+    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
         `${CORE}/agent/toolExecutor/legacyHooks.ts`,
         `${CORE}/agent/toolExecutor/toolExecutor.ts`,
@@ -1691,8 +1726,8 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
-  test("2.7.2 generic executors are constructed only inside the managed agent composition", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 generic executors are constructed only inside the managed agent composition", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], "new ToolExecutor(")).toEqual([
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
@@ -1705,10 +1740,10 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("2.6+ executor phases preserve managed-hook veto and execution ordering", () => {
     const version = upstreamVersion();
-    if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(version)) return;
+    if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) return;
     const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
     expect(service).toContain("composeToolExecutorHooks([resetHook, legacyHook, ...hooks, internalHook])");
-    if (version === "2.7.2") {
+    if (["2.7.2", "2.7.3"].includes(version)) {
       const executor = read(`${CORE_RUNTIME}/tool/tool-executor.ts`);
       const starting = executor.indexOf("const starting = await this.decide('starting'");
       const conditional = executor.indexOf("if (starting === undefined || !('skipPermitting' in starting))");
@@ -1734,7 +1769,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     const legacy = read(`${CORE}/agent/toolExecutor/legacyHooks.ts`);
     expect(legacy).toContain("if (decision?.allow === true) return { skipPermitting: true };");
     expect(legacy).toContain("if (decision?.veto !== undefined)");
-    const composer = version === "2.7.2"
+    const composer = ["2.7.2", "2.7.3"].includes(version)
       ? `${CORE_RUNTIME}/tool/hook-composer.ts`
       : `${CORE}/tool/executor/hook-composer.ts`;
     expect(read(composer)).toContain("if ('skipPermitting' in decision)");
@@ -1783,7 +1818,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
     }
     // Every append-log read in the wire service names the single wire key.
@@ -1812,7 +1847,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       expect(end, "readRestoreChains body delimiter changed").toBeGreaterThan(-1);
       const chains = body.slice(0, end);
       expect(chains).toContain("const entries = await this.readStableEntries();");
-      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())) {
+      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
         expect(chains).toContain(
           "restorable: normalizeLegacyTurnSteerRecords(restorableChain(entries, tree).map(({ record }) => record))",
         );
@@ -1897,7 +1932,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 // These assertions pin the upstream premises of the plugin's bounded-wave
 // construction, including the cancellation weakness it must close. They do
 // not assert that native maxConcurrency is repaired or replace binary controls.
-const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3", "2.7.2"].includes(upstreamVersion())
+const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())
   ? describe
   : describe.skip;
 
@@ -1939,7 +1974,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("this.pending.unshift(state);");
     expect(batch).toContain("this.launcher.retry(attempt.state.retryAgentId, runOptions)");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    if (["2.6.3", "2.7.2"].includes(upstreamVersion())) {
+    if (["2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       expect(runner).toContain("return awaitRunCompletion(target, loop, loop.retry(), options);");
       const quiescent = section(runner, "async function awaitQuiescent(", "async function stopChildTasks(");
       expect(quiescent).toContain("const result = await loop.settled();");
@@ -2045,7 +2080,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     const abort = read(`${CORE}/_base/utils/abort.ts`);
     expect(section(abort, "export function abortable<T>(", "export function linkAbortSignal(")).toContain("reject(abortReason(signal));");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    if (["2.6.3", "2.7.2"].includes(upstreamVersion())) {
+    if (["2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       const completion = section(runner, "async function awaitRunCompletion(", "async function awaitQuiescent(");
       expect(completion).toContain("loop.cancel(undefined, reason);");
       expect(completion).toContain("abortCleanup ??= stopChildTasks(target, loop, reason);");
@@ -2068,7 +2103,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
 
   test("detached completion can wake a finished child and must be prevented", () => {
     const version = upstreamVersion();
-    const loop = read(version === "2.7.2"
+    const loop = read(["2.7.2", "2.7.3"].includes(version)
       ? `${CORE_RUNTIME}/loop/loop-actor.ts`
       : `${CORE}/agent/loop/core/loop-actor.ts`);
     const finish = section(loop, "private finishTurn(", "private appendPendingReminders(");
@@ -2076,13 +2111,13 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(finish).toContain("this.phase = this.phase === 'closed' ? 'closed' : 'idle';");
     const completion = section(loop, "private drainDetachedCompletions():", "private deferForCompletion(");
     expect(completion).toContain("type: 'tool.async_ended'");
-    expect(completion).toContain(version === "2.7.2"
+    expect(completion).toContain(["2.7.2", "2.7.3"].includes(version)
       ? "this.mailbox.queue([message]);"
       : "this.mailbox.queue([entry]);");
     expect(completion).toContain("if (!this.resetting) this.held = false;");
     expect(completion).toContain("this.schedule();");
     expect(loop).toContain("return this.normal.length > 0 || this.notifyEntries.length > 0;");
-    if (version === "2.7.2") {
+    if (["2.7.2", "2.7.3"].includes(version)) {
       const schedule = section(loop, "private canSchedule(): boolean {", "private schedule(): boolean {");
       expect(schedule).toContain("this.phase === 'idle' &&");
       expect(schedule).toContain("!this.held &&");
@@ -2132,8 +2167,8 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(read(`${CORE}/persistence/backends/node-fs/fileStorageService.ts`)).toContain("return join(this.baseDir, scope, key);");
   });
 
-  test("2.7.2 moved retry code preserves per-attempt settlement and cancellation", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 moved retry code preserves per-attempt settlement and cancellation", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     const policy = read(`${CORE_RUNTIME}/llm/policy/policy.ts`);
     const settled = policy.indexOf("const result = await settleLlmRequest(resolvedRequest, { signal, onEvent });");
     const retryIndex = policy.indexOf("if (shouldRetry(policy.retry, attempt, result.error, listOf(policy.retryables)))");
@@ -2157,8 +2192,8 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("this.rateLimitCapacity += 1;");
   });
 
-  test("2.7.2 structured errors retain swarm rate-limit classification", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 structured errors retain swarm rate-limit classification", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     const errors = read(`${CORE}/llm-adapter/contract/errors.ts`);
     expect(errors).toContain("if (error instanceof APIProviderQuotaExhaustedError) return false;");
     expect(errors).toContain("if (error instanceof APIProviderRateLimitError) return true;");
@@ -2177,8 +2212,8 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("if (isProviderRateLimitError(error)) {");
   });
 
-  test("2.7.2 host task.background remains outside the model-tool detachment census", () => {
-    if (upstreamVersion() !== "2.7.2") return;
+  test("2.7.2/2.7.3 host task.background remains outside the model-tool detachment census", () => {
+    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
     const requests = read(`${KAP}/transport/ws/v1/taskRequests.ts`);
     expect(requests).toContain("const background = taskBackgroundMessageSchema.safeParse(frame);");
     expect(requests).toContain("handler?.detach();");
