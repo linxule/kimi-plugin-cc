@@ -545,9 +545,15 @@ export interface NativeV2PreflightOptions {
  * fresh session) and MUST NOT mention /kimi:setup or hook drift.
  * Every details object also carries `retryable_after_setup: false`.
  */
+export interface NativeV2PreflightResult {
+  /** Conditions that do not refuse but that the calling model must see (channel W). */
+  readonly warnings: readonly string[];
+}
+
 export async function assertNativeV2Preflight(
   options: NativeV2PreflightOptions,
-): Promise<void> {
+): Promise<NativeV2PreflightResult> {
+  const warnings: string[] = [];
   const stage = options.stage ?? "native-v2.preflight";
   const configPath = kimiCodeConfigPath(options.kimiHome);
 
@@ -647,4 +653,5 @@ export async function assertNativeV2Preflight(
       );
     }
   }
+  return { warnings };
 }

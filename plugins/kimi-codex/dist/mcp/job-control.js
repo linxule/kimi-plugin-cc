@@ -1,6 +1,6 @@
 import { formatError, RuntimeError } from "../errors.js";
 import { markJobFailed, STALE_SWEEP_GRACE_MS } from "../jobs.js";
-import { JobStore, parseHookEscapes, renderBudgetSource, } from "../job-store.js";
+import { JobStore, parseHookEscapes, parseJobWarnings, renderBudgetSource, } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { readProcessIdentity, revalidateProcessIdentities, revalidateProcessIdentity, } from "../process-tree.js";
 import { readArtifact, renderTerminalJobArtifact } from "../render.js";
@@ -325,6 +325,7 @@ function mcpJobMetadata(task, job) {
         kimi_session_id: job.kimi_session_id,
         kimi_session_id_source: job.kimi_session_id_source,
         hook_escapes: parseHookEscapes(job.hook_escapes),
+        ...(parseJobWarnings(job.warnings).length > 0 ? { warnings: parseJobWarnings(job.warnings) } : {}),
         error: job.error,
     };
 }

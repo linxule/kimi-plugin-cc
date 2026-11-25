@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
-import { JobStore, type CreateJobInput } from "../../runtime/job-store.js";
+import { JobStore, parseJobWarnings, type CreateJobInput } from "../../runtime/job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -70,6 +70,7 @@ describe("job-store column handling", () => {
         "thinking_effort TEXT", "hook_escapes TEXT", "operation_kind TEXT", "intended_engine TEXT",
         "observed_engine TEXT", "kimi_version TEXT", "system_version TEXT", "kimi_command TEXT",
         "kimi_prefix_args TEXT", "plan_certification TEXT", "resumed_from_job_id TEXT", "safety_profile TEXT",
+        "warnings TEXT",
       ]);
       expect(columns(paths.stateDbPath, "mcp_tasks").at(-1)).toBe("kimi_identity TEXT");
     } finally {
@@ -93,8 +94,10 @@ describe("job-store column handling", () => {
           plan_certification: "certified", resumed_from_job_id: "prev", safety_profile: "workspace-write",
           agent_profile: "<cli-client>", prompt_digest: "d", summary: "s", phase: "starting", budget_ms: 1000,
           final_output_path: null, stream_log_path: "/l", error: null, kimi_session_id_source: "announced",
-          budget_source: "explicit", thinking_effort: "high", hook_escapes: null,
+          budget_source: "explicit", thinking_effort: "high", hook_escapes: null, warnings: null,
         });
+        // A warning-free row keeps its historical JobRecord shape.
+        expect(Object.keys(store.getJob("job-full")!)).not.toContain("warnings");
 
         // Protected and unknown keys are ignored; undefined values leave the column unchanged.
         store.updateRunningJob("job-full", {
@@ -129,5 +132,29 @@ describe("job-store column handling", () => {
     } finally {
       await cleanupTestPath(root);
     }
+  });
+
+  test("launch warnings persist as a JSON array and parse defensively", async () => {
+    const root = await createTestPluginDataRoot("job-store-columns-warnings");
+    try {
+      const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: root });
+      await ensurePluginPaths(paths);
+      const store = new JobStore(paths);
+      try {
+        const warnings = JSON.stringify(["first", "second"]);
+        store.createJob({ ...FULL_INPUT, job_id: "job-warned", warnings });
+        expect(rawRow(paths.stateDbPath, "job-warned").warnings).toBe(warnings);
+        expect(store.getJob("job-warned")?.warnings).toBe(warnings);
+        expect(parseJobWarnings(store.getJob("job-warned")?.warnings)).toEqual(["first", "second"]);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await cleanupTestPath(root);
+    }
+    expect(parseJobWarnings(null)).toEqual([]);
+    expect(parseJobWarnings("not json")).toEqual([]);
+    expect(parseJobWarnings('{"a":1}')).toEqual([]);
+    expect(parseJobWarnings('["ok", 3, null]')).toEqual(["ok"]);
   });
 });

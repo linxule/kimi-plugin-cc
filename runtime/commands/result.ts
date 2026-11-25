@@ -2,7 +2,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
 import { reconcileHistoricalJobProvenance } from "../kimi-engine.js";
-import { renderBudgetSource, withJobStore, type JobRecord, parseHookEscapes } from "../job-store.js";
+import { parseJobWarnings, renderBudgetSource, withJobStore, type JobRecord, parseHookEscapes } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import { readArtifact, renderTerminalJobArtifact } from "../render.js";
@@ -77,8 +77,15 @@ function renderResultEnvelope(
       kimi_version: job.kimi_version,
       system_version: job.system_version,
       resumed_from_job_id: job.resumed_from_job_id,
+      ...warningsField(job),
     },
     null,
     2,
   )}\n`;
+}
+
+/** Present only when the job carries warnings, so warning-free envelopes are unchanged. */
+function warningsField(job: JobRecord): { warnings?: string[] } {
+  const warnings = parseJobWarnings(job.warnings);
+  return warnings.length > 0 ? { warnings } : {};
 }

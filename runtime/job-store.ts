@@ -23,6 +23,8 @@ export interface JobRecord {
   thinking_effort?: string | null;
   /** JSON array of hook-escape findings (runtime/hook-escape.ts), NULL when none. */
   hook_escapes?: string | null;
+  /** JSON array of launch warnings the caller must see (channel W), NULL when none. */
+  warnings?: string | null;
   background: boolean;
   pid: number | null;
   kimi_pid: number | null;
@@ -68,6 +70,8 @@ export interface CreateJobInput {
   thinking_effort?: string | null;
   /** JSON array of hook-escape findings (runtime/hook-escape.ts), NULL when none. */
   hook_escapes?: string | null;
+  /** JSON array of launch warnings the caller must see (channel W), NULL when none. */
+  warnings?: string | null;
   background: boolean;
   pid: number | null;
   kimi_pid: number | null;
@@ -572,6 +576,7 @@ const ADDED_JOB_COLUMNS = [
   ["plan_certification", "TEXT"],
   ["resumed_from_job_id", "TEXT"],
   ["safety_profile", "TEXT"],
+  ["warnings", "TEXT"],
 ] as const;
 
 /** Columns createJob writes, in INSERT order. hook_escapes is written only by updates. */
@@ -579,7 +584,7 @@ const INSERT_JOB_COLUMNS = [
   "job_id", "repo_id", "command_type", "created_at", "updated_at", "cwd", "model", "thinking", "thinking_effort",
   "background", "pid", "kimi_pid", "status", "kimi_session_id", "kimi_session_id_source", "budget_source",
   "operation_kind", "intended_engine", "observed_engine", "kimi_version", "system_version",
-  "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile",
+  "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile", "warnings",
   "agent_profile", "prompt_digest", "summary", "phase", "budget_ms", "final_output_path", "stream_log_path", "error",
 ] as const;
 
@@ -612,6 +617,7 @@ interface DbRow {
   thinking: number | null;
   thinking_effort: string | null;
   hook_escapes: string | null;
+  warnings: string | null;
   background: number;
   pid: number | null;
   kimi_pid: number | null;
@@ -640,8 +646,12 @@ interface DbRow {
 }
 
 function hydrateRow(row: DbRow): JobRecord {
+  // A warning-free row keeps its historical shape, so every JSON surface that
+  // spreads a JobRecord stays byte-identical.
+  const { warnings, ...rest } = row;
   return {
-    ...row,
+    ...rest,
+    ...(warnings !== null && warnings !== undefined ? { warnings } : {}),
     thinking: row.thinking === null ? null : Boolean(row.thinking),
     background: Boolean(row.background),
     error: row.error ? (JSON.parse(row.error) as JobError) : null,
@@ -908,6 +918,17 @@ export async function withJobStore<T>(
 export function parseHookEscapes(raw: string | null | undefined): unknown[] {
   if (!raw) return [];
   try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+/** Parsed `warnings` column: [] when NULL or unreadable. */
+export function parseJobWarnings(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Old non-null budgets have unknown provenance; never invent explicit intent. */

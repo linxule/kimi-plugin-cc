@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { JobRecord } from "./job-store.js";
+import { parseJobWarnings, type JobRecord } from "./job-store.js";
 import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
@@ -31,7 +31,29 @@ export async function readArtifact(artifactPath: string): Promise<string> {
   return readFile(artifactPath, "utf8");
 }
 
+/**
+ * Prefix a "Warnings:" block when the job carries launch warnings. Wrapper
+ * models read stdout and artifacts, never stderr, so this is the load-bearing
+ * copy. Without warnings the text is returned unchanged, byte for byte.
+ */
+export function withWarningsBlock(job: Pick<JobRecord, "warnings">, text: string): string {
+  const warnings = parseJobWarnings(job.warnings);
+  if (warnings.length === 0) return text;
+  return `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}\n\n${text}`;
+}
+
 export function renderManagedJobOutput(job: JobRecord, finalText: string): RenderedManagedOutput {
+  const rendered = renderManagedJobOutputBody(job, finalText);
+  if (parseJobWarnings(job.warnings).length === 0) return rendered;
+  return {
+    ...rendered,
+    // review_gate's output is the parsed decision object; its warnings live in the artifact only.
+    output: typeof rendered.output === "string" ? withWarningsBlock(job, rendered.output) : rendered.output,
+    rendered: withWarningsBlock(job, rendered.rendered),
+  };
+}
+
+function renderManagedJobOutputBody(job: JobRecord, finalText: string): RenderedManagedOutput {
   assertOutputModeConsistency(job.command_type, finalText);
 
   switch (job.command_type) {
@@ -184,6 +206,10 @@ export function renderTerminalJobArtifact(job: JobRecord, partialOutput?: Partia
     `- Summary: ${job.summary}`,
     ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
   ];
+  const warnings = parseJobWarnings(job.warnings);
+  if (warnings.length > 0) {
+    lines.push("", "Warnings:", ...warnings.map((warning) => `- ${warning}`));
+  }
 
   if (job.error) {
     lines.push("", "## Error", `- Code: ${job.error.code}`, `- Stage: ${job.error.stage}`, job.error.message);

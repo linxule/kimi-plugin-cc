@@ -367,13 +367,14 @@ const ADDED_JOB_COLUMNS = [
     ["plan_certification", "TEXT"],
     ["resumed_from_job_id", "TEXT"],
     ["safety_profile", "TEXT"],
+    ["warnings", "TEXT"],
 ];
 /** Columns createJob writes, in INSERT order. hook_escapes is written only by updates. */
 const INSERT_JOB_COLUMNS = [
     "job_id", "repo_id", "command_type", "created_at", "updated_at", "cwd", "model", "thinking", "thinking_effort",
     "background", "pid", "kimi_pid", "status", "kimi_session_id", "kimi_session_id_source", "budget_source",
     "operation_kind", "intended_engine", "observed_engine", "kimi_version", "system_version",
-    "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile",
+    "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile", "warnings",
     "agent_profile", "prompt_digest", "summary", "phase", "budget_ms", "final_output_path", "stream_log_path", "error",
 ];
 const INSERT_JOB_SQL = `INSERT INTO jobs (${INSERT_JOB_COLUMNS.join(", ")}) VALUES (${INSERT_JOB_COLUMNS.map((column) => `@${column}`).join(", ")})`;
@@ -383,8 +384,12 @@ const UPDATABLE_JOB_COLUMNS = new Set([
     "hook_escapes",
 ]);
 function hydrateRow(row) {
+    // A warning-free row keeps its historical shape, so every JSON surface that
+    // spreads a JobRecord stays byte-identical.
+    const { warnings, ...rest } = row;
     return {
-        ...row,
+        ...rest,
+        ...(warnings !== null && warnings !== undefined ? { warnings } : {}),
         thinking: row.thinking === null ? null : Boolean(row.thinking),
         background: Boolean(row.background),
         error: row.error ? JSON.parse(row.error) : null,
@@ -597,6 +602,18 @@ export function parseHookEscapes(raw) {
     try {
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+}
+/** Parsed `warnings` column: [] when NULL or unreadable. */
+export function parseJobWarnings(raw) {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
     }
     catch {
         return [];

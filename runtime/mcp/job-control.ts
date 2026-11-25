@@ -3,6 +3,7 @@ import { markJobFailed, STALE_SWEEP_GRACE_MS } from "../jobs.js";
 import {
   JobStore,
   parseHookEscapes,
+  parseJobWarnings,
   renderBudgetSource,
   type JobRecord,
   type McpTaskRecord,
@@ -411,6 +412,7 @@ function mcpJobMetadata(task: McpTaskRecord, job: JobRecord | null): Record<stri
     kimi_session_id: job.kimi_session_id,
     kimi_session_id_source: job.kimi_session_id_source,
     hook_escapes: parseHookEscapes(job.hook_escapes),
+    ...(parseJobWarnings(job.warnings).length > 0 ? { warnings: parseJobWarnings(job.warnings) } : {}),
     error: job.error,
   };
 }

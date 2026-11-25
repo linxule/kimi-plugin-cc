@@ -380,7 +380,7 @@ describe("scanSessionJournalsForPlan", () => {
 describe("assertNativeV2Preflight", () => {
   test("passes on a clean home without resumeSessionId", async () => {
     await withHome("assert-clean-no-resume", async (home) => {
-      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toBeUndefined();
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toEqual({ warnings: [] });
     });
   });
 
@@ -391,7 +391,7 @@ describe("assertNativeV2Preflight", () => {
       ]);
       await expect(
         assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: "session-1" }),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ warnings: [] });
     });
   });
 
@@ -442,7 +442,7 @@ describe("assertNativeV2Preflight", () => {
   test("allows unused remote declarations without a default", async () => {
     await withHome("assert-unused-remote-declaration", async (home) => {
       await writeConfig(home, '[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
-      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toBeUndefined();
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toEqual({ warnings: [] });
     });
   });
 
@@ -472,7 +472,7 @@ describe("assertNativeV2Preflight", () => {
         });
       await writeFile(statePath, JSON.stringify({ environmentId: "local", environmentCwd: "/work" }));
       await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: "session-1" }))
-        .resolves.toBeUndefined();
+        .resolves.toEqual({ warnings: [] });
     });
   });
 
@@ -492,7 +492,7 @@ describe("assertNativeV2Preflight", () => {
   test("accepts literal workspace trust enforcement", async () => {
     await withHome("assert-workspace-trust-enabled", async (home) => {
       await writeConfig(home, "[workspace]\nrequire_trust = true\n");
-      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toBeUndefined();
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toEqual({ warnings: [] });
     });
   });
 
@@ -516,7 +516,7 @@ describe("assertNativeV2Preflight", () => {
       await writeJournal(home, "ws1", "session-1", "main", [
         JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: "/other" }),
       ]);
-      await expect(assertNativeV2Preflight(options)).resolves.toBeUndefined();
+      await expect(assertNativeV2Preflight(options)).resolves.toEqual({ warnings: [] });
     });
   });
 

@@ -127,6 +127,7 @@ export async function prepareKimiExecutionPlan(options) {
     }
     const kimi = resolveKimiCliCommand(options.env);
     const exactCommand = await resolveExactExecutable(kimi.command, options.cwd, options.env);
+    const warnings = [];
     const runPreflight = async (intendedEngine) => {
         if (options.resumeSource) {
             assertResumeEngineCompatible(options.resumeSource, intendedEngine, options.operationKind);
@@ -134,19 +135,20 @@ export async function prepareKimiExecutionPlan(options) {
         if (intendedEngine !== "native-v2")
             return;
         // Safety, not certification: runs for test-bypass plans too.
-        await assertNativeV2Preflight({
+        const preflight = await assertNativeV2Preflight({
             kimiHome: resolveKimiHome(options.env, options.cwd),
             env: options.env,
             resumeSessionId: options.resumeSessionId,
             expectedExecutionRoot: options.cwd,
             stage: "kimi-engine.plan",
         });
+        warnings.push(...preflight.warnings);
     };
     if (options.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1") {
         const intendedEngine = options.intendedEngine ?? "legacy-v1";
         const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
         await runPreflight(intendedEngine);
-        return Object.freeze({
+        return finishPlan({
             schemaVersion: 1,
             operationKind: options.operationKind,
             intendedEngine,
@@ -156,7 +158,7 @@ export async function prepareKimiExecutionPlan(options) {
             certification: "test-bypass",
             resumedFromJobId: options.resumedFromJobId ?? null,
             safetyProfile,
-        });
+        }, warnings, options.stderr);
     }
     const probe = await probeKimiVersion({
         kimiBin: exactCommand,
@@ -178,7 +180,7 @@ export async function prepareKimiExecutionPlan(options) {
     const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
     assertCertifiedCapability(intendedEngine, options.operationKind, probe);
     await runPreflight(intendedEngine);
-    return Object.freeze({
+    return finishPlan({
         schemaVersion: 1,
         operationKind: options.operationKind,
         intendedEngine,
@@ -188,7 +190,15 @@ export async function prepareKimiExecutionPlan(options) {
         certification: "certified",
         resumedFromJobId: options.resumedFromJobId ?? null,
         safetyProfile,
-    });
+    }, warnings, options.stderr);
+}
+/** Freeze the plan; a nonempty warning list is attached and announced once on stderr. */
+function finishPlan(plan, warnings, stderr = process.stderr) {
+    if (warnings.length === 0)
+        return Object.freeze(plan);
+    for (const warning of warnings)
+        stderr.write(`[kimi-plugin-cc] warning: ${warning}\n`);
+    return Object.freeze({ ...plan, warnings: Object.freeze([...warnings]) });
 }
 export function assertExecutionPlanMatchesSpawn(plan, command, prefixArgs, env = {}) {
     assertExecutionPlanShape(plan);
@@ -218,6 +228,7 @@ export function persistedExecutionPlanFields(plan) {
         plan_certification: plan.certification,
         resumed_from_job_id: plan.resumedFromJobId,
         safety_profile: plan.safetyProfile,
+        warnings: plan.warnings !== undefined && plan.warnings.length > 0 ? JSON.stringify(plan.warnings) : null,
     };
 }
 export function observedExecutionFields(result) {

@@ -441,20 +441,8 @@ export async function scanSessionJournalsForPlan(kimiHome, sessionId, expectedEx
     }
     return { kind: "clean", journals: journalPaths };
 }
-/**
- * Run every inspection and throw a RuntimeError on the first refusal:
- *   CLI_V2_PLAN_MODE_CONFIGURED   details.refusal_kind = "v2-plan-mode-configured"
- *   CLI_V2_CONFIG_UNREADABLE      details.refusal_kind = "v2-config-unreadable"
- *   CLI_V2_EXPERIMENTAL_UNSAFE    details.refusal_kind = "v2-experimental-unsafe", details.selectors
- *   CLI_V2_ENVIRONMENT_UNSAFE / CLI_V2_WORKSPACE_TRUST_UNSAFE for unsafe config
- *   KIMI_SESSION_ENVIRONMENT_UNSAFE details.refusal_kind = "session-environment-unsafe"
- *   KIMI_SESSION_PLAN_TAINTED     details.refusal_kind = "session-plan-tainted", details.record_type
- *   KIMI_SESSION_JOURNAL_UNAVAILABLE details.refusal_kind = "session-journal-unavailable"
- * Every message carries a truthful remedy (edit the named setting / start a
- * fresh session) and MUST NOT mention /kimi:setup or hook drift.
- * Every details object also carries `retryable_after_setup: false`.
- */
 export async function assertNativeV2Preflight(options) {
+    const warnings = [];
     const stage = options.stage ?? "native-v2.preflight";
     const configPath = kimiCodeConfigPath(options.kimiHome);
     const planMode = await inspectPlanModeConfig(options.kimiHome);
@@ -524,4 +512,5 @@ export async function assertNativeV2Preflight(options) {
             });
         }
     }
+    return { warnings };
 }

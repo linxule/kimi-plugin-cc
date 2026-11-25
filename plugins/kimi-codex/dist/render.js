@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parseJobWarnings } from "./job-store.js";
 import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
@@ -12,7 +13,29 @@ export async function writeArtifact(paths, job, markdown) {
 export async function readArtifact(artifactPath) {
     return readFile(artifactPath, "utf8");
 }
+/**
+ * Prefix a "Warnings:" block when the job carries launch warnings. Wrapper
+ * models read stdout and artifacts, never stderr, so this is the load-bearing
+ * copy. Without warnings the text is returned unchanged, byte for byte.
+ */
+export function withWarningsBlock(job, text) {
+    const warnings = parseJobWarnings(job.warnings);
+    if (warnings.length === 0)
+        return text;
+    return `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}\n\n${text}`;
+}
 export function renderManagedJobOutput(job, finalText) {
+    const rendered = renderManagedJobOutputBody(job, finalText);
+    if (parseJobWarnings(job.warnings).length === 0)
+        return rendered;
+    return {
+        ...rendered,
+        // review_gate's output is the parsed decision object; its warnings live in the artifact only.
+        output: typeof rendered.output === "string" ? withWarningsBlock(job, rendered.output) : rendered.output,
+        rendered: withWarningsBlock(job, rendered.rendered),
+    };
+}
+function renderManagedJobOutputBody(job, finalText) {
     assertOutputModeConsistency(job.command_type, finalText);
     switch (job.command_type) {
         case "ask": {
@@ -138,6 +161,10 @@ export function renderTerminalJobArtifact(job, partialOutput) {
         `- Summary: ${job.summary}`,
         ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
     ];
+    const warnings = parseJobWarnings(job.warnings);
+    if (warnings.length > 0) {
+        lines.push("", "Warnings:", ...warnings.map((warning) => `- ${warning}`));
+    }
     if (job.error) {
         lines.push("", "## Error", `- Code: ${job.error.code}`, `- Stage: ${job.error.stage}`, job.error.message);
         // Structured context (e.g. `drift_axis` / `retryable_after_setup`) so a
