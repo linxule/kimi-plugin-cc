@@ -234,7 +234,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         warnings,
         reviewGateEnabled,
         nextStep: probe.ok
-            ? "Run /kimi:review, /kimi:challenge, /kimi:ask, or /kimi:rescue. Codex users can invoke the matching $kimi-* skills."
+            ? "Run /kimi:task, /kimi:review, /kimi:pursue or /kimi:swarm. Codex users can invoke the matching $kimi-* skills."
             : "Re-run /kimi:setup after installing kimi-code and Node. If the probe keeps failing, run /kimi:setup --uninstall and inspect ~/.kimi-code/config.toml manually.",
         details: buildDetails({
             configPath,
@@ -1287,10 +1287,10 @@ async function collectInstalledKimiPluginsNotice(env, warnings) {
     warnings.push([
         `NOTE: ${enabledIds.length} kimi-code plugin(s) installed and enabled: ${enabledIds.join(", ")}.`,
         "  kimi-code registers their tools (including MCP) on every session. Under kimi-plugin-cc's",
-        "  read-only commands (/kimi:review, /kimi:challenge, /kimi:ask, and the review gate) the",
+        "  read-only commands (/kimi:task, /kimi:review and the review gate) the",
         "  PreToolUse hook denies any tool outside Read/Grep/Glob, so calls to these plugins' tools",
         "  are blocked — safe, but they can waste model turns. This is expected; no action needed.",
-        "  (/kimi:rescue and /kimi:swarm apply their own allowlists.) To avoid the turn-waste, disable",
+        "  (/kimi:task --write and /kimi:swarm apply their own allowlists.) To avoid the turn-waste, disable",
         "  kimi-code plugins you don't need for delegated work in your kimi-code config.",
     ].join("\n"));
 }

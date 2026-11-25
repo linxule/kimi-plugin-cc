@@ -206,7 +206,7 @@ describe("setup rendered details", () => {
       probeDetail: okDetail,
       hostId: HOST,
       ...common,
-      nextStep: "Run /kimi:review, /kimi:challenge, /kimi:ask, or /kimi:rescue. Codex users can invoke the matching $kimi-* skills.",
+      nextStep: "Run /kimi:task, /kimi:review, /kimi:pursue or /kimi:swarm. Codex users can invoke the matching $kimi-* skills.",
     }));
 
     expect(renderSetupResult(await runSetup(["--check"], context))).toBe(render({

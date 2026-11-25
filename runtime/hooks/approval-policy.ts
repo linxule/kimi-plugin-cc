@@ -356,7 +356,7 @@ function denyReadOnlyMessage(label: string, toolName: string): string {
   return [
     `kimi-plugin-cc safety hook: ${label} is read-only.`,
     `Tool "${tool}" is denied — use Read, Grep, or Glob to inspect the workspace instead.`,
-    "If you need to mutate state, the user must invoke /kimi:rescue (write-capable) rather than this command.",
+    "If you need to mutate state, the user must invoke /kimi:task --write (write-capable) rather than this command.",
   ].join(" ");
 }
 
