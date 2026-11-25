@@ -105,7 +105,6 @@ export async function runReview(argv, context, commandType) {
         }
         await syncKimiSessionTitle({
             promptText: `Review target: ${reviewContext.targetDescription}${parsed.focus ? `. Focus: ${parsed.focus}` : ""}`,
-            submittedPrompt: previewPrompt,
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,

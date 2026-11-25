@@ -821,7 +821,6 @@ async function executeSwarmJob(
     }
     await syncKimiSessionTitle({
       promptText: objective,
-      submittedPrompt: prompt,
       env: context.env,
       cwd: job.cwd,
       sessionId: result.sessionId ?? job.kimi_session_id,

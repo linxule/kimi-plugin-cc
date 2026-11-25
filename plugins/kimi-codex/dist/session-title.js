@@ -44,18 +44,18 @@ function sanitizePromptMetadata(text) {
         .replace(/\s+/g, " ")
         .trim();
 }
+const OWN_PROMPT_MIN_PREFIX = 40;
 /**
- * Recorded previews are redacted, whitespace-collapsed and possibly truncated,
- * so compare normalized forms and accept a prefix either way. An empty form
- * never matches: every string starts with "".
+ * Earlier plugin releases stored the submitted prompt redacted, whitespace-
+ * collapsed and capped, so compare normalized forms. A prefix relation counts
+ * only when the shorter side is long enough that short native text never does.
  */
-function isOwnSubmittedPrompt(existing, submitted) {
-    if (submitted === undefined)
-        return false;
+function isOwnPrompt(existing, ownPrompts) {
     const current = normalizeTitleFragment(existing);
     if (!current)
         return false;
-    return (typeof submitted === "string" ? [submitted] : submitted).some((prompt) => [normalizeTitleFragment(prompt), sanitizePromptMetadata(prompt)].some((own) => own.length > 0 && (current === own || own.startsWith(current) || current.startsWith(own))));
+    return ownPrompts.some((prompt) => [normalizeTitleFragment(prompt), sanitizePromptMetadata(prompt)].some((own) => own.length > 0 && (current === own ||
+        (Math.min(own.length, current.length) >= OWN_PROMPT_MIN_PREFIX && (own.startsWith(current) || current.startsWith(own))))));
 }
 export function shortenForTitle(text, maxLength) {
     const normalized = normalizeTitleFragment(text);
@@ -139,11 +139,10 @@ export async function syncKimiSessionTitle(options) {
     const next = { ...state };
     const preview = options.promptText === undefined ? undefined : promptMetadataText(options.promptText);
     const blankPreview = typeof state.lastPrompt !== "string" || !state.lastPrompt.trim();
-    const ownPreview = !blankPreview && isOwnSubmittedPrompt(state.lastPrompt, options.submittedPrompt);
-    if (nativeV2 && preview && (blankPreview || ownPreview)) {
+    if (nativeV2 && preview && (blankPreview || !options.ownPrompts || isOwnPrompt(state.lastPrompt, options.ownPrompts))) {
         next.lastPrompt = preview;
     }
-    const replacedPreview = nativeV2 && ownPreview && next.lastPrompt !== state.lastPrompt;
+    const replacedPreview = !blankPreview && next.lastPrompt !== state.lastPrompt;
     if (!options.preserveTitle && !customTitle && !generatedTitle) {
         next.title = promptMetadataText(options.title)?.slice(0, KIMI_SESSION_TITLE_MAX_LENGTH) ?? "Kimi Session";
         // Native UI generation must remain eligible; a deterministic fallback is not

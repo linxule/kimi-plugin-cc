@@ -188,7 +188,6 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         }
         await syncKimiSessionTitle({
             promptText: stripRescuePromptPrefix(prompt),
-            submittedPrompt: prompt,
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,

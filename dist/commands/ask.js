@@ -184,7 +184,6 @@ export async function executeAskJob(jobId, prompt, context, options) {
         }
         await syncKimiSessionTitle({
             promptText: askPromptSubject(prompt),
-            submittedPrompt: prompt,
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,

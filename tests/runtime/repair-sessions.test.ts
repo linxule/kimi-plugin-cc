@@ -264,6 +264,15 @@ describe("repair-sessions", () => {
     expect(parse(await runRepairSessions(["--apply"], f.context)).counts).toEqual({ unchanged: 4 });
   });
 
+  test("a short native text that merely starts the plugin prompt is kept", async () => {
+    const f = await fixture();
+    const session = await f.seed("short", {}, {}, {}, ASK_PREFIX + "Where are sessions stored?");
+    await writeFile(session.statePath, JSON.stringify({ version: 2, title: "Manual", titleKind: "custom", lastPrompt: "Answer directly" }));
+    const before = await readFile(session.statePath, "utf8");
+    expect(parse(await runRepairSessions(["--apply"], f.context)).counts).toEqual({ unchanged: 1 });
+    expect(await readFile(session.statePath, "utf8")).toBe(before);
+  });
+
   test("an earlier run's own prompt in a resumed session is replaced by the newest run's raw text", async () => {
     const f = await fixture();
     const first = await f.seed("first", { updated_at: "2026-09-01T00:00:00Z" }, {}, {}, ASK_PREFIX + "First question");

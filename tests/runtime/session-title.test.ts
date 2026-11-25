@@ -533,7 +533,7 @@ describe("native-v2 session discovery", () => {
       const p = await seedKimiSession(home, id, { id, version: 2, title: "Manual", isCustomTitle: true });
       const before = await readFile(p, "utf8");
       const options = { env: { KIMI_CODE_HOME: home }, sessionId: id, title: "",
-        preserveTitle: true, requireNativeV2: true, promptText: "Original task" };
+        preserveTitle: true, requireNativeV2: true, promptText: "Original task", ownPrompts: [] };
       expect(await syncKimiSessionTitle({ ...options, dryRun: true })).toBe("would-update");
       expect(await readFile(p, "utf8")).toBe(before);
       expect(await readdir(path.join(home, "sessions"))).toEqual(["wd_repo_123"]);
@@ -597,114 +597,135 @@ describe("native-v2 preview shows the raw task text", () => {
       const p = await seedKimiSession(home, id, { id, version: 2, title: "New Session", ...state });
       const before = await readFile(p, "utf8");
       const result = await syncKimiSessionTitle({ env: { KIMI_CODE_HOME: home }, sessionId: id,
-        title: "Kimi Ask: Where are sessions stored?", promptText: raw, submittedPrompt: submitted, ...extra });
+        title: "Kimi Ask: Where are sessions stored?", promptText: raw, ...extra });
       const after = await readFile(p, "utf8");
       return { result, before, after, state: JSON.parse(after) as Record<string, unknown> };
     } finally { await cleanupTestPath(home); }
   }
 
-  test("fills a missing or blank preview with the raw text", async () => {
-    const filled = await syncWith({});
-    expect(filled.result).toBe("updated");
-    expect(filled.state.lastPrompt).toBe(raw);
-    expect((await syncWith({ lastPrompt: " \n " })).state.lastPrompt).toBe(raw);
+  describe("after a settled run", () => {
+    test("fills a missing or blank preview with the raw text", async () => {
+      const filled = await syncWith({});
+      expect(filled.result).toBe("updated");
+      expect(filled.state.lastPrompt).toBe(raw);
+      expect((await syncWith({ lastPrompt: " \n " })).state.lastPrompt).toBe(raw);
+    });
+
+    test.each([
+      ["an earlier run's request (resume)", "The first question of this session"],
+      ["a native preview written before this resumed run", "Typed in Kimi Desktop"],
+      ["an earlier plugin release's prefixed prompt", kimiStored],
+    ])("replaces %s with this run's request", async (_label, existing) => {
+      const { result, state } = await syncWith({ lastPrompt: existing, title: "Manual", isCustomTitle: true });
+      expect(result).toBe("preview-replaced");
+      expect(state).toMatchObject({ title: "Manual", isCustomTitle: true, lastPrompt: raw });
+    });
+
+    test.each([
+      { title: "Human title", titleKind: "custom" },
+      { title: "Human title", isCustomTitle: true },
+      { title: "Native generated title", titleKind: "generated", isCustomTitle: false },
+    ])("keeps title %j while updating the preview", async (titleState) => {
+      const { state } = await syncWith({ ...titleState, lastPrompt: "Older request" });
+      expect(state).toEqual({ id: "session_raw_preview", version: 2, ...titleState, lastPrompt: raw });
+    });
+
+    test("keeps the replaceable fallback title semantics while updating the preview", async () => {
+      const { state } = await syncWith({ titleKind: "replaceable", lastPrompt: "Older request" });
+      expect(state).toMatchObject({ title: "Kimi Ask: Where are sessions stored?", titleKind: "replaceable",
+        isCustomTitle: false, lastPrompt: raw });
+    });
+
+    test("redacts and caps the new preview", async () => {
+      const longRaw = `Fix login password=hunter2 ${"word ".repeat(1000)}`;
+      const { state } = await syncWith({ lastPrompt: "Older request" }, { promptText: longRaw });
+      expect(state.lastPrompt).toBe(promptMetadataText(longRaw));
+      expect((state.lastPrompt as string).length).toBe(4000);
+      expect(state.lastPrompt).not.toContain("hunter2");
+    });
+
+    test("an empty raw text never writes a preview", async () => {
+      for (const promptText of [undefined, "", " \n\t "]) {
+        const { state } = await syncWith({ lastPrompt: "Older request", title: "Manual", isCustomTitle: true }, { promptText });
+        expect(state.lastPrompt).toBe("Older request");
+      }
+    });
+
+    test("writes nothing when the preview already shows this request", async () => {
+      const { result, before, after } = await syncWith({ lastPrompt: raw, title: "Kimi Ask: Where are sessions stored?",
+        titleKind: "replaceable", isCustomTitle: false });
+      expect(result).toBe("unchanged");
+      expect(after).toBe(before);
+    });
+
+    test("dry-run reports the replacement without writing", async () => {
+      const { result, before, after } = await syncWith({ lastPrompt: "Older request", title: "Manual", titleKind: "custom" }, { dryRun: true });
+      expect(result).toBe("would-replace-preview");
+      expect(after).toBe(before);
+    });
+
+    test("legacy-v1 state keeps its preview", async () => {
+      const home = await createTestPluginDataRoot("kimi-legacy-raw-preview");
+      const id = "session_legacy_preview";
+      try {
+        const p = await seedKimiSession(home, id, { title: "New Session", lastPrompt: "Older request" });
+        await syncKimiSessionTitle({ env: { KIMI_CODE_HOME: home }, sessionId: id,
+          title: "Kimi Ask: Where are sessions stored?", promptText: raw });
+        const state = JSON.parse(await readFile(p, "utf8"));
+        expect(state.lastPrompt).toBe("Older request");
+        expect(state.isCustomTitle).toBe(true);
+        expect(await readdir(path.join(home, "sessions"))).toEqual(["wd_repo_123"]);
+      } finally { await cleanupTestPath(home); }
+    });
   });
 
-  test.each([
-    ["exact Kimi-stored form", kimiStored],
-    ["raw submitted text", submitted],
-    ["whitespace-different form", submitted.replace(/\n+/g, "   \t")],
-    ["truncated prefix", kimiStored.slice(0, 40)],
-    ["submitted prompt followed by more text", `${kimiStored} [image]`],
-  ])("replaces the plugin's own submitted prompt (%s)", async (_label, existing) => {
-    const { result, state } = await syncWith({ lastPrompt: existing });
-    expect(result).toBe("preview-replaced");
-    expect(state.lastPrompt).toBe(raw);
-  });
+  describe("in repair (ownPrompts)", () => {
+    const repair = (lastPrompt: unknown, ownPrompts: readonly string[] = [submitted], extra: Record<string, unknown> = {}) =>
+      syncWith({ title: "Manual", isCustomTitle: true, lastPrompt }, { ownPrompts, preserveTitle: true, ...extra });
 
-  test("matches Kimi's redacted, 4000-character form of a long prompt with secrets and long paths", async () => {
-    const longSubmitted = `Perform a read-only code review.\nRepository root: /Users/example/Documents/Apps/some-long-repository-name\ntoken=abc123\n${"diff line\n".repeat(600)}`;
-    const stored = promptMetadataText(longSubmitted)!;
-    expect(stored).toContain("[redacted]");
-    expect(stored.length).toBe(4000);
-    const { state } = await syncWith({ lastPrompt: stored },
-      { submittedPrompt: longSubmitted, promptText: "Review target: current working tree changes" });
-    expect(state.lastPrompt).toBe("Review target: current working tree changes");
-  });
+    test.each([
+      ["exact stored form", kimiStored],
+      ["raw submitted text", submitted],
+      ["whitespace-different form", submitted.replace(/\n+/g, "   \t")],
+      ["40-character truncated prefix", kimiStored.slice(0, 40)],
+      ["stored prompt followed by more text", `${kimiStored} [image]`],
+    ])("replaces the plugin's own prompt (%s)", async (_label, existing) => {
+      const { result, state } = await repair(existing);
+      expect(result).toBe("preview-replaced");
+      expect(state.lastPrompt).toBe(raw);
+    });
 
-  test.each([
-    ["a foreign preview", "Something the user typed natively later"],
-    ["text sharing only an inner substring", "User question: Where are sessions stored?"],
-  ])("keeps %s", async (_label, existing) => {
-    const { result, before, after } = await syncWith({ lastPrompt: existing, title: "Manual", isCustomTitle: true });
-    expect(result).toBe("custom-title");
-    expect(after).toBe(before);
-  });
+    test("matches Kimi's redacted, 4000-character form of a long prompt with secrets and long paths", async () => {
+      const longSubmitted = `Perform a read-only code review.\nRepository root: /Users/example/Documents/Apps/some-long-repository-name\ntoken=abc123\n${"diff line\n".repeat(600)}`;
+      const stored = promptMetadataText(longSubmitted)!;
+      expect(stored).toContain("[redacted]");
+      expect(stored.length).toBe(4000);
+      const { state } = await repair(stored, [longSubmitted], { promptText: "Review target: current working tree changes" });
+      expect(state.lastPrompt).toBe("Review target: current working tree changes");
+    });
 
-  test("matches any of several submitted prompts", async () => {
-    const { result, state } = await syncWith({ lastPrompt: kimiStored, title: "Manual", isCustomTitle: true },
-      { submittedPrompt: ["Another run's prompt", submitted] });
-    expect(result).toBe("preview-replaced");
-    expect(state.lastPrompt).toBe(raw);
-  });
+    test("matches any of several verified prompts", async () => {
+      expect((await repair(kimiStored, ["Another run's prompt", submitted])).state.lastPrompt).toBe(raw);
+    });
 
-  test("never treats a preview as its own without the submitted prompt, or with a blank one", async () => {
-    for (const submittedPrompt of [undefined, "", " \n\t "]) {
-      const { state } = await syncWith({ lastPrompt: kimiStored, title: "Manual", isCustomTitle: true }, { submittedPrompt });
-      expect(state.lastPrompt).toBe(kimiStored);
-    }
-    const { state } = await syncWith({ lastPrompt: "Foreign", title: "Manual", isCustomTitle: true }, { submittedPrompt: " " });
-    expect(state.lastPrompt).toBe("Foreign");
-  });
+    test.each([
+      ["a foreign preview", "Something the user typed natively later"],
+      ["text sharing only an inner substring", "User question: Where are sessions stored?"],
+      ["a short prefix of the prompt (39 characters)", kimiStored.slice(0, 39)],
+      ["a short native text the prompt starts with", "Answer"],
+    ])("keeps %s", async (_label, existing) => {
+      const { result, before, after } = await repair(existing);
+      expect(result).toBe("unchanged");
+      expect(after).toBe(before);
+    });
 
-  test.each([
-    { title: "Human title", titleKind: "custom" },
-    { title: "Human title", isCustomTitle: true },
-    { title: "Native generated title", titleKind: "generated", isCustomTitle: false },
-  ])("replaces the own-prompt preview while keeping title %j", async (titleState) => {
-    const { state } = await syncWith({ ...titleState, lastPrompt: kimiStored });
-    expect(state).toMatchObject({ ...titleState, lastPrompt: raw });
-  });
-
-  test("keeps the replaceable fallback title semantics while replacing the preview", async () => {
-    const { state } = await syncWith({ titleKind: "replaceable", lastPrompt: kimiStored });
-    expect(state).toMatchObject({ title: "Kimi Ask: Where are sessions stored?", titleKind: "replaceable",
-      isCustomTitle: false, lastPrompt: raw });
-  });
-
-  test("redacts and caps the replacement preview", async () => {
-    const longRaw = `Fix login password=hunter2 ${"word ".repeat(1000)}`;
-    const { state } = await syncWith({ lastPrompt: kimiStored }, { promptText: longRaw });
-    expect(state.lastPrompt).toBe(promptMetadataText(longRaw));
-    expect((state.lastPrompt as string).length).toBe(4000);
-    expect(state.lastPrompt).not.toContain("hunter2");
-  });
-
-  test("writes nothing when the preview already shows the raw text", async () => {
-    const { result, before, after } = await syncWith({ lastPrompt: raw, title: "Kimi Ask: Where are sessions stored?",
-      titleKind: "replaceable", isCustomTitle: false });
-    expect(result).toBe("unchanged");
-    expect(after).toBe(before);
-  });
-
-  test("dry-run reports the replacement without writing", async () => {
-    const { result, before, after } = await syncWith({ lastPrompt: kimiStored, title: "Manual", titleKind: "custom" }, { dryRun: true });
-    expect(result).toBe("would-replace-preview");
-    expect(after).toBe(before);
-  });
-
-  test("legacy-v1 state keeps its preview even when it is the submitted prompt", async () => {
-    const home = await createTestPluginDataRoot("kimi-legacy-raw-preview");
-    const id = "session_legacy_preview";
-    try {
-      const p = await seedKimiSession(home, id, { title: "New Session", lastPrompt: kimiStored });
-      await syncKimiSessionTitle({ env: { KIMI_CODE_HOME: home }, sessionId: id,
-        title: "Kimi Ask: Where are sessions stored?", promptText: raw, submittedPrompt: submitted });
-      const state = JSON.parse(await readFile(p, "utf8"));
-      expect(state.lastPrompt).toBe(kimiStored);
-      expect(state.isCustomTitle).toBe(true);
-      expect(await readdir(path.join(home, "sessions"))).toEqual(["wd_repo_123"]);
-    } finally { await cleanupTestPath(home); }
+    test("keeps any nonblank preview without verified prompts, or with blank ones, and still fills a blank one", async () => {
+      for (const ownPrompts of [[], [""], [" \n\t "]]) {
+        expect((await repair(kimiStored, ownPrompts)).state.lastPrompt).toBe(kimiStored);
+      }
+      expect((await repair("Foreign", [" "])).state.lastPrompt).toBe("Foreign");
+      expect((await repair(undefined, [])).state.lastPrompt).toBe(raw);
+    });
   });
 });
 

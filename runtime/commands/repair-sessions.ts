@@ -72,7 +72,7 @@ export async function runRepairSessions(argv: string[], context: CommandContext)
         // Without an exact raw-text derivation, only a missing preview is
         // filled, with the verified prompt itself.
         promptText: raw ?? prompt,
-        submittedPrompt: raw === undefined ? undefined : own,
+        ownPrompts: raw === undefined ? [] : own,
         dryRun: !apply,
         preserveTitle: true,
         requireNativeV2: true,
