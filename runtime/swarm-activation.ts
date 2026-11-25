@@ -1078,8 +1078,7 @@ async function restData(
   if (signal?.aborted === true) onAbort();
 
   try {
-    const headers: Record<string, string> = { accept: "application/json" };
-    if (web.token !== undefined) headers.authorization = `Bearer ${web.token}`;
+    const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${web.token}` };
     if (body !== undefined) headers["content-type"] = "application/json";
     const response = await fetch(`${web.origin}${route}`, {
       method,
