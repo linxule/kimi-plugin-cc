@@ -33,6 +33,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 
 import { RuntimeError } from "./errors.js";
+import { kimiCodeConfigPath } from "./kimi-home.js";
 import { parse as parseToml } from "./vendor/smol-toml/parse.js";
 
 /** `<kimiHome>/config.toml` is small hand-edited config, never a data file. */
@@ -102,7 +103,7 @@ type ParsedConfig =
 /** Read+parse `<kimiHome>/config.toml`. `config: null` means the file is
  * absent (upstream default applies); any read/parse failure fails closed. */
 async function readParsedConfig(kimiHome: string): Promise<ParsedConfig> {
-  const configPath = path.join(kimiHome, "config.toml");
+  const configPath = kimiCodeConfigPath(kimiHome);
   const read = await readSmallFileSafe(configPath, CONFIG_MAX_BYTES);
   if (read.kind === "absent") return { kind: "ok", config: null };
   if (read.kind === "unreadable") {
@@ -170,7 +171,7 @@ export async function inspectPlanModeConfig(
   if (matching.length === 0) return { kind: "ok", setting: "absent" };
   const offending = matching.filter(([, value]) => value !== false).map(([rawKey]) => rawKey);
   if (offending.length === 0) return { kind: "ok", setting: "false" };
-  const configPath = path.join(kimiHome, "config.toml");
+  const configPath = kimiCodeConfigPath(kimiHome);
   return {
     kind: "refuse",
     refusalKind: "v2-plan-mode-configured",
@@ -547,7 +548,7 @@ export async function assertNativeV2Preflight(
   options: NativeV2PreflightOptions,
 ): Promise<void> {
   const stage = options.stage ?? "native-v2.preflight";
-  const configPath = path.join(options.kimiHome, "config.toml");
+  const configPath = kimiCodeConfigPath(options.kimiHome);
 
   const planMode = await inspectPlanModeConfig(options.kimiHome);
   if (planMode.kind === "refuse") {

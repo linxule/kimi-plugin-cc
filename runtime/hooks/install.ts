@@ -1,11 +1,10 @@
 import { constants as fsConstants, existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
-import path from "node:path";
 
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import { evaluateInstalled, type HookCommandDrift } from "./managed-block.js";
 import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
-import { resolveKimiHome } from "../kimi-home.js";
+import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 
 /**
  * Verify the managed PreToolUse hook and require its decoded command to equal
@@ -172,10 +171,6 @@ export async function verifyHookInstalled(
   }
 
   return { installed: true, configPath };
-}
-
-function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {
-  return path.join(resolveKimiHome(env), "config.toml");
 }
 
 /**

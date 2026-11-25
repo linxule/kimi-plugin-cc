@@ -1,10 +1,9 @@
 import { constants as fsConstants, existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
-import path from "node:path";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import { evaluateInstalled } from "./managed-block.js";
 import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
-import { resolveKimiHome } from "../kimi-home.js";
+import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 export async function verifyHookInstalled(env) {
     const configPath = resolveKimiCodeConfigPath(env);
     if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
@@ -118,9 +117,6 @@ export async function verifyHookInstalled(env) {
         };
     }
     return { installed: true, configPath };
-}
-function resolveKimiCodeConfigPath(env) {
-    return path.join(resolveKimiHome(env), "config.toml");
 }
 /**
  * Caller-facing repair protocol shared by every hook-refusal surface. Re-pin

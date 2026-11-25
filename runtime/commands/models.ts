@@ -1,9 +1,8 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import path from "node:path";
 
 import { RuntimeError } from "../errors.js";
-import { resolveKimiHome } from "../kimi-home.js";
+import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 import { upstreamSnakeToCamel } from "../native-v2-preflight.js";
 import type { CommandContext } from "../types.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
@@ -20,7 +19,7 @@ export async function runModelInventory(argv: string[], context: CommandContext)
   if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--json")) {
     throw new RuntimeError("INVALID_ARGS", "Use setup --models [--json] without other setup flags.", "setup.models");
   }
-  const configPath = path.join(resolveKimiHome(context.env, context.cwd), "config.toml");
+  const configPath = resolveKimiCodeConfigPath(context.env, context.cwd);
   let config: Record<string, unknown> = {};
   let configPresent = true;
   try {

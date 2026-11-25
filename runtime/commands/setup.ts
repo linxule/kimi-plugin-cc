@@ -66,7 +66,7 @@ import {
   NATIVE_V2_ANY_OPERATION_VERSIONS,
   NATIVE_V2_NON_SWARM_VERSIONS,
 } from "../kimi-engine.js";
-import { resolveKimiHome } from "../kimi-home.js";
+import { resolveKimiCodeConfigPath, resolveKimiHome } from "../kimi-home.js";
 import { formatVersionChoice, kimiReleaseHas, kimiVersionsWith } from "../kimi-releases.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import type { CommandContext } from "../types.js";
@@ -1093,10 +1093,6 @@ function assertHookPathTomlSafe(hookScriptPath: string): void {
 }
 
 // ----- Path resolution ---------------------------------------------------
-
-function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {
-  return path.join(resolveKimiHome(env), "config.toml");
-}
 
 async function assertHookScriptExists(hookScriptPath: string): Promise<void> {
   try {

@@ -31,6 +31,7 @@ import { open, readdir } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { RuntimeError } from "./errors.js";
+import { kimiCodeConfigPath } from "./kimi-home.js";
 import { parse as parseToml } from "./vendor/smol-toml/parse.js";
 /** `<kimiHome>/config.toml` is small hand-edited config, never a data file. */
 const CONFIG_MAX_BYTES = 1 * 1024 * 1024;
@@ -91,7 +92,7 @@ async function readSmallFileSafe(filePath, maxBytes) {
 /** Read+parse `<kimiHome>/config.toml`. `config: null` means the file is
  * absent (upstream default applies); any read/parse failure fails closed. */
 async function readParsedConfig(kimiHome) {
-    const configPath = path.join(kimiHome, "config.toml");
+    const configPath = kimiCodeConfigPath(kimiHome);
     const read = await readSmallFileSafe(configPath, CONFIG_MAX_BYTES);
     if (read.kind === "absent")
         return { kind: "ok", config: null };
@@ -149,7 +150,7 @@ export async function inspectPlanModeConfig(kimiHome) {
     const offending = matching.filter(([, value]) => value !== false).map(([rawKey]) => rawKey);
     if (offending.length === 0)
         return { kind: "ok", setting: "false" };
-    const configPath = path.join(kimiHome, "config.toml");
+    const configPath = kimiCodeConfigPath(kimiHome);
     return {
         kind: "refuse",
         refusalKind: "v2-plan-mode-configured",
@@ -454,7 +455,7 @@ export async function scanSessionJournalsForPlan(kimiHome, sessionId, expectedEx
  */
 export async function assertNativeV2Preflight(options) {
     const stage = options.stage ?? "native-v2.preflight";
-    const configPath = path.join(options.kimiHome, "config.toml");
+    const configPath = kimiCodeConfigPath(options.kimiHome);
     const planMode = await inspectPlanModeConfig(options.kimiHome);
     if (planMode.kind === "refuse") {
         const code = planMode.refusalKind === "v2-plan-mode-configured"

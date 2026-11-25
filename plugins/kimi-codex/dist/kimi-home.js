@@ -7,3 +7,9 @@ export function resolveKimiHome(env, baseCwd = process.cwd()) {
     }
     return path.join(os.homedir(), ".kimi-code");
 }
+export function kimiCodeConfigPath(kimiHome) {
+    return path.join(kimiHome, "config.toml");
+}
+export function resolveKimiCodeConfigPath(env, baseCwd = process.cwd()) {
+    return kimiCodeConfigPath(resolveKimiHome(env, baseCwd));
+}

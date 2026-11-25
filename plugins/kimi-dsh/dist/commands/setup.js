@@ -29,7 +29,7 @@ import { buildHookShellCommand, hostIdFromHookCommand, resolveHookScriptPath, re
 import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, markerCommentLines, MARKERS, ORPHAN_MARKER_REMEDY, parseManagedBlock, } from "../hooks/managed-block.js";
 import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
 import { isNativeV2CertifiedVersion, NATIVE_V2_ANY_OPERATION_VERSIONS, NATIVE_V2_NON_SWARM_VERSIONS, } from "../kimi-engine.js";
-import { resolveKimiHome } from "../kimi-home.js";
+import { resolveKimiCodeConfigPath, resolveKimiHome } from "../kimi-home.js";
 import { formatVersionChoice, kimiReleaseHas, kimiVersionsWith } from "../kimi-releases.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
@@ -821,9 +821,6 @@ function assertHookPathTomlSafe(hookScriptPath) {
     ].join(" "), "setup.hook-path", { details: { hookScriptPath } });
 }
 // ----- Path resolution ---------------------------------------------------
-function resolveKimiCodeConfigPath(env) {
-    return path.join(resolveKimiHome(env), "config.toml");
-}
 async function assertHookScriptExists(hookScriptPath) {
     try {
         await access(hookScriptPath, fsConstants.R_OK);
