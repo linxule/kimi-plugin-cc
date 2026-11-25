@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { access, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -196,6 +197,9 @@ export async function evaluateRescueHookRequest(
       };
     }
     const cwd = isObject(toolInput) ? toolInput.cwd : undefined;
+    // Without Bash.cwd the shell runs in the session work dir, which every
+    // write-capable launch sets to the trusted root.
+    let shellCwd = root;
     if (cwd !== undefined) {
       if (typeof cwd !== "string" || cwd.length === 0) {
         return { decision: "deny", reason: "rescue requires Bash cwd to be a non-empty string" };
@@ -211,11 +215,12 @@ export async function evaluateRescueHookRequest(
         if (outcome === "reject") {
           return { decision: "deny", reason: `rescue rejects Bash cwd outside the workspace or inside .git: ${cwd}` };
         }
+        shellCwd = await realpath(path.resolve(root, cwd));
       } catch (err) {
         return { decision: "deny", reason: `rescue cannot inspect Bash cwd ${cwd}: ${(err as Error).message}` };
       }
     }
-    const result = validateShellCommand(command);
+    const result = await validateWorkspaceShellCommand(command, root, shellCwd);
     return result.response === "approve"
       ? { decision: "allow" }
       : { decision: "deny", reason: result.feedback ?? "rescue rejected the shell command" };
@@ -345,9 +350,56 @@ async function findNearestExistingAncestor(targetDirectory: string): Promise<str
   }
 }
 
-export function validateShellCommand(
+type ShellVerdict = { response: "approve" } | { response: "reject"; feedback: string };
+
+/**
+ * Path-free shell policy. File operations (rm/mv/cp/mkdir) need the trusted
+ * root and the validated working directory, so this entry point rejects them;
+ * the hook uses `validateWorkspaceShellCommand`.
+ */
+export function validateShellCommand(command: string): ShellVerdict {
+  const parsed = parseShellPipeline(command);
+  if ("response" in parsed) return parsed;
+
+  for (let index = 0; index < parsed.stages.length; index += 1) {
+    const allowed = validateShellStage(parsed.stages[index]!, parsed.stages.length > 1);
+    if (!allowed.ok) {
+      return rejectShell(allowed.reason);
+    }
+  }
+
+  return { response: "approve" };
+}
+
+/**
+ * Shell policy with workspace context. `workspaceRoot` and `cwd` must both be
+ * realpaths; `cwd` is the validated Bash.cwd or the root. Every rm/mv/cp/mkdir
+ * operand passes the write containment rules before the command is approved.
+ */
+export async function validateWorkspaceShellCommand(
   command: string,
-): { response: "approve" } | { response: "reject"; feedback: string } {
+  workspaceRoot: string,
+  cwd: string,
+): Promise<ShellVerdict> {
+  const parsed = parseShellPipeline(command);
+  if ("response" in parsed) return parsed;
+
+  for (let index = 0; index < parsed.stages.length; index += 1) {
+    const stage = parsed.stages[index]!;
+    const allowed = FILE_OPERATION_FLAGS.has(stage[0]!)
+      ? await validateFileOperationStage(stage, workspaceRoot, cwd)
+      : validateShellStage(stage, parsed.stages.length > 1);
+    if (!allowed.ok) {
+      return rejectShell(allowed.reason);
+    }
+  }
+
+  return { response: "approve" };
+}
+
+function parseShellPipeline(
+  command: string,
+): { stages: string[][] } | { response: "reject"; feedback: string } {
   // shell-quote collapses raw newline/carriage-return separators into adjacent tokens, which
   // hides a second command from per-stage validation (`git status\nrm -rf /` parses as
   // ['git','status','rm','-rf','/']). Reject any line-break characters up front so every
@@ -381,15 +433,176 @@ export function validateShellCommand(
     return rejectShell(`Rescue rejects malformed shell pipelines: ${command}`);
   }
 
-  for (let index = 0; index < stages.length; index += 1) {
-    const stage = stages[index]!;
-    const allowed = validateShellStage(stage, index > 0 || stages.length > 1);
-    if (!allowed.ok) {
-      return rejectShell(allowed.reason);
+  return { stages };
+}
+
+// Exact flag tokens only: bundles other than rm's -rf/-fr are refused.
+const FILE_OPERATION_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["rm", new Set(["-f", "-r", "-R", "-rf", "-fr"])],
+  ["mkdir", new Set(["-p"])],
+  ["mv", new Set(["-f", "-n"])],
+  ["cp", new Set(["-R", "-r", "-p", "-f", "-n"])],
+]);
+// Positive operand alphabet. Everything a POSIX shell could expand (globs,
+// brackets, braces, tilde, `$`, `=`) is outside it, and the parser has already
+// removed quoting, so a token cannot tell whether bash would expand it.
+const FILE_OPERAND = /^[\p{L}\p{N}._+@%,:/ -]+$/u;
+
+type ResolvedOperand = { path: string; stats: Stats | null };
+
+/**
+ * rm/mv/cp/mkdir inside the trusted root. Operands get the write containment
+ * (inside the root after symlink resolution, never `.git` in any letter case,
+ * never a symlink as the final component); `..` segments are refused because
+ * the kernel resolves them physically where `path.resolve` would not.
+ */
+async function validateFileOperationStage(
+  tokens: string[],
+  workspaceRoot: string,
+  cwd: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const [command, ...args] = tokens as [string, ...string[]];
+  const allowedFlags = FILE_OPERATION_FLAGS.get(command)!;
+  const shown = tokens.join(" ");
+  const flags = new Set<string>();
+  const operands: string[] = [];
+  let endOfFlags = false;
+
+  for (const arg of args) {
+    if (!endOfFlags && arg === "--") {
+      endOfFlags = true;
+      continue;
     }
+    if (!endOfFlags && arg.startsWith("-")) {
+      if (!allowedFlags.has(arg)) {
+        return {
+          ok: false,
+          reason: `Rescue allows ${command} only with ${[...allowedFlags].join(", ")} and --: ${shown}`,
+        };
+      }
+      flags.add(arg);
+      continue;
+    }
+    if (!FILE_OPERAND.test(arg)) {
+      return {
+        ok: false,
+        reason: `Rescue rejects ${command} operands with glob, expansion or other special characters: ${shown}`,
+      };
+    }
+    if (arg.split("/").includes("..")) {
+      return { ok: false, reason: `Rescue rejects ${command} operands containing "..": ${shown}` };
+    }
+    operands.push(arg);
   }
 
-  return { response: "approve" };
+  const minimum = command === "mv" || command === "cp" ? 2 : 1;
+  if (operands.length < minimum) {
+    return { ok: false, reason: `Rescue requires ${command} to name at least ${minimum} path operand(s): ${shown}` };
+  }
+
+  try {
+    const resolved: ResolvedOperand[] = [];
+    for (const operand of operands) {
+      const outcome = await resolveFileOperand(workspaceRoot, cwd, operand);
+      if (outcome === "symlink") {
+        return { ok: false, reason: `Rescue rejects ${command} on a symlink operand: ${operand}` };
+      }
+      if (outcome === "reject") {
+        return {
+          ok: false,
+          reason: `Rescue rejects ${command} operands outside the workspace or inside .git: ${operand}`,
+        };
+      }
+      resolved.push(outcome);
+    }
+
+    const sources = command === "mv" || command === "cp" ? resolved.slice(0, -1) : resolved;
+    if (command !== "mkdir" && sources.some((operand) => operand.path === workspaceRoot)) {
+      return { ok: false, reason: `Rescue rejects ${command} on the workspace root itself: ${shown}` };
+    }
+
+    const recursive = flags.has("-r") || flags.has("-R") || flags.has("-rf") || flags.has("-fr");
+    if (command === "rm" && recursive) {
+      for (const operand of resolved) {
+        if (operand.stats?.isDirectory() && (await statIfExists(path.join(operand.path, ".git")))) {
+          return { ok: false, reason: `Rescue rejects rm -r of a directory that holds a .git entry: ${shown}` };
+        }
+      }
+    }
+
+    if (command === "mv" || command === "cp") {
+      const destination = resolved.at(-1)!;
+      // Recursive cp into an existing tree merges into it and writes through
+      // any symlink already there, so a directory copy must create its target.
+      if (
+        command === "cp" &&
+        recursive &&
+        destination.stats !== null &&
+        sources.some((source) => source.stats?.isDirectory())
+      ) {
+        return {
+          ok: false,
+          reason: `Rescue allows cp -R of a directory only to a destination that does not exist yet: ${shown}`,
+        };
+      }
+      if (destination.stats?.isDirectory()) {
+        for (const source of sources) {
+          const target = path.join(destination.path, path.basename(source.path));
+          const targetStats = await statIfExists(target);
+          if (targetStats?.isSymbolicLink()) {
+            return { ok: false, reason: `Rescue rejects ${command} onto a symlink: ${target}` };
+          }
+          if (!isWithinWorkspaceOutsideAnyGit(workspaceRoot, target)) {
+            return { ok: false, reason: `Rescue rejects ${command} into .git: ${target}` };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    return { ok: false, reason: `Rescue cannot inspect ${command} operands: ${(err as Error).message}` };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Resolve one operand the way the kernel will (no `..` reaches here). An
+ * existing target is canonicalised through realpath so letter case matches the
+ * directory entry; a missing one is placed under its nearest existing
+ * ancestor's realpath, and a dangling symlink on the way is refused.
+ */
+async function resolveFileOperand(
+  workspaceRoot: string,
+  cwd: string,
+  operand: string,
+): Promise<ResolvedOperand | "symlink" | "reject"> {
+  const absolute = path.resolve(cwd, operand);
+  const stats = await statIfExists(absolute);
+  if (stats?.isSymbolicLink()) return "symlink";
+
+  let candidate: string;
+  if (stats !== null) {
+    candidate = await realpath(absolute);
+  } else {
+    let ancestor = path.dirname(absolute);
+    let ancestorReal: string | null = null;
+    while (ancestorReal === null) {
+      try {
+        ancestorReal = await realpath(ancestor);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        if ((await statIfExists(ancestor)) !== null) return "reject";
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) return "reject";
+        ancestor = parent;
+      }
+    }
+    candidate = path.join(ancestorReal, path.relative(ancestor, absolute));
+  }
+
+  return isWithinWorkspaceOutsideAnyGit(workspaceRoot, candidate)
+    ? { path: candidate, stats }
+    : "reject";
 }
 
 export function validateShellStage(
@@ -889,6 +1102,18 @@ function isWithin(root: string, target: string): boolean {
 
 function isWithinWorkspaceOutsideGit(root: string, target: string): boolean {
   return isWithin(root, target) && !path.relative(root, target).split(path.sep).includes(".git");
+}
+
+// Case-insensitive, trailing-dot/space tolerant: case-insensitive and Windows
+// filesystems open `.GIT` or `.git.` as the repository's `.git`.
+function isWithinWorkspaceOutsideAnyGit(root: string, target: string): boolean {
+  return (
+    isWithin(root, target) &&
+    !path
+      .relative(root, target)
+      .split(path.sep)
+      .some((segment) => segment.replace(/[. ]+$/, "").toLowerCase() === ".git")
+  );
 }
 
 function rejectShell(feedback: string): { response: "reject"; feedback: string } {
