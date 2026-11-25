@@ -95,17 +95,9 @@ function commandText(result) {
         .join("\n");
 }
 export function apply(ctx, config) {
-    const resolved = resolveConfig(config);
     const spec = {
         companionPath: COMPANION_PATH,
-        dataRoot: resolved.dataRoot,
-        env: resolved.env,
-        disposeGraceMs: resolved.disposeGraceMs,
-        maxOutputBytes: resolved.maxOutputBytes,
-        model: resolved.model,
-        thinkingEffort: resolved.thinkingEffort,
-        budget: resolved.budget,
-        reviewBase: resolved.reviewBase,
+        ...resolveConfig(config),
         spawn: (spawnSpec) => ctx.subprocess.spawn(spawnSpec),
     };
     for (const operation of DSH_COMPANION_OPERATIONS) {

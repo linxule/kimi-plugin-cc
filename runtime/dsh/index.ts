@@ -61,16 +61,7 @@ export const Config: z<Config> = z.object({
   reviewBase: z.string().min(1),
 });
 
-interface ResolvedConfig {
-  dataRoot: string;
-  env: Record<string, string>;
-  disposeGraceMs: number;
-  maxOutputBytes: number;
-  model?: string;
-  thinkingEffort?: string;
-  budget?: string;
-  reviewBase?: string;
-}
+type ResolvedConfig = Omit<DshCompanionSpec, "companionPath" | "spawn">;
 
 export function defaultDshDataRoot(env: NodeJS.ProcessEnv = process.env): string {
   const explicit = env.KIMI_PLUGIN_CC_DATA;
@@ -141,17 +132,9 @@ function commandText(result: Awaited<ReturnType<typeof runCompanionCommand>>): s
 }
 
 export function apply(ctx: Context, config: Config): void {
-  const resolved = resolveConfig(config);
   const spec: DshCompanionSpec = {
     companionPath: COMPANION_PATH,
-    dataRoot: resolved.dataRoot,
-    env: resolved.env,
-    disposeGraceMs: resolved.disposeGraceMs,
-    maxOutputBytes: resolved.maxOutputBytes,
-    model: resolved.model,
-    thinkingEffort: resolved.thinkingEffort,
-    budget: resolved.budget,
-    reviewBase: resolved.reviewBase,
+    ...resolveConfig(config),
     spawn: (spawnSpec) => ctx.subprocess.spawn(spawnSpec),
   };
 
