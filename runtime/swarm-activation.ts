@@ -20,6 +20,7 @@ import { kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
 import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
+import { sleep } from "./util.js";
 import {
   collectDescendantIdentities,
   collectProcessGroupsIdentities,
@@ -1278,7 +1279,7 @@ function startDescendantTracking(owned: OwnedWebChild): void {
     while (!owned.trackingStopped && !owned.exited) {
       await refreshOwnedDescendants(owned);
       if (owned.trackingStopped || owned.exited) break;
-      await new Promise<void>((resolve) => setTimeout(resolve, DESCENDANT_TRACK_INTERVAL_MS));
+      await sleep(DESCENDANT_TRACK_INTERVAL_MS);
     }
   })();
 }

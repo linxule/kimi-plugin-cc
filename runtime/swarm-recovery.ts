@@ -1,5 +1,6 @@
 import { RuntimeError } from "./errors.js";
 import type { JobStore } from "./job-store.js";
+import { sleep } from "./util.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, type ProcessIdentity } from "./process-tree.js";
 
 export type SwarmRecoveryEvent =
@@ -180,7 +181,7 @@ export async function recoverLaunch(launch: RecoveryLaunch, persist: () => void,
     do {
       signal?.throwIfAborted();
       if ((await inspect()).length === 0) { launch.quiescent = true; persist(); return; }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await sleep(25);
     } while (Date.now() < deadline);
   }
   throw recoveryError("Recorded processes did not become quiescent; recovery remains pending.");

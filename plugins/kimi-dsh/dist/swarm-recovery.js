@@ -1,4 +1,5 @@
 import { RuntimeError } from "./errors.js";
+import { sleep } from "./util.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities } from "./process-tree.js";
 export function recordRecoveryEvent(store, record, event) {
     record.complete = false;
@@ -158,7 +159,7 @@ export async function recoverLaunch(launch, persist, signal) {
                 persist();
                 return;
             }
-            await new Promise((resolve) => setTimeout(resolve, 25));
+            await sleep(25);
         } while (Date.now() < deadline);
     }
     throw recoveryError("Recorded processes did not become quiescent; recovery remains pending.");

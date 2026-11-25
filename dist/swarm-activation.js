@@ -12,6 +12,7 @@ import { kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
 import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
+import { sleep } from "./util.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
 // These exact activation entries support candidate integration; production scope is per operation.
 const PREACTIVATION_VERSIONS = kimiVersionsWith("web-preactivation");
@@ -931,7 +932,7 @@ function startDescendantTracking(owned) {
             await refreshOwnedDescendants(owned);
             if (owned.trackingStopped || owned.exited)
                 break;
-            await new Promise((resolve) => setTimeout(resolve, DESCENDANT_TRACK_INTERVAL_MS));
+            await sleep(DESCENDANT_TRACK_INTERVAL_MS);
         }
     })();
 }
