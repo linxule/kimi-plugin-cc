@@ -8,6 +8,7 @@ import {
   resolveKimiCliCommand,
   selectKimiBinary,
 } from "../../runtime/kimi-command.js";
+import { validateKimiHookSetForEnvironment } from "../../runtime/hooks/config-safety.js";
 import { prepareKimiExecutionPlan } from "../../runtime/kimi-engine.js";
 
 const roots: string[] = [];
@@ -177,5 +178,33 @@ describe.skipIf(process.platform === "win32")("execution plan over the plugin-ow
     await expect(
       prepareKimiExecutionPlan({ operationKind: "rescue", cwd: dataRoot, env: planEnv(dataRoot) }),
     ).rejects.toThrow(/9\.9\.9/);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("hook-schema version check over the plugin-owned binary", () => {
+  const contents = '[[hooks]]\nevent = "Interrupt"\ncommand = "foreign-hook"\n';
+
+  test("probes the plugin-owned binary jobs will run, not PATH", async () => {
+    const dataRoot = await makeDataRoot();
+    await writePin(dataRoot, "2.7.3", "0.2.0");
+    const result = await validateKimiHookSetForEnvironment(contents, envFor(dataRoot));
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("installed version is 0.2");
+  });
+
+  test("accepts the event when the plugin-owned binary is new enough", async () => {
+    const dataRoot = await makeDataRoot();
+    await writePin(dataRoot, "2.7.3");
+    expect((await validateKimiHookSetForEnvironment(contents, envFor(dataRoot))).valid).toBe(true);
+  });
+
+  test("the override still wins for the hook-schema probe", async () => {
+    const dataRoot = await makeDataRoot();
+    await writePin(dataRoot, "2.7.3");
+    const old = path.join(dataRoot, "old-kimi");
+    await writeFile(old, "#!/bin/sh\necho 0.2.0\n", "utf8");
+    await chmod(old, 0o755);
+    const result = await validateKimiHookSetForEnvironment(contents, envFor(dataRoot, { KIMI_PLUGIN_CC_KIMI_BIN: old }));
+    expect(result.valid).toBe(false);
   });
 });

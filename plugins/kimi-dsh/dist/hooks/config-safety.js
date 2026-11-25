@@ -3,6 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { RuntimeError } from "../errors.js";
+import { selectKimiBinary } from "../kimi-command.js";
 import { kimiReleaseHas } from "../kimi-releases.js";
 import { probeKimiVersion } from "../kimi-version-probe.js";
 import { sleep, tomlErrorLocation } from "../util.js";
@@ -490,7 +491,7 @@ export async function validateKimiHookSetForEnvironment(contents, env) {
         return inspection.validation;
     }
     const probe = await probeKimiVersion({
-        kimiBin: env.KIMI_PLUGIN_CC_KIMI_BIN || undefined,
+        kimiBin: selectKimiBinary(env).command,
         env,
     });
     const first = inspection.versionSensitiveEvents[0];
