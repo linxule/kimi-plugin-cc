@@ -440,6 +440,47 @@ describe("assertNativeV2Preflight", () => {
     });
   });
 
+  test("G4: a fresh non-swarm launch of a certified local-environment row ignores environments.default", async () => {
+    await withHome("assert-remote-default-g4", async (home) => {
+      await writeConfig(home, '[environments]\ndefault = "build"\n[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
+      const certified = (operationKind: string, kimiVersion: string | null = "2.7.3") =>
+        ({ operationKind, kimiVersion, certification: "certified" as const });
+      for (const operationKind of ["ask", "review", "challenge", "review_gate", "rescue", "pursue"]) {
+        for (const version of ["2.5.0", "2.6.0", "2.7.3"]) {
+          await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified(operationKind, version) }))
+            .resolves.toEqual({ warnings: [] });
+        }
+      }
+      const refused = { code: "CLI_V2_ENVIRONMENT_UNSAFE", details: { refusal_kind: "v2-environment-configured" } };
+      // Swarm (web-created sessions), rows without the local flag, uncertified and
+      // test-bypass plans, and unlabeled callers keep the refusal.
+      for (const release of [
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"), certified("ask", "2.8.0"),
+        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
+        undefined,
+      ]) {
+        await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release })).rejects.toMatchObject(refused);
+      }
+      // A resume keeps the refusal on a certified row too.
+      await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: home }),
+      ]);
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", expectedExecutionRoot: home, release: certified("ask"),
+      })).rejects.toMatchObject(refused);
+    });
+  });
+
+  test("G4: a non-table [environments] still refuses a fresh certified launch", async () => {
+    await withHome("assert-remote-nontable-g4", async (home) => {
+      await writeConfig(home, 'environments = "build"\n');
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, release: { operationKind: "ask", kimiVersion: "2.7.3", certification: "certified" },
+      })).rejects.toMatchObject({ code: "CLI_V2_ENVIRONMENT_UNSAFE", details: { refusal_kind: "v2-environment-configured" } });
+    });
+  });
+
   test("allows unused remote declarations without a default", async () => {
     await withHome("assert-unused-remote-declaration", async (home) => {
       await writeConfig(home, '[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');

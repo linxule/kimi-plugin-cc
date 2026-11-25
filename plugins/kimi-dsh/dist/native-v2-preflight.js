@@ -34,6 +34,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { RuntimeError } from "./errors.js";
 import { kimiCodeConfigPath } from "./kimi-home.js";
+import { kimiCertifiedReleaseHas } from "./kimi-releases.js";
 import { tomlErrorLocation } from "./util.js";
 import { parse as parseToml } from "./vendor/smol-toml/parse.js";
 /** `<kimiHome>/config.toml` is small hand-edited config, never a data file. */
@@ -160,7 +161,14 @@ export async function inspectPlanModeConfig(kimiHome) {
         reason: `\`${offending.join("`, `")}\` (upstream setting \`default_plan_mode\`) is set in ${configPath} and is not \`false\`.`,
     };
 }
-export async function inspectEnvironmentConfig(kimiHome) {
+/**
+ * `allowDefaultEnvironment`: a fresh print on a certified row that passes
+ * `--environment local` never reads `environments.default` upstream
+ * (sessionManagerService.openCreation skips declarations for the local id at
+ * every local-environment row), so that one key stops refusing. A non-table
+ * section still refuses.
+ */
+export async function inspectEnvironmentConfig(kimiHome, options = {}) {
     const parsed = await readParsedConfig(kimiHome);
     if (parsed.kind === "unreadable") {
         return { kind: "refuse", refusalKind: "v2-config-unreadable", reason: parsed.reason };
@@ -174,7 +182,7 @@ export async function inspectEnvironmentConfig(kimiHome) {
                 reason: "The [environments] section is not a table, so the execution environment cannot be verified as local.",
             };
         }
-        if (section["default"] !== undefined) {
+        if (options.allowDefaultEnvironment !== true && section["default"] !== undefined) {
             return {
                 kind: "refuse",
                 refusalKind: "v2-environment-configured",
@@ -443,6 +451,20 @@ export async function scanSessionJournalsForPlan(kimiHome, sessionId, expectedEx
     }
     return { kind: "clean", journals: journalPaths };
 }
+/**
+ * A per-release config relaxation applies only to a fresh, non-swarm launch
+ * of an exactly certified row that has the capability. Web-created swarm
+ * sessions and every resume keep the strict check.
+ */
+function freshCertifiedLaunchHas(options, capability) {
+    const release = options.release;
+    return options.resumeSessionId === undefined &&
+        release !== undefined &&
+        release.certification === "certified" &&
+        release.operationKind !== "swarm" &&
+        release.operationKind !== "swarm-write" &&
+        kimiCertifiedReleaseHas(release.kimiVersion, capability);
+}
 export async function assertNativeV2Preflight(options) {
     const warnings = [];
     const stage = options.stage ?? "native-v2.preflight";
@@ -459,7 +481,9 @@ export async function assertNativeV2Preflight(options) {
             details: { refusal_kind: planMode.refusalKind, retryable_after_setup: false },
         });
     }
-    const environment = await inspectEnvironmentConfig(options.kimiHome);
+    const environment = await inspectEnvironmentConfig(options.kimiHome, {
+        allowDefaultEnvironment: freshCertifiedLaunchHas(options, "local-environment"),
+    });
     if (environment.kind === "refuse") {
         const code = environment.refusalKind === "v2-environment-configured"
             ? "CLI_V2_ENVIRONMENT_UNSAFE"

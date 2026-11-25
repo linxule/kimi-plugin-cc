@@ -255,6 +255,34 @@ describe("kimi execution plan", () => {
     }
   });
 
+  test("G4: fresh certified non-swarm plans accept environments.default; swarm and uncertified still refuse", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-g4");
+    const kimiHome = path.join(cwd, "kimi-home");
+    await mkdir(kimiHome, { recursive: true });
+    await writeFile(path.join(kimiHome, "config.toml"), '[environments]\ndefault = "build"\n');
+    const env = {
+      ...process.env,
+      KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
+    };
+    const stderr = { write: () => true } as unknown as NodeJS.WritableStream;
+    try {
+      for (const operationKind of ["ask", "rescue"] as const) {
+        await expect(prepareKimiExecutionPlan({ operationKind, cwd, env, stderr }))
+          .resolves.toMatchObject({ certification: "certified", kimiVersion: "2.7.3" });
+      }
+      for (const [operationKind, version] of [["swarm", "2.7.3"], ["ask", "2.4.1"], ["ask", "2.8.0"]] as const) {
+        await expect(prepareKimiExecutionPlan({
+          operationKind, cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version }, stderr,
+        })).rejects.toMatchObject({ code: "CLI_V2_ENVIRONMENT_UNSAFE" });
+      }
+    } finally {
+      await cleanupTestPath(cwd);
+    }
+  });
+
   test("selectIntendedEngine routes certified versions and every major-2 release to native-v2", () => {
     expect(selectIntendedEngine("review", { version: "0.42.0" })).toBe("native-v2");
     expect(selectIntendedEngine("swarm-write", { version: "v0.42.0" })).toBe("native-v2");

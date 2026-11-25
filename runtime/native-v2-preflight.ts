@@ -36,6 +36,7 @@ import { createInterface } from "node:readline";
 
 import { RuntimeError } from "./errors.js";
 import { kimiCodeConfigPath } from "./kimi-home.js";
+import { kimiCertifiedReleaseHas, type KimiReleaseCapability } from "./kimi-releases.js";
 import { tomlErrorLocation } from "./util.js";
 import { parse as parseToml } from "./vendor/smol-toml/parse.js";
 
@@ -190,8 +191,16 @@ export type EnvironmentConfigInspection =
       readonly reason: string;
     };
 
+/**
+ * `allowDefaultEnvironment`: a fresh print on a certified row that passes
+ * `--environment local` never reads `environments.default` upstream
+ * (sessionManagerService.openCreation skips declarations for the local id at
+ * every local-environment row), so that one key stops refusing. A non-table
+ * section still refuses.
+ */
 export async function inspectEnvironmentConfig(
   kimiHome: string,
+  options: { readonly allowDefaultEnvironment?: boolean } = {},
 ): Promise<EnvironmentConfigInspection> {
   const parsed = await readParsedConfig(kimiHome);
   if (parsed.kind === "unreadable") {
@@ -206,7 +215,7 @@ export async function inspectEnvironmentConfig(
         reason: "The [environments] section is not a table, so the execution environment cannot be verified as local.",
       };
     }
-    if ((section as Record<string, unknown>)["default"] !== undefined) {
+    if (options.allowDefaultEnvironment !== true && (section as Record<string, unknown>)["default"] !== undefined) {
       return {
         kind: "refuse",
         refusalKind: "v2-environment-configured",
@@ -564,6 +573,24 @@ export interface NativeV2PreflightResult {
   readonly warnings: readonly string[];
 }
 
+/**
+ * A per-release config relaxation applies only to a fresh, non-swarm launch
+ * of an exactly certified row that has the capability. Web-created swarm
+ * sessions and every resume keep the strict check.
+ */
+function freshCertifiedLaunchHas(
+  options: NativeV2PreflightOptions,
+  capability: KimiReleaseCapability,
+): boolean {
+  const release = options.release;
+  return options.resumeSessionId === undefined &&
+    release !== undefined &&
+    release.certification === "certified" &&
+    release.operationKind !== "swarm" &&
+    release.operationKind !== "swarm-write" &&
+    kimiCertifiedReleaseHas(release.kimiVersion, capability);
+}
+
 export async function assertNativeV2Preflight(
   options: NativeV2PreflightOptions,
 ): Promise<NativeV2PreflightResult> {
@@ -586,7 +613,9 @@ export async function assertNativeV2Preflight(
     });
   }
 
-  const environment = await inspectEnvironmentConfig(options.kimiHome);
+  const environment = await inspectEnvironmentConfig(options.kimiHome, {
+    allowDefaultEnvironment: freshCertifiedLaunchHas(options, "local-environment"),
+  });
   if (environment.kind === "refuse") {
     const code = environment.refusalKind === "v2-environment-configured"
       ? "CLI_V2_ENVIRONMENT_UNSAFE"
