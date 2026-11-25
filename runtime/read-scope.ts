@@ -339,6 +339,7 @@ const NON_GLOBAL_IPV4: ReadonlyArray<readonly [number, number]> = [
   [0xac100000, 12], // private
   [0xc0000000, 24], // IETF protocol assignments
   [0xc0000200, 24], // documentation
+  [0xc0586300, 24], // deprecated 6to4 relay anycast
   [0xc0a80000, 16], // private
   [0xc6120000, 15], // benchmarking
   [0xc6336400, 24], // documentation
@@ -433,5 +434,6 @@ function isGlobalIpv6(h: readonly number[]): boolean {
   if (h[0] === 0x2001 && h[1]! < 0x0200) return false; // 2001::/23 IETF assignments, Teredo 2001::/32
   if (h[0] === 0x2001 && h[1] === 0x0db8) return false; // documentation
   if (h[0] === 0x2002) return false; // 6to4 embeds an IPv4 address
+  if (h[0] === 0x3fff && h[1]! < 0x1000) return false; // documentation 3fff::/20
   return true;
 }

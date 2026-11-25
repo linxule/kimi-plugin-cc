@@ -316,6 +316,7 @@ const NON_GLOBAL_IPV4 = [
     [0xac100000, 12], // private
     [0xc0000000, 24], // IETF protocol assignments
     [0xc0000200, 24], // documentation
+    [0xc0586300, 24], // deprecated 6to4 relay anycast
     [0xc0a80000, 16], // private
     [0xc6120000, 15], // benchmarking
     [0xc6336400, 24], // documentation
@@ -422,5 +423,7 @@ function isGlobalIpv6(h) {
         return false; // documentation
     if (h[0] === 0x2002)
         return false; // 6to4 embeds an IPv4 address
+    if (h[0] === 0x3fff && h[1] < 0x1000)
+        return false; // documentation 3fff::/20
     return true;
 }

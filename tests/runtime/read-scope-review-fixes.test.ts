@@ -127,3 +127,25 @@ describe("S-3 FetchURL allows only global unicast literals", () => {
     expect(isAllowedFetchUrl(url)).toBe(true);
   });
 });
+
+describe("S2-1 FetchURL denies the remaining non-global special-purpose blocks", () => {
+  test.each([
+    "http://192.88.99.0/", "http://192.88.99.255/", // deprecated 6to4 relay anycast
+    "http://[3fff::]/", "http://[3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff]/", // documentation, RFC 9637
+  ])("denies %s", (url) => {
+    expect(isAllowedFetchUrl(url)).toBe(false);
+  });
+
+  test.each([
+    "http://192.88.98.255/", "http://192.88.100.0/", "http://[3fff:1000::]/", "http://[3ffe:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/",
+  ])("allows the neighbouring address %s", (url) => {
+    expect(isAllowedFetchUrl(url)).toBe(true);
+  });
+
+  test.each(["http://[5f00::1]/", "http://[64:ff9b:1::808:808]/", "http://[100::1]/", "http://[100:0:0:1::1]/"])(
+    "the 2000::/3 rule already denies %s",
+    (url) => {
+      expect(isAllowedFetchUrl(url)).toBe(false);
+    },
+  );
+});
