@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { isRecord } from "../util.js";
 
 export interface ReviewGateIssue {
   title: string;
@@ -31,7 +32,7 @@ export function parseReviewGateOutput(text: string): ReviewGateOutput {
     );
   }
 
-  if (!isObject(parsed)) {
+  if (!isRecord(parsed)) {
     throw new RuntimeError(
       "REVIEW_GATE_PARSE_FAILED",
       "Review gate output must be a JSON object.",
@@ -63,7 +64,7 @@ export function parseReviewGateOutput(text: string): ReviewGateOutput {
 }
 
 function normalizeIssue(issue: unknown, index: number): ReviewGateIssue {
-  if (!isObject(issue)) {
+  if (!isRecord(issue)) {
     throw new RuntimeError(
       "REVIEW_GATE_PARSE_FAILED",
       `Review gate issue ${index + 1} must be an object.`,
@@ -84,8 +85,4 @@ function normalizeIssue(issue: unknown, index: number): ReviewGateIssue {
   }
 
   return issue as unknown as ReviewGateIssue;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

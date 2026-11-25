@@ -33,6 +33,7 @@ import {
 } from "../hooks/install.js";
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { shorten } from "../util.js";
 
 const ASK_SUMMARY_MAX = 120;
 const ASK_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
@@ -449,13 +450,4 @@ function buildAskPrompt(question: string | undefined, reusedSession: boolean): s
 function askPromptSubject(prompt: string): string {
   if (prompt.startsWith(ASK_PROMPT_PREFIX)) return prompt.slice(ASK_PROMPT_PREFIX.length);
   return prompt === ASK_RESUME_PROMPT ? ASK_CONTINUE_TASK : prompt;
-}
-
-function shorten(text: string, max: number): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= max) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }

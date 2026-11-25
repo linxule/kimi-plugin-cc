@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import { RuntimeError } from "./errors.js";
 import { formatBudgetDuration, renderTerminalJobArtifact, writeArtifact } from "./render.js";
-export function digestPrompt(prompt) {
-    return createHash("sha256").update(prompt).digest("hex");
-}
+import { sleep } from "./util.js";
+export { sha256 as digestPrompt } from "./git.js";
 export function normalizeJobError(error) {
     if (error instanceof RuntimeError) {
         const normalized = {
@@ -209,9 +207,4 @@ export async function waitForTerminalJob(storeFactory, jobId, timeoutMs = 60_000
         await sleep(200);
     }
     throw new RuntimeError("JOB_WAIT_TIMEOUT", `Timed out after ${timeoutMs}ms while waiting for job ${jobId} to finish. The worker may still be running; use /kimi:status ${jobId} to check progress or /kimi:result ${jobId} once it completes.`, "jobs.wait");
-}
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
 }

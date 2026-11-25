@@ -7,6 +7,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import { revalidateProcessIdentities } from "../process-tree.js";
 import { getManagedCommandConfig } from "./registry.js";
+import { sleep } from "../util.js";
 export async function runCancel(argv, context) {
     const parsed = parseJobLookupArgs(argv);
     const paths = resolvePluginPaths(context.env);
@@ -164,11 +165,6 @@ function signalJobProcesses(job, signal, include = { companion: true, kimi: true
         }
     }
 }
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
 async function waitForCancellation(paths, jobId) {
     const deadline = Date.now() + 4_000;
     while (Date.now() < deadline) {
@@ -185,9 +181,7 @@ async function waitForCancellation(paths, jobId) {
         finally {
             store.close();
         }
-        await new Promise((resolve) => {
-            setTimeout(resolve, 200);
-        });
+        await sleep(200);
     }
     return null;
 }

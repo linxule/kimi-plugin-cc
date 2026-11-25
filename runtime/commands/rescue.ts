@@ -33,6 +33,7 @@ import {
 } from "../hooks/install.js";
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { shorten } from "../util.js";
 
 // "Continue working on the bug" verbs that auto-attach to the latest
 // rescue session. Documented UX trap: a prompt matching this pattern
@@ -475,13 +476,4 @@ function ensureSessionIsNotRunning(job: JobRecord): void {
       "rescue.resume",
     );
   }
-}
-
-function shorten(text: string, max: number): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= max) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }

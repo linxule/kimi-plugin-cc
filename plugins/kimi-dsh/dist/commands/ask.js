@@ -19,6 +19,7 @@ import { startBackgroundJob } from "../background-spawn.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { shorten } from "../util.js";
 const ASK_SUMMARY_MAX = 120;
 const ASK_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 const ASK_PROMPT_CONTRACT = [
@@ -324,11 +325,4 @@ function askPromptSubject(prompt) {
     if (prompt.startsWith(ASK_PROMPT_PREFIX))
         return prompt.slice(ASK_PROMPT_PREFIX.length);
     return prompt === ASK_RESUME_PROMPT ? ASK_CONTINUE_TASK : prompt;
-}
-function shorten(text, max) {
-    const normalized = text.replace(/\s+/g, " ").trim();
-    if (normalized.length <= max) {
-        return normalized;
-    }
-    return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }

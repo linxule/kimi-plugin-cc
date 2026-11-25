@@ -9,6 +9,7 @@ import { parseJobLookupArgs } from "../parsing.js";
 import { revalidateProcessIdentities, type ProcessIdentity } from "../process-tree.js";
 import { getManagedCommandConfig } from "./registry.js";
 import type { CommandContext } from "../types.js";
+import { sleep } from "../util.js";
 
 export async function runCancel(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseJobLookupArgs(argv);
@@ -255,12 +256,6 @@ function signalJobProcesses(
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 async function waitForCancellation(paths: ReturnType<typeof resolvePluginPaths>, jobId: string) {
   const deadline = Date.now() + 4_000;
 
@@ -278,9 +273,7 @@ async function waitForCancellation(paths: ReturnType<typeof resolvePluginPaths>,
       store.close();
     }
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 200);
-    });
+    await sleep(200);
   }
 
   return null;

@@ -19,6 +19,7 @@ import { startBackgroundJob } from "../background-spawn.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { shorten } from "../util.js";
 // "Continue working on the bug" verbs that auto-attach to the latest
 // rescue session. Documented UX trap: a prompt matching this pattern
 // will resume the most recent rescue session regardless of whether
@@ -334,11 +335,4 @@ function ensureSessionIsNotRunning(job) {
     if (job.status === "running") {
         throw new RuntimeError("RESCUE_ALREADY_RUNNING", `Rescue session ${job.kimi_session_id ?? "<unknown>"} is already active under job ${job.job_id}.`, "rescue.resume");
     }
-}
-function shorten(text, max) {
-    const normalized = text.replace(/\s+/g, " ").trim();
-    if (normalized.length <= max) {
-        return normalized;
-    }
-    return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }

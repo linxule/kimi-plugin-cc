@@ -1,14 +1,11 @@
-import { createHash } from "node:crypto";
-
 import { RuntimeError } from "./errors.js";
 import type { JobRecord, JobStore } from "./job-store.js";
 import type { PluginPaths } from "./paths.js";
 import { formatBudgetDuration, type PartialJobOutput, renderTerminalJobArtifact, writeArtifact } from "./render.js";
 import type { JobError } from "./types.js";
+import { sleep } from "./util.js";
 
-export function digestPrompt(prompt: string): string {
-  return createHash("sha256").update(prompt).digest("hex");
-}
+export { sha256 as digestPrompt } from "./git.js";
 
 export function normalizeJobError(error: unknown): JobError {
   if (error instanceof RuntimeError) {
@@ -282,10 +279,4 @@ export async function waitForTerminalJob(
     `Timed out after ${timeoutMs}ms while waiting for job ${jobId} to finish. The worker may still be running; use /kimi:status ${jobId} to check progress or /kimi:result ${jobId} once it completes.`,
     "jobs.wait",
   );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

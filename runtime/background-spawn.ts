@@ -10,6 +10,7 @@ import { JobStore, type JobRecord } from "./job-store.js";
 import { readArtifact } from "./render.js";
 import { type PluginPaths } from "./paths.js";
 import type { CommandContext } from "./types.js";
+import { sleep } from "./util.js";
 
 // Resolves to runtime/companion.ts in dev (via tsx) and dist/companion.js in production (compiled
 // with tsc to the same relative layout). The extension is derived from the running module so the
@@ -269,12 +270,6 @@ async function appendStuckJobTelemetry(
       `[kimi-plugin-cc] failed to append stuck job telemetry at ${stuckPath}: ${formatError(appendError)}\n`,
     );
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 /**

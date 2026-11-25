@@ -31,6 +31,7 @@ import {
 } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { shorten } from "../util.js";
 
 // /kimi:pursue — experimental autonomous goal mode (kimi-code 0.8.0+).
 // Runtime-foreground-only, with a mandatory finite wall-clock budget. No resume:
@@ -397,12 +398,4 @@ async function executePursueJob(
     handlers.dispose();
     store.close();
   }
-}
-
-function shorten(text: string, max: number): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= max) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }

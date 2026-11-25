@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { isRecord } from "../util.js";
 const ALLOWED_DECISIONS = new Set(["ALLOW", "BLOCK"]);
 const ALLOWED_SEVERITIES = new Set(["low", "medium", "high"]);
 const ALLOWED_CONFIDENCE = new Set(["low", "medium", "high"]);
@@ -10,7 +11,7 @@ export function parseReviewGateOutput(text) {
     catch (error) {
         throw new RuntimeError("REVIEW_GATE_PARSE_FAILED", `Review gate output is not valid JSON: ${error.message}`, "review_gate.parse", { cause: error });
     }
-    if (!isObject(parsed)) {
+    if (!isRecord(parsed)) {
         throw new RuntimeError("REVIEW_GATE_PARSE_FAILED", "Review gate output must be a JSON object.", "review_gate.parse");
     }
     const { decision, confidence, summary, issues } = parsed;
@@ -28,7 +29,7 @@ export function parseReviewGateOutput(text) {
     };
 }
 function normalizeIssue(issue, index) {
-    if (!isObject(issue)) {
+    if (!isRecord(issue)) {
         throw new RuntimeError("REVIEW_GATE_PARSE_FAILED", `Review gate issue ${index + 1} must be an object.`, "review_gate.parse");
     }
     if (typeof issue.title !== "string" ||
@@ -37,7 +38,4 @@ function normalizeIssue(issue, index) {
         throw new RuntimeError("REVIEW_GATE_PARSE_FAILED", `Review gate issue ${index + 1} is missing a required field.`, "review_gate.parse");
     }
     return issue;
-}
-function isObject(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

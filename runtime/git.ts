@@ -162,7 +162,7 @@ function truncateDiff(diffText: string): string {
   return `${diffText.slice(0, MAX_DIFF_CHARS)}\n\n[diff truncated by companion after ${MAX_DIFF_CHARS} characters]`;
 }
 
-function sha256(value: string): string {
+export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 

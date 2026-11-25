@@ -7,6 +7,7 @@ import { preferStableNodePath } from "./hooks/install-paths.js";
 import { markJobFailed, waitForTerminalJob } from "./jobs.js";
 import { JobStore } from "./job-store.js";
 import { readArtifact } from "./render.js";
+import { sleep } from "./util.js";
 // Resolves to runtime/companion.ts in dev (via tsx) and dist/companion.js in production (compiled
 // with tsc to the same relative layout). The extension is derived from the running module so the
 // child-process spawn in startBackgroundJob targets the right entrypoint in both modes.
@@ -183,11 +184,6 @@ async function appendStuckJobTelemetry(paths, entry) {
     catch (appendError) {
         process.stderr.write(`[kimi-plugin-cc] failed to append stuck job telemetry at ${stuckPath}: ${formatError(appendError)}\n`);
     }
-}
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
 }
 /**
  * Builds a descriptive message for the rare edge case where `waitForTerminalJob`
