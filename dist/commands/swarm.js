@@ -17,6 +17,7 @@ import { KIMI_SWARM_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseSwarmArgs } from "../parsing.js";
+import { parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
@@ -209,12 +210,14 @@ export async function runSwarm(argv, context) {
     if (!objective) {
         throw new RuntimeError("INVALID_ARGS", "/kimi:swarm requires an objective. Usage: /kimi:swarm [--write] [--budget 30m] [--cap N] [--max-concurrency N] [-m model] <objective>", "swarm.parse");
     }
-    return parsed.write
-        ? runWriteSwarm(parsed, objective, context)
-        : runReadSwarm(parsed, objective, context);
+    if (parsed.write)
+        return runWriteSwarm(parsed, objective, context);
+    const readScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
+        : await resolveReadScope(parsed.readRoots, parsed.network, "swarm.parse");
+    return runReadSwarm(parsed, objective, context, readScope);
 }
 /** Read-only swarm (default). */
-async function runReadSwarm(parsed, objective, context) {
+async function runReadSwarm(parsed, objective, context, readScope) {
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
@@ -235,7 +238,7 @@ async function runReadSwarm(parsed, objective, context) {
         const job = await createSwarmJob(store, paths, {
             jobId, repoId: repoIdentity.repoId, commandType: "review", label: "swarm",
             agentProfile: SWARM_AGENT_PROFILE, failureSummary: "Swarm failed.",
-            parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd,
+            parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd, readScope,
         });
         const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, maxConcurrency, context, undefined, await realpath(context.cwd));
         if (!completed.final_output_path) {
@@ -353,6 +356,7 @@ async function createSwarmJob(store, paths, spec) {
         model: parsed.model ?? null,
         thinking: null,
         thinking_effort: parsed.thinkingEffort ?? null,
+        read_scope: serializeReadScope(spec.readScope),
         background: false,
         budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
         budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -518,6 +522,8 @@ writeMode, executionCwd) {
             commandLabel,
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
+            // Read-only swarm only: write mode rejects scope flags at parse time.
+            readScope: writeMode ? undefined : parseJobReadScope(job.read_scope),
             swarmMaxConcurrency: maxConcurrency,
             trustedWorkspaceRoot: executionCwd ?? writeMode?.workspaceRoot,
         };

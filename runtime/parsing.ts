@@ -1,4 +1,5 @@
 import { RuntimeError } from "./errors.js";
+import { SCOPE_FLAGS_WRITE_MESSAGE } from "./read-scope.js";
 
 /**
  * Unknown flag-shaped tokens hard-fail instead of being absorbed into prose.
@@ -15,11 +16,12 @@ function looksLikeFlag(token: string): boolean {
   return /^-[a-zA-Z]$/.test(token);
 }
 
-export const ASK_SUPPORTED_FLAGS =
+const SCOPE_SUPPORTED_FLAGS = "--read-root <absolute-dir> (repeatable), --network";
+export const RESCUE_SUPPORTED_FLAGS =
   "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
-export const RESCUE_SUPPORTED_FLAGS = ASK_SUPPORTED_FLAGS;
+export const ASK_SUPPORTED_FLAGS = `${RESCUE_SUPPORTED_FLAGS}, ${SCOPE_SUPPORTED_FLAGS}`;
 
-export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>";
+export const REVIEW_SUPPORTED_FLAGS = `--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, ${SCOPE_SUPPORTED_FLAGS}`;
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
 
 export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags), --install-kimi [--json] (without other setup flags)";
@@ -41,7 +43,13 @@ export interface KimiFlagState {
   thinkingEffort?: string;
 }
 
-export interface AskArgs extends KimiFlagState {
+/** Per-call read scope flags; validated against the filesystem by resolveReadScope. */
+export interface ScopeFlagState {
+  readRoots?: string[];
+  network?: boolean;
+}
+
+export interface AskArgs extends KimiFlagState, ScopeFlagState {
   help?: boolean;
   budgetMs?: number;
   background: boolean;
@@ -52,7 +60,7 @@ export interface AskArgs extends KimiFlagState {
   prompt?: string;
 }
 
-export interface ReviewArgs extends KimiFlagState {
+export interface ReviewArgs extends KimiFlagState, ScopeFlagState {
   budgetMs?: number;
   base?: string;
   background: boolean;
@@ -60,7 +68,7 @@ export interface ReviewArgs extends KimiFlagState {
   focus?: string;
 }
 
-export type RescueArgs = AskArgs;
+export type RescueArgs = Omit<AskArgs, keyof ScopeFlagState>;
 
 export interface PursueArgs extends KimiFlagState {
   /**
@@ -80,7 +88,7 @@ export interface PursueArgs extends KimiFlagState {
 
 export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --turns <N>";
 
-export interface SwarmArgs extends KimiFlagState {
+export interface SwarmArgs extends KimiFlagState, ScopeFlagState {
   /**
    * Hard wall-clock ceiling in ms — the hard bound on total runtime. Undefined
    * means "apply the command default" (swarm.ts owns the default so parsing
@@ -120,7 +128,7 @@ export interface SwarmArgs extends KimiFlagState {
 }
 
 export const SWARM_SUPPORTED_FLAGS =
-  "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
+  `-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write, ${SCOPE_SUPPORTED_FLAGS} (read-only swarm only)`;
 
 /**
  * Parser for /kimi:swarm. Foreground-only: no --background/--fresh/--resume.
@@ -133,6 +141,8 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
   let cap: number | undefined;
   let maxConcurrency: number | undefined;
   let write = false;
+  const readRoots: string[] = [];
+  let network = false;
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -161,6 +171,12 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
       case "--write":
         write = true;
         break;
+      case "--read-root":
+        readRoots.push(readRootValue(argv[++index], "swarm.parse"));
+        break;
+      case "--network":
+        network = true;
+        break;
       case "--budget":
         budgetMs = readBudget(argv[++index], "swarm.parse", "safety");
         break;
@@ -184,6 +200,10 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
     }
   }
 
+  if (write && (readRoots.length > 0 || network)) {
+    throw new RuntimeError("INVALID_ARGS", `swarm --write rejects scope flags. ${SCOPE_FLAGS_WRITE_MESSAGE}`, "swarm.parse");
+  }
+
   return {
     budgetMs,
     cap,
@@ -191,8 +211,28 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
     write,
     model,
     thinkingEffort,
+    ...scopeFields(readRoots, network),
     objective: trailingTokens?.join(" "),
   };
+}
+
+/** Omit default-scope fields so parsed shapes stay unchanged without the flags. */
+function scopeFields(readRoots: string[], network: boolean): ScopeFlagState {
+  return {
+    ...(readRoots.length > 0 ? { readRoots } : {}),
+    ...(network ? { network } : {}),
+  };
+}
+
+function readRootValue(value: string | undefined, stage: string): string {
+  if (!value || value.startsWith("-")) {
+    throw new RuntimeError("INVALID_ARGS", "--read-root requires an absolute directory path.", stage);
+  }
+  return value;
+}
+
+function rejectScopeFlag(token: string, command: string, stage: string): never {
+  throw new RuntimeError("INVALID_ARGS", `${command} rejects ${token}. ${SCOPE_FLAGS_WRITE_MESSAGE}`, stage);
 }
 
 /**
@@ -336,6 +376,9 @@ export function parsePursueArgs(argv: string[]): PursueArgs {
       case "--turns":
         turns = parsePositiveIntFlag("--turns", argv[++index], "pursue.parse");
         break;
+      case "--read-root":
+      case "--network":
+        rejectScopeFlag(token, "pursue", "pursue.parse");
       default:
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
@@ -368,7 +411,7 @@ export interface JobLookupArgs {
   json: boolean;
 }
 
-const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
+const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type", "--read-root"]);
 
 /**
  * `--help` / `-h` counts only inside the leading flag region: before `--`
@@ -413,6 +456,8 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
   let resume = false;
   let resumeTarget: string | undefined;
   let explicitResumeTarget = false;
+  const readRoots: string[] = [];
+  let network = false;
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -450,6 +495,14 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
       case "--fresh":
         fresh = true;
         break;
+      case "--read-root":
+        if (kind === "rescue") rejectScopeFlag(token, kind, `${kind}.parse`);
+        readRoots.push(readRootValue(argv[++index], `${kind}.parse`));
+        break;
+      case "--network":
+        if (kind === "rescue") rejectScopeFlag(token, kind, `${kind}.parse`);
+        network = true;
+        break;
       case "-r":
         resume = true;
         break;
@@ -472,7 +525,7 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
-            `Unknown flag ${token} for ${kind}. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`,
+            `Unknown flag ${token} for ${kind}. Supported flags: ${kind === "rescue" ? RESCUE_SUPPORTED_FLAGS : ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`,
             "args.parse",
           );
         }
@@ -507,6 +560,7 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
     resumeTarget,
     model,
     thinkingEffort,
+    ...scopeFields(readRoots, network),
     prompt: trailingTokens?.join(" "),
   };
 }
@@ -514,7 +568,7 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
 export function parseReviewArgs(argv: string[], commandName: string = "review"): ReviewArgs {
   const parsed = parseKnownFlags(
     argv,
-    new Set(["--budget", "--base", "--background", "--wait", "-m", "--model"]),
+    new Set(["--budget", "--base", "--background", "--wait", "-m", "--model", "--read-root", "--network"]),
     commandName,
   );
 
@@ -525,6 +579,7 @@ export function parseReviewArgs(argv: string[], commandName: string = "review"):
     wait: parsed.wait,
     model: parsed.model,
     thinkingEffort: parsed.thinkingEffort,
+    ...scopeFields(parsed.readRoots, parsed.network),
     focus: parsed.trailingText,
   };
 }
@@ -583,6 +638,8 @@ export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
 }
 
 interface ParsedKnownFlags extends KimiFlagState {
+  readRoots: string[];
+  network: boolean;
   budgetMs?: number;
   base?: string;
   background: boolean;
@@ -611,6 +668,8 @@ function parseKnownFlags(
   let base: string | undefined;
   let background = false;
   let wait = false;
+  const readRoots: string[] = [];
+  let network = false;
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -668,6 +727,12 @@ function parseKnownFlags(
       case "--wait":
         wait = true;
         break;
+      case "--read-root":
+        readRoots.push(readRootValue(argv[++index], `${commandName}.parse`));
+        break;
+      case "--network":
+        network = true;
+        break;
       // The early `if (!knownFlags.has(token))` gate above means we only
       // reach this switch with tokens that ARE in knownFlags, and every
       // member is handled above. A `default` arm would be unreachable.
@@ -679,6 +744,8 @@ function parseKnownFlags(
     base,
     background,
     wait,
+    readRoots,
+    network,
     model,
     thinkingEffort,
     trailingText: trailingTokens?.join(" "),

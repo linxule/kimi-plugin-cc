@@ -368,6 +368,7 @@ const ADDED_JOB_COLUMNS = [
     ["resumed_from_job_id", "TEXT"],
     ["safety_profile", "TEXT"],
     ["warnings", "TEXT"],
+    ["read_scope", "TEXT"],
 ];
 /** Columns createJob writes, in INSERT order. hook_escapes is written only by updates. */
 const INSERT_JOB_COLUMNS = [
@@ -375,7 +376,7 @@ const INSERT_JOB_COLUMNS = [
     "background", "pid", "kimi_pid", "status", "kimi_session_id", "kimi_session_id_source", "budget_source",
     "operation_kind", "intended_engine", "observed_engine", "kimi_version", "system_version",
     "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile", "warnings",
-    "agent_profile", "prompt_digest", "summary", "phase", "budget_ms", "final_output_path", "stream_log_path", "error",
+    "read_scope", "agent_profile", "prompt_digest", "summary", "phase", "budget_ms", "final_output_path", "stream_log_path", "error",
 ];
 const INSERT_JOB_SQL = `INSERT INTO jobs (${INSERT_JOB_COLUMNS.join(", ")}) VALUES (${INSERT_JOB_COLUMNS.map((column) => `@${column}`).join(", ")})`;
 /** Columns an update may set; identity and timestamps are store-owned. */
@@ -386,10 +387,11 @@ const UPDATABLE_JOB_COLUMNS = new Set([
 function hydrateRow(row) {
     // A warning-free row keeps its historical shape, so every JSON surface that
     // spreads a JobRecord stays byte-identical.
-    const { warnings, ...rest } = row;
+    const { warnings, read_scope, ...rest } = row;
     return {
         ...rest,
         ...(warnings !== null && warnings !== undefined ? { warnings } : {}),
+        ...(read_scope !== null && read_scope !== undefined ? { read_scope } : {}),
         thinking: row.thinking === null ? null : Boolean(row.thinking),
         background: Boolean(row.background),
         error: row.error ? JSON.parse(row.error) : null,

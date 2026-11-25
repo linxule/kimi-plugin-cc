@@ -37,6 +37,7 @@ import { KIMI_SWARM_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths, type PluginPaths } from "../paths.js";
 import { parseSwarmArgs, type SwarmArgs } from "../parsing.js";
+import { parseJobReadScope, resolveReadScope, serializeReadScope, type ReadScope } from "../read-scope.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import {
@@ -251,9 +252,10 @@ export async function runSwarm(argv: string[], context: CommandContext): Promise
     );
   }
 
-  return parsed.write
-    ? runWriteSwarm(parsed, objective, context)
-    : runReadSwarm(parsed, objective, context);
+  if (parsed.write) return runWriteSwarm(parsed, objective, context);
+  const readScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
+    : await resolveReadScope(parsed.readRoots, parsed.network, "swarm.parse");
+  return runReadSwarm(parsed, objective, context, readScope);
 }
 
 /** Read-only swarm (default). */
@@ -261,6 +263,7 @@ async function runReadSwarm(
   parsed: SwarmArgs,
   objective: string,
   context: CommandContext,
+  readScope: ReadScope | undefined,
 ): Promise<string> {
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
@@ -287,7 +290,7 @@ async function runReadSwarm(
     const job = await createSwarmJob(store, paths, {
       jobId, repoId: repoIdentity.repoId, commandType: "review", label: "swarm",
       agentProfile: SWARM_AGENT_PROFILE, failureSummary: "Swarm failed.",
-      parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd,
+      parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd, readScope,
     });
 
     const completed = await executeSwarmJob(
@@ -453,6 +456,7 @@ async function createSwarmJob(
     executionPlan: KimiExecutionPlan;
     logPath: string;
     cwd: string;
+    readScope?: ReadScope;
   },
 ): Promise<JobRecord> {
   const { parsed } = spec;
@@ -464,6 +468,7 @@ async function createSwarmJob(
     model: parsed.model ?? null,
     thinking: null,
     thinking_effort: parsed.thinkingEffort ?? null,
+    read_scope: serializeReadScope(spec.readScope),
     background: false,
     budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
     budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -671,6 +676,8 @@ async function executeSwarmJob(
       commandLabel,
       model: job.model ?? undefined,
       thinkingEffort: job.thinking_effort ?? undefined,
+      // Read-only swarm only: write mode rejects scope flags at parse time.
+      readScope: writeMode ? undefined : parseJobReadScope(job.read_scope),
       swarmMaxConcurrency: maxConcurrency,
       trustedWorkspaceRoot: executionCwd ?? writeMode?.workspaceRoot,
     };

@@ -13,6 +13,7 @@ import { KIMI_REVIEW_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
+import { resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
@@ -24,6 +25,8 @@ export async function runReview(argv, context, commandType) {
     if (parsed.background || parsed.wait) {
         throw new RuntimeError("INVALID_FLAGS", `${commandType} does not support --background or --wait in v1; review runs foreground-synchronously.`, `${commandType}.parse`);
     }
+    const readScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
+        : await resolveReadScope(parsed.readRoots, parsed.network, `${commandType}.parse`);
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
         await requireReadOnlyHookInstalled(context, commandType);
     }
@@ -51,6 +54,7 @@ export async function runReview(argv, context, commandType) {
         model: parsed.model ?? null,
         thinking: null,
         thinking_effort: parsed.thinkingEffort ?? null,
+        read_scope: serializeReadScope(readScope),
         background: false,
         budget_ms: parsed.budgetMs ?? null,
         budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -86,6 +90,7 @@ export async function runReview(argv, context, commandType) {
             commandLabel: commandType,
             model: parsed.model,
             thinkingEffort: parsed.thinkingEffort,
+            readScope,
             logPath,
             onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             signal: handlers.signal,

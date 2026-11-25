@@ -76,6 +76,8 @@ async function main(): Promise<void> {
           KIMI_PLUGIN_CC_WORKSPACE_ROOT:
             process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT ?? null,
           KIMI_CODE_HOME: process.env.KIMI_CODE_HOME ?? null,
+          ...(process.env.KIMI_PLUGIN_CC_READ_ROOTS === undefined ? {} : { KIMI_PLUGIN_CC_READ_ROOTS: process.env.KIMI_PLUGIN_CC_READ_ROOTS }),
+          ...(process.env.KIMI_PLUGIN_CC_NETWORK === undefined ? {} : { KIMI_PLUGIN_CC_NETWORK: process.env.KIMI_PLUGIN_CC_NETWORK }),
         },
       })}\n`,
       "utf8",

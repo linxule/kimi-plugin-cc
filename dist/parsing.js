@@ -1,4 +1,5 @@
 import { RuntimeError } from "./errors.js";
+import { SCOPE_FLAGS_WRITE_MESSAGE } from "./read-scope.js";
 /**
  * Unknown flag-shaped tokens hard-fail instead of being absorbed into prose.
  * Parsing still switches to prose at the first non-flag token or after `--`.
@@ -13,9 +14,10 @@ function looksLikeFlag(token) {
     // Short flag: a single dash followed by exactly one letter (`-r`, `-m`).
     return /^-[a-zA-Z]$/.test(token);
 }
-export const ASK_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
-export const RESCUE_SUPPORTED_FLAGS = ASK_SUPPORTED_FLAGS;
-export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>";
+const SCOPE_SUPPORTED_FLAGS = "--read-root <absolute-dir> (repeatable), --network";
+export const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+export const ASK_SUPPORTED_FLAGS = `${RESCUE_SUPPORTED_FLAGS}, ${SCOPE_SUPPORTED_FLAGS}`;
+export const REVIEW_SUPPORTED_FLAGS = `--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, ${SCOPE_SUPPORTED_FLAGS}`;
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
 export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags), --install-kimi [--json] (without other setup flags)";
 export const RECOVER_SWARM_SUPPORTED_FLAGS = "--apply";
@@ -30,7 +32,7 @@ export function validateThinkingEffort(value, stage = "args.parse", lowercase = 
     return effort;
 }
 export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --turns <N>";
-export const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
+export const SWARM_SUPPORTED_FLAGS = `-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write, ${SCOPE_SUPPORTED_FLAGS} (read-only swarm only)`;
 /**
  * Parser for /kimi:swarm. Foreground-only: no --background/--fresh/--resume.
  * Trailing tokens are the objective.
@@ -42,6 +44,8 @@ export function parseSwarmArgs(argv) {
     let cap;
     let maxConcurrency;
     let write = false;
+    const readRoots = [];
+    let network = false;
     let trailingTokens;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
@@ -66,6 +70,12 @@ export function parseSwarmArgs(argv) {
             case "--write":
                 write = true;
                 break;
+            case "--read-root":
+                readRoots.push(readRootValue(argv[++index], "swarm.parse"));
+                break;
+            case "--network":
+                network = true;
+                break;
             case "--budget":
                 budgetMs = readBudget(argv[++index], "swarm.parse", "safety");
                 break;
@@ -84,6 +94,9 @@ export function parseSwarmArgs(argv) {
                 break;
         }
     }
+    if (write && (readRoots.length > 0 || network)) {
+        throw new RuntimeError("INVALID_ARGS", `swarm --write rejects scope flags. ${SCOPE_FLAGS_WRITE_MESSAGE}`, "swarm.parse");
+    }
     return {
         budgetMs,
         cap,
@@ -91,8 +104,25 @@ export function parseSwarmArgs(argv) {
         write,
         model,
         thinkingEffort,
+        ...scopeFields(readRoots, network),
         objective: trailingTokens?.join(" "),
     };
+}
+/** Omit default-scope fields so parsed shapes stay unchanged without the flags. */
+function scopeFields(readRoots, network) {
+    return {
+        ...(readRoots.length > 0 ? { readRoots } : {}),
+        ...(network ? { network } : {}),
+    };
+}
+function readRootValue(value, stage) {
+    if (!value || value.startsWith("-")) {
+        throw new RuntimeError("INVALID_ARGS", "--read-root requires an absolute directory path.", stage);
+    }
+    return value;
+}
+function rejectScopeFlag(token, command, stage) {
+    throw new RuntimeError("INVALID_ARGS", `${command} rejects ${token}. ${SCOPE_FLAGS_WRITE_MESSAGE}`, stage);
 }
 /**
  * Shared positive-integer flag parser for swarm's `--cap` / `--max-concurrency`
@@ -212,6 +242,9 @@ export function parsePursueArgs(argv) {
             case "--turns":
                 turns = parsePositiveIntFlag("--turns", argv[++index], "pursue.parse");
                 break;
+            case "--read-root":
+            case "--network":
+                rejectScopeFlag(token, "pursue", "pursue.parse");
             default:
                 if (looksLikeFlag(token)) {
                     throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for pursue. Supported flags: ${PURSUE_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped objective text to pass it through.`, "pursue.parse");
@@ -229,7 +262,7 @@ export function parsePursueArgs(argv) {
         objective: trailingTokens?.join(" "),
     };
 }
-const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
+const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type", "--read-root"]);
 /**
  * `--help` / `-h` counts only inside the leading flag region: before `--`
  * and before the first prose token. The value of a value-taking flag is
@@ -275,6 +308,8 @@ function parsePromptArgs(argv, kind) {
     let resume = false;
     let resumeTarget;
     let explicitResumeTarget = false;
+    const readRoots = [];
+    let network = false;
     let trailingTokens;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
@@ -308,6 +343,16 @@ function parsePromptArgs(argv, kind) {
             case "--fresh":
                 fresh = true;
                 break;
+            case "--read-root":
+                if (kind === "rescue")
+                    rejectScopeFlag(token, kind, `${kind}.parse`);
+                readRoots.push(readRootValue(argv[++index], `${kind}.parse`));
+                break;
+            case "--network":
+                if (kind === "rescue")
+                    rejectScopeFlag(token, kind, `${kind}.parse`);
+                network = true;
+                break;
             case "-r":
                 resume = true;
                 break;
@@ -324,7 +369,7 @@ function parsePromptArgs(argv, kind) {
             }
             default:
                 if (looksLikeFlag(token)) {
-                    throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${kind}. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
+                    throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${kind}. Supported flags: ${kind === "rescue" ? RESCUE_SUPPORTED_FLAGS : ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`, "args.parse");
                 }
                 trailingTokens = argv.slice(index);
                 index = argv.length;
@@ -346,11 +391,12 @@ function parsePromptArgs(argv, kind) {
         resumeTarget,
         model,
         thinkingEffort,
+        ...scopeFields(readRoots, network),
         prompt: trailingTokens?.join(" "),
     };
 }
 export function parseReviewArgs(argv, commandName = "review") {
-    const parsed = parseKnownFlags(argv, new Set(["--budget", "--base", "--background", "--wait", "-m", "--model"]), commandName);
+    const parsed = parseKnownFlags(argv, new Set(["--budget", "--base", "--background", "--wait", "-m", "--model", "--read-root", "--network"]), commandName);
     return {
         budgetMs: parsed.budgetMs,
         base: parsed.base,
@@ -358,6 +404,7 @@ export function parseReviewArgs(argv, commandName = "review") {
         wait: parsed.wait,
         model: parsed.model,
         thinkingEffort: parsed.thinkingEffort,
+        ...scopeFields(parsed.readRoots, parsed.network),
         focus: parsed.trailingText,
     };
 }
@@ -408,6 +455,8 @@ function parseKnownFlags(argv, knownFlags, commandName) {
     let base;
     let background = false;
     let wait = false;
+    const readRoots = [];
+    let network = false;
     let trailingTokens;
     for (let index = 0; index < argv.length; index += 1) {
         const token = argv[index];
@@ -453,6 +502,12 @@ function parseKnownFlags(argv, knownFlags, commandName) {
             case "--wait":
                 wait = true;
                 break;
+            case "--read-root":
+                readRoots.push(readRootValue(argv[++index], `${commandName}.parse`));
+                break;
+            case "--network":
+                network = true;
+                break;
             // The early `if (!knownFlags.has(token))` gate above means we only
             // reach this switch with tokens that ARE in knownFlags, and every
             // member is handled above. A `default` arm would be unreachable.
@@ -463,6 +518,8 @@ function parseKnownFlags(argv, knownFlags, commandName) {
         base,
         background,
         wait,
+        readRoots,
+        network,
         model,
         thinkingEffort,
         trailingText: trailingTokens?.join(" "),

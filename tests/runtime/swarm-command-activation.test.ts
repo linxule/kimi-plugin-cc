@@ -9,6 +9,7 @@ import { RuntimeError } from "../../runtime/errors.js";
 import { removeWorktree, resolveRepoIdentity } from "../../runtime/git.js";
 import { JobStore, type JobRecord } from "../../runtime/job-store.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
+import { parseJobReadScope } from "../../runtime/read-scope.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -165,6 +166,7 @@ async function runSwarmFault(
   let deactivations = 0;
   const bindings = {
     RuntimeError,
+    parseJobReadScope,
     recordRecoveryEvent,
     finishRecoveryRecord: options.finalizeFailure ? () => { throw new Error("journal finalization failed"); } : finishRecoveryRecord,
     probeProcessIdentity: async () => ({ complete: true, identity: undefined }),

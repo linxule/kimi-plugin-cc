@@ -20,6 +20,7 @@ import { KIMI_ASK_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
+import { parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
@@ -54,6 +55,9 @@ const ASK_RESUME_PROMPT = [
 export async function runAsk(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseAskArgs(argv);
   if (parsed.help) return companionHelp(["ask", ...argv])!;
+  // Scope always comes from this invocation, never from a resumed job.
+  const readScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
+    : await resolveReadScope(parsed.readRoots, parsed.network, "ask.parse");
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
     await requireAskHookInstalled(context);
   }
@@ -86,6 +90,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       model: parsed.model ?? null,
       thinking: null,
       thinking_effort: parsed.thinkingEffort ?? null,
+      read_scope: serializeReadScope(readScope),
       background: parsed.background,
       ...resumeBudget("ask", parsed.budgetMs, sessionResolution.sourceJob),
       pid: parsed.background ? null : process.pid,
@@ -169,6 +174,7 @@ export async function executeAskJob(
     }
     handlers = createCliCancellationHandlers();
     const executionPlan = executionPlanFromPersisted(job);
+    const readScope = parseJobReadScope(job.read_scope);
     store.updateRunningJob(job.job_id, { phase: "turn-running" });
 
     // Re-validate resume lineage from the store before spawning: a detached
@@ -194,6 +200,7 @@ export async function executeAskJob(
         commandLabel: "ask",
         model: job.model ?? undefined,
         thinkingEffort: job.thinking_effort ?? undefined,
+        readScope,
         resumeSessionId: job.kimi_session_id ?? undefined,
         logPath: job.stream_log_path,
         onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },

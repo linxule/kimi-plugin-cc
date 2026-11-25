@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseJobWarnings } from "./job-store.js";
+import { describeReadScope, parseJobReadScope } from "./read-scope.js";
 import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
@@ -24,15 +25,21 @@ export function withWarningsBlock(job, text) {
         return text;
     return `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}\n\n${text}`;
 }
+/** Prefix the non-default read scope so callers see what they asked for; unchanged otherwise. */
+export function withScopeLine(job, text) {
+    const line = describeReadScope(parseJobReadScope(job.read_scope));
+    return line === undefined ? text : `${line}\n\n${text}`;
+}
 export function renderManagedJobOutput(job, finalText) {
     const rendered = renderManagedJobOutputBody(job, finalText);
-    if (parseJobWarnings(job.warnings).length === 0)
+    if (parseJobWarnings(job.warnings).length === 0 && !job.read_scope)
         return rendered;
+    const decorate = (text) => withWarningsBlock(job, withScopeLine(job, text));
     return {
         ...rendered,
         // review_gate's output is the parsed decision object; its warnings live in the artifact only.
-        output: typeof rendered.output === "string" ? withWarningsBlock(job, rendered.output) : rendered.output,
-        rendered: withWarningsBlock(job, rendered.rendered),
+        output: typeof rendered.output === "string" ? decorate(rendered.output) : rendered.output,
+        rendered: decorate(rendered.rendered),
     };
 }
 function renderManagedJobOutputBody(job, finalText) {
@@ -160,6 +167,7 @@ export function renderTerminalJobArtifact(job, partialOutput) {
         `- Status: ${job.status}`,
         `- Summary: ${job.summary}`,
         ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
+        ...terminalScopeLine(job),
     ];
     const warnings = parseJobWarnings(job.warnings);
     if (warnings.length > 0) {
@@ -188,6 +196,15 @@ export function renderTerminalJobArtifact(job, partialOutput) {
                     : "No assistant prose was emitted before the budget.");
     }
     return lines.join("\n");
+}
+function terminalScopeLine(job) {
+    try {
+        const line = describeReadScope(parseJobReadScope(job.read_scope));
+        return line === undefined ? [] : [`- ${line}`];
+    }
+    catch {
+        return ["- Scope: unreadable stored scope"];
+    }
 }
 export function capitalize(value) {
     return value.slice(0, 1).toUpperCase() + value.slice(1);

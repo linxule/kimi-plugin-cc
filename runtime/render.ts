@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { parseJobWarnings, type JobRecord } from "./job-store.js";
+import { describeReadScope, parseJobReadScope } from "./read-scope.js";
 import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
 import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
@@ -42,14 +43,21 @@ export function withWarningsBlock(job: Pick<JobRecord, "warnings">, text: string
   return `Warnings:\n${warnings.map((warning) => `- ${warning}`).join("\n")}\n\n${text}`;
 }
 
+/** Prefix the non-default read scope so callers see what they asked for; unchanged otherwise. */
+export function withScopeLine(job: Pick<JobRecord, "read_scope">, text: string): string {
+  const line = describeReadScope(parseJobReadScope(job.read_scope));
+  return line === undefined ? text : `${line}\n\n${text}`;
+}
+
 export function renderManagedJobOutput(job: JobRecord, finalText: string): RenderedManagedOutput {
   const rendered = renderManagedJobOutputBody(job, finalText);
-  if (parseJobWarnings(job.warnings).length === 0) return rendered;
+  if (parseJobWarnings(job.warnings).length === 0 && !job.read_scope) return rendered;
+  const decorate = (text: string) => withWarningsBlock(job, withScopeLine(job, text));
   return {
     ...rendered,
     // review_gate's output is the parsed decision object; its warnings live in the artifact only.
-    output: typeof rendered.output === "string" ? withWarningsBlock(job, rendered.output) : rendered.output,
-    rendered: withWarningsBlock(job, rendered.rendered),
+    output: typeof rendered.output === "string" ? decorate(rendered.output) : rendered.output,
+    rendered: decorate(rendered.rendered),
   };
 }
 
@@ -205,6 +213,7 @@ export function renderTerminalJobArtifact(job: JobRecord, partialOutput?: Partia
     `- Status: ${job.status}`,
     `- Summary: ${job.summary}`,
     ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
+    ...terminalScopeLine(job),
   ];
   const warnings = parseJobWarnings(job.warnings);
   if (warnings.length > 0) {
@@ -237,6 +246,15 @@ export function renderTerminalJobArtifact(job: JobRecord, partialOutput?: Partia
   }
 
   return lines.join("\n");
+}
+
+function terminalScopeLine(job: JobRecord): string[] {
+  try {
+    const line = describeReadScope(parseJobReadScope(job.read_scope));
+    return line === undefined ? [] : [`- ${line}`];
+  } catch {
+    return ["- Scope: unreadable stored scope"];
+  }
 }
 
 export function capitalize(value: string): string {
