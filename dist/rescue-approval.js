@@ -404,6 +404,12 @@ async function validateFileOperationStage(tokens, workspaceRoot, cwd) {
     const [command, ...args] = tokens;
     const allowedFlags = FILE_OPERATION_FLAGS.get(command);
     const shown = tokens.join(" ");
+    // Windows runs Git Bash behind a path bridge whose mapping (`/c/...`, `/`
+    // as the Git install root, `:` stream names) Node's win32 resolution does
+    // not reproduce, so containment cannot be proven there.
+    if (process.platform === "win32") {
+        return { ok: false, reason: `Rescue does not allow ${command} on Windows: ${shown}` };
+    }
     const flags = new Set();
     const operands = [];
     let endOfFlags = false;

@@ -372,6 +372,24 @@ describe("evaluateRescueHookRequest", () => {
       });
     });
 
+    test("refuses every file operation on Windows, where Git Bash path mapping is unproven", async () => {
+      const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+      Object.defineProperty(process, "platform", { ...original, value: "win32" });
+      try {
+        await withFileOpFixture(async (root, outside) => {
+          for (const command of ["rm a.txt", "mkdir new", "mv a.txt b.txt", "cp a.txt b.txt"]) {
+            expect(await decide(root, outside, { command })).toEqual({
+              decision: "deny",
+              reason: expect.stringContaining("on Windows"),
+            });
+          }
+          expect(await decide(root, outside, { command: "git status" })).toEqual({ decision: "allow" });
+        });
+      } finally {
+        Object.defineProperty(process, "platform", original);
+      }
+    });
+
     test("the path-free validator never approves file operations", () => {
       for (const command of ["rm a.txt", "mkdir new", "mv a.txt b.txt", "cp a.txt b.txt"]) {
         expect(validateShellCommand(command).response).toBe("reject");
