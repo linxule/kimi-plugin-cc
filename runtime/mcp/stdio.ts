@@ -39,10 +39,11 @@ export async function serveMcpStdio(
         const line = buffer.subarray(0, newline);
         buffer = buffer.subarray(newline + 1);
         if (line.length > MAX_MESSAGE_BYTES) throw new Error("MCP frame exceeds 8 MiB");
-        if (line.toString("utf8").trim().length === 0) continue;
+        const text = line.toString("utf8");
+        if (text.trim().length === 0) continue;
         let parsed: unknown;
         try {
-          parsed = JSON.parse(line.toString("utf8"));
+          parsed = JSON.parse(text);
         } catch {
           track(write({ jsonrpc: "2.0", id: null, error: { code: -32_700, message: "Parse error" } }));
           continue;
