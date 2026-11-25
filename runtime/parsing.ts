@@ -437,16 +437,17 @@ export function hasHelpFlag(argv: string[]): boolean {
 }
 
 /**
- * Remove every occurrence of a boolean selector flag from the same leading
- * flag region `hasHelpFlag` scans; undefined when the region lacks it, so a
- * selector inside prose or after `--` never changes the operation.
+ * Remove every occurrence of a boolean selector flag from the leading flag
+ * region the prompt parsers use (prose starts at `--` or the first token that
+ * is not flag-shaped, such as `-5`); undefined when the region lacks it, so a
+ * selector inside prose never changes the operation.
  */
 export function withoutLeadingFlag(argv: readonly string[], flag: string): string[] | undefined {
   const kept: string[] = [];
   let found = false;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--" || !token.startsWith("-")) {
+    if (token === "--" || !looksLikeFlag(token)) {
       kept.push(...argv.slice(index));
       break;
     }

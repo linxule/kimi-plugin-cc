@@ -27,6 +27,10 @@ describe("surface selector routing", () => {
       ["ask", "what", "does", "--write", "do"],
       ["ask", "--", "--write", "this"],
       ["ask", "-m", "--write", "x"],
+      ["ask", "-5", "--write", "x"],
+      ["ask", "-", "--write"],
+      ["ask", "-rf", "--write"],
+      ["review", "-5", "--challenge"],
       ["review", "--", "--challenge"],
       ["review", "focus", "--challenge"],
       ["review", "--base", "--challenge"],
@@ -89,6 +93,12 @@ describe("companion entry point routing", () => {
 
       const asked = await runCompanion(["ask", "--fresh", "--", "--write", "explained"], env);
       expect(asked.exitCode, asked.stderr).toBe(0);
+      expect(await latestKind(env)).toBe("ask");
+
+      await runCompanion(["ask", "--write", "--fresh", "apply", "again"], env);
+      expect(await latestKind(env)).toBe("rescue");
+      const prose = await runCompanion(["ask", "--fresh", "-5", "--write", "is", "what?"], env);
+      expect(prose.exitCode, prose.stderr).toBe(0);
       expect(await latestKind(env)).toBe("ask");
     });
   }, 60_000);
