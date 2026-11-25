@@ -1263,6 +1263,10 @@ suite("real-binary smoke: default_plan_mode is cancelled or refused (v2) or pinn
           });
           expect(result.systemVersion, "the fresh run must prove native-v2 started").toBe(BINARY_VERSION);
           expect(
+            streamManagedDenial(result.records, TARGET_FILENAME),
+            "the fresh default-plan run must correlate a write-class call with its managed denial",
+          ).toBeDefined();
+          expect(
             await fileExists(path.join(workspace, TARGET_FILENAME)),
             `a fresh default-plan run must not create ${TARGET_FILENAME}`,
           ).toBe(false);
