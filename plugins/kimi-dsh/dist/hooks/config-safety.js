@@ -5,6 +5,7 @@ import path from "node:path";
 import { RuntimeError } from "../errors.js";
 import { kimiReleaseHas } from "../kimi-releases.js";
 import { probeKimiVersion } from "../kimi-version-probe.js";
+import { sleep } from "../util.js";
 import { extractValue } from "../vendor/smol-toml/extract.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 import { parseKey } from "../vendor/smol-toml/struct.js";
@@ -122,9 +123,6 @@ async function createPrivateLockFile(lockPath, owner) {
         await handle.sync();
         const stats = await handle.stat({ bigint: true });
         candidateIdentity = lockIdentity(stats.dev, stats.ino);
-    }
-    catch (error) {
-        throw error;
     }
     finally {
         await handle.close().catch(() => undefined);
@@ -272,10 +270,7 @@ async function tryRecoverStaleLock(lockPath, observed, staleMs) {
     try {
         await assertOwnedLock(recoveryPath, recoverySnapshot, recoveryOwner.token);
         const current = await readLockSnapshot(lockPath);
-        if (current !== null &&
-            current.identity === observed.identity &&
-            current.owner?.token === observed.owner?.token &&
-            isStaleLock(current, staleMs)) {
+        if (current !== null && sameObservedLock(current, observed) && isStaleLock(current, staleMs)) {
             // The per-identity recovery lock above ensures only one observer of this
             // inode can claim it. Rename is the atomic removal from the public path;
             // verification happens on the claimed inode before its unique name is
@@ -370,9 +365,6 @@ async function releaseOwnedLock(lockPath, acquired, token) {
         throw new RuntimeError("SETUP_CONFIG_LOCK_RELEASE_RACE", `Setup lock ${lockPath} changed identity during release; the claimed file was preserved at ${releasePath}.`, "setup.config-lock", { details: { lockPath, releasePath, expectedIdentity: acquired.identity, claimedIdentity: claimed?.identity } });
     }
     await unlink(releasePath);
-}
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 /**
  * Convert a validated top-level inline `hooks = [...]` assignment to canonical
