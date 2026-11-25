@@ -1160,6 +1160,8 @@ function spawnProbe(
           ...env,
           KIMI_PLUGIN_CC_CMD: "review",
           KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
+          // An ambient job host naming another host would make the probe abstain.
+          KIMI_PLUGIN_CC_JOB_HOST: undefined,
         },
         stdio: ["pipe", "pipe", "pipe"],
       });

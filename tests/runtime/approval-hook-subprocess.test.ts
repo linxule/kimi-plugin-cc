@@ -17,8 +17,11 @@
 
 import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { realpath } from "node:fs/promises";
+import { realpath, symlink } from "node:fs/promises";
 import path from "node:path";
+
+import { JOB_HOST_ENV, jobHostForHookScript } from "../../runtime/hooks/job-host.js";
+import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const hookScriptPath = path.join(process.cwd(), "runtime/hooks/approval-hook.ts");
 
@@ -31,10 +34,10 @@ interface InvokeResult {
 async function invokeHook(
   payload: unknown,
   env: NodeJS.ProcessEnv = process.env,
-  options?: { skipStdin?: boolean; closeStdinWithoutPayload?: boolean },
+  options?: { skipStdin?: boolean; closeStdinWithoutPayload?: boolean; scriptPath?: string },
 ): Promise<InvokeResult> {
   return await new Promise<InvokeResult>((resolve, reject) => {
-    const child = spawn("node", ["--import", "tsx", hookScriptPath], {
+    const child = spawn("node", ["--import", "tsx", options?.scriptPath ?? hookScriptPath], {
       cwd: process.cwd(),
       env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -318,5 +321,50 @@ describe("pursue metadata hook environment", () => {
       { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", KIMI_PLUGIN_CC_NETWORK: "1" });
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("--network");
+  });
+});
+
+describe("job host: a hook decides only for its own host's jobs", () => {
+  const bash = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "rm -rf x" } };
+  const ownHost = jobHostForHookScript(hookScriptPath);
+
+  test("another host's job: the hook abstains (exit 0, no output) for a call its policy denies", async () => {
+    const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: "codex" });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).not.toContain("kimi-plugin-cc safety hook");
+  });
+
+  test("its own job enforces: deny and allow", async () => {
+    const env = { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: ownHost };
+    const denied = await invokeHook(bash, env);
+    expect(denied.exitCode).toBe(2);
+    expect(denied.stderr).toContain("Bash");
+    const allowed = await invokeHook({ tool_name: "Read", tool_input: { file_path: "x" } }, env);
+    expect(allowed.exitCode).toBe(0);
+  });
+
+  test.each([["empty", ""], ["malformed", "Codex"], ["foreign grammar", "dsh"]])(
+    "%s job host enforces",
+    async (_name, value) => {
+      const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: value });
+      expect(result.exitCode).toBe(2);
+    },
+  );
+
+  test("a symlinked script path still recognizes both spellings as its own", async () => {
+    const dir = await createTestPluginDataRoot("job-host-link");
+    try {
+      const link = path.join(dir, "approval-hook.ts");
+      await symlink(hookScriptPath, link);
+      for (const host of [jobHostForHookScript(link), ownHost]) {
+        const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: host }, { scriptPath: link });
+        expect(result.exitCode).toBe(2);
+      }
+      const other = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: "claude-code" }, { scriptPath: link });
+      expect(other.exitCode).toBe(0);
+    } finally {
+      await cleanupTestPath(dir);
+    }
   });
 });
