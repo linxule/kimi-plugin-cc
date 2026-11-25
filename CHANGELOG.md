@@ -9,7 +9,7 @@ The plugin makes promises about the sessions it launches and no longer polices t
 ### Breaking
 
 - PLACEHOLDER (surfaces change, to be written by the integrator): host slash commands, agents, MCP tools and DSH providers.
-- A configured `default_plan_mode`, `[environments] default`, `require_trust = false` or enabled tower/subagent-fork selector no longer refuses certified launches where the plugin can neutralize it. Callers that relied on those refusals as a stop signal must check `warnings` instead.
+- A configured `default_plan_mode`, `[environments] default`, `require_trust = false` or enabled tower/subagent-fork selector no longer refuses certified launches where the plugin can neutralize it. Plan mode, the environment default and the selectors are neutralized silently; disabled trust and job-time marker problems appear in `warnings`.
 - The native-v2 session preview now shows the run's raw request instead of the plugin's prefixed prompt, and replaces a differing preview after every settled run.
 
 ### Added
