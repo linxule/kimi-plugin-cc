@@ -203,7 +203,7 @@ export interface OrphanMarker {
  * both sides rather than being guessed into a block. Callers decide which
  * orphans fail closed (see `parseManagedBlock`).
  */
-function pairBlocks(lines: string[]): { blocks: ManagedBlockEntry[]; orphans: OrphanMarker[] } {
+export function pairBlocks(lines: string[]): { blocks: ManagedBlockEntry[]; orphans: OrphanMarker[] } {
   const markers = findMarkers(lines);
   const blocks: ManagedBlockEntry[] = [];
   const orphans: OrphanMarker[] = [];

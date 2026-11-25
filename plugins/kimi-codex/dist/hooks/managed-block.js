@@ -147,7 +147,7 @@ function findMarkers(lines) {
  * both sides rather than being guessed into a block. Callers decide which
  * orphans fail closed (see `parseManagedBlock`).
  */
-function pairBlocks(lines) {
+export function pairBlocks(lines) {
     const markers = findMarkers(lines);
     const blocks = [];
     const orphans = [];

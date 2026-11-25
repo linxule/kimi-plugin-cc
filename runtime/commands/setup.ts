@@ -50,9 +50,8 @@ import {
   effectiveHost,
   evaluateInstalled,
   findUnmanagedApprovalHookBlocks,
-  markerCommentLines,
-  MARKERS,
   ORPHAN_MARKER_REMEDY,
+  pairBlocks,
   parseManagedBlock,
   type ManagedBlockEntry,
   type ManagedBlockState,
@@ -855,33 +854,10 @@ function splitPreservingEnding(contents: string): string[] {
 function removeOrphanMarkers(
   contents: string,
 ): { contents: string; count: number } {
-  const lines = splitPreservingEnding(contents);
-  const orphans: { index: number; host: string | null }[] = [];
-  const comments = markerCommentLines(contents);
-  let open: { index: number; host: string | null } | null = null;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!comments.has(i)) continue;
-    const line = lines[i]!.trim();
-    const begin = MARKERS.BEGIN_LINE_RE.exec(line);
-    if (begin !== null) {
-      if (open !== null) orphans.push(open);
-      open = { index: i, host: begin[1]?.toLowerCase() ?? null };
-    } else {
-      const end = MARKERS.END_LINE_RE.exec(line);
-      if (end === null) continue;
-      const endMarker = { index: i, host: end[1]?.toLowerCase() ?? null };
-      if (open === null) orphans.push(endMarker);
-      else {
-        if (open.host !== endMarker.host) orphans.push(open, endMarker);
-        open = null;
-      }
-    }
-  }
-  if (open !== null) orphans.push(open);
-  const remove = new Set(orphans.map((marker) => marker.index));
+  const remove = new Set(pairBlocks(splitPreservingEnding(contents)).orphans.map((marker) => marker.line));
   return remove.size === 0
     ? { contents, count: 0 }
-    : { contents: contents.split(/(?<=\n)/).filter((_, index) => !remove.has(index)).join(""), count: remove.size };
+    : { contents: removeLines(contents, remove), count: remove.size };
 }
 
 /**
@@ -899,11 +875,7 @@ function stripManagedBlocks(
   orphansLeft: number[];
 } {
   const lines = splitPreservingEnding(contents);
-  const rawLines = contents.split(/(?<=\n)/);
-  const markerLines = markerCommentLines(contents);
-  const result: string[] = [];
-  const orphansLeft: number[] = [];
-  let removedBlocks = 0;
+  const { blocks, orphans } = pairBlocks(lines);
 
   // Suffixed blocks belong only to the matching host. Complete legacy blocks
   // use their command-derived host; an unattributable non-canonical command is
@@ -922,70 +894,28 @@ function stripManagedBlocks(
     return derived === currentHost;
   };
 
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i]!;
-    const trimmed = line.trim();
-    const begin = markerLines.has(i) ? MARKERS.BEGIN_LINE_RE.exec(trimmed) : null;
-    if (begin !== null) {
-      const beginHost = begin[1]?.toLowerCase() ?? null;
-      // Look ahead for the matching END, capturing the block's command en route.
-      let endIdx = -1;
-      let blockCommand: string | null = null;
-      for (let j = i + 1; j < lines.length; j += 1) {
-        const nextTrimmed = lines[j]!.trim();
-        if (markerLines.has(j) && MARKERS.BEGIN_LINE_RE.test(nextTrimmed)) {
-          // Two BEGINs in a row — the outer one is an orphan.
-          break;
-        }
-        const end = markerLines.has(j) ? MARKERS.END_LINE_RE.exec(nextTrimmed) : null;
-        if (end !== null) {
-          if ((end[1]?.toLowerCase() ?? null) === beginHost) endIdx = j;
-          break;
-        }
-        const decoded = decodeManagedCommandLine(nextTrimmed);
-        if (decoded !== null) blockCommand = decoded;
-      }
-      if (endIdx === -1) {
-        // Orphan BEGIN: drop only this line (if it's ours to remove).
-        if (shouldRemove(beginHost, null, true)) {
-          orphansLeft.push(i);
-          i += 1;
-          continue;
-        }
-        result.push(rawLines[i]!);
-        i += 1;
-        continue;
-      }
-      if (shouldRemove(beginHost, blockCommand, false)) {
-        // Complete pair we're removing — drop BEGIN..END inclusive.
-        removedBlocks += 1;
-        i = endIdx + 1;
-        continue;
-      }
-      // Another host's block — keep it verbatim.
-      for (let k = i; k <= endIdx; k += 1) result.push(rawLines[k]!);
-      i = endIdx + 1;
-      continue;
+  const orphansLeft = orphans
+    .filter((orphan) => shouldRemove(orphan.hostId, null, true))
+    .map((orphan) => orphan.line);
+  const remove = new Set(orphansLeft);
+  let removedBlocks = 0;
+  for (const block of blocks) {
+    // Attribute by the LAST command line in the body, even one after a line
+    // that makes the block invalid (unlike the validator's commandPath).
+    let blockCommand: string | null = null;
+    for (const line of lines.slice(block.beginLine + 1, block.endLine)) {
+      blockCommand = decodeManagedCommandLine(line.trim()) ?? blockCommand;
     }
-    const end = markerLines.has(i) ? MARKERS.END_LINE_RE.exec(trimmed) : null;
-    if (end !== null) {
-      const endHost = end[1]?.toLowerCase() ?? null;
-      // Orphan END with no preceding BEGIN: drop only this line (if ours).
-      if (shouldRemove(endHost, null, true)) {
-        orphansLeft.push(i);
-        i += 1;
-        continue;
-      }
-      result.push(rawLines[i]!);
-      i += 1;
-      continue;
-    }
-    result.push(rawLines[i]!);
-    i += 1;
+    if (!shouldRemove(block.hostId, blockCommand, false)) continue;
+    removedBlocks += 1;
+    for (let i = block.beginLine; i <= block.endLine; i += 1) remove.add(i);
   }
 
-  return { stripped: result.join(""), removedBlocks, orphansLeft };
+  return { stripped: removeLines(contents, remove), removedBlocks, orphansLeft };
+}
+
+function removeLines(contents: string, remove: ReadonlySet<number>): string {
+  return contents.split(/(?<=\n)/).filter((_, index) => !remove.has(index)).join("");
 }
 
 /**
