@@ -44,6 +44,7 @@ async function linuxApi(
     },
     execFile: undefined,
     promisify: () => async () => { psCalls += 1; return { stdout: psOutput }; },
+    sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
   };
   const api = new Function(...Object.keys(bindings), `${code}; return {
     collectDescendantIdentities, collectDescendantIdentitiesForRoots,
