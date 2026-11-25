@@ -2,6 +2,53 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 3.0.0 — 2026-11-25
+
+The plugin makes promises about the sessions it launches and no longer polices the user's own Kimi configuration. Certified kimi-code versions are unchanged: exact 0.42.0 through 2.7.3 as listed in `runtime/kimi-releases.ts`, with 2.7.3 the newest and 2.6.0 still non-swarm-only.
+
+### Breaking
+
+- PLACEHOLDER (surfaces change, to be written by the integrator): host slash commands, agents, MCP tools and DSH providers.
+- A configured `default_plan_mode`, `[environments] default`, `require_trust = false` or enabled tower/subagent-fork selector no longer refuses certified launches where the plugin can neutralize it. Callers that relied on those refusals as a stop signal must check `warnings` instead.
+- The native-v2 session preview now shows the run's raw request instead of the plugin's prefixed prompt, and replaces a differing preview after every settled run.
+
+### Added
+
+- Read-only operations run on an unlisted plain 2.x kimi-code release newer than 2.0.0 with the warning `kimi-code <version> is not certified by this plugin release; running <operation> read-only with <row> mechanics.` `rescue`, `pursue`, `swarm` and `swarm --write` still refuse with `KIMI_CAPABILITY_NOT_CERTIFIED`. `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` restores exact-version refusal for every operation.
+- `setup --install-kimi [--json]` installs the highest certified kimi-code into `<data root>/kimi-plugin-cc/kimi-bin/<version>/` and points `kimi-bin/current` at it. Jobs use `KIMI_PLUGIN_CC_KIMI_BIN`, then that binary, then `kimi` on PATH. `setup` and `setup --check` print a `Kimi binary:` line. New error codes: `KIMI_INSTALL_FAILED`, `KIMI_INSTALL_VERIFY_FAILED`, `KIMI_INSTALL_UNSUPPORTED_PLATFORM`.
+- A launch warnings channel: the nullable `warnings` job column, a `Warnings:` block at the top of stdout and the artifact, and a `warnings` key in `status`, `result --json` and MCP results. Output without warnings is unchanged.
+- `--read-root <absolute-directory>` (repeatable) and `--network` on `ask`, `review`, `challenge` and read-only `swarm`. `--read-root` confines `Read`, `Grep`, `Glob` and `ReadMediaFile` to the workspace and the named roots. `--network` allows `WebSearch` and `FetchURL` to public hosts and confines reads the same way. Scope is stored in the nullable `read_scope` job column and is not inherited by a resumed or follow-up job. New error code: `READ_SCOPE_INVALID`.
+- Rescue, pursue and write-swarm may run `rm`, `mv`, `cp` and `mkdir` on absolute paths inside the workspace, with exact flags, symlink-resolved containment, no `.git` targets, and a `.git` scan before `rm -r`.
+
+### Changed
+
+- On exact 2.4.0 through 2.7.3, a configured `default_plan_mode` no longer refuses non-swarm launches, fresh or resumed, because print mode cancels the create-time plan entry before any turn. Swarm launches, older versions and uncertified releases still refuse.
+- Every child runs with `KIMI_CODE_EXPERIMENTAL_TOWER=0` and `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0`, and native-v2 children no longer receive `KIMI_CODE_EXPERIMENTAL_FLAG`. Enabled selectors no longer refuse certified releases.
+- On exact 2.5.0 through 2.7.3, a configured `[environments] default` no longer refuses a fresh non-swarm launch, because the plugin passes `--environment local`. Resumed and swarm launches still refuse.
+- `[workspace] require_trust = false` produces a warning instead of a refusal. A non-boolean value still refuses.
+- At job time, duplicate or orphaned managed hook markers produce a warning instead of a refusal when the real TOML parser proves a clean, byte-exact managed entry. `setup` and `setup --check` still fail on them.
+- `repair-sessions` replaces a preview that is blank or one of the session's own verified plugin prompts, and reports `would-replace-preview` or `preview-replaced`.
+- Release facts live in one table, `runtime/kimi-releases.ts`. Background ask and rescue no longer set `KIMI_PLUGIN_CC_ASK_REUSED_SESSION` or `KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION`. The `setup --check` direct probe uses the Node path parsed from the installed hook command. `classifySetupFailure` no longer returns `runtimeProbe` or `authProbe`, and the `CODEX_SKILLS[].displayName` field and the `TimeoutKind` export are removed.
+
+### Fixed
+
+- `grep -i` and `git --no-pager <read-only subcommand>` are allowed under rescue; both were wrongly rejected.
+- An MCP job that finished between the server's job read and its process-identity probe now attaches normally instead of failing with `MCP_PROCESS_IDENTITY_MISMATCH`.
+
+### Security
+
+- A malformed `~/.kimi-code/config.toml` could make the TOML parser's error message, which quotes neighbouring source lines, reach `setup --check` stdout and job stderr; those lines could include an API key. Errors now report only `syntax error at line N, column M`. The leak was present in 2.7.3 and earlier.
+
+### Known limitations
+
+- Reads stay unconfined unless the caller passes `--read-root` or `--network`.
+- The `FetchURL` host check sees only the URL as written, not DNS resolution or HTTP redirects. `--read-root /` removes read confinement.
+- Another host's older hook block still denies web tools until that host runs setup with this version.
+- A Desktop turn that finishes after a plugin run and before its preview sync has its preview overwritten.
+- The review gate's `systemMessage` does not carry warnings, and `recover-swarm` still writes its notices to stderr.
+- `go test -exec=<bin>` and `--exec` are still approved under rescue while `-exec <bin>` is rejected; `rg -i`, `rg -w` and `grep -w` are still rejected.
+- The newly allowed paths have not yet been driven by a real kimi-code binary; live cases run before the tag.
+
 ## 2.7.3 — 2026-11-24
 
 - Certify exact kimi-code 2.7.3 for all eight native-v2 operations under the no-plan and bounded-swarm/direct-worker construction. Exact source commit `a8f643ad2e7f197d6ec4409b7cdad8a544afad86` and bundle SHA-256 `747dbb1fd3ad0789194e0181cfaf036a795c8c6d6b3a9204c152aee8db10de16` are verified; exact 2.7.0, 2.7.1 and 2.7.4 remain excluded.
