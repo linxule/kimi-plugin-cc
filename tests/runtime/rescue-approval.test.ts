@@ -344,6 +344,10 @@ describe("evaluateRescueHookRequest", () => {
         await mkdir(path.join(root, "via-link"), { recursive: true });
         await symlink(path.join(root, "two"), path.join(root, "via-link", "to-two"));
         await link(path.join(outside, "victim.txt"), path.join(root, "hard.txt"));
+        await mkdir(path.join(root, "evil"), { recursive: true });
+        await symlink(outside, path.join(root, "evil", "link"));
+        await mkdir(path.join(root, "d2", "dir"), { recursive: true });
+        await writeFile(path.join(root, "d2", "dir", "b.txt"), "b");
         await mkdir(path.join(root, "hdir"), { recursive: true });
         await link(path.join(outside, "victim.txt"), path.join(root, "hdir", "a.txt"));
         await run(root, outside);
@@ -376,6 +380,9 @@ describe("evaluateRescueHookRequest", () => {
       { command: "rm -- <root>/a.txt" },
       { command: "rm -f -r -- <root>/dir" },
       { command: "rm <root>/a.txt <root>/dir/b.txt" },
+      { command: "rm -rf <root>/dir <root>/dir/b.txt" },
+      { command: "mkdir -p <root>/n1 <root>/n1/n2" },
+      { command: "mv <root>/evil <root>/existing" },
       { command: "rm <root>/dir/b.txt", cwd: "dir" },
       { command: "rm -rf '<root>/dir'" },
       { command: "rm '<root>/name with spaces.txt'" },
@@ -516,6 +523,15 @@ describe("evaluateRescueHookRequest", () => {
       // recursive copy into an existing tree
       { command: "cp -R <root>/dir <root>/existing", reason: "does not exist yet" },
       { command: "cp -r <root>/dir/ <root>/existing", reason: "does not exist yet" },
+      // operands are all checked before any runs, so later ones may not depend on earlier ones
+      { command: "mv <root>/evil <root>/existing/evil/link/victim.txt <root>/existing", reason: "Rescue requires every mv source to exist" },
+      { command: "cp <root>/missing.txt <root>/copy.txt", reason: "Rescue requires every cp source to exist" },
+      { command: "mv <root>/dir <root>/d2/dir/b.txt <root>/d2", reason: "lies under another source's destination" },
+      { command: "cp <root>/dir/b.txt <root>/d2/dir/b.txt <root>/d2/dir", reason: "lies under another source's destination" },
+      { command: "mv <root>/dir <root>/dir/sub", reason: "destination lies under one of its sources" },
+      { command: "cp -R <root>/dir <root>/dir/copy", reason: "destination lies under one of its sources" },
+      { command: "mv <root>/evil <root>/existing | cp <root>/a.txt <root>/existing/evil/link/", reason: "only one rm, mv, cp or mkdir" },
+      { command: "mkdir -p <root>/x | rm -rf <root>/x", reason: "only one rm, mv, cp or mkdir" },
       // compound shell syntax stays refused
       { command: "rm <root>/a.txt && rm <root>/dir/b.txt", reason: "shell syntax" },
       { command: "rm <root>/a.txt ; rm <root>/dir/b.txt", reason: "shell syntax" },

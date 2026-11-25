@@ -435,6 +435,11 @@ export async function validateWorkspaceShellCommand(
 ): Promise<ShellVerdict> {
   const parsed = parseShellPipeline(command);
   if ("response" in parsed) return parsed;
+  // Pipeline stages run concurrently after every check has passed, so one
+  // file operation could change what another's already-checked path names.
+  if (parsed.stages.filter((stage) => FILE_OPERATION_FLAGS.has(stage[0]!)).length > 1) {
+    return rejectShell(`Rescue allows only one rm, mv, cp or mkdir per command: ${command}`);
+  }
 
   for (let index = 0; index < parsed.stages.length; index += 1) {
     const stage = parsed.stages[index]!;
@@ -587,6 +592,33 @@ async function validateFileOperationStage(
     const sources = command === "mv" || command === "cp" ? resolved.slice(0, -1) : resolved;
     if (command !== "mkdir" && sources.some((operand) => operand.path === workspaceRoot)) {
       return { ok: false, reason: `Rescue rejects ${command} on the workspace root itself: ${shown}` };
+    }
+
+    if (command === "mv" || command === "cp") {
+      // Every operand is checked before mv/cp runs, so an operand must not
+      // depend on what an earlier source does: a missing source could be
+      // created by an earlier move (and resolve through a symlink it carries),
+      // and a source inside another source's destination changes underfoot.
+      // rm only removes and mkdir only creates plain directories, so neither
+      // can make a later operand name a different file.
+      const missing = sources.find((source) => source.stats === null);
+      if (missing !== undefined) {
+        return { ok: false, reason: `Rescue requires every ${command} source to exist: ${missing.path}` };
+      }
+      const destination = resolved.at(-1)!;
+      const landing = sources.map((source) =>
+        destination.stats?.isDirectory() ? path.join(destination.path, path.basename(source.path)) : destination.path,
+      );
+      for (const [index, source] of sources.entries()) {
+        if (landing.some((target, other) => other !== index && isWithin(target, source.path))) {
+          return { ok: false, reason: `Rescue rejects ${command} where a source lies under another source's destination: ${shown}` };
+        }
+        // Landing on itself is a no-op mv/cp refuses; strictly inside is not.
+        const inside = (target: string) => target !== source.path && isWithin(source.path, target);
+        if (inside(destination.path) || inside(landing[index]!)) {
+          return { ok: false, reason: `Rescue rejects ${command} whose destination lies under one of its sources: ${shown}` };
+        }
+      }
     }
 
     const recursive = flags.has("-r") || flags.has("-R") || flags.has("-rf") || flags.has("-fr");
