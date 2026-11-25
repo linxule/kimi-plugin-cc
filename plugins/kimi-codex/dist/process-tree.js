@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { promisify } from "node:util";
+import { sleep } from "./util.js";
 const execFileAsync = promisify(execFile);
 const MAX_DESCENDANT_DEPTH = 8;
 const MAX_DESCENDANT_PIDS = 512;
@@ -18,17 +19,16 @@ const PROBE_TIMEOUT = Symbol("process-probe-timeout");
 export async function collectDescendantIdentities(rootPid, expectedRoot) {
     if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === "win32")
         return [];
-    const snapshot = await raceValueWithTimeout(collectVerifiedDescendantIdentities(rootPid, expectedRoot), PROCESS_SNAPSHOT_TIMEOUT_MS);
-    if (snapshot === PROBE_TIMEOUT) {
-        throw new Error(`process snapshot exceeded ${PROCESS_SNAPSHOT_TIMEOUT_MS}ms`);
-    }
-    return snapshot;
+    return snapshotWithinTimeout(collectVerifiedDescendantIdentities(rootPid, expectedRoot));
 }
 /** Collect owned roots and descendants with one shared table and targeted verification. */
 export async function collectDescendantIdentitiesForRoots(expectedRoots) {
     if (expectedRoots.length === 0 || process.platform === "win32")
         return [];
-    const snapshot = await raceValueWithTimeout(collectVerifiedDescendantIdentitiesForRoots(expectedRoots), PROCESS_SNAPSHOT_TIMEOUT_MS);
+    return snapshotWithinTimeout(collectVerifiedDescendantIdentitiesForRoots(expectedRoots));
+}
+async function snapshotWithinTimeout(collect) {
+    const snapshot = await raceValueWithTimeout(collect, PROCESS_SNAPSHOT_TIMEOUT_MS, PROBE_TIMEOUT);
     if (snapshot === PROBE_TIMEOUT) {
         throw new Error(`process snapshot exceeded ${PROCESS_SNAPSHOT_TIMEOUT_MS}ms`);
     }
@@ -41,7 +41,7 @@ export async function collectProcessGroupsIdentities(processGroupIds) {
     const groups = new Set(processGroupIds.filter((id) => Number.isInteger(id) && id > 0));
     if (groups.size === 0)
         return [];
-    const rows = await raceValueWithTimeout(collectProcessSnapshotRows(), PROCESS_SNAPSHOT_TIMEOUT_MS);
+    const rows = await raceValueWithTimeout(collectProcessSnapshotRows(), PROCESS_SNAPSHOT_TIMEOUT_MS, PROBE_TIMEOUT);
     if (rows === PROBE_TIMEOUT || rows === undefined)
         return undefined;
     return rows.filter((row) => groups.has(row.processGroupId)).map(toProcessIdentity);
@@ -66,7 +66,7 @@ export async function probeProcessIdentity(pid) {
     const read = process.platform === "linux"
         ? readProcessIdentityBatchFromProc([pid])
         : readProcessIdentityBatchWithPs([pid]);
-    const batch = await raceValueWithTimeout(read, PROCESS_IDENTITY_PROBE_TIMEOUT_MS);
+    const batch = await raceValueWithTimeout(read, PROCESS_IDENTITY_PROBE_TIMEOUT_MS, PROBE_TIMEOUT);
     if (batch === PROBE_TIMEOUT)
         return { complete: false };
     return { identity: batch.identities.get(pid), complete: batch.complete };
@@ -88,7 +88,7 @@ export async function revalidateProcessIdentities(expectedIdentities, options = 
     const read = options.identityReader === undefined
         ? readCurrentIdentityBatch(expected)
         : readIdentityBatchWithReader(expected, options.identityReader);
-    const batch = await raceValueWithTimeout(read, timeoutMs);
+    const batch = await raceValueWithTimeout(read, timeoutMs, PROBE_TIMEOUT);
     if (batch === PROBE_TIMEOUT)
         return { identities: [], complete: false };
     const identities = [];
@@ -323,9 +323,7 @@ async function collectProcessSnapshotRowsFromProc() {
     try {
         entries = await readdir("/proc");
     }
-    catch (err) {
-        if (isErrnoException(err, "ENOENT") || isErrnoException(err, "EPERM"))
-            return undefined;
+    catch {
         return undefined;
     }
     const outcomes = await Promise.all(entries
@@ -354,7 +352,7 @@ async function collectProcessSnapshotRowsFromPs(pids) {
         stdout = result.stdout;
     }
     catch (err) {
-        if (uniquePids !== undefined && isExitCode(err, 1))
+        if (uniquePids !== undefined && hasErrorCode(err, 1))
             return [];
         return undefined;
     }
@@ -404,7 +402,7 @@ async function readProcessIdentityBatchWithPs(pids) {
         stdout = result.stdout;
     }
     catch (err) {
-        if (isExitCode(err, 1))
+        if (hasErrorCode(err, 1))
             return { identities: new Map(), complete: true };
         return { identities: new Map(), complete: false };
     }
@@ -452,7 +450,7 @@ async function readProcRow(pid) {
         stat = await readFile(`/proc/${pid}/stat`, "utf8");
     }
     catch (err) {
-        if (isErrnoException(err, "ENOENT") || isErrnoException(err, "ESRCH")) {
+        if (hasErrorCode(err, "ENOENT") || hasErrorCode(err, "ESRCH")) {
             return { status: "missing" };
         }
         return { status: "error" };
@@ -560,16 +558,13 @@ function isQuiescentState(state) {
     const normalized = state.trim().toUpperCase();
     return normalized.startsWith("Z") || normalized.startsWith("X");
 }
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-async function raceValueWithTimeout(promise, timeoutMs) {
+export async function raceValueWithTimeout(promise, timeoutMs, timeoutValue) {
     let timer;
     try {
         return await Promise.race([
             promise,
             new Promise((resolve) => {
-                timer = setTimeout(() => resolve(PROBE_TIMEOUT), Math.max(0, timeoutMs));
+                timer = setTimeout(() => resolve(timeoutValue), Math.max(0, timeoutMs));
             }),
         ]);
     }
@@ -578,9 +573,7 @@ async function raceValueWithTimeout(promise, timeoutMs) {
             clearTimeout(timer);
     }
 }
-function isErrnoException(err, code) {
-    return typeof err === "object" && err !== null && "code" in err && err.code === code;
-}
-function isExitCode(err, code) {
+/** Matches an errno string (ENOENT) or a numeric child exit code on a thrown value. */
+function hasErrorCode(err, code) {
     return typeof err === "object" && err !== null && "code" in err && err.code === code;
 }

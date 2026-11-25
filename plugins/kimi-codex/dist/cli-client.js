@@ -19,7 +19,7 @@ import { parseVersionLine } from "./kimi-version-probe.js";
 import { sleep } from "./util.js";
 import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
 import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
-import { collectDescendantIdentities, collectDescendantIdentitiesForRoots, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
+import { collectDescendantIdentities, collectDescendantIdentitiesForRoots, raceValueWithTimeout, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
 /** Bytes of stderr retained for diagnostics on completion. Rolling buffer. */
 const STDERR_TAIL_BYTES = 8192;
 /** Hard cap on awaiting diagnostics log drain before resolving the result. */
@@ -383,7 +383,7 @@ export async function runCliPrompt(opts) {
         const captureProcessIdentities = async (collect, excludedPid, onFailure) => {
             let snapshot;
             try {
-                const collected = await raceWithValueTimeout(collect(), DESCENDANT_SNAPSHOT_TIMEOUT_MS, DESCENDANT_SNAPSHOT_TIMEOUT);
+                const collected = await raceValueWithTimeout(collect(), DESCENDANT_SNAPSHOT_TIMEOUT_MS, DESCENDANT_SNAPSHOT_TIMEOUT);
                 if (collected === DESCENDANT_SNAPSHOT_TIMEOUT) {
                     appendLogLine({
                         event: "descendant_collection_timeout",
@@ -1053,19 +1053,4 @@ function raceWithTimeout(promise, timeoutMs) {
         if (timer !== undefined)
             clearTimeout(timer);
     });
-}
-async function raceWithValueTimeout(promise, timeoutMs, timeoutValue) {
-    let timer;
-    try {
-        return await Promise.race([
-            promise,
-            new Promise((resolve) => {
-                timer = setTimeout(() => resolve(timeoutValue), Math.max(0, timeoutMs));
-            }),
-        ]);
-    }
-    finally {
-        if (timer !== undefined)
-            clearTimeout(timer);
-    }
 }

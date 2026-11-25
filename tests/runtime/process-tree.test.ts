@@ -20,8 +20,8 @@ describe("targeted ps snapshot exit", () => {
       ["async function collectProcessSnapshotRowsFromPs(", "async function readCurrentIdentityBatch("],
       ["function parsePsSnapshotRows(", "function mergeIdentityBatches("],
       ["function toProcessIdentity(", "function dedupeIdentities("],
-      ["function uniqueValidPids(", "function sleep("],
-      ["function isExitCode(", undefined],
+      ["function uniqueValidPids(", "export async function raceValueWithTimeout<"],
+      ["function hasErrorCode(", undefined],
     ].map(([start, end]) => source.slice(source.indexOf(start!), end === undefined ? undefined : source.indexOf(end)));
     const code = new Bun.Transpiler({ loader: "ts" }).transformSync(snippets.join("\n"));
     let beforeVerification: (rows: Row[]) => Promise<void> = async () => undefined;

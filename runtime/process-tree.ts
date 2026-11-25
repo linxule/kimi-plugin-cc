@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
+import { sleep } from "./util.js";
+
 const execFileAsync = promisify(execFile);
 
 const MAX_DESCENDANT_DEPTH = 8;
@@ -67,15 +69,7 @@ export async function collectDescendantIdentities(
   expectedRoot?: ProcessIdentity,
 ): Promise<ProcessIdentity[]> {
   if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === "win32") return [];
-
-  const snapshot = await raceValueWithTimeout(
-    collectVerifiedDescendantIdentities(rootPid, expectedRoot),
-    PROCESS_SNAPSHOT_TIMEOUT_MS,
-  );
-  if (snapshot === PROBE_TIMEOUT) {
-    throw new Error(`process snapshot exceeded ${PROCESS_SNAPSHOT_TIMEOUT_MS}ms`);
-  }
-  return snapshot;
+  return snapshotWithinTimeout(collectVerifiedDescendantIdentities(rootPid, expectedRoot));
 }
 
 /** Collect owned roots and descendants with one shared table and targeted verification. */
@@ -83,10 +77,11 @@ export async function collectDescendantIdentitiesForRoots(
   expectedRoots: readonly ProcessIdentity[],
 ): Promise<ProcessIdentity[]> {
   if (expectedRoots.length === 0 || process.platform === "win32") return [];
-  const snapshot = await raceValueWithTimeout(
-    collectVerifiedDescendantIdentitiesForRoots(expectedRoots),
-    PROCESS_SNAPSHOT_TIMEOUT_MS,
-  );
+  return snapshotWithinTimeout(collectVerifiedDescendantIdentitiesForRoots(expectedRoots));
+}
+
+async function snapshotWithinTimeout(collect: Promise<ProcessIdentity[]>): Promise<ProcessIdentity[]> {
+  const snapshot = await raceValueWithTimeout(collect, PROCESS_SNAPSHOT_TIMEOUT_MS, PROBE_TIMEOUT);
   if (snapshot === PROBE_TIMEOUT) {
     throw new Error(`process snapshot exceeded ${PROCESS_SNAPSHOT_TIMEOUT_MS}ms`);
   }
@@ -100,7 +95,7 @@ export async function collectProcessGroupsIdentities(
   if (process.platform === "win32") return undefined;
   const groups = new Set(processGroupIds.filter((id) => Number.isInteger(id) && id > 0));
   if (groups.size === 0) return [];
-  const rows = await raceValueWithTimeout(collectProcessSnapshotRows(), PROCESS_SNAPSHOT_TIMEOUT_MS);
+  const rows = await raceValueWithTimeout(collectProcessSnapshotRows(), PROCESS_SNAPSHOT_TIMEOUT_MS, PROBE_TIMEOUT);
   if (rows === PROBE_TIMEOUT || rows === undefined) return undefined;
   return rows.filter((row) => groups.has(row.processGroupId)).map(toProcessIdentity);
 }
@@ -130,7 +125,7 @@ export async function probeProcessIdentity(pid: number): Promise<ProcessIdentity
   const read = process.platform === "linux"
     ? readProcessIdentityBatchFromProc([pid])
     : readProcessIdentityBatchWithPs([pid]);
-  const batch = await raceValueWithTimeout(read, PROCESS_IDENTITY_PROBE_TIMEOUT_MS);
+  const batch = await raceValueWithTimeout(read, PROCESS_IDENTITY_PROBE_TIMEOUT_MS, PROBE_TIMEOUT);
   if (batch === PROBE_TIMEOUT) return { complete: false };
   return { identity: batch.identities.get(pid), complete: batch.complete };
 }
@@ -156,7 +151,7 @@ export async function revalidateProcessIdentities(
   const read = options.identityReader === undefined
     ? readCurrentIdentityBatch(expected)
     : readIdentityBatchWithReader(expected, options.identityReader);
-  const batch = await raceValueWithTimeout(read, timeoutMs);
+  const batch = await raceValueWithTimeout(read, timeoutMs, PROBE_TIMEOUT);
   if (batch === PROBE_TIMEOUT) return { identities: [], complete: false };
 
   const identities: ProcessIdentity[] = [];
@@ -421,8 +416,7 @@ async function collectProcessSnapshotRowsFromProc(): Promise<ProcessSnapshotRow[
   let entries: string[];
   try {
     entries = await readdir("/proc");
-  } catch (err) {
-    if (isErrnoException(err, "ENOENT") || isErrnoException(err, "EPERM")) return undefined;
+  } catch {
     return undefined;
   }
 
@@ -460,7 +454,7 @@ async function collectProcessSnapshotRowsFromPs(
     );
     stdout = result.stdout;
   } catch (err) {
-    if (uniquePids !== undefined && isExitCode(err, 1)) return [];
+    if (uniquePids !== undefined && hasErrorCode(err, 1)) return [];
     return undefined;
   }
 
@@ -521,7 +515,7 @@ async function readProcessIdentityBatchWithPs(
     );
     stdout = result.stdout;
   } catch (err) {
-    if (isExitCode(err, 1)) return { identities: new Map(), complete: true };
+    if (hasErrorCode(err, 1)) return { identities: new Map(), complete: true };
     return { identities: new Map(), complete: false };
   }
 
@@ -572,7 +566,7 @@ async function readProcRow(pid: number): Promise<ProcRowRead> {
   try {
     stat = await readFile(`/proc/${pid}/stat`, "utf8");
   } catch (err) {
-    if (isErrnoException(err, "ENOENT") || isErrnoException(err, "ESRCH")) {
+    if (hasErrorCode(err, "ENOENT") || hasErrorCode(err, "ESRCH")) {
       return { status: "missing" };
     }
     return { status: "error" };
@@ -691,20 +685,17 @@ function isQuiescentState(state: string): boolean {
   return normalized.startsWith("Z") || normalized.startsWith("X");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function raceValueWithTimeout<T>(
+export async function raceValueWithTimeout<T, TTimeout>(
   promise: Promise<T>,
   timeoutMs: number,
-): Promise<T | typeof PROBE_TIMEOUT> {
+  timeoutValue: TTimeout,
+): Promise<T | TTimeout> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
-      new Promise<typeof PROBE_TIMEOUT>((resolve) => {
-        timer = setTimeout(() => resolve(PROBE_TIMEOUT), Math.max(0, timeoutMs));
+      new Promise<TTimeout>((resolve) => {
+        timer = setTimeout(() => resolve(timeoutValue), Math.max(0, timeoutMs));
       }),
     ]);
   } finally {
@@ -712,10 +703,7 @@ async function raceValueWithTimeout<T>(
   }
 }
 
-function isErrnoException(err: unknown, code: string): boolean {
-  return typeof err === "object" && err !== null && "code" in err && err.code === code;
-}
-
-function isExitCode(err: unknown, code: number): boolean {
+/** Matches an errno string (ENOENT) or a numeric child exit code on a thrown value. */
+function hasErrorCode(err: unknown, code: string | number): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === code;
 }

@@ -39,6 +39,7 @@ import {
 import {
   collectDescendantIdentities,
   collectDescendantIdentitiesForRoots,
+  raceValueWithTimeout,
   revalidateProcessIdentities,
   waitForProcessTreeExit,
   type ProcessIdentity,
@@ -601,7 +602,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     ): Promise<ProcessIdentity[]> => {
       let snapshot: ProcessIdentity[];
       try {
-        const collected = await raceWithValueTimeout(
+        const collected = await raceValueWithTimeout(
           collect(),
           DESCENDANT_SNAPSHOT_TIMEOUT_MS,
           DESCENDANT_SNAPSHOT_TIMEOUT,
@@ -1336,22 +1337,4 @@ function raceWithTimeout(promise: Promise<unknown>, timeoutMs: number): Promise<
   ]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
   });
-}
-
-async function raceWithValueTimeout<T, TTimeout>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  timeoutValue: TTimeout,
-): Promise<T | TTimeout> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<TTimeout>((resolve) => {
-        timer = setTimeout(() => resolve(timeoutValue), Math.max(0, timeoutMs));
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
 }
