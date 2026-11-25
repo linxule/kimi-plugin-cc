@@ -1086,16 +1086,26 @@ function isWithinWorkspaceOutsideAnyGit(root, target) {
 }
 /** Total directory entries one rm -r may inspect before the hook gives up. */
 export const RM_RECURSIVE_SCAN_ENTRY_CAP = 20_000;
+/** Wall-clock budget for one scan; kimi-code treats a hook timeout as allow. */
+export const GIT_SCAN_DEADLINE_MS = 3_000;
 /**
- * Walk the trees rm -r would delete, without following symlinks, looking for
- * a `.git` file or directory at any depth (a nested repository or submodule).
- * One entry budget covers all trees so the hook cannot stall.
+ * Walk the trees a recursive operation would touch, without following
+ * symlinks or leaving each tree's filesystem, looking for a `.git` file or
+ * directory at any depth (a nested repository or submodule). One entry budget
+ * and one deadline cover all trees so the hook cannot stall.
  */
-async function scanTreesForGit(roots, cap = RM_RECURSIVE_SCAN_ENTRY_CAP) {
-    const pending = [...roots];
+export async function scanTreesForGit(roots, { cap = RM_RECURSIVE_SCAN_ENTRY_CAP, deadlineMs = GIT_SCAN_DEADLINE_MS } = {}) {
+    const deadline = Date.now() + deadlineMs;
+    const late = () => Date.now() >= deadline;
+    const pending = [];
+    for (const root of roots) {
+        pending.push({ directory: root, device: (await lstat(root)).dev });
+    }
     let seen = 0;
     while (pending.length > 0) {
-        const directory = pending.pop();
+        if (late())
+            return `took longer than ${deadlineMs} ms`;
+        const { directory, device } = pending.pop();
         let entries;
         try {
             entries = await readdir(directory, { withFileTypes: true });
@@ -1109,8 +1119,21 @@ async function scanTreesForGit(roots, cap = RM_RECURSIVE_SCAN_ENTRY_CAP) {
                 return `more than ${cap} entries`;
             if (isGitName(entry.name))
                 return "git";
-            if (entry.isDirectory())
-                pending.push(path.join(directory, entry.name));
+            if (!entry.isDirectory())
+                continue;
+            const child = path.join(directory, entry.name);
+            let childDevice;
+            try {
+                childDevice = (await lstat(child)).dev;
+            }
+            catch (err) {
+                return `cannot read ${child}: ${err.code ?? err.message}`;
+            }
+            if (childDevice !== device)
+                return `crosses a filesystem boundary at ${child}`;
+            if (late())
+                return `took longer than ${deadlineMs} ms`;
+            pending.push({ directory: child, device });
         }
     }
     return "clean";

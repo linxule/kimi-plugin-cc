@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  GIT_SCAN_DEADLINE_MS,
   RM_RECURSIVE_SCAN_ENTRY_CAP,
   evaluateRescueHookRequest,
+  scanTreesForGit,
   hasUnsafeShellSyntax,
   validateShellCommand,
 } from "../../runtime/rescue-approval.js";
@@ -557,6 +559,20 @@ describe("evaluateRescueHookRequest", () => {
           reason: `Rescue requires absolute paths for rm; use paths under ${await realpath(root)}: rm a.txt`,
         });
       });
+    });
+
+    test(`the .git scan stops after ${GIT_SCAN_DEADLINE_MS} ms of wall clock`, async () => {
+      await withFileOpFixture(async (root) => {
+        expect(GIT_SCAN_DEADLINE_MS).toBe(3000);
+        expect(await scanTreesForGit([path.join(root, "deep")], { deadlineMs: 0 })).toBe("took longer than 0 ms");
+        expect(await scanTreesForGit([path.join(root, "deep")])).toBe("clean");
+      });
+    });
+
+    const posixTest = process.platform === "win32" ? test.skip : test;
+    posixTest("the .git scan refuses to cross a filesystem boundary", async () => {
+      // /dev is a separate filesystem (devfs/devtmpfs) directly under / on macOS and Linux.
+      expect(await scanTreesForGit(["/"])).toStartWith("crosses a filesystem boundary at /");
     });
 
     test("the path-free validator never approves file operations", () => {
