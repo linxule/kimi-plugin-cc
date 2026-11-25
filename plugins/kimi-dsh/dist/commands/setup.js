@@ -26,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
+import { olderHostHookWarnings } from "../hooks/install.js";
 import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKimiConfigLock, } from "../hooks/config-safety.js";
 import { buildHookShellCommand, hostIdFromHookCommand, parseHookShellCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
 import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, ORPHAN_MARKER_REMEDY, pairBlocks, parseManagedBlock, } from "../hooks/managed-block.js";
@@ -212,6 +213,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         return { blockWritten, next, expectedCommand };
     });
     const { blockWritten, next, expectedCommand } = mutation;
+    warnings.push(...await olderHostHookWarnings(next, hostId, expectedCommand));
     collectPermissionRuleWarnings(next, warnings);
     const kimiBinary = describeKimiBinary(context.env, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
@@ -300,6 +302,7 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
     if (otherHosts.length > 0) {
         warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")} (coexisting, untouched).`);
     }
+    warnings.push(...await olderHostHookWarnings(existing, hostId, expectedCommand));
     // Config rewrites can strip markers while leaving each host's table enforcing.
     // Our exact-command table is live; our stale table is prunable; another host's
     // table is reported but left strictly alone.

@@ -1,8 +1,10 @@
 import { constants as fsConstants, existsSync } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access, open, readFile } from "node:fs/promises";
+import path from "node:path";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
-import { countCleanEntriesInFile, evaluateInstalled } from "./managed-block.js";
-import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
+import { countCleanEntriesInFile, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, parseManagedBlock, } from "./managed-block.js";
+import { hostIdFromHookCommand, parseHookShellCommand, resolveHostId, tryBuildExpectedHookCommand, } from "./install-paths.js";
+import { jobHostForHookScript } from "./job-host.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 export async function verifyHookInstalled(env) {
     const configPath = resolveKimiCodeConfigPath(env);
@@ -52,8 +54,9 @@ export async function verifyHookInstalled(env) {
     // Classify command mismatches into actionable drift reasons without changing
     // the installed=false decision. hostId isolates this host's block in the
     // shared config.
+    const hostId = resolveHostId(env, expected.hookScriptPath);
     const check = evaluateInstalled(raw, expected.command, {
-        hostId: resolveHostId(env, expected.hookScriptPath),
+        hostId,
         nodeExists: (binPath) => existsSync(binPath),
     });
     // Markers are bookkeeping, not the security boundary. At job time a
@@ -127,7 +130,116 @@ export async function verifyHookInstalled(env) {
             nodeBin: expected.nodeBin,
         };
     }
+    // Transition notice (channel W): other hosts' older hooks still veto.
+    warnings.push(...await olderHostHookWarnings(raw, hostId, expected.command));
     return warnings.length > 0 ? { installed: true, configPath, warnings } : { installed: true, configPath };
+}
+/**
+ * First plugin version whose hook abstains for jobs another host launched
+ * (KIMI_PLUGIN_CC_JOB_HOST). Older hooks still apply their own rules to every
+ * plugin job, and any deny wins.
+ */
+export const FIRST_ABSTAINING_HOOK_VERSION = "3.0.0";
+const MANIFEST_WALK_LEVELS = 4;
+const MANIFEST_MAX_BYTES = 64 * 1024;
+const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+/**
+ * One launch warning per other host's hook that predates abstaining (or whose
+ * version cannot be read). Covers other hosts' managed blocks and their
+ * marker-less tables left by a config rewrite. Reads manifests only; never
+ * executes anything and never refuses.
+ */
+export async function olderHostHookWarnings(contents, ownHostId, ownCommand) {
+    const ownScript = parseHookShellCommand(ownCommand)?.hookScript;
+    const ownIds = new Set([ownHostId, ...(ownScript !== undefined ? [jobHostForHookScript(ownScript)] : [])]);
+    const others = new Map();
+    for (const block of parseManagedBlock(contents, ownHostId).blocks) {
+        const host = effectiveHost(block, ownHostId);
+        if (ownIds.has(host) || block.commandPath.length === 0 || block.commandPath === ownCommand)
+            continue;
+        if (!others.has(block.commandPath))
+            others.set(block.commandPath, host);
+    }
+    for (const table of findUnmanagedApprovalHookBlocks(contents)) {
+        const host = hostIdFromHookCommand(table.command);
+        if (host === null || ownIds.has(host) || table.command === ownCommand)
+            continue;
+        if (!others.has(table.command))
+            others.set(table.command, host);
+    }
+    const warnings = [];
+    for (const [command, host] of others) {
+        const version = await hookPluginVersion(command);
+        if (version !== undefined && !predatesAbstainingHook(version))
+            continue;
+        warnings.push(`The ${host} host's kimi-plugin-cc hook (${version === undefined ? "an unknown version" : `version ${version}`}) ` +
+            `also checks this job with its older rules; it can deny web access and rm, mv, cp and mkdir that this ` +
+            `version allows. Update the plugin in ${host} and run its setup.`);
+    }
+    return warnings;
+}
+/**
+ * The plugin version behind a canonical hook command: walk up a few levels
+ * from the hook script to the nearest named `package.json` (it must be
+ * `kimi-plugin-cc`) or a Codex install's `.codex-plugin/plugin.json` (name
+ * `kimi`; that root has no package.json). Nameless `{"type":"module"}`
+ * markers under dist/ are skipped. Undefined when nothing trustworthy is found.
+ */
+export async function hookPluginVersion(command) {
+    const parsed = parseHookShellCommand(command);
+    if (parsed === null || !path.isAbsolute(parsed.hookScript))
+        return undefined;
+    let dir = path.dirname(path.resolve(parsed.hookScript));
+    for (let level = 0; level <= MANIFEST_WALK_LEVELS; level += 1) {
+        const pkg = await readSmallJsonObject(path.join(dir, "package.json"));
+        if (pkg !== undefined && typeof pkg.name === "string") {
+            return pkg.name === "kimi-plugin-cc" ? semverOrUndefined(pkg.version) : undefined;
+        }
+        const codex = await readSmallJsonObject(path.join(dir, ".codex-plugin", "plugin.json"));
+        if (codex !== undefined && typeof codex.name === "string") {
+            return codex.name === "kimi" ? semverOrUndefined(codex.version) : undefined;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir)
+            break;
+        dir = parent;
+    }
+    return undefined;
+}
+/** True for a version below FIRST_ABSTAINING_HOOK_VERSION, its prereleases, or an unparseable one. */
+export function predatesAbstainingHook(version) {
+    const have = SEMVER_RE.exec(version);
+    const want = SEMVER_RE.exec(FIRST_ABSTAINING_HOOK_VERSION);
+    if (have === null)
+        return true;
+    for (let i = 1; i <= 3; i += 1) {
+        const diff = Number(have[i]) - Number(want[i]);
+        if (diff !== 0)
+            return diff < 0;
+    }
+    return have[4] !== undefined;
+}
+function semverOrUndefined(value) {
+    return typeof value === "string" && SEMVER_RE.test(value) ? value : undefined;
+}
+async function readSmallJsonObject(file) {
+    let handle;
+    try {
+        handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > MANIFEST_MAX_BYTES)
+            return undefined;
+        const value = JSON.parse(await handle.readFile("utf8"));
+        return typeof value === "object" && value !== null && !Array.isArray(value)
+            ? value
+            : undefined;
+    }
+    catch {
+        return undefined;
+    }
+    finally {
+        await handle?.close().catch(() => undefined);
+    }
 }
 /**
  * Caller-facing repair protocol shared by every hook-refusal surface. Re-pin

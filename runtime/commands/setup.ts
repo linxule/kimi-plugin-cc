@@ -43,6 +43,7 @@ import path from "node:path";
 
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
+import { olderHostHookWarnings } from "../hooks/install.js";
 import {
   normalizeTopLevelInlineHooks,
   validateKimiHookSetForEnvironment,
@@ -393,6 +394,7 @@ async function runInstall(
     return { blockWritten, next, expectedCommand };
   });
   const { blockWritten, next, expectedCommand } = mutation;
+  warnings.push(...await olderHostHookWarnings(next, hostId, expectedCommand));
 
   collectPermissionRuleWarnings(next, warnings);
   const kimiBinary = describeKimiBinary(context.env, warnings);
@@ -505,6 +507,7 @@ async function runCheck(
       `Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")} (coexisting, untouched).`,
     );
   }
+  warnings.push(...await olderHostHookWarnings(existing, hostId, expectedCommand));
   // Config rewrites can strip markers while leaving each host's table enforcing.
   // Our exact-command table is live; our stale table is prunable; another host's
   // table is reported but left strictly alone.
