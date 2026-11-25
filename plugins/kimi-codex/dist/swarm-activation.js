@@ -1131,14 +1131,8 @@ async function signalCapturedTree(owned, childPid, identities, signal) {
     for (const identity of pidValidation.identities)
         trySignalPid(identity.pid, signal);
     const activeGroupIds = new Set(pidValidation.identities.map((identity) => identity.processGroupId));
-    if (owned.exited) {
-        if (!pidValidation.identities.some((identity) => identity.processGroupId === childPid)) {
-            activeGroupIds.delete(childPid);
-        }
-    }
-    else {
+    if (!owned.exited)
         activeGroupIds.delete(childPid);
-    }
     for (const processGroupId of activeGroupIds)
         trySignalPid(-processGroupId, signal);
 }
