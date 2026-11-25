@@ -375,6 +375,11 @@ export class JobStore {
       sessionId, exceptJobId));
   }
 
+  /** Every job recorded for a Kimi session, across repos and states, oldest first. */
+  listJobsBySessionId(sessionId: string): JobRecord[] {
+    return this.db.all<DbRow>("SELECT * FROM jobs WHERE kimi_session_id = ? ORDER BY created_at", sessionId).map(hydrateRow);
+  }
+
   findLatestJob(options: FindLatestJobOptions): JobRecord | null {
     const conditions = ["repo_id = @repo_id"];
     const params: Record<string, unknown> = {

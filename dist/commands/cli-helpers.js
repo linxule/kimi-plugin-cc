@@ -240,6 +240,32 @@ export async function resolveResumeSession(store, kind, repoId, options) {
         sourceJob: source,
     };
 }
+/**
+ * --network on a resumed session must not send out what an earlier,
+ * unconfined turn read. Every job recorded for the session, and every job on
+ * the source's resume chain, must have run confined (non-null read_scope).
+ * No recorded history, or a broken chain, counts as unconfined.
+ */
+export function assertNetworkResumeConfined(store, kind, network, resolution) {
+    if (!network || !resolution.reusedSession)
+        return;
+    const sessionId = resolution.kimiSessionId;
+    const history = sessionId ? store.listJobsBySessionId(sessionId) : [];
+    let confined = history.length > 0 && history.every((job) => job.read_scope != null);
+    const seen = new Set();
+    for (let jobId = resolution.sourceJob?.job_id; confined && jobId;) {
+        if (seen.has(jobId))
+            break;
+        seen.add(jobId);
+        const job = store.getJob(jobId);
+        confined = job !== null && job.read_scope != null;
+        jobId = job?.resumed_from_job_id;
+    }
+    if (!confined) {
+        throw new RuntimeError("INVALID_ARGS", `${kind} --network cannot resume session ${sessionId ?? "<unknown>"}: an earlier turn in it ran without confined reads (or its history is not recorded), so its reads could be sent out. ` +
+            `Start a fresh session instead: ${kind} --fresh --network [--read-root <dir>] <prompt>.`, `${kind}.resume`);
+    }
+}
 /** An explicit budget wins; otherwise a resume inherits its same-operation source's budget. */
 export function resumeBudget(kind, explicitMs, source) {
     const inherited = source?.operation_kind === kind ? source.budget_ms : null;

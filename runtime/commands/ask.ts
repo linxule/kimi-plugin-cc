@@ -25,7 +25,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import type { CommandContext } from "../types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget, hookRefusal, READ_ONLY_HOOK_REPAIR } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, assertNetworkResumeConfined, resumeBudget, hookRefusal, READ_ONLY_HOOK_REPAIR } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 
@@ -72,6 +72,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
 
     const jobId = allocateJobId(context);
     const sessionResolution = await resolveResumeSession(store, "ask", repoIdentity.repoId, parsed);
+    assertNetworkResumeConfined(store, "ask", readScope?.network === true, sessionResolution);
     const askPrompt = buildAskPrompt(parsed.prompt, sessionResolution.reusedSession);
     const executionPlan = await prepareKimiExecutionPlan({
       operationKind: "ask",

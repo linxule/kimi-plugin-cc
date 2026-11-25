@@ -7,6 +7,9 @@ import { runAsk } from "../../runtime/commands/ask.js";
 import { runRescue } from "../../runtime/commands/rescue.js";
 import { runReview } from "../../runtime/commands/review.js";
 import { runSwarm } from "../../runtime/commands/swarm.js";
+import { assertNetworkResumeConfined } from "../../runtime/commands/cli-helpers.js";
+import { resolveRepoIdentity } from "../../runtime/git.js";
+import { JobStore } from "../../runtime/job-store.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import { describeReadScope, parseJobReadScope, resolveReadScope, serializeReadScope } from "../../runtime/read-scope.js";
 import { renderManagedJobOutput, renderTerminalJobArtifact } from "../../runtime/render.js";
@@ -251,3 +254,74 @@ describe("S1 scope flags: commands", () => {
     expect(renderTerminalJobArtifact({ ...(job as object), read_scope: undefined } as never)).not.toContain("Scope:");
   });
 });
+
+describe("S4 --network on a resumed session", () => {
+  async function latestAsk(env: NodeJS.ProcessEnv, repoRoot: string) {
+    const store = new JobStore(resolvePluginPaths(env));
+    try {
+      return store.findLatestJob({ repoId: (await resolveRepoIdentity(repoRoot)).repoId, commandType: "ask" })!;
+    } finally {
+      store.close();
+    }
+  }
+
+  test("refuses -r and an explicit session id after an unconfined turn, before creating a job", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("read-scope-resume-refuse");
+    const repoRoot = await createGitRepoFixture("read-scope-resume-refuse-repo");
+    const env = makeMockEnv(pluginDataRoot, "ask-success", path.join(pluginDataRoot, "invocation.jsonl"));
+    try {
+      await runAsk(["first"], makeContext(repoRoot, env));
+      const first = await latestAsk(env, repoRoot);
+      expect(first.kimi_session_id).toBeTruthy();
+      for (const argv of [["-r", "--network", "next"], ["--network", "--resume", first.kimi_session_id!], ["--network", "--resume", first.job_id]]) {
+        await expect(runAsk(argv, makeContext(repoRoot, env))).rejects.toMatchObject({
+          code: "INVALID_ARGS", stage: "ask.resume", message: expect.stringContaining("ask --fresh --network"),
+        });
+      }
+      expect((await latestAsk(env, repoRoot)).job_id).toBe(first.job_id);
+      // A confined later turn does not clean an unconfined history.
+      await runAsk(["-r", "--read-root", pluginDataRoot, "confined"], makeContext(repoRoot, env));
+      await expect(runAsk(["-r", "--network", "next"], makeContext(repoRoot, env))).rejects.toMatchObject({ code: "INVALID_ARGS" });
+      // --fresh starts a new session that can use the network.
+      expect(await runAsk(["--fresh", "--network", "q"], makeContext(repoRoot, env))).toContain("network on");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  }, 60_000);
+
+  test("allows -r and an explicit session id when every earlier turn ran confined", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("read-scope-resume-allow");
+    const repoRoot = await createGitRepoFixture("read-scope-resume-allow-repo");
+    const env = makeMockEnv(pluginDataRoot, "ask-success", path.join(pluginDataRoot, "invocation.jsonl"));
+    try {
+      await runAsk(["--read-root", pluginDataRoot, "first"], makeContext(repoRoot, env));
+      const first = await latestAsk(env, repoRoot);
+      expect(await runAsk(["-r", "--network", "next"], makeContext(repoRoot, env))).toContain("network on");
+      expect(await runAsk(["--network", "--resume", first.kimi_session_id!], makeContext(repoRoot, env))).toContain("network on");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  }, 60_000);
+
+  test("unknown or broken history refuses; no network or a fresh session never checks", () => {
+    const resolution = (sourceJob: object | null, kimiSessionId: string | null) =>
+      ({ reusedSession: true, kimiSessionId, resumedFromJobId: null, sourceJob }) as never;
+    const store = (jobs: Array<{ job_id: string; read_scope?: string; resumed_from_job_id?: string | null }>) => ({
+      listJobsBySessionId: () => jobs,
+      getJob: (id: string) => jobs.find((job) => job.job_id === id) ?? null,
+    }) as never;
+    const scope = serializeReadScope({ readRoots: ["/x"], network: false })!;
+    expect(() => assertNetworkResumeConfined(store([]), "ask", true, resolution({ job_id: "a" }, "s")))
+      .toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+    expect(() => assertNetworkResumeConfined(store([{ job_id: "b", read_scope: scope, resumed_from_job_id: "gone" }]), "ask", true,
+      resolution({ job_id: "b" }, "s"))).toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+    expect(() => assertNetworkResumeConfined(store([{ job_id: "a", read_scope: scope }]), "ask", true,
+      resolution({ job_id: "a" }, "s"))).not.toThrow();
+    expect(() => assertNetworkResumeConfined(store([]), "ask", false, resolution({ job_id: "a" }, "s"))).not.toThrow();
+    expect(() => assertNetworkResumeConfined(store([]), "ask", true,
+      { reusedSession: false, kimiSessionId: null, resumedFromJobId: null, sourceJob: null })).not.toThrow();
+  });
+});
+
