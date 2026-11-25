@@ -408,6 +408,11 @@ describe("ask session resume", () => {
         ...env,
         KIMI_PLUGIN_CC_MOCK_DELAY_MS: "0",
       }));
+      const initial = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+      expect(initial.lastPrompt).toBe("Initial question");
+      // Real Kimi records the submitted prompt (possibly truncated) as the
+      // preview when the resume turn starts; the mock does not.
+      await writeFile(statePath, JSON.stringify({ ...initial, lastPrompt: "Answer directly in free-form prose." }));
       const startOutput = await runAsk(["--background", "-r"], makeContext(repoRoot, env));
       const started = JSON.parse(startOutput) as { job_id: string };
       const store = new JobStore(resolvePluginPaths(env));
@@ -420,7 +425,7 @@ describe("ask session resume", () => {
       await waitForJobState(env, repoId, (job) => job?.job_id === started.job_id && job.status === "completed", 15_000);
       const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
       expect(state.title).toBe(`Kimi Ask: ${continuation}`);
-      expect(state.lastPrompt).toContain("Answer directly in free-form prose.");
+      expect(state.lastPrompt).toBe(continuation);
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);

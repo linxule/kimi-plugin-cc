@@ -183,7 +183,8 @@ export async function executeAskJob(jobId, prompt, context, options) {
             store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
         }
         await syncKimiSessionTitle({
-            promptText: prompt,
+            promptText: askPromptSubject(prompt),
+            submittedPrompt: prompt,
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,

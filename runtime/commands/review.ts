@@ -137,7 +137,8 @@ export async function runReview(
       store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
-      promptText: previewPrompt,
+      promptText: `Review target: ${reviewContext.targetDescription}${parsed.focus ? `. Focus: ${parsed.focus}` : ""}`,
+      submittedPrompt: previewPrompt,
       env: context.env,
       cwd: job.cwd,
       sessionId: result.sessionId ?? job.kimi_session_id,

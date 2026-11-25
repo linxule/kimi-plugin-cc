@@ -187,7 +187,8 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
         }
         await syncKimiSessionTitle({
-            promptText: prompt,
+            promptText: stripRescuePromptPrefix(prompt),
+            submittedPrompt: prompt,
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,

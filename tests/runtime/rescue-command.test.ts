@@ -124,6 +124,33 @@ async function waitForJobState(
 }
 
 describe("rescue command lifecycle", () => {
+  test("native-v2 preview replaces Kimi's recorded rescue prompt with the raw task", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-preview");
+    const repoRoot = await createGitRepoFixture("rescue-preview-repo");
+    const kimiHome = await createTestPluginDataRoot("rescue-preview-kimi-home");
+    const invocationPath = path.join(pluginDataRoot, "rescue-preview.jsonl");
+    const sessionId = "abababab-abab-4bab-8bab-abababababab";
+    const env = {
+      ...makeMockEnv(pluginDataRoot, "rescue-success", invocationPath),
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+    };
+    try {
+      const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
+      // Real Kimi records the submitted prompt; the mock does not.
+      await writeFile(statePath, JSON.stringify({ id: sessionId, version: 2, title: "New Session",
+        titleKind: "replaceable", isCustomTitle: false, lastPrompt: EXPECTED_RESCUE_PROMPT_PREFIX }));
+      await runRescue(["Implement", "the", "requested", "fix"], makeContext(repoRoot, env));
+      const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+      expect(state).toMatchObject({ title: "Kimi Rescue: Implement the requested fix", titleKind: "replaceable",
+        lastPrompt: "Implement the requested fix" });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+      await cleanupTestPath(kimiHome);
+    }
+  });
+
   test("foreground rescue returns prose, persists the session id, and forwards the rescue command label", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("rescue-foreground");
     const repoRoot = await createGitRepoFixture("rescue-foreground-repo");
@@ -168,6 +195,7 @@ describe("rescue command lifecycle", () => {
       expect(status.kimi_session_id).toBe(sessionId);
       expect(spawnedPrompt).toBe(`${EXPECTED_RESCUE_PROMPT_PREFIX}Implement the requested fix`);
       expect(state.title).toBe("Kimi Rescue: Implement the requested fix");
+      expect(state.lastPrompt).toBeUndefined();
       const store = new JobStore(resolvePluginPaths(env));
       try {
         expect(store.getJob(status.job_id)?.prompt_digest).toBe(digestPrompt(spawnedPrompt));

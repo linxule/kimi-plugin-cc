@@ -34,8 +34,17 @@ export interface SyncKimiSessionTitleOptions {
   cwd?: string;
   sessionId: string | undefined | null;
   title: string;
-  /** Actual submitted prompt, not the completed job's answer summary. */
+  /**
+   * Raw task text for the session preview (the question, task or objective),
+   * never the prefixed prompt and never the completed job's answer summary.
+   */
   promptText?: string;
+  /**
+   * Exact prompt this run submitted. A native-v2 preview that is this prompt
+   * (Kimi records it itself) is replaced by `promptText`; any other nonblank
+   * preview is kept.
+   */
+  submittedPrompt?: string;
   /** Repair previews/indexing without changing existing titles. */
   preserveTitle?: boolean;
   requireNativeV2?: boolean;
@@ -82,7 +91,12 @@ export function normalizeTitleFragment(text: string): string {
 
 /** Mirrors kimi-code 2.0.0 promptMetadataTextFromText: redact BEFORE truncating. */
 export function promptMetadataText(text: string): string | undefined {
-  const sanitized = text
+  const sanitized = sanitizePromptMetadata(text);
+  return sanitized ? sanitized.slice(0, 4000) : undefined;
+}
+
+function sanitizePromptMetadata(text: string): string {
+  return text
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi, "[redacted]")
     .replace(/\b(authorization)\s*:\s*bearer\s+\S+/gi, "$1: Bearer [redacted]")
     .replace(/\b(api[_-]?key|token|secret|password|passwd|pwd)\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "$1=[redacted]")
@@ -91,7 +105,19 @@ export function promptMetadataText(text: string): string | undefined {
     .replace(/\p{Cc}+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return sanitized ? sanitized.slice(0, 4000) : undefined;
+}
+
+/**
+ * Kimi stores the submitted prompt redacted, whitespace-collapsed and possibly
+ * truncated, so compare normalized forms and accept a prefix either way. An
+ * empty form never matches: every string starts with "".
+ */
+function isOwnSubmittedPrompt(existing: string, submitted: string | undefined): boolean {
+  if (submitted === undefined) return false;
+  const current = normalizeTitleFragment(existing);
+  if (!current) return false;
+  return [normalizeTitleFragment(submitted), sanitizePromptMetadata(submitted)].some((own) =>
+    own.length > 0 && (current === own || own.startsWith(current) || current.startsWith(own)));
 }
 
 export function shortenForTitle(text: string, maxLength: number): string {
@@ -185,7 +211,8 @@ export async function syncKimiSessionTitle(
   const generatedTitle = state.titleKind === "generated";
   const next = { ...state };
   const preview = options.promptText === undefined ? undefined : promptMetadataText(options.promptText);
-  if (nativeV2 && preview && (typeof state.lastPrompt !== "string" || !state.lastPrompt.trim())) {
+  if (nativeV2 && preview && (typeof state.lastPrompt !== "string" || !state.lastPrompt.trim() ||
+    isOwnSubmittedPrompt(state.lastPrompt, options.submittedPrompt))) {
     next.lastPrompt = preview;
   }
   if (!options.preserveTitle && !customTitle && !generatedTitle) {

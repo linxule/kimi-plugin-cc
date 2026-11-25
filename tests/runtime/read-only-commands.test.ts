@@ -154,6 +154,35 @@ describe("read-only command handlers", () => {
     }
   });
 
+  test.each([
+    ["review", [], "Kimi Review: current working tree changes", "Review target: current working tree changes"],
+    ["challenge", ["the", "retry", "design"], "Kimi Challenge: the retry design",
+      "Review target: current working tree changes. Focus: the retry design"],
+  ] as const)("native-v2 %s preview replaces Kimi's recorded prompt with the target and focus", async (commandType, focus, title, preview) => {
+    const pluginDataRoot = await createTestPluginDataRoot(`${commandType}-preview`);
+    const kimiHome = await createTestPluginDataRoot(`${commandType}-preview-kimi-home`);
+    const repoRoot = await createGitRepoFixture(`${commandType}-preview-git`);
+    const sessionId = "session_cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd";
+    const env = {
+      ...makeMockEnv(pluginDataRoot, `${commandType}-success`, path.join(pluginDataRoot, "invocation.jsonl")),
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+    };
+    try {
+      const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
+      // Real Kimi records the submitted prompt (here a truncated prefix); the mock does not.
+      await writeFile(statePath, JSON.stringify({ id: sessionId, version: 2, title: "New Session", titleKind: "replaceable",
+        isCustomTitle: false, lastPrompt: "Perform a read-only code review of the supplied repository changes." }));
+      await runReview([...focus], makeContext(repoRoot, env), commandType);
+      const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+      expect(state).toMatchObject({ title, titleKind: "replaceable", lastPrompt: preview });
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(kimiHome);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
   test("runReview returns prose passthrough and sets the review command label", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("review-command");
     const kimiHome = await createTestPluginDataRoot("review-command-kimi-home");
@@ -180,6 +209,7 @@ describe("read-only command handlers", () => {
       expect(result).toContain("Incorrect answer constant");
       expect(invocation.env.KIMI_PLUGIN_CC_CMD).toBe("review");
       expect(state.title).toBe("Kimi Review: current working tree changes");
+      expect(state.lastPrompt).toBeUndefined();
       expect(state.isCustomTitle).toBe(true);
     } finally {
       await cleanupTestPath(pluginDataRoot);
