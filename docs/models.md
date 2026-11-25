@@ -78,7 +78,7 @@ Names in the inventory are untrusted configuration data and must be passed as
 one correctly shell-quoted argument, never evaluated as shell instructions.
 
 The model list is a routing aid, not a second implementation of Kimi's config
-validator. Every task still uses the existing exact-version, hook, workspace,
+validator. Every task still uses the existing version-certification, hook, workspace,
 and no-plan checks. Source review is against kimi-code 2.0.0 (`1b89e4b0`),
 including `kosongConfig/configSection.ts`, `envOverlay.ts`, and
 `cli/v2/run-v2-print.ts`.

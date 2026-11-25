@@ -180,8 +180,11 @@ plugin-managed session, and every executed tool call passes the managed hook.
      `defaultPlanMode` domain (`app/config/toml.ts`; the `[experimental]` table keeps raw keys) —
      in the single user `config.toml`, read once inside
      `sessions.create()` (`sessionLifecycleService.ts:221-227`; no env, argv or project overlay;
-     `printDefaults.ts` leaves it alone). **Closed pre-spawn** by
+     `printDefaults.ts` leaves it alone). **Closed pre-spawn** at 0.42.0 by
      `runtime/native-v2-preflight.ts::inspectPlanModeConfig` (`CLI_V2_PLAN_MODE_CONFIGURED`).
+     From exact 2.4.0, fresh print cancels the create-time enter before any turn, so plugin
+     3.0.0 lets non-swarm launches on those rows proceed; see
+     [invariants §1](invariants.md#1-native-v2-safety-contract-the-version-headline).
   2. The `EnterPlanMode` tool (`enterPlanModeTool.ts:38`), an ordinary tool: nothing
      final-allows it and the auto-approve policy uses non-terminal `pass()`. **Closed** by the
      managed hook (`approval-policy.ts` denies `EnterPlanMode`/`ExitPlanMode` for every label).
@@ -224,8 +227,12 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
   exceed the requested cap during rate-limit recovery, so this is not an unconditional peak
   or write-serialization guarantee. See `docs/safety.md` for the current limitation.
 - The update preflight runs on the `-p` path; every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1`.
-- `[experimental]` config alone can enable `tower`/`subagent_fork`; the preflight refuses them
-  (`CLI_V2_EXPERIMENTAL_UNSAFE`) alongside the master `KIMI_CODE_EXPERIMENTAL_FLAG`.
+- `[experimental]` config alone can enable `tower`/`subagent_fork`, but a per-flag
+  `KIMI_CODE_EXPERIMENTAL_<NAME>` value outranks config and the master flag
+  (`app/flag/flagService.ts`). Every plugin child gets `KIMI_CODE_EXPERIMENTAL_TOWER=0` and
+  `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0`, and native-v2 children never receive the master
+  `KIMI_CODE_EXPERIMENTAL_FLAG`. Only uncertified releases still refuse an enabled selector
+  (`CLI_V2_EXPERIMENTAL_UNSAFE`) or the master flag (`CLI_V2_HOOK_ORDER_UNSAFE`).
 - `system.version` is always the first stream-json line; a native-v2 plan REQUIRES it and it
   must equal the probed version (`CLI_ENGINE_PROVENANCE_MISMATCH` otherwise).
 - Write/Edit still use `path`; a new singular `Agent` tool exists and stays denied.
@@ -244,8 +251,9 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
   fails the audit loudly instead of silently outflanking `scanSessionJournalsForPlan`.
 - The upstream hook runner still fails open on its own internal errors; allowed repo test/build
   commands still execute repo code. Unchanged from v1.
-- Native plan mode, tower, subagent fork, Remote Control, `--add-dir` are out of scope and
-  refused or never passed.
+- Native plan mode, tower, subagent fork, Remote Control, `--add-dir` are out of scope: plan
+  mode is never active when a tool runs, tower and subagent fork are forced off in every child,
+  and the rest are refused or never passed.
 
 ## Upstream follow-up
 
