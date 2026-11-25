@@ -5,7 +5,9 @@ import path from "node:path";
 import {
   KIMI_V2_RELEASES,
   formatVersionChoice,
+  kimiCertifiedReleaseHas,
   kimiReleaseHas,
+  resolveKimiRelease,
   kimiVersionsInScope,
   kimiVersionsWith,
   type KimiReleaseCapability,
@@ -64,12 +66,36 @@ describe("kimi-releases table", () => {
     for (const release of KIMI_V2_RELEASES) expect(release.commit).toMatch(/^[0-9a-f]{8}$/);
   });
 
-  test("matching is exact: no ranges, prefixes, suffixes or absent versions", () => {
-    for (const version of [null, undefined, "", "2.7", "2.7.4", "2.8.0", "3.0.0", "v2.7.3", " 2.7.3", "2.7.3-rc.1"]) {
+  test("malformed, suffixed, other-major and old versions resolve to nothing", () => {
+    for (const version of [null, undefined, "", "2.7", "3.0.0", "1.9.9", "2.0.0-rc.1", "v2.7.3", " 2.7.3", "2.7.3-rc.1", "2.8.0+build", "0.44.0"]) {
+      expect(resolveKimiRelease(version)).toBeNull();
       for (const capability of Object.keys(EXPECTED) as KimiReleaseCapability[]) {
         expect(kimiReleaseHas(version, capability)).toBe(false);
+        expect(kimiCertifiedReleaseHas(version, capability)).toBe(false);
       }
     }
+  });
+
+  test("an unlisted plain 2.x borrows only the argv mechanics of the row below it", () => {
+    expect(resolveKimiRelease("2.7.3")).toMatchObject({ certified: true, release: { version: "2.7.3" } });
+    expect(resolveKimiRelease("2.8.0")).toMatchObject({ certified: false, release: { version: "2.7.3" } });
+    expect(resolveKimiRelease("2.7.4")).toMatchObject({ certified: false, release: { version: "2.7.3" } });
+    expect(resolveKimiRelease("2.6.1")).toMatchObject({ certified: false, release: { version: "2.6.0" } });
+    expect(resolveKimiRelease("2.0.3")).toMatchObject({ certified: false, release: { version: "2.0.2" } });
+    expect(resolveKimiRelease("2.10.0")).toMatchObject({ certified: false, release: { version: "2.7.3" } });
+    expect(resolveKimiRelease("2.8.0", { strict: true })).toBeNull();
+    expect(resolveKimiRelease("2.7.3", { strict: true })).toMatchObject({ certified: true });
+
+    for (const capability of Object.keys(EXPECTED) as KimiReleaseCapability[]) {
+      const borrowable = capability === "local-environment";
+      expect([capability, kimiReleaseHas("2.8.0", capability)]).toEqual([capability, borrowable]);
+      expect([capability, kimiCertifiedReleaseHas("2.8.0", capability)]).toEqual([capability, false]);
+      expect([capability, kimiCertifiedReleaseHas("2.7.3", capability)]).toEqual([capability, true]);
+    }
+    // A borrowed row never lends a capability it does not itself have.
+    expect(kimiReleaseHas("2.4.2", "local-environment")).toBe(false);
+    expect(kimiReleaseHas("2.5.4", "local-environment")).toBe(true);
+    expect(kimiReleaseHas("2.8.0", "hook-schema")).toBe(false);
   });
 
   test("formatVersionChoice matches the refusal wording", () => {

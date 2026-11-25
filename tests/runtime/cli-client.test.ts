@@ -341,12 +341,23 @@ describe("runCliPrompt", () => {
       }
 
       options.resumeSessionId = undefined;
-      for (const candidate of ["2.4.1", "2.7.0", "2.7.1", "2.7.4"]) {
+      for (const candidate of ["2.4.1", "2.4.2", "2.7.3-rc.1", "3.0.0"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([
           "run", mockKimiStreamPath,
           "--output-format", "stream-json",
+          "-p", "test prompt",
+        ]);
+      }
+      // An unlisted plain 2.x borrows the fresh-print argv of the row below it (G1).
+      for (const candidate of ["2.7.0", "2.7.1", "2.7.4"]) {
+        options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
+        await runCliPrompt(options);
+        expect(capturedArgs).toEqual([
+          "run", mockKimiStreamPath,
+          "--output-format", "stream-json",
+          "--environment", "local",
           "-p", "test prompt",
         ]);
       }

@@ -6,6 +6,7 @@ import {
   assertExecutionPlanMatchesSpawn,
   classifyHistoricalEngineProvenance,
   executionPlanFromPersisted,
+  persistedExecutionPlanFields,
   NATIVE_V2_CERTIFIED,
   NATIVE_V2_ANY_OPERATION_VERSIONS,
   NATIVE_V2_SAFETY_PROFILE,
@@ -196,8 +197,12 @@ describe("kimi execution plan", () => {
         }
       }
 
+      // Plain unlisted 2.x newer than 2.0.0 runs read-only operations uncertified
+      // (covered in the G1 test below); every write/swarm operation still refuses.
+      const uncertifiedReadOnly = new Set(["ask", "review", "challenge", "review_gate"]);
       for (const version of ["0.41.0", "0.42.1", "0.43.2", "2.0.3", "2.1.2", "2.2.1", "2.3.4", "2.3.3-rc.1", "2.3.3+unreviewed", "2.5.4", "2.5.3-rc.1", "2.5.3+unreviewed", "2.5.2-rc.1", "2.5.2+unreviewed", "2.5.0-rc.1", "2.5.0+unreviewed", "2.4.2", "2.4.1-rc.1", "2.4.1+unreviewed", "2.4.0-rc.1", "2.4.0+unreviewed", "2.3.0-rc.1", "2.3.0+unreviewed", "2.2.0-rc.1", "2.2.0+unreviewed", "2.1.0-rc.1", "2.1.1+unreviewed", "2.0.2-rc.1", "2.0.2+unreviewed", "2.6.1", "2.6.4", "2.6.3-rc.1", "2.6.3+unreviewed", "2.6.2-rc.1", "2.6.2+unreviewed", "2.6.0-rc.1", "2.6.0+unreviewed", "2.7.0", "2.7.1", "2.7.4", "2.7.2-rc.1", "2.7.2+unreviewed"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
+          if (/^2\.\d+\.\d+$/.test(version) && uncertifiedReadOnly.has(operationKind)) continue;
           await expect(
             prepareKimiExecutionPlan({
               operationKind,
@@ -250,12 +255,95 @@ describe("kimi execution plan", () => {
     }
   });
 
-  test("selectIntendedEngine routes only exactly certified versions to native-v2", () => {
+  test("selectIntendedEngine routes certified versions and every major-2 release to native-v2", () => {
     expect(selectIntendedEngine("review", { version: "0.42.0" })).toBe("native-v2");
     expect(selectIntendedEngine("swarm-write", { version: "v0.42.0" })).toBe("native-v2");
     expect(selectIntendedEngine("review", { version: "0.41.0" })).toBe("legacy-v1");
     expect(selectIntendedEngine("review", { version: "0.42.1" })).toBe("legacy-v1");
     expect(selectIntendedEngine("review", { version: "garbage" })).toBe("legacy-v1");
+    // An unlisted 2.x never falls back to the deleted legacy engine.
+    expect(selectIntendedEngine("rescue", { version: "2.8.0" })).toBe("native-v2");
+    expect(selectIntendedEngine("review", { version: "2.7.4" })).toBe("native-v2");
+  });
+
+  test("G1: an unlisted 2.x runs read-only operations uncertified with a warning", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-g1");
+    const env = {
+      ...process.env,
+      KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+      KIMI_CODE_HOME: path.join(cwd, "kimi-home"),
+      KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
+      KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+    };
+    const stderrChunks: string[] = [];
+    const stderr = { write: (chunk: string) => { stderrChunks.push(chunk); return true; } } as unknown as NodeJS.WritableStream;
+    try {
+      for (const operationKind of ["ask", "review", "challenge", "review_gate"] as const) {
+        const plan = await prepareKimiExecutionPlan({ operationKind, cwd, env, stderr });
+        const warning = `kimi-code 2.8.0 is not certified by this plugin release; running ${operationKind} read-only with 2.7.3 mechanics.`;
+        expect(plan).toMatchObject({
+          operationKind, intendedEngine: "native-v2", kimiVersion: "2.8.0",
+          certification: "uncertified", safetyProfile: NATIVE_V2_SAFETY_PROFILE, warnings: [warning],
+        });
+        expect(stderrChunks.at(-1)).toContain(warning);
+        // Spawn-boundary and detached-worker revalidation accept the same plan.
+        expect(() => assertExecutionPlanMatchesSpawn(plan, plan.command, plan.prefixArgs, env)).not.toThrow();
+        const restored = executionPlanFromPersisted(persistedExecutionPlanFields(plan));
+        expect(restored.certification).toBe("uncertified");
+        expect(() => assertExecutionPlanMatchesSpawn(restored, plan.command, plan.prefixArgs, env)).not.toThrow();
+        // A strict environment at the spawn boundary refuses the persisted plan.
+        expect(() => assertExecutionPlanMatchesSpawn(restored, plan.command, plan.prefixArgs, {
+          ...env, KIMI_PLUGIN_CC_STRICT_VERSIONS: "1",
+        })).toThrowError(expect.objectContaining({ code: "KIMI_CAPABILITY_NOT_CERTIFIED" }));
+        // A forged "certified" label for the same version is refused.
+        expect(() => assertExecutionPlanMatchesSpawn({ ...plan, certification: "certified" }, plan.command, plan.prefixArgs, env))
+          .toThrowError(expect.objectContaining({ code: "KIMI_CAPABILITY_NOT_CERTIFIED" }));
+      }
+      // Borrowed mechanics follow the highest row at or below the version.
+      const between = await prepareKimiExecutionPlan({ operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: "2.6.1" }, stderr });
+      expect(between.warnings).toEqual(["kimi-code 2.6.1 is not certified by this plugin release; running ask read-only with 2.6.0 mechanics."]);
+
+      for (const operationKind of ["rescue", "pursue", "swarm", "swarm-write"] as const) {
+        await expect(prepareKimiExecutionPlan({ operationKind, cwd, env, stderr })).rejects.toMatchObject({
+          code: "KIMI_CAPABILITY_NOT_CERTIFIED",
+          message: expect.stringContaining("write and swarm operations need an exact certified release"),
+          details: { refusal_kind: "v2-version-not-certified", intended_engine: "native-v2", kimi_version: "2.8.0" },
+        });
+        // A forged uncertified plan for a write/swarm operation never reaches spawn.
+        const forged = {
+          schemaVersion: 1 as const, operationKind, intendedEngine: "native-v2" as const, command: process.execPath,
+          prefixArgs: [], kimiVersion: "2.8.0", certification: "uncertified" as const, resumedFromJobId: null,
+          safetyProfile: NATIVE_V2_SAFETY_PROFILE,
+        };
+        expect(() => assertExecutionPlanMatchesSpawn(forged, process.execPath, [], env))
+          .toThrowError(expect.objectContaining({ code: "KIMI_CAPABILITY_NOT_CERTIFIED" }));
+      }
+      // Strict mode restores the exact refusal for read-only operations too.
+      await expect(prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_STRICT_VERSIONS: "1" }, stderr,
+      })).rejects.toMatchObject({
+        code: "KIMI_CAPABILITY_NOT_CERTIFIED",
+        message: expect.stringContaining("KIMI_PLUGIN_CC_STRICT_VERSIONS=1 is set"),
+        details: { refusal_kind: "v2-version-not-certified" },
+      });
+      // Suffixed, other-major, and at-or-below-2.0.0 versions never borrow.
+      for (const version of ["2.8.0-rc.1", "2.8.0+build", "3.0.0", "1.9.0"]) {
+        await expect(prepareKimiExecutionPlan({
+          operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version }, intendedEngine: "native-v2", stderr,
+        })).rejects.toMatchObject({ code: "KIMI_CAPABILITY_NOT_CERTIFIED", details: { refusal_kind: "v2-version-not-certified" } });
+      }
+      // An "uncertified" label on a certified release is a stale or forged row.
+      const exactPlan = await prepareKimiExecutionPlan({ operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3" }, stderr });
+      expect(() => assertExecutionPlanMatchesSpawn({ ...exactPlan, certification: "uncertified" }, exactPlan.command, exactPlan.prefixArgs, env))
+        .toThrowError(expect.objectContaining({ code: "KIMI_EXECUTION_PLAN_INVALID" }));
+      // A certified version carries no warning.
+      const certified = await prepareKimiExecutionPlan({ operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3" }, stderr });
+      expect(certified.certification).toBe("certified");
+      expect("warnings" in certified).toBe(false);
+    } finally {
+      await cleanupTestPath(cwd);
+    }
   });
 
   // Setup uses this to avoid the misleading "not certified, commands will

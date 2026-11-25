@@ -4,7 +4,7 @@ import path from "node:path";
 import { RuntimeError } from "./errors.js";
 import { resolveKimiCliCommand } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
-import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith } from "./kimi-releases.js";
+import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith, resolveKimiRelease } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { isInTestedRange, parseVersionLine, probeKimiVersion, } from "./kimi-version-probe.js";
 import { isRecord } from "./util.js";
@@ -15,6 +15,34 @@ import { isRecord } from "./util.js";
  */
 const NON_SWARM_OPERATION_KINDS = ["review", "challenge", "ask", "rescue", "review_gate", "pursue"];
 const OPERATION_KINDS = [...NON_SWARM_OPERATION_KINDS, "swarm", "swarm-write"];
+/** Operations that may run on an uncertified release. Every write or swarm operation stays exact. */
+const UNCERTIFIED_READ_ONLY_OPERATIONS = new Set([
+    "ask",
+    "review",
+    "challenge",
+    "review_gate",
+]);
+/** Restores exact-version refusal for every operation. */
+export const STRICT_VERSIONS_ENV = "KIMI_PLUGIN_CC_STRICT_VERSIONS";
+function strictVersions(env) {
+    return env[STRICT_VERSIONS_ENV] === "1";
+}
+/**
+ * Native-v2 certification of an exact version for one operation: "certified"
+ * from the per-operation table, "uncertified" for a read-only operation on an
+ * unlisted plain 2.x that borrows a row's mechanics, otherwise null (refuse).
+ */
+export function resolveNativeV2Certification(operationKind, version, env) {
+    if (isNativeV2Certified(operationKind, version))
+        return "certified";
+    if (!UNCERTIFIED_READ_ONLY_OPERATIONS.has(operationKind) || strictVersions(env))
+        return null;
+    const normalized = parseVersionLine(version)?.raw;
+    if (normalized === undefined || isNativeV2CertifiedVersion(normalized))
+        return null;
+    const resolved = resolveKimiRelease(normalized);
+    return resolved !== null && !resolved.certified ? "uncertified" : null;
+}
 export const NATIVE_V2_SAFETY_PROFILE = "native-v2-no-plan/1";
 /**
  * Minimum legacy-v1 version that actually contains each operation. The upper
@@ -86,14 +114,17 @@ export function isNativeV2CertifiedVersion(version) {
     return NATIVE_V2_ANY_OPERATION_VERSIONS.includes(normalized);
 }
 /**
- * Select native v2 for an exactly certified version or a test-only operation
- * admission, then enforce scope in assertCertifiedCapability. A narrowed
- * release must not fall back to legacy-v1 for an excluded operation.
+ * Select native v2 for a certified version, a test-only operation admission,
+ * or any major-2 release, then enforce scope in assertCertifiedCapability. A
+ * narrowed or uncertified 2.x never falls back to legacy-v1 (deleted upstream
+ * at 0.42.0), so its refusal names the native-v2 set.
  */
 export function selectIntendedEngine(operationKind, probe) {
-    return isNativeV2CertifiedVersion(probe.version) || isNativeV2Certified(operationKind, probe.version)
-        ? "native-v2"
-        : "legacy-v1";
+    if (isNativeV2CertifiedVersion(probe.version) || isNativeV2Certified(operationKind, probe.version)) {
+        return "native-v2";
+    }
+    const parsed = parseVersionLine(probe.version);
+    return parsed !== undefined && parsed.major >= 2 ? "native-v2" : "legacy-v1";
 }
 const UNSAFE_EXPERIMENTAL_VALUES = new Set(["1", "true", "yes", "on"]);
 /**
@@ -178,7 +209,11 @@ export async function prepareKimiExecutionPlan(options) {
     }
     const intendedEngine = options.intendedEngine ?? selectIntendedEngine(options.operationKind, probe);
     const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
-    assertCertifiedCapability(intendedEngine, options.operationKind, probe);
+    const certification = assertCertifiedCapability(intendedEngine, options.operationKind, probe, options.env);
+    if (certification === "uncertified") {
+        const borrowed = resolveKimiRelease(probe.version).release.version;
+        warnings.push(`kimi-code ${probe.version} is not certified by this plugin release; running ${options.operationKind} read-only with ${borrowed} mechanics.`);
+    }
     await runPreflight(intendedEngine);
     return finishPlan({
         schemaVersion: 1,
@@ -187,7 +222,7 @@ export async function prepareKimiExecutionPlan(options) {
         command: exactCommand,
         prefixArgs: Object.freeze([...kimi.prefixArgs]),
         kimiVersion: probe.version,
-        certification: "certified",
+        certification,
         resumedFromJobId: options.resumedFromJobId ?? null,
         safetyProfile,
     }, warnings, options.stderr);
@@ -464,12 +499,12 @@ export function classifyHistoricalEngineProvenance(contents) {
         conflict,
     };
 }
-function assertCertifiedCapability(engine, operationKind, probe) {
+function assertCertifiedCapability(engine, operationKind, probe, env) {
     if (engine === "native-v2") {
-        if (!isNativeV2Certified(operationKind, probe.version)) {
-            throw nativeV2NotCertified(operationKind, probe.version);
-        }
-        return;
+        const certification = resolveNativeV2Certification(operationKind, probe.version, env);
+        if (certification === null)
+            throw nativeV2NotCertified(operationKind, probe.version, env);
+        return certification;
     }
     const minimum = LEGACY_V1_MINIMUMS[operationKind];
     const meetsMinimum = probe.major > minimum.major ||
@@ -490,6 +525,7 @@ function assertCertifiedCapability(engine, operationKind, probe) {
             },
         });
     }
+    return "certified";
 }
 /**
  * Revalidate the persisted certification at the final subprocess boundary.
@@ -515,20 +551,33 @@ function assertPlanCertification(plan, env) {
         return;
     }
     if (plan.kimiVersion === null) {
-        throw invalidPersistedPlan("certified plans require kimi_version");
+        throw invalidPersistedPlan(`${plan.certification} plans require kimi_version`);
     }
     const parsed = parseVersionLine(plan.kimiVersion);
     if (parsed === undefined) {
         throw invalidPersistedPlan("kimi_version is not a parseable semantic version");
     }
-    assertCertifiedCapability(plan.intendedEngine, plan.operationKind, {
+    if (plan.certification === "uncertified" && plan.intendedEngine !== "native-v2") {
+        throw invalidPersistedPlan("uncertified plans must use native-v2");
+    }
+    // Recompute from the release table and the current environment: a strict
+    // environment, a write operation, or a row that has since been added all
+    // refuse a plan whose recorded certification no longer matches.
+    const certification = assertCertifiedCapability(plan.intendedEngine, plan.operationKind, {
         kind: "ok",
         version: parsed.raw,
         major: parsed.major,
         minor: parsed.minor,
         patch: parsed.patch,
         inTestedRange: isInTestedRange(parsed.major, parsed.minor),
-    });
+    }, env);
+    if (certification !== plan.certification) {
+        // A plan claiming exact certification for an uncertified release keeps the
+        // historical capability refusal; any other mismatch is a stale/forged row.
+        if (plan.certification === "certified")
+            throw nativeV2NotCertified(plan.operationKind, parsed.raw, env);
+        throw invalidPersistedPlan(`plan_certification ${JSON.stringify(plan.certification)} does not match ${JSON.stringify(certification)} for kimi-code ${parsed.raw}`);
+    }
 }
 function assertExecutionPlanShape(plan) {
     const candidate = plan;
@@ -563,7 +612,7 @@ function assertExecutionPlanShape(plan) {
         throw invalidPersistedPlan("safetyProfile is invalid");
     }
 }
-function nativeV2NotCertified(operationKind, version) {
+function nativeV2NotCertified(operationKind, version, env = {}) {
     const certified = NATIVE_V2_CERTIFIED.get(operationKind) ?? [];
     const normalized = version === null ? undefined : parseVersionLine(version)?.raw;
     if (normalized !== undefined &&
@@ -583,7 +632,13 @@ function nativeV2NotCertified(operationKind, version) {
         });
     }
     const observed = version === null ? "an unprobed version" : `kimi-code ${version}`;
-    return new RuntimeError("KIMI_CAPABILITY_NOT_CERTIFIED", `Refusing ${operationKind} on native v2: ${observed} is not in this operation's exactly certified set [${certified.join(", ")}]. Update kimi-plugin-cc to a release that certifies this kimi-code version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production repair path.`, "kimi-engine.capability", {
+    const borrowable = normalized !== undefined && resolveKimiRelease(normalized)?.certified === false;
+    const readOnlyNote = !borrowable
+        ? ""
+        : strictVersions(env)
+            ? ` ${STRICT_VERSIONS_ENV}=1 is set, so read-only operations on this uncertified release also refuse.`
+            : " Read-only operations (ask, review, challenge, review gate) still run on this uncertified release with a warning; write and swarm operations need an exact certified release.";
+    return new RuntimeError("KIMI_CAPABILITY_NOT_CERTIFIED", `Refusing ${operationKind} on native v2: ${observed} is not in this operation's exactly certified set [${certified.join(", ")}].${readOnlyNote} Update kimi-plugin-cc to a release that certifies this kimi-code version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production repair path.`, "kimi-engine.capability", {
         details: {
             refusal_kind: "v2-version-not-certified",
             retryable_after_setup: false,
@@ -658,5 +713,5 @@ function isKimiEngine(value) {
     return value === "legacy-v1" || value === "native-v2";
 }
 function isPlanCertification(value) {
-    return value === "certified" || value === "test-bypass";
+    return value === "certified" || value === "uncertified" || value === "test-bypass";
 }
