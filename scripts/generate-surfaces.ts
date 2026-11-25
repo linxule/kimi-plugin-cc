@@ -116,8 +116,21 @@ export function generatedDshSurfaceFiles(): GeneratedFile[] {
 }
 
 export async function checkGeneratedDshSurfaces(repoRoot: string): Promise<SurfaceCheckResult> {
+  return checkGeneratedContent(repoRoot, generatedDshSurfaceFiles());
+}
+
+export async function checkGeneratedDshTextOrphans(repoRoot: string): Promise<SurfaceCheckResult> {
+  const expected = [...generatedDshSurfaceFiles().map((file) => file.path), `${DSH_PLUGIN_SUBDIR}/LICENSE`];
+  return checkTextOrphans(repoRoot, DSH_PLUGIN_SUBDIR, expected, []);
+}
+
+export async function checkGeneratedCodexSurfaces(repoRoot: string): Promise<SurfaceCheckResult> {
+  return checkGeneratedContent(repoRoot, generatedCodexSurfaceFiles());
+}
+
+async function checkGeneratedContent(repoRoot: string, files: readonly GeneratedFile[]): Promise<SurfaceCheckResult> {
   const messages: string[] = [];
-  for (const file of generatedDshSurfaceFiles()) {
+  for (const file of files) {
     let actual: string;
     try {
       actual = await readFile(path.join(repoRoot, file.path), "utf8");
@@ -130,42 +143,27 @@ export async function checkGeneratedDshSurfaces(repoRoot: string): Promise<Surfa
   return { ok: messages.length === 0, messages };
 }
 
-export async function checkGeneratedDshTextOrphans(repoRoot: string): Promise<SurfaceCheckResult> {
-  const expected = new Set([
-    ...generatedDshSurfaceFiles().map((file) => file.path),
-    `${DSH_PLUGIN_SUBDIR}/LICENSE`,
-  ]);
-  const messages: string[] = [];
-  const entries = await readdir(path.join(repoRoot, DSH_PLUGIN_SUBDIR), { withFileTypes: true }).catch(() => []);
+// Orphans are regular files directly under packageRoot plus every file under
+// the listed subdirectories that no generator owns.
+async function checkTextOrphans(
+  repoRoot: string,
+  packageRoot: string,
+  expectedPaths: readonly string[],
+  recursiveSubdirs: readonly string[],
+): Promise<SurfaceCheckResult> {
+  const expected = new Set(expectedPaths);
+  const candidates: string[] = [];
+  const entries = await readdir(path.join(repoRoot, packageRoot), { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const rel = `${DSH_PLUGIN_SUBDIR}/${entry.name}`;
-    if (!expected.has(rel)) messages.push(`${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`);
+    if (entry.isFile()) candidates.push(`${packageRoot}/${entry.name}`);
   }
+  for (const sub of recursiveSubdirs) {
+    candidates.push(...(await listFilesRecursive(repoRoot, path.join(packageRoot, sub))));
+  }
+  const messages = candidates
+    .filter((rel) => !expected.has(rel))
+    .map((rel) => `${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`);
   return { ok: messages.length === 0, messages };
-}
-
-export async function checkGeneratedCodexSurfaces(repoRoot: string): Promise<SurfaceCheckResult> {
-  const messages: string[] = [];
-  for (const file of generatedCodexSurfaceFiles()) {
-    const absolutePath = path.join(repoRoot, file.path);
-    let actual: string;
-    try {
-      actual = await readFile(absolutePath, "utf8");
-    } catch (error) {
-      messages.push(`${file.path}: unable to read (${formatError(error)})`);
-      continue;
-    }
-
-    if (actual !== file.content) {
-      messages.push(`${file.path}: generated content is not current`);
-    }
-  }
-
-  return {
-    ok: messages.length === 0,
-    messages,
-  };
 }
 
 // Repo-relative source paths the subfolder must mirror byte-for-byte:
@@ -240,30 +238,8 @@ export async function checkRuntimeMirror(
 // Orphan detection for generated TEXT surfaces under the subfolder, including
 // root-level launch configs and renamed/removed skills.
 export async function checkGeneratedTextOrphans(repoRoot: string): Promise<SurfaceCheckResult> {
-  const expected = new Set(generatedCodexSurfaceFiles().map((file) => file.path));
-  const messages: string[] = [];
-
-  const rootEntries = await readdir(path.join(repoRoot, CODEX_PLUGIN_SUBDIR), {
-    withFileTypes: true,
-  }).catch(() => []);
-  for (const entry of rootEntries) {
-    if (!entry.isFile()) continue;
-    const rel = `${CODEX_PLUGIN_SUBDIR}/${entry.name}`;
-    if (!expected.has(rel)) {
-      messages.push(`${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`);
-    }
-  }
-
-  for (const sub of [".codex-plugin", "skills"]) {
-    const files = await listFilesRecursive(repoRoot, path.join(CODEX_PLUGIN_SUBDIR, sub));
-    for (const rel of files) {
-      if (!expected.has(rel)) {
-        messages.push(`${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`);
-      }
-    }
-  }
-
-  return { ok: messages.length === 0, messages };
+  const expected = generatedCodexSurfaceFiles().map((file) => file.path);
+  return checkTextOrphans(repoRoot, CODEX_PLUGIN_SUBDIR, expected, [".codex-plugin", "skills"]);
 }
 
 export async function writeGeneratedCodexSurfaces(repoRoot: string): Promise<void> {
