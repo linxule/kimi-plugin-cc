@@ -234,6 +234,17 @@ async function startWebChild(options, env, expectedVersion, failureCode) {
 }
 async function waitForReadyLine(owned, expectedVersion, signal, failureCode) {
     throwIfAborted(signal, failureCode, "swarm-activation.ready");
+    const ready = JSON_READY_VERSIONS.includes(expectedVersion)
+        ? {
+            skip: (line) => line.trim().length === 0,
+            parse: parseJsonReadyLine,
+            invalid: "The Kimi web JSON ready line did not confirm the authenticated KAP loopback contract.",
+        }
+        : {
+            skip: (line) => !line.startsWith("Kimi server: "),
+            parse: parseReadyLine,
+            invalid: "The Kimi web ready line was not an authenticated loopback URL in the expected format.",
+        };
     return await new Promise((resolve, reject) => {
         let buffered = "";
         let settled = false;
@@ -276,24 +287,13 @@ async function waitForReadyLine(owned, expectedVersion, signal, failureCode) {
                 const newline = buffered.indexOf("\n");
                 const line = buffered.slice(0, newline).replace(/\r$/, "");
                 buffered = buffered.slice(newline + 1);
-                if (JSON_READY_VERSIONS.includes(expectedVersion)) {
-                    if (line.trim().length === 0)
-                        continue;
-                    try {
-                        settle(parseJsonReadyLine(line));
-                    }
-                    catch {
-                        settle(failure(failureCode, "swarm-activation.ready", "The Kimi web JSON ready line did not confirm the authenticated KAP loopback contract."));
-                    }
-                    return;
-                }
-                if (!line.startsWith("Kimi server: "))
+                if (ready.skip(line))
                     continue;
                 try {
-                    settle(parseReadyLine(line));
+                    settle(ready.parse(line));
                 }
                 catch {
-                    settle(failure(failureCode, "swarm-activation.ready", "The Kimi web ready line was not an authenticated loopback URL in the expected format."));
+                    settle(failure(failureCode, "swarm-activation.ready", ready.invalid));
                 }
                 return;
             }
@@ -309,15 +309,8 @@ async function waitForReadyLine(owned, expectedVersion, signal, failureCode) {
 function parseReadyLine(line) {
     const candidate = line.slice("Kimi server: ".length);
     const parsed = new URL(candidate);
-    if (parsed.protocol !== "http:" ||
-        parsed.hostname !== "127.0.0.1" ||
-        parsed.port.length === 0 ||
-        parsed.pathname !== "/" ||
-        parsed.search.length > 0 ||
-        parsed.username.length > 0 ||
-        parsed.password.length > 0) {
+    if (!isLoopbackRootUrl(parsed))
         throw new Error("invalid ready URL");
-    }
     if (!parsed.hash.startsWith("#token=") || parsed.hash.length === "#token=".length) {
         throw new Error("invalid ready token");
     }
@@ -325,6 +318,16 @@ function parseReadyLine(line) {
         origin: parsed.origin,
         token: parsed.hash.slice("#token=".length),
     };
+}
+/** An http://127.0.0.1:<port>/ URL with no query or credentials; callers check the hash. */
+function isLoopbackRootUrl(url) {
+    return (url.protocol === "http:" &&
+        url.hostname === "127.0.0.1" &&
+        url.port.length > 0 &&
+        url.pathname === "/" &&
+        url.search.length === 0 &&
+        url.username.length === 0 &&
+        url.password.length === 0);
 }
 function parseJsonReadyLine(line) {
     const data = JSON.parse(line);
@@ -337,14 +340,8 @@ function parseJsonReadyLine(line) {
         throw new Error("invalid JSON ready payload");
     }
     const origin = new URL(data.origin);
-    if (origin.protocol !== "http:" ||
-        origin.hostname !== "127.0.0.1" ||
-        origin.port.length === 0 ||
-        origin.pathname !== "/" ||
-        origin.search.length > 0 ||
+    if (!isLoopbackRootUrl(origin) ||
         origin.hash.length > 0 ||
-        origin.username.length > 0 ||
-        origin.password.length > 0 ||
         (data.origin !== origin.origin && data.origin !== `${origin.origin}/`)) {
         throw new Error("invalid JSON ready origin");
     }
