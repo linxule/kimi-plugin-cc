@@ -170,7 +170,7 @@ describe("read-only command handlers", () => {
     };
     try {
       const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
-      // Real Kimi records the submitted prompt (here a truncated prefix); the mock does not.
+      // A preview holding this run's own submitted prompt (truncated), as earlier plugin releases wrote it.
       await writeFile(statePath, JSON.stringify({ id: sessionId, version: 2, title: "New Session", titleKind: "replaceable",
         isCustomTitle: false, lastPrompt: "Perform a read-only code review of the supplied repository changes." }));
       await runReview([...focus], makeContext(repoRoot, env), commandType);

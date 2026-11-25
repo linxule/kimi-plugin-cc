@@ -45,9 +45,9 @@ function sanitizePromptMetadata(text) {
         .trim();
 }
 /**
- * Kimi stores the submitted prompt redacted, whitespace-collapsed and possibly
- * truncated, so compare normalized forms and accept a prefix either way. An
- * empty form never matches: every string starts with "".
+ * Recorded previews are redacted, whitespace-collapsed and possibly truncated,
+ * so compare normalized forms and accept a prefix either way. An empty form
+ * never matches: every string starts with "".
  */
 function isOwnSubmittedPrompt(existing, submitted) {
     if (submitted === undefined)

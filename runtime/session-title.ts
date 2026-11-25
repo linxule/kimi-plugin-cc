@@ -41,8 +41,8 @@ export interface SyncKimiSessionTitleOptions {
   promptText?: string;
   /**
    * Exact prompt this run submitted. A native-v2 preview that is this prompt
-   * (Kimi records it itself) is replaced by `promptText`; any other nonblank
-   * preview is kept.
+   * (as earlier plugin releases recorded it) is replaced by `promptText`; any
+   * other nonblank preview is kept.
    */
   submittedPrompt?: string;
   /** Repair previews/indexing without changing existing titles. */
@@ -108,9 +108,9 @@ function sanitizePromptMetadata(text: string): string {
 }
 
 /**
- * Kimi stores the submitted prompt redacted, whitespace-collapsed and possibly
- * truncated, so compare normalized forms and accept a prefix either way. An
- * empty form never matches: every string starts with "".
+ * Recorded previews are redacted, whitespace-collapsed and possibly truncated,
+ * so compare normalized forms and accept a prefix either way. An empty form
+ * never matches: every string starts with "".
  */
 function isOwnSubmittedPrompt(existing: string, submitted: string | undefined): boolean {
   if (submitted === undefined) return false;
