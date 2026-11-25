@@ -37,8 +37,9 @@ import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 export interface HookInstallStatus {
   installed: boolean;
   /**
-   * Job-time only: an installed hook whose markers need repair (duplicate or
-   * orphan) carries the setup remedy here so the job can record it (channel W).
+   * Job-time only, recorded by the job (channel W): the setup remedy for an
+   * installed hook whose markers need repair (duplicate or orphan), and a note
+   * for each other host's hook that predates abstaining for this host's jobs.
    */
   warnings?: string[];
   /** Human-readable reason (filled when `installed === false`). */
