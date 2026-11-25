@@ -210,7 +210,17 @@ function requirePath(value, key) {
         throw new ScopeDenial(`"${value}" uses home-directory expansion.`);
     if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value))
         throw new ScopeDenial(`"${value}" is not a filesystem path.`);
+    denyAmbiguousSpelling(value, "path");
     return value;
+}
+// Upstream resolves with pathe, which reads "\\" as a separator and a drive
+// prefix as absolute; node:path on POSIX reads neither. Deny those spellings
+// instead of imitating pathe.
+function denyAmbiguousSpelling(value, noun) {
+    if (value.includes("\\"))
+        throw new ScopeDenial(`${noun} "${value}" contains a backslash.`);
+    if (/^[A-Za-z]:/.test(value))
+        throw new ScopeDenial(`${noun} "${value}" starts with a drive letter.`);
 }
 /** Literal directory an absolute glob names; undefined for a relative glob. */
 function patternAnchor(value, key) {
@@ -220,7 +230,8 @@ function patternAnchor(value, key) {
     const body = value.startsWith("!") ? value.slice(1) : value;
     if (body.startsWith("~"))
         throw new ScopeDenial(`glob "${value}" uses home-directory expansion.`);
-    const segments = body.split(/[\\/]/);
+    denyAmbiguousSpelling(body, "glob");
+    const segments = body.split("/");
     if (segments.includes(".."))
         throw new ScopeDenial(`glob "${value}" climbs with "..".`);
     if (!path.isAbsolute(body))
