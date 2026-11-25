@@ -26,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
+import { HOOK_TIMEOUT_S } from "../hooks/hook-timing.js";
 import { olderHostHookWarnings } from "../hooks/install.js";
 import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKimiConfigLock, } from "../hooks/config-safety.js";
 import { buildHookShellCommand, hostIdFromHookCommand, parseHookShellCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
@@ -39,7 +40,7 @@ import { ensurePluginPaths, resolveKimiBinDir, resolvePluginPaths } from "../pat
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
-const DEFAULT_HOOK_TIMEOUT_S = 15;
+const DEFAULT_HOOK_TIMEOUT_S = HOOK_TIMEOUT_S;
 // Probe timing. The direct script probe is local and fast; allow 5s for
 // node startup on cold CI runners. The shell probe adds /bin/sh fork
 // overhead but should still complete well within the same budget.

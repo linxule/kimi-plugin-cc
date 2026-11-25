@@ -26,11 +26,13 @@
 // shell-quoted absolute tokens — the resolved Node binary and hook script — so
 // `/bin/sh -c` does not depend on its working directory or PATH.
 import { decideHookOutcome } from "./approval-policy.js";
+import { HOOK_DECISION_DEADLINE_MS, HOOK_TEST_DELAY_ENV } from "./hook-timing.js";
 import { NETWORK_ENV, READ_ROOTS_ENV } from "../read-scope.js";
 import { evaluateRescueHookRequest } from "../rescue-approval.js";
 import { SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV } from "../swarm-policy.js";
 const STDIN_TIMEOUT_MS = 5_000;
 async function main() {
+    armDecisionDeadline();
     const stdinText = await readStdinWithTimeout(STDIN_TIMEOUT_MS);
     let input;
     try {
@@ -44,6 +46,7 @@ async function main() {
         failClosed(`stdin was not a JSON object: ${formatErr(err)}`);
         return;
     }
+    await testOnlyDelay(process.env[HOOK_TEST_DELAY_ENV]);
     const decision = await decideHookOutcome(input, {
         commandLabel: process.env.KIMI_PLUGIN_CC_CMD,
         operationKind: process.env.KIMI_PLUGIN_CC_OPERATION,
@@ -64,6 +67,40 @@ async function main() {
         return;
     }
     process.exit(0);
+}
+/**
+ * A timed-out hook is ALLOW upstream, so a labelled call that has not decided
+ * within HOOK_DECISION_DEADLINE_MS (below the installed timeout) denies. The
+ * timer is unref'd so it never keeps a decided process alive; a stall with
+ * nothing pending would then drain the loop and exit 0, so `beforeExit`
+ * denies too. Every decision path exits explicitly before either fires.
+ * Unlabelled calls are out-of-plugin use and keep their exit-0 behaviour.
+ */
+function armDecisionDeadline() {
+    const label = process.env.KIMI_PLUGIN_CC_CMD;
+    if (label === undefined || label.length === 0)
+        return;
+    const reason = `kimi-plugin-cc safety hook: no decision within ${HOOK_DECISION_DEADLINE_MS / 1000}s; ` +
+        "the tool call is denied because a hook that times out would be read as allow.";
+    setTimeout(() => {
+        process.stderr.write(`${reason}\n`);
+        process.exit(2);
+    }, HOOK_DECISION_DEADLINE_MS).unref();
+    process.once("beforeExit", () => {
+        process.stderr.write(`${reason}\n`);
+        process.exit(2);
+    });
+}
+async function testOnlyDelay(value) {
+    if (value === undefined || value.length === 0)
+        return;
+    if (value === "hang") {
+        await new Promise(() => { });
+        return;
+    }
+    const ms = Number(value);
+    if (Number.isSafeInteger(ms) && ms > 0)
+        await new Promise((resolve) => setTimeout(resolve, ms));
 }
 function failClosed(reason) {
     process.stderr.write(`kimi-plugin-cc safety hook misconfigured: ${reason}\n`);

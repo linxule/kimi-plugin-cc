@@ -2445,3 +2445,15 @@ describe("child environment names no launching host", () => {
     expect("KIMI_PLUGIN_CC_JOB_HOOK" in env).toBe(false);
   });
 });
+
+describe("test-only hook delay never reaches a job's hook", () => {
+  test("the spawn deletes an ambient KIMI_PLUGIN_CC_HOOK_TEST_DELAY_MS", () => {
+    const env = buildKimiCliEnvironment({
+      cwd: process.cwd(),
+      env: { KIMI_PLUGIN_CC_HOOK_TEST_DELAY_MS: "60000" },
+      executionPlan: testExecutionPlan("kimi"),
+      commandLabel: "review",
+    });
+    expect("KIMI_PLUGIN_CC_HOOK_TEST_DELAY_MS" in env).toBe(false);
+  });
+});

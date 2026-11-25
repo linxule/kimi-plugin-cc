@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { HOOK_DECISION_DEADLINE_MS, HOOK_TEST_DELAY_ENV, HOOK_TIMEOUT_S } from "../../runtime/hooks/hook-timing.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const hookScriptPath = path.join(process.cwd(), "runtime/hooks/approval-hook.ts");
@@ -344,5 +345,54 @@ describe("every installed hook enforces every labelled job", () => {
     } finally {
       await cleanupTestPath(dir);
     }
+  });
+});
+
+// The deadline and the test-only delay come from runtime/hooks/hook-timing.ts.
+// The delay variable never reaches a job's hook: buildKimiCliEnvironment
+// deletes it on every spawn (see cli-client.test.ts), and it can only delay a
+// decision into the fail-closed deadline, never turn a deny into an allow.
+describe("fail-closed decision deadline", () => {
+  const bash = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } };
+  const read = { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "x" } };
+
+  test("a labelled call with no decision before the deadline exits 2 with a reason", async () => {
+    const started = Date.now();
+    const result = await invokeHook(read, {
+      ...process.env,
+      KIMI_PLUGIN_CC_CMD: "review",
+      [HOOK_TEST_DELAY_ENV]: String(HOOK_DECISION_DEADLINE_MS + 5_000),
+    });
+    const elapsed = Date.now() - started;
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain(`no decision within ${HOOK_DECISION_DEADLINE_MS / 1000}s`);
+    expect(elapsed).toBeGreaterThanOrEqual(HOOK_DECISION_DEADLINE_MS);
+    expect(elapsed).toBeLessThan(HOOK_TIMEOUT_S * 1000);
+  }, 30_000);
+
+  test("a labelled call that stalls with nothing pending exits 2, not 0", async () => {
+    const result = await invokeHook(read, { ...process.env, KIMI_PLUGIN_CC_CMD: "review", [HOOK_TEST_DELAY_ENV]: "hang" });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("no decision");
+  });
+
+  test("an unlabelled call keeps exit 0, even when slow or stalled", async () => {
+    const env = { ...process.env };
+    delete env.KIMI_PLUGIN_CC_CMD;
+    expect((await invokeHook(bash, { ...env, [HOOK_TEST_DELAY_ENV]: "300" })).exitCode).toBe(0);
+    expect((await invokeHook(bash, { ...env, [HOOK_TEST_DELAY_ENV]: "hang" })).exitCode).toBe(0);
+  });
+
+  test("the deadline timer does not keep a decided process alive", async () => {
+    const started = Date.now();
+    const result = await invokeHook(read, { ...process.env, KIMI_PLUGIN_CC_CMD: "review" });
+    expect(result.exitCode).toBe(0);
+    expect(Date.now() - started).toBeLessThan(HOOK_DECISION_DEADLINE_MS / 2);
+  });
+
+  test("the deadline sits strictly below the installed hook timeout", () => {
+    expect(HOOK_DECISION_DEADLINE_MS).toBe(10_000);
+    expect(HOOK_DECISION_DEADLINE_MS).toBeLessThan(HOOK_TIMEOUT_S * 1000);
+    expect(HOOK_TIMEOUT_S).toBe(15);
   });
 });

@@ -18,6 +18,7 @@ import {
   type KimiEngine,
   type KimiExecutionPlan,
 } from "./kimi-engine.js";
+import { HOOK_TEST_DELAY_ENV } from "./hooks/hook-timing.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { kimiReleaseHas } from "./kimi-releases.js";
@@ -1338,6 +1339,8 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
     // (env on the spawned process; the model cannot alter it). See field doc.
     env.KIMI_PLUGIN_CC_WORKSPACE_ROOT = opts.trustedWorkspaceRoot;
   }
+  // Test-only hook delay: never reaches a job's hook.
+  delete env[HOOK_TEST_DELAY_ENV];
   // Scope comes only from this call: an ambient value must never widen it.
   delete env[READ_ROOTS_ENV];
   delete env[NETWORK_ENV];
