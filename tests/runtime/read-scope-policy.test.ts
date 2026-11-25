@@ -220,6 +220,17 @@ describe("hook-escape monitor follows the same scope", () => {
     expect("evaluator" in decideHookOutcomePure({ tool_name: "Read", tool_input: { path: "/x" } }, { commandLabel: "ask", ...scope }))
       .toBe(true);
   });
+
+  test("without --network a WebSearch result that is not the hook's denial is still a mismatch", () => {
+    for (const scope of [{}, confined([workspace])]) {
+      const monitor = createHookEscapeMonitor({ commandLabel: "ask", cwd: workspace, ...scope });
+      monitor.observe({ role: "assistant", tool_calls: [
+        { type: "function", id: "w", function: { name: "WebSearch", arguments: "{\"query\":\"x\"}" } },
+      ] });
+      expect(monitor.observe({ role: "tool", tool_call_id: "w", content: "results" }))
+        .toMatchObject({ tool_call_id: "w", tool_name: "WebSearch", kind: "mismatch" });
+    }
+  });
 });
 
 describe("child environment", () => {
