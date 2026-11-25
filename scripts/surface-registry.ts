@@ -130,7 +130,7 @@ export const CODEX_MARKETPLACE = {
       name: PLUGIN_NAME,
       source: {
         source: "local",
-        path: "./plugins/kimi-codex",
+        path: `./${CODEX_PLUGIN_SUBDIR}`,
       },
       policy: {
         installation: "AVAILABLE",
@@ -144,6 +144,18 @@ export const CODEX_MARKETPLACE = {
 export const DSH_PLUGIN_SUBDIR = "plugins/kimi-dsh";
 export const DSH_PLUGIN_PACKAGE_NAME = "kimi-plugin-cc";
 export const DSH_VERSION_RANGE = ">=0.2.1-rc.5 <0.3.0";
+
+const DSH_PEER_DEPENDENCIES = {
+  "@deepseek-ai/cordis": "~4.0.5",
+  "@deepseek-ai/dsh-commands": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-llm": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-session": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-subagent": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-subprocess": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-system-prompt": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-working-directory": DSH_VERSION_RANGE,
+  "@deepseek-ai/dsh-tool-subagent": DSH_VERSION_RANGE,
+} as const;
 
 export const DSH_PLUGIN_MANIFEST = {
   name: DSH_PLUGIN_PACKAGE_NAME,
@@ -172,28 +184,10 @@ export const DSH_PLUGIN_MANIFEST = {
       patch: "./cordis.patch.yml",
     },
   },
-  peerDependencies: {
-    "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-commands": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-llm": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-session": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-subagent": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-subprocess": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-system-prompt": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-working-directory": DSH_VERSION_RANGE,
-    "@deepseek-ai/dsh-tool-subagent": DSH_VERSION_RANGE,
-  },
-  peerDependenciesMeta: Object.fromEntries([
-    "@deepseek-ai/cordis",
-    "@deepseek-ai/dsh-commands",
-    "@deepseek-ai/dsh-llm",
-    "@deepseek-ai/dsh-session",
-    "@deepseek-ai/dsh-subagent",
-    "@deepseek-ai/dsh-subprocess",
-    "@deepseek-ai/dsh-system-prompt",
-    "@deepseek-ai/dsh-working-directory",
-    "@deepseek-ai/dsh-tool-subagent",
-  ].map((name) => [name, { optional: true }])),
+  peerDependencies: DSH_PEER_DEPENDENCIES,
+  peerDependenciesMeta: Object.fromEntries(
+    Object.keys(DSH_PEER_DEPENDENCIES).map((name) => [name, { optional: true }]),
+  ),
   dependencies: {
     "@deepseek-ai/dsh-brand": DSH_VERSION_RANGE,
     "@deepseek-ai/schemastery": "~3.18.5",
@@ -202,7 +196,7 @@ export const DSH_PLUGIN_MANIFEST = {
   repository: {
     type: "git",
     url: "git+https://github.com/linxule/kimi-plugin-cc.git",
-    directory: "plugins/kimi-dsh",
+    directory: DSH_PLUGIN_SUBDIR,
   },
 } as const;
 
@@ -255,7 +249,7 @@ Job controls are \`/kimi-status [job-id]\`, \`/kimi-result [job-id]\`, and \`/ki
 From this repository checkout:
 
 \`\`\`sh
-dsh plugin --profile web add ./plugins/kimi-dsh
+dsh plugin --profile web add ./${DSH_PLUGIN_SUBDIR}
 \`\`\`
 
 For another DSH profile, replace \`web\` with its name. To install the published root package instead, run \`dsh plugin --profile web add kimi-plugin-cc\`.
