@@ -378,7 +378,7 @@ function countCleanEntries(hooks, expectedCommand) {
     return count;
 }
 /** Clean entries in the whole file's parsed `hooks[]`; 0 when it does not parse. */
-function countCleanEntriesInFile(contents, expectedCommand) {
+export function countCleanEntriesInFile(contents, expectedCommand) {
     let parsed;
     try {
         parsed = parseToml(contents);

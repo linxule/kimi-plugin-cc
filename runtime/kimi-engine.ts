@@ -6,6 +6,7 @@ import { RuntimeError } from "./errors.js";
 import { resolveKimiCliCommand } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith, resolveKimiRelease } from "./kimi-releases.js";
+import { verifyHookInstalled } from "./hooks/install.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import {
   isInTestedRange,
@@ -295,6 +296,7 @@ export async function prepareKimiExecutionPlan(
     const intendedEngine = options.intendedEngine ?? "legacy-v1";
     const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
     await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
+    warnings.push(...await hookMarkerWarnings(options.env));
     return finishPlan({
       schemaVersion: 1,
       operationKind: options.operationKind,
@@ -341,6 +343,7 @@ export async function prepareKimiExecutionPlan(
     );
   }
   await runPreflight(intendedEngine, { kimiVersion: probe.version, certification });
+  warnings.push(...await hookMarkerWarnings(options.env));
 
   return finishPlan({
     schemaVersion: 1,
@@ -353,6 +356,20 @@ export async function prepareKimiExecutionPlan(
     resumedFromJobId: options.resumedFromJobId ?? null,
     safetyProfile,
   }, warnings, options.stderr);
+}
+
+/**
+ * Marker-repair warnings from the job-time hook check (G6). The command's own
+ * hook gate already refused an uninstalled hook; an unverifiable result here
+ * adds nothing and never refuses.
+ */
+async function hookMarkerWarnings(env: NodeJS.ProcessEnv): Promise<readonly string[]> {
+  try {
+    const status = await verifyHookInstalled(env);
+    return status.installed ? status.warnings ?? [] : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Freeze the plan; a nonempty warning list is attached and announced once on stderr. */

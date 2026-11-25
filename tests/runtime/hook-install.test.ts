@@ -10,7 +10,8 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../../runtime/hooks/install.js";
-import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
+import { buildHookShellCommand, resolveHostId } from "../../runtime/hooks/install-paths.js";
+import { evaluateInstalled } from "../../runtime/hooks/managed-block.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 /**
@@ -942,5 +943,72 @@ describe("formatHookMissingWarning", () => {
     expect(text).toContain("review_gate");
     expect(text).toContain("/kimi:setup");
     expect(text).toContain("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK");
+  });
+});
+
+describe("G6: job-time tolerance for marker damage around an enforcing hook", () => {
+  const BEGIN = "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===";
+  const END = "# === END kimi-plugin-cc-managed ===";
+  const table = (command: string, extra: string[] = []) =>
+    ["[[hooks]]", 'event = "PreToolUse"', `command = ${JSON.stringify(command)}`, "timeout = 15", ...extra];
+
+  async function withConfig(
+    prefix: string,
+    build: (command: string) => string[],
+    run: (status: Awaited<ReturnType<typeof verifyHookInstalled>>, raw: string, command: string, hookPath: string) => void,
+  ): Promise<void> {
+    const home = await createTestPluginDataRoot(prefix);
+    try {
+      const hookPath = path.join(home, "dist", "hooks", "approval-hook.js");
+      await mkdir(path.dirname(hookPath), { recursive: true });
+      await writeFile(hookPath, "// hook\n", "utf8");
+      const command = canonicalCommandFor(hookPath);
+      const raw = build(command).join("\n");
+      await writeFile(path.join(home, "config.toml"), raw, "utf8");
+      run(await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath }), raw, command, hookPath);
+    } finally {
+      await cleanupTestPath(home);
+    }
+  }
+
+  test("duplicate managed blocks with a clean exact entry are installed with a setup warning", async () => {
+    await withConfig("hook-g6-duplicate", (command) => [BEGIN, ...table(command), END, BEGIN, ...table(command), END], (status, raw, command, hookPath) => {
+      expect(status.installed).toBe(true);
+      expect(status.warnings).toHaveLength(1);
+      expect(status.warnings![0]).toContain("installed and enforcing");
+      expect(status.warnings![0]).toContain("duplicate managed blocks");
+      expect(status.warnings![0]).toContain("/kimi:setup");
+      // setup and setup --check evaluate markers directly and keep failing.
+      expect(evaluateInstalled(raw, command, { hostId: resolveHostId({}, hookPath) }).installed).toBe(false);
+    });
+  });
+
+  test("an own orphan marker beside a clean exact entry is installed with a setup warning", async () => {
+    await withConfig("hook-g6-orphan", (command) => [BEGIN, ...table(command)], (status, raw, command, hookPath) => {
+      expect(status.installed).toBe(true);
+      expect(status.warnings?.[0]).toContain("BEGIN-without-END");
+      expect(evaluateInstalled(raw, command, { hostId: resolveHostId({}, hookPath) }).installed).toBe(false);
+    });
+  });
+
+  test("marker damage still refuses when the entry is conditional, unexpected or stale", async () => {
+    for (const [prefix, build] of [
+      ["hook-g6-matcher", (command: string) => [BEGIN, ...table(command, ['matcher = "Write"']), END, BEGIN, ...table(command, ['matcher = "Write"']), END]],
+      ["hook-g6-extra-key", (command: string) => [BEGIN, ...table(command, ["extra = 1"])]],
+      ["hook-g6-stale", (command: string) => [BEGIN, ...table(`${command} --stale`)]],
+      ["hook-g6-post-event", (command: string) => [BEGIN, "[[hooks]]", 'event = "PostToolUse"', `command = ${JSON.stringify(command)}`]],
+    ] as const) {
+      await withConfig(prefix, build, (status) => {
+        expect([prefix, status.installed]).toEqual([prefix, false]);
+        expect(status.warnings).toBeUndefined();
+      });
+    }
+  });
+
+  test("a clean installed hook carries no warnings", async () => {
+    await withConfig("hook-g6-clean", (command) => [BEGIN, ...table(command), END], (status) => {
+      expect(status.installed).toBe(true);
+      expect("warnings" in status).toBe(false);
+    });
   });
 });

@@ -17,6 +17,7 @@ import {
   reconcileHistoricalJobProvenance,
 } from "../../runtime/kimi-engine.js";
 import { JobStore } from "../../runtime/job-store.js";
+import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
 import { WORKSPACE_TRUST_DISABLED_WARNING } from "../../runtime/native-v2-preflight.js";
 import { maxTestedMinor } from "../../runtime/kimi-version-probe.js";
 import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
@@ -307,6 +308,41 @@ describe("kimi execution plan", () => {
       expect(plan.warnings).toEqual([WORKSPACE_TRUST_DISABLED_WARNING]);
       expect(JSON.parse(persistedExecutionPlanFields(plan).warnings!)).toEqual([WORKSPACE_TRUST_DISABLED_WARNING]);
       expect(chunks.join("")).toContain(WORKSPACE_TRUST_DISABLED_WARNING);
+    } finally {
+      await cleanupTestPath(cwd);
+    }
+  });
+
+  test("G6: the job plan records the marker-repair warning of a tolerated hook", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-g6");
+    const kimiHome = path.join(cwd, "kimi-home");
+    const hookPath = path.join(cwd, "dist", "hooks", "approval-hook.js");
+    await mkdir(kimiHome, { recursive: true });
+    await mkdir(path.dirname(hookPath), { recursive: true });
+    await writeFile(hookPath, "// hook\n");
+    const env = {
+      ...process.env,
+      KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath,
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "",
+      KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
+    };
+    const block = [
+      "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===", "[[hooks]]", 'event = "PreToolUse"',
+      `command = ${JSON.stringify(buildHookShellCommand(hookPath, env))}`, "timeout = 15", "# === END kimi-plugin-cc-managed ===",
+    ];
+    const stderr = { write: () => true } as unknown as NodeJS.WritableStream;
+    try {
+      await writeFile(path.join(kimiHome, "config.toml"), [...block, ...block].join("\n"));
+      const plan = await prepareKimiExecutionPlan({ operationKind: "ask", cwd, env, stderr });
+      expect(plan.warnings).toHaveLength(1);
+      expect(plan.warnings![0]).toContain("duplicate managed blocks");
+      // A clean block adds nothing.
+      await writeFile(path.join(kimiHome, "config.toml"), block.join("\n"));
+      const clean = await prepareKimiExecutionPlan({ operationKind: "ask", cwd, env, stderr });
+      expect("warnings" in clean).toBe(false);
     } finally {
       await cleanupTestPath(cwd);
     }

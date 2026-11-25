@@ -1,7 +1,7 @@
 import { constants as fsConstants, existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
-import { evaluateInstalled } from "./managed-block.js";
+import { countCleanEntriesInFile, evaluateInstalled } from "./managed-block.js";
 import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 export async function verifyHookInstalled(env) {
@@ -56,7 +56,18 @@ export async function verifyHookInstalled(env) {
         hostId: resolveHostId(env, expected.hookScriptPath),
         nodeExists: (binPath) => existsSync(binPath),
     });
-    if (!check.installed) {
+    // Markers are bookkeeping, not the security boundary. At job time a
+    // duplicate or orphan marker is tolerated when the real parser finds a clean,
+    // unconditional PreToolUse entry with the byte-exact command (the whole hook
+    // set already validated above), and the job records the setup remedy. setup
+    // and setup --check use evaluateInstalled directly and keep failing.
+    const warnings = [];
+    if (!check.installed &&
+        (check.state.kind === "duplicate" || check.state.kind === "orphan") &&
+        countCleanEntriesInFile(raw, expected.command) >= 1) {
+        warnings.push(`The managed kimi-code PreToolUse hook is installed and enforcing, but its config markers need repair: ${check.reason}`);
+    }
+    else if (!check.installed) {
         return {
             installed: false,
             reason: check.reason,
@@ -116,7 +127,7 @@ export async function verifyHookInstalled(env) {
             nodeBin: expected.nodeBin,
         };
     }
-    return { installed: true, configPath };
+    return warnings.length > 0 ? { installed: true, configPath, warnings } : { installed: true, configPath };
 }
 /**
  * Caller-facing repair protocol shared by every hook-refusal surface. Re-pin

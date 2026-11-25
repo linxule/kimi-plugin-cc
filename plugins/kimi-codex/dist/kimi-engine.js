@@ -5,6 +5,7 @@ import { RuntimeError } from "./errors.js";
 import { resolveKimiCliCommand } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith, resolveKimiRelease } from "./kimi-releases.js";
+import { verifyHookInstalled } from "./hooks/install.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { isInTestedRange, parseVersionLine, probeKimiVersion, } from "./kimi-version-probe.js";
 import { isRecord } from "./util.js";
@@ -180,6 +181,7 @@ export async function prepareKimiExecutionPlan(options) {
         const intendedEngine = options.intendedEngine ?? "legacy-v1";
         const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
         await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
+        warnings.push(...await hookMarkerWarnings(options.env));
         return finishPlan({
             schemaVersion: 1,
             operationKind: options.operationKind,
@@ -216,6 +218,7 @@ export async function prepareKimiExecutionPlan(options) {
         warnings.push(`kimi-code ${probe.version} is not certified by this plugin release; running ${options.operationKind} read-only with ${borrowed} mechanics.`);
     }
     await runPreflight(intendedEngine, { kimiVersion: probe.version, certification });
+    warnings.push(...await hookMarkerWarnings(options.env));
     return finishPlan({
         schemaVersion: 1,
         operationKind: options.operationKind,
@@ -227,6 +230,20 @@ export async function prepareKimiExecutionPlan(options) {
         resumedFromJobId: options.resumedFromJobId ?? null,
         safetyProfile,
     }, warnings, options.stderr);
+}
+/**
+ * Marker-repair warnings from the job-time hook check (G6). The command's own
+ * hook gate already refused an uninstalled hook; an unverifiable result here
+ * adds nothing and never refuses.
+ */
+async function hookMarkerWarnings(env) {
+    try {
+        const status = await verifyHookInstalled(env);
+        return status.installed ? status.warnings ?? [] : [];
+    }
+    catch {
+        return [];
+    }
 }
 /** Freeze the plan; a nonempty warning list is attached and announced once on stderr. */
 function finishPlan(plan, warnings, stderr = process.stderr) {

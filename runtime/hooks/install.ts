@@ -2,7 +2,7 @@ import { constants as fsConstants, existsSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
-import { evaluateInstalled, type HookCommandDrift } from "./managed-block.js";
+import { countCleanEntriesInFile, evaluateInstalled, type HookCommandDrift } from "./managed-block.js";
 import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 
@@ -22,6 +22,11 @@ import { resolveKimiCodeConfigPath } from "../kimi-home.js";
  */
 export interface HookInstallStatus {
   installed: boolean;
+  /**
+   * Job-time only: an installed hook whose markers need repair (duplicate or
+   * orphan) carries the setup remedy here so the job can record it (channel W).
+   */
+  warnings?: string[];
   /** Human-readable reason (filled when `installed === false`). */
   reason?: string;
   /** Path examined. Useful for the warning message. */
@@ -108,7 +113,21 @@ export async function verifyHookInstalled(
     hostId: resolveHostId(env, expected.hookScriptPath),
     nodeExists: (binPath) => existsSync(binPath),
   });
-  if (!check.installed) {
+  // Markers are bookkeeping, not the security boundary. At job time a
+  // duplicate or orphan marker is tolerated when the real parser finds a clean,
+  // unconditional PreToolUse entry with the byte-exact command (the whole hook
+  // set already validated above), and the job records the setup remedy. setup
+  // and setup --check use evaluateInstalled directly and keep failing.
+  const warnings: string[] = [];
+  if (
+    !check.installed &&
+    (check.state.kind === "duplicate" || check.state.kind === "orphan") &&
+    countCleanEntriesInFile(raw, expected.command) >= 1
+  ) {
+    warnings.push(
+      `The managed kimi-code PreToolUse hook is installed and enforcing, but its config markers need repair: ${check.reason}`,
+    );
+  } else if (!check.installed) {
     return {
       installed: false,
       reason: check.reason,
@@ -170,7 +189,7 @@ export async function verifyHookInstalled(
     };
   }
 
-  return { installed: true, configPath };
+  return warnings.length > 0 ? { installed: true, configPath, warnings } : { installed: true, configPath };
 }
 
 /**
