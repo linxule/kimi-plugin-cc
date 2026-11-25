@@ -9,6 +9,7 @@ import {
   upstreamSnakeToCamel,
   scanSessionJournalsForPlan,
 } from "../../runtime/native-v2-preflight.js";
+import { buildKimiCliEnvironment } from "../../runtime/cli-client.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
@@ -520,11 +521,36 @@ describe("assertNativeV2Preflight", () => {
     });
   });
 
-  test("throws CLI_V2_EXPERIMENTAL_UNSAFE when an experimental selector is truthy", async () => {
+  test("G3: enabled experimental selectors no longer refuse a certified or unlabeled launch", async () => {
+    await withHome("assert-experimental-relaxed", async (home) => {
+      await writeConfig(home, "[experimental]\ntower = true\nsubagent_fork = true\n");
+      const env = { KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "true" };
+      await expect(assertNativeV2Preflight({ kimiHome: home, env })).resolves.toEqual({ warnings: [] });
+      for (const certification of ["certified", "test-bypass"] as const) {
+        await expect(assertNativeV2Preflight({
+          kimiHome: home, env, release: { operationKind: "ask", kimiVersion: "2.7.3", certification },
+        })).resolves.toEqual({ warnings: [] });
+      }
+    });
+  });
+
+  test("G3: an unreadable config still refuses before any experimental relaxation", async () => {
+    await withHome("assert-experimental-unreadable", async (home) => {
+      await writeConfig(home, "[experimental\ntower = true\n");
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).rejects.toMatchObject({
+        code: "CLI_V2_CONFIG_UNREADABLE",
+      });
+    });
+  });
+
+  test("throws CLI_V2_EXPERIMENTAL_UNSAFE for an uncertified release with a truthy selector", async () => {
     await withHome("assert-experimental", async (home) => {
       await writeConfig(home, "[experimental]\ntower = true\n");
       try {
-        await assertNativeV2Preflight({ kimiHome: home, env: NO_ENV });
+        await assertNativeV2Preflight({
+          kimiHome: home, env: NO_ENV,
+          release: { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" },
+        });
         throw new Error("expected assertNativeV2Preflight to throw");
       } catch (error) {
         expect(error).toBeInstanceOf(RuntimeError);
@@ -648,5 +674,25 @@ describe("scanSessionJournalsForPlan — enumeration errors are classified", () 
         await chmod(locked, 0o700);
       }
     });
+  });
+});
+
+describe("G3: child environment forces uncertified experimental features off", () => {
+  test("per-flag env overrides ambient selectors for print and web children; master flag is untouched", () => {
+    for (const operationKind of ["ask", "rescue", "swarm"] as const) {
+      const env = buildKimiCliEnvironment({
+        cwd: "/isolated/workspace",
+        env: { KIMI_CODE_HOME: "/isolated/kimi", KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "yes" },
+        executionPlan: {
+          schemaVersion: 1, operationKind, intendedEngine: "native-v2", command: "kimi", prefixArgs: [],
+          kimiVersion: "2.7.3", certification: "certified", resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1",
+        },
+        commandLabel: operationKind,
+        ...(operationKind === "swarm" ? { swarmMaxConcurrency: 2 } : {}),
+      });
+      expect(env.KIMI_CODE_EXPERIMENTAL_TOWER).toBe("0");
+      expect(env.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK).toBe("0");
+      expect("KIMI_CODE_EXPERIMENTAL_FLAG" in env).toBe(false);
+    }
   });
 });

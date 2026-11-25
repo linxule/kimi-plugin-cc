@@ -13,9 +13,11 @@
 //     B. the EnterPlanMode tool (already hook-denied for every label);
 //     C. resuming a session whose agent wire journal holds a durable
 //        `plan_mode.enter` record (restore() folds ONLY agents/*/wire.jsonl).
-//   This module closes A and C before any process is spawned, refuses the
-//   v2-only experimental features (tower, subagent fork) that this plugin does
-//   not certify, and requires local execution for configured and resumed sessions.
+//   This module closes A and C before any process is spawned and requires
+//   local execution for configured and resumed sessions. The v2-only
+//   experimental features (tower, subagent fork) are forced off for every
+//   child by per-flag env in cli-client.ts; only an uncertified release, whose
+//   flag names are unreviewed, still refuses an enabled selector here.
 //   B stays in runtime/hooks/approval-policy.ts.
 //
 // Contract:
@@ -473,7 +475,12 @@ export async function assertNativeV2Preflight(options) {
             details: { refusal_kind: environment.refusalKind, retryable_after_setup: false },
         });
     }
-    const experimental = await inspectExperimentalSelectors(options.kimiHome, options.env);
+    // Certified and test-bypass children run with tower and subagent fork forced
+    // off by per-flag env, which outranks config and the master flag on every
+    // reviewed release. An uncertified release's flag names are unreviewed.
+    const experimental = options.release?.certification === "uncertified"
+        ? await inspectExperimentalSelectors(options.kimiHome, options.env)
+        : { kind: "ok" };
     if (experimental.kind === "refuse") {
         throw new RuntimeError("CLI_V2_EXPERIMENTAL_UNSAFE", `${experimental.reason} Unset the listed selector(s) before retrying.`, stage, {
             details: {

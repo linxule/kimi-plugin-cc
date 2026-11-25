@@ -267,6 +267,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       resumeSessionId: opts.resumeSessionId,
       expectedExecutionRoot: opts.trustedWorkspaceRoot ?? opts.cwd,
       stage: "cli-client.spawn",
+      release: opts.executionPlan,
     });
   }
 
@@ -1297,6 +1298,11 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
   env.KIMI_CODE_NO_AUTO_UPDATE = "1";
   // Plugin-owned web lifecycles must not inherit ambient idle-session reclamation.
   env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS = "0";
+  // Tower and subagent fork are uncertified. A per-flag env value outranks
+  // [experimental] config and the master flag upstream (0.42.0-2.7.3), and
+  // "0" parses as false there, so these force both off for print and web.
+  env.KIMI_CODE_EXPERIMENTAL_TOWER = "0";
+  env.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK = "0";
   // Rescue and pursue share the write label. Only the immutable execution
   // plan can grant pursue's narrow goal-metadata access; never trust ambient
   // state inherited from another plugin job.

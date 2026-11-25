@@ -13,9 +13,11 @@
 //     B. the EnterPlanMode tool (already hook-denied for every label);
 //     C. resuming a session whose agent wire journal holds a durable
 //        `plan_mode.enter` record (restore() folds ONLY agents/*/wire.jsonl).
-//   This module closes A and C before any process is spawned, refuses the
-//   v2-only experimental features (tower, subagent fork) that this plugin does
-//   not certify, and requires local execution for configured and resumed sessions.
+//   This module closes A and C before any process is spawned and requires
+//   local execution for configured and resumed sessions. The v2-only
+//   experimental features (tower, subagent fork) are forced off for every
+//   child by per-flag env in cli-client.ts; only an uncertified release, whose
+//   flag names are unreviewed, still refuses an enabled selector here.
 //   B stays in runtime/hooks/approval-policy.ts.
 //
 // Contract:
@@ -530,6 +532,17 @@ export interface NativeV2PreflightOptions {
   readonly expectedExecutionRoot?: string;
   /** RuntimeError stage label, e.g. "kimi-engine.plan" or "cli-client.spawn". */
   readonly stage?: string;
+  /**
+   * The plan being launched. Relaxations that rest on a reviewed release
+   * apply only when it names one; omitted, every check keeps its strictest form.
+   */
+  readonly release?: NativeV2PreflightRelease;
+}
+
+export interface NativeV2PreflightRelease {
+  readonly operationKind: string;
+  readonly kimiVersion: string | null;
+  readonly certification: "certified" | "uncertified" | "test-bypass";
 }
 
 /**
@@ -537,6 +550,7 @@ export interface NativeV2PreflightOptions {
  *   CLI_V2_PLAN_MODE_CONFIGURED   details.refusal_kind = "v2-plan-mode-configured"
  *   CLI_V2_CONFIG_UNREADABLE      details.refusal_kind = "v2-config-unreadable"
  *   CLI_V2_EXPERIMENTAL_UNSAFE    details.refusal_kind = "v2-experimental-unsafe", details.selectors
+ *                                 (uncertified releases only)
  *   CLI_V2_ENVIRONMENT_UNSAFE / CLI_V2_WORKSPACE_TRUST_UNSAFE for unsafe config
  *   KIMI_SESSION_ENVIRONMENT_UNSAFE details.refusal_kind = "session-environment-unsafe"
  *   KIMI_SESSION_PLAN_TAINTED     details.refusal_kind = "session-plan-tainted", details.record_type
@@ -589,7 +603,12 @@ export async function assertNativeV2Preflight(
     });
   }
 
-  const experimental = await inspectExperimentalSelectors(options.kimiHome, options.env);
+  // Certified and test-bypass children run with tower and subagent fork forced
+  // off by per-flag env, which outranks config and the master flag on every
+  // reviewed release. An uncertified release's flag names are unreviewed.
+  const experimental = options.release?.certification === "uncertified"
+    ? await inspectExperimentalSelectors(options.kimiHome, options.env)
+    : { kind: "ok" as const };
   if (experimental.kind === "refuse") {
     throw new RuntimeError(
       "CLI_V2_EXPERIMENTAL_UNSAFE",

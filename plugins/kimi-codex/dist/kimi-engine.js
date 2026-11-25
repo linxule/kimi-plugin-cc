@@ -159,7 +159,7 @@ export async function prepareKimiExecutionPlan(options) {
     const kimi = resolveKimiCliCommand(options.env);
     const exactCommand = await resolveExactExecutable(kimi.command, options.cwd, options.env);
     const warnings = [];
-    const runPreflight = async (intendedEngine) => {
+    const runPreflight = async (intendedEngine, release) => {
         if (options.resumeSource) {
             assertResumeEngineCompatible(options.resumeSource, intendedEngine, options.operationKind);
         }
@@ -172,13 +172,14 @@ export async function prepareKimiExecutionPlan(options) {
             resumeSessionId: options.resumeSessionId,
             expectedExecutionRoot: options.cwd,
             stage: "kimi-engine.plan",
+            release: { operationKind: options.operationKind, ...release },
         });
         warnings.push(...preflight.warnings);
     };
     if (options.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1") {
         const intendedEngine = options.intendedEngine ?? "legacy-v1";
         const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
-        await runPreflight(intendedEngine);
+        await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
         return finishPlan({
             schemaVersion: 1,
             operationKind: options.operationKind,
@@ -214,7 +215,7 @@ export async function prepareKimiExecutionPlan(options) {
         const borrowed = resolveKimiRelease(probe.version).release.version;
         warnings.push(`kimi-code ${probe.version} is not certified by this plugin release; running ${options.operationKind} read-only with ${borrowed} mechanics.`);
     }
-    await runPreflight(intendedEngine);
+    await runPreflight(intendedEngine, { kimiVersion: probe.version, certification });
     return finishPlan({
         schemaVersion: 1,
         operationKind: options.operationKind,
