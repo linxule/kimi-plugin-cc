@@ -15,6 +15,14 @@ export function resolvePluginPaths(env) {
         configPath: path.join(pluginRoot, "config.json"),
     };
 }
+/**
+ * Plugin-owned kimi-code installs (`setup --install-kimi`): one directory per
+ * exact version plus a `current` symlink. Binary resolution and the installer
+ * both use this helper so they cannot disagree about the location.
+ */
+export function resolveKimiBinDir(env) {
+    return path.join(resolvePluginDataRoot(env), "kimi-bin");
+}
 export async function ensurePluginPaths(paths) {
     await mkdir(paths.pluginRoot, { recursive: true });
     await mkdir(paths.logsDir, { recursive: true });
