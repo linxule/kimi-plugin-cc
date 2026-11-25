@@ -6,7 +6,7 @@ import { countCleanEntriesInFile, effectiveHost, evaluateInstalled, findUnmanage
 import { hostIdFromHookCommand, parseHookShellCommand, resolveHostId, tryBuildExpectedHookCommand, } from "./install-paths.js";
 import { jobHostForHookScript } from "./job-host.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
-export async function verifyHookInstalled(env) {
+export async function verifyHookInstalled(env, options = {}) {
     const configPath = resolveKimiCodeConfigPath(env);
     if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
         return { installed: true, configPath };
@@ -43,12 +43,13 @@ export async function verifyHookInstalled(env) {
             configPath,
         };
     }
-    const hookSet = await validateKimiHookSetForEnvironment(raw, env);
+    const hookSet = await validateKimiHookSetForEnvironment(raw, env, options.kimiVersion);
     if (!hookSet.valid) {
         return {
             installed: false,
             reason: hookSet.reason ?? "configured hooks failed whole-array validation",
             configPath,
+            hookSetInvalid: true,
         };
     }
     // Classify command mismatches into actionable drift reasons without changing

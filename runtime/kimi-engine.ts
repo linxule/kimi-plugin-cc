@@ -305,7 +305,7 @@ export async function prepareKimiExecutionPlan(
     const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
     assertNoUnsafeExperimentalSelector(options.env, "kimi-engine.plan", { intendedEngine, certification: "test-bypass" });
     await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
-    warnings.push(...await hookMarkerWarnings(options.env));
+    warnings.push(...await planHookCheck(options.env));
     return finishPlan({
       schemaVersion: 1,
       operationKind: options.operationKind,
@@ -353,7 +353,7 @@ export async function prepareKimiExecutionPlan(
     );
   }
   await runPreflight(intendedEngine, { kimiVersion: probe.version, certification });
-  warnings.push(...await hookMarkerWarnings(options.env));
+  warnings.push(...await planHookCheck(options.env, probe));
 
   return finishPlan({
     schemaVersion: 1,
@@ -375,18 +375,36 @@ function withoutExperimentalMasterFlag(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
 }
 
 /**
- * Warnings from the job-time hook check: marker repair (G6) and other hosts'
- * older hooks that still apply their own rules to this job (H2). The command's
- * own hook gate already refused an uninstalled hook; an unverifiable result
- * here adds nothing and never refuses.
+ * Job-time hook check against the release this plan probed (`probe`, absent
+ * only on the test-bypass path). It refuses when the configured hooks array is
+ * invalid for that release, because kimi-code would then load no hook at all;
+ * the command gate's earlier check may have probed a different release.
+ * Otherwise it returns warnings: marker repair (G6) and other hosts' older
+ * hooks that still apply their own rules to this job (H2). Any other
+ * uninstalled or unverifiable result was the command gate's to refuse.
  */
-async function hookMarkerWarnings(env: NodeJS.ProcessEnv): Promise<readonly string[]> {
+async function planHookCheck(env: NodeJS.ProcessEnv, probe?: KimiVersionProbeOk): Promise<readonly string[]> {
+  let status: Awaited<ReturnType<typeof verifyHookInstalled>>;
   try {
-    const status = await verifyHookInstalled(env);
-    return status.installed ? status.warnings ?? [] : [];
+    status = await verifyHookInstalled(env, { kimiVersion: probe });
   } catch {
     return [];
   }
+  if (status.hookSetInvalid) {
+    throw new RuntimeError(
+      "KIMI_HOOK_SET_INVALID",
+      `Refusing to spawn kimi: the configured kimi-code hooks are invalid for the release this job runs (${probe?.version ?? "version not probed"}): ${status.reason}. kimi-code drops the whole hooks array, so the managed PreToolUse hook would not run. Repair or remove that [[hooks]] entry in ${status.configPath} and retry.`,
+      "kimi-engine.plan",
+      {
+        details: {
+          config_path: status.configPath,
+          kimi_version: probe?.version ?? null,
+          retryable_after_setup: false,
+        },
+      },
+    );
+  }
+  return status.installed ? status.warnings ?? [] : [];
 }
 
 /** Freeze the plan; a nonempty warning list is attached and announced once on stderr. */

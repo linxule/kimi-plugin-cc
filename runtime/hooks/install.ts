@@ -19,6 +19,7 @@ import {
 } from "./install-paths.js";
 import { jobHostForHookScript } from "./job-host.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
+import type { KimiVersionProbeOk } from "../kimi-version-probe.js";
 
 /**
  * Verify the managed PreToolUse hook and require its decoded command to equal
@@ -69,10 +70,16 @@ export interface HookInstallStatus {
   refusalKind?: "node-bin-not-executable";
   /** The interpreter path that failed the probe (pairs with `refusalKind`). */
   nodeBin?: string;
+  /** The configured hooks array fails validation, so kimi-code would load no hook. */
+  hookSetInvalid?: true;
 }
 
 export async function verifyHookInstalled(
   env: NodeJS.ProcessEnv,
+  options: {
+    /** The execution plan's exact probe; omitted elsewhere, which probes when needed. */
+    kimiVersion?: KimiVersionProbeOk;
+  } = {},
 ): Promise<HookInstallStatus> {
   const configPath = resolveKimiCodeConfigPath(env);
   if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
@@ -112,12 +119,13 @@ export async function verifyHookInstalled(
     };
   }
 
-  const hookSet = await validateKimiHookSetForEnvironment(raw, env);
+  const hookSet = await validateKimiHookSetForEnvironment(raw, env, options.kimiVersion);
   if (!hookSet.valid) {
     return {
       installed: false,
       reason: hookSet.reason ?? "configured hooks failed whole-array validation",
       configPath,
+      hookSetInvalid: true,
     };
   }
 

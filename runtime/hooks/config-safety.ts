@@ -6,7 +6,7 @@ import path from "node:path";
 import { RuntimeError } from "../errors.js";
 import { selectKimiBinary } from "../kimi-command.js";
 import { kimiReleaseHas } from "../kimi-releases.js";
-import { probeKimiVersion } from "../kimi-version-probe.js";
+import { probeKimiVersion, type KimiVersionProbeOk } from "../kimi-version-probe.js";
 import { sleep, tomlErrorLocation } from "../util.js";
 import { extractValue } from "../vendor/smol-toml/extract.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
@@ -637,16 +637,21 @@ export function validateKimiHookSet(
   return validateVersionSensitiveEvents(inspection.versionSensitiveEvents, version);
 }
 
-/** Probe `kimi --version` only when the config uses an additive hook event. */
+/**
+ * Probe `kimi --version` only when the config uses an additive hook event.
+ * A job's execution plan passes its own exact probe as `knownVersion`, so the
+ * hook set is judged against the release the job runs and nothing is spawned.
+ */
 export async function validateKimiHookSetForEnvironment(
   contents: string,
   env: NodeJS.ProcessEnv,
+  knownVersion?: KimiVersionProbeOk,
 ): Promise<KimiHookSetValidation> {
   const inspection = inspectKimiHookSet(contents);
   if (!inspection.validation.valid || inspection.versionSensitiveEvents.length === 0) {
     return inspection.validation;
   }
-  const probe = await probeKimiVersion({
+  const probe = knownVersion ?? await probeKimiVersion({
     kimiBin: selectKimiBinary(env).command,
     env,
   });

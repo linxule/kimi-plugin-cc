@@ -484,13 +484,17 @@ export function validateKimiHookSet(contents, version) {
         return inspection.validation;
     return validateVersionSensitiveEvents(inspection.versionSensitiveEvents, version);
 }
-/** Probe `kimi --version` only when the config uses an additive hook event. */
-export async function validateKimiHookSetForEnvironment(contents, env) {
+/**
+ * Probe `kimi --version` only when the config uses an additive hook event.
+ * A job's execution plan passes its own exact probe as `knownVersion`, so the
+ * hook set is judged against the release the job runs and nothing is spawned.
+ */
+export async function validateKimiHookSetForEnvironment(contents, env, knownVersion) {
     const inspection = inspectKimiHookSet(contents);
     if (!inspection.validation.valid || inspection.versionSensitiveEvents.length === 0) {
         return inspection.validation;
     }
-    const probe = await probeKimiVersion({
+    const probe = knownVersion ?? await probeKimiVersion({
         kimiBin: selectKimiBinary(env).command,
         env,
     });
