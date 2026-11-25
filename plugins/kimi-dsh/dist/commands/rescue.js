@@ -56,6 +56,7 @@ export async function runRescue(argv, context) {
             operationKind: "rescue",
             cwd: context.cwd,
             env: context.env,
+            stderr: context.stderr,
             resumedFromJobId: sessionResolution.resumedFromJobId,
             resumeSessionId: sessionResolution.kimiSessionId ?? undefined,
             resumeSource: sessionResolution.sourceJob,

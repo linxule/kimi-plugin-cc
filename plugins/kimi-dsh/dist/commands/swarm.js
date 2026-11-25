@@ -228,6 +228,7 @@ async function runReadSwarm(parsed, objective, context, readScope) {
             operationKind: "swarm",
             cwd: context.cwd,
             env: context.env,
+            stderr: context.stderr,
         });
         const maxConcurrency = resolveSwarmMaxConcurrency(parsed.maxConcurrency);
         const prompt = buildSwarmPrompt(objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined);
@@ -301,6 +302,7 @@ async function runWriteSwarm(parsed, objective, context) {
                 operationKind: "swarm-write",
                 cwd: worktreePath,
                 env: context.env,
+                stderr: context.stderr,
             });
             const prompt = buildSwarmWritePrompt(objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined);
             // Reuse the rescue (write-capable) lineage, like pursue; the hook label

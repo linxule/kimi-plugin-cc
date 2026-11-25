@@ -77,6 +77,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       operationKind: "ask",
       cwd: context.cwd,
       env: context.env,
+      stderr: context.stderr,
       resumedFromJobId: sessionResolution.resumedFromJobId,
       resumeSessionId: sessionResolution.kimiSessionId ?? undefined,
       resumeSource: sessionResolution.sourceJob,

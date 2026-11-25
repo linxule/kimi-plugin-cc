@@ -141,8 +141,12 @@ describe("channel W end to end", () => {
         KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
       };
       const warning = "kimi-code 2.8.0 is not certified by this plugin release; running ask read-only with 2.7.3 mechanics.";
-      const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr: process.stderr };
+      let commandStderr = "";
+      const stderr = { write(chunk: string) { commandStderr += chunk; return true; } } as unknown as NodeJS.WriteStream;
+      const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr };
       const output = await runAsk(["What", "changed?"], context);
+      // S3: the launch notice follows the command's own stderr stream.
+      expect(commandStderr).toContain(`[kimi-plugin-cc] warning: ${warning}`);
       expect(output.startsWith(`Warnings:\n- ${warning}\n\n`)).toBe(true);
       const status = JSON.parse(await runStatus(["--type", "ask"], context));
       expect(status.warnings).toEqual([warning]);

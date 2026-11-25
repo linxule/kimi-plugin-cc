@@ -38,6 +38,7 @@ export async function runReview(argv, context, commandType) {
         operationKind: commandType,
         cwd: context.cwd,
         env: context.env,
+        stderr: context.stderr,
     });
     const store = new JobStore(paths);
     const jobId = allocateJobId(context);

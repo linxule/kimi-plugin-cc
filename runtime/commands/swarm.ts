@@ -276,6 +276,7 @@ async function runReadSwarm(
       operationKind: "swarm",
       cwd: context.cwd,
       env: context.env,
+      stderr: context.stderr,
     });
 
     const maxConcurrency = resolveSwarmMaxConcurrency(parsed.maxConcurrency);
@@ -378,6 +379,7 @@ async function runWriteSwarm(
         operationKind: "swarm-write",
         cwd: worktreePath,
         env: context.env,
+        stderr: context.stderr,
       });
       const prompt = buildSwarmWritePrompt(
         objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined,

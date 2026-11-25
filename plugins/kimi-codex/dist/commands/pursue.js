@@ -120,6 +120,7 @@ export async function runPursue(argv, context) {
             operationKind: "pursue",
             cwd: context.cwd,
             env: context.env,
+            stderr: context.stderr,
         });
         const prompt = buildGoalPrompt(objective, parsed.turns);
         const jobId = allocateJobId(context);
