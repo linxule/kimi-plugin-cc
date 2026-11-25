@@ -15,6 +15,7 @@ import {
 } from "../swarm-activation.js";
 import {
   executionPlanFromPersisted,
+  type KimiExecutionPlan,
   observedExecutionFields,
   persistedExecutionPlanFields,
   prepareKimiExecutionPlan,
@@ -281,49 +282,13 @@ async function runReadSwarm(
     const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `swarm-${jobId}.jsonl`);
 
-    const job = store.createJob({
-      job_id: jobId,
-      repo_id: repoIdentity.repoId,
-      // Reuse the read-only review lineage; the hook label below ("swarm") is
-      // what actually drives the allowlist.
-      command_type: "review",
-      cwd: context.cwd,
-      model: parsed.model ?? null,
-      thinking: null,
-      thinking_effort: parsed.thinkingEffort ?? null,
-      background: false,
-      budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
-      budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
-      pid: process.pid,
-      kimi_pid: null,
-      status: "running",
-      kimi_session_id: null,
-      ...persistedExecutionPlanFields(executionPlan),
-      agent_profile: SWARM_AGENT_PROFILE,
-      prompt_digest: digestPrompt(prompt),
-      summary: `[swarm] ${shorten(objective, SWARM_SUMMARY_MAX)}`,
-      phase: "starting",
-      final_output_path: null,
-      stream_log_path: logPath,
-      error: null,
+    // Reuse the read-only review lineage; the hook label ("swarm") is what
+    // actually drives the allowlist.
+    const job = await createSwarmJob(store, paths, {
+      jobId, repoId: repoIdentity.repoId, commandType: "review", label: "swarm",
+      agentProfile: SWARM_AGENT_PROFILE, failureSummary: "Swarm failed.",
+      parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd,
     });
-
-    try {
-      await writeInvocationLogHeader(logPath, {
-        commandType: "swarm",
-        kimiSessionId: "(pending)",
-        cwd: context.cwd,
-      });
-    } catch (error) {
-      const classified = new RuntimeError(
-        "SWARM_LOG_HEADER_FAILED",
-        `Failed to write swarm invocation log header: ${(error as Error).message ?? String(error)}`,
-        "swarm.log-header",
-        error instanceof Error ? { cause: error } : undefined,
-      );
-      await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
-      throw classified;
-    }
 
     const completed = await executeSwarmJob(
       job.job_id,
@@ -415,53 +380,15 @@ async function runWriteSwarm(
         objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined,
       );
 
-      const job = store.createJob({
-        job_id: jobId,
-        repo_id: repoIdentity.repoId,
-        // Reuse the rescue (write-capable) lineage, like pursue; the hook label
-        // below ("swarm-write") drives the allowlist. cwd stays the USER's real
-        // cwd for lineage — the kimi spawn cwd is the worktree (threaded via the
-        // writeMode arg to executeSwarmJob).
-        command_type: "rescue",
-        cwd: context.cwd,
-        model: parsed.model ?? null,
-        thinking: null,
-        thinking_effort: parsed.thinkingEffort ?? null,
-        background: false,
-        budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
-        budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
-        pid: process.pid,
-        kimi_pid: null,
-        status: "running",
-        kimi_session_id: null,
-        ...persistedExecutionPlanFields(executionPlan),
-        agent_profile: SWARM_WRITE_AGENT_PROFILE,
-        prompt_digest: digestPrompt(prompt),
-        summary: `[swarm-write] ${shorten(objective, SWARM_SUMMARY_MAX)}`,
-        phase: "starting",
-        final_output_path: null,
-        stream_log_path: logPath,
-        error: null,
+      // Reuse the rescue (write-capable) lineage, like pursue; the hook label
+      // ("swarm-write") drives the allowlist. cwd stays the USER's real cwd for
+      // lineage — the kimi spawn cwd is the worktree (threaded via the writeMode
+      // arg to executeSwarmJob).
+      const job = await createSwarmJob(store, paths, {
+        jobId, repoId: repoIdentity.repoId, commandType: "rescue", label: "swarm-write",
+        agentProfile: SWARM_WRITE_AGENT_PROFILE, failureSummary: "Swarm (write) failed.",
+        parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd,
       });
-
-      try {
-        await writeInvocationLogHeader(logPath, {
-          commandType: "swarm-write",
-          kimiSessionId: "(pending)",
-          cwd: context.cwd,
-        });
-      } catch (error) {
-        const classified = new RuntimeError(
-          "SWARM_LOG_HEADER_FAILED",
-          `Failed to write swarm-write invocation log header: ${(error as Error).message ?? String(error)}`,
-          "swarm.log-header",
-          error instanceof Error ? { cause: error } : undefined,
-        );
-        await markJobFailed(store, paths, job, classified, "Swarm (write) failed.", {
-          phase: "failed",
-        });
-        throw classified;
-      }
 
       const completed = await executeSwarmJob(
         job.job_id,
@@ -504,6 +431,73 @@ async function runWriteSwarm(
   } finally {
     store.close();
   }
+}
+
+/**
+ * Create the running job row and write its invocation log header. A header
+ * failure marks the job failed and rethrows.
+ */
+async function createSwarmJob(
+  store: JobStore,
+  paths: PluginPaths,
+  spec: {
+    jobId: string;
+    repoId: string;
+    commandType: "review" | "rescue";
+    label: "swarm" | "swarm-write";
+    agentProfile: string;
+    failureSummary: string;
+    parsed: SwarmArgs;
+    objective: string;
+    prompt: string;
+    executionPlan: KimiExecutionPlan;
+    logPath: string;
+    cwd: string;
+  },
+): Promise<JobRecord> {
+  const { parsed } = spec;
+  const job = store.createJob({
+    job_id: spec.jobId,
+    repo_id: spec.repoId,
+    command_type: spec.commandType,
+    cwd: spec.cwd,
+    model: parsed.model ?? null,
+    thinking: null,
+    thinking_effort: parsed.thinkingEffort ?? null,
+    background: false,
+    budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
+    budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
+    pid: process.pid,
+    kimi_pid: null,
+    status: "running",
+    kimi_session_id: null,
+    ...persistedExecutionPlanFields(spec.executionPlan),
+    agent_profile: spec.agentProfile,
+    prompt_digest: digestPrompt(spec.prompt),
+    summary: `[${spec.label}] ${shorten(spec.objective, SWARM_SUMMARY_MAX)}`,
+    phase: "starting",
+    final_output_path: null,
+    stream_log_path: spec.logPath,
+    error: null,
+  });
+
+  try {
+    await writeInvocationLogHeader(spec.logPath, {
+      commandType: spec.label,
+      kimiSessionId: "(pending)",
+      cwd: spec.cwd,
+    });
+  } catch (error) {
+    const classified = new RuntimeError(
+      "SWARM_LOG_HEADER_FAILED",
+      `Failed to write ${spec.label} invocation log header: ${(error as Error).message ?? String(error)}`,
+      "swarm.log-header",
+      error instanceof Error ? { cause: error } : undefined,
+    );
+    await markJobFailed(store, paths, job, classified, spec.failureSummary, { phase: "failed" });
+    throw classified;
+  }
+  return job;
 }
 
 /** Refuse --write outside a git repo (git worktree add has nothing to fork). */
