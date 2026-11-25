@@ -36,6 +36,20 @@ describe("kimi-releases table", () => {
     }
   });
 
+  test("the per-version predicate agrees with the pinned lists for every release", () => {
+    for (const [capability, versions] of Object.entries(EXPECTED)) {
+      for (const release of KIMI_V2_RELEASES) {
+        expect([release.version, capability, kimiReleaseHas(release.version, capability as KimiReleaseCapability)])
+          .toEqual([release.version, capability, versions.includes(release.version)]);
+      }
+    }
+  });
+
+  test("rows and their shared capability arrays cannot be mutated", () => {
+    expect(Object.isFrozen(KIMI_V2_RELEASES)).toBe(true);
+    for (const release of KIMI_V2_RELEASES) expect(Object.isFrozen(release.capabilities)).toBe(true);
+  });
+
   test("scopes keep 2.6.0 out of the all-operation set", () => {
     expect(kimiVersionsInScope("non-swarm")).toEqual(["2.6.0"]);
     expect(kimiVersionsInScope("all")).not.toContain("2.6.0");

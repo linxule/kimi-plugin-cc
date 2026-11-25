@@ -13,13 +13,15 @@
  * This module imports nothing. The per-tool-call hook and the config verifier
  * load it, and neither may pull in the engine.
  */
-const NONE = [];
-const HOOK_SCHEMA = ["hook-schema"];
-const WEB = [...HOOK_SCHEMA, "web-preactivation"];
-const LOCAL = [...WEB, "local-environment", "agent-state"];
-const MODERN_WS = [...LOCAL, "modern-ws-control"];
-const BOUNDED = [...MODERN_WS, "bounded-swarm"];
-const JSON_READY = [...BOUNDED, "web-json-ready"];
+// Rows share these arrays, so each is frozen: a mutated preset would change every row using it.
+const preset = (...capabilities) => Object.freeze(capabilities);
+const NONE = preset();
+const HOOK_SCHEMA = preset("hook-schema");
+const WEB = preset(...HOOK_SCHEMA, "web-preactivation");
+const LOCAL = preset(...WEB, "local-environment", "agent-state");
+const MODERN_WS = preset(...LOCAL, "modern-ws-control");
+const BOUNDED = preset(...MODERN_WS, "bounded-swarm");
+const JSON_READY = preset(...BOUNDED, "web-json-ready");
 /** Ascending. Order is visible in error messages and in the exported version arrays. */
 export const KIMI_V2_RELEASES = Object.freeze([
     { version: "0.42.0", commit: "6954d2c8", scope: "all", capabilities: NONE },

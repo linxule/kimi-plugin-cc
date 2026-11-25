@@ -147,7 +147,7 @@ export function pairedCalls(journals:Array<{agent:string;events:any[]}>,name?:st
 export type RunResult = Awaited<ReturnType<typeof runLane>>;
 
 async function implementationFingerprints():Promise<Record<string,string>> {
- const names=['runtime/commands/swarm.ts','runtime/cli-client.ts','runtime/process-tree.ts','runtime/hooks/approval-policy.ts','runtime/swarm-policy.ts','runtime/swarm-tool-policy.ts','dist/commands/swarm.js','dist/commands/setup.js','dist/cli-client.js','dist/process-tree.js','dist/kimi-engine.js','dist/swarm-activation.js','dist/hooks/approval-hook.js','dist/hooks/approval-policy.js','dist/swarm-policy.js','dist/swarm-tool-policy.js'];
+ const names=['runtime/commands/swarm.ts','runtime/cli-client.ts','runtime/process-tree.ts','runtime/hooks/approval-policy.ts','runtime/swarm-policy.ts','runtime/swarm-tool-policy.ts','runtime/kimi-releases.ts','dist/kimi-releases.js','dist/commands/swarm.js','dist/commands/setup.js','dist/cli-client.js','dist/process-tree.js','dist/kimi-engine.js','dist/swarm-activation.js','dist/hooks/approval-hook.js','dist/hooks/approval-policy.js','dist/swarm-policy.js','dist/swarm-tool-policy.js'];
  return Object.fromEntries(await Promise.all(names.map(async name=>[name,createHash('sha256').update(await readFile(new URL(`../../${name}`,import.meta.url))).digest('hex')])));
 }
 

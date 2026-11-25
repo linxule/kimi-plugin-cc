@@ -45,13 +45,16 @@ export interface KimiRelease {
   readonly capabilities: readonly KimiReleaseCapability[];
 }
 
-const NONE: readonly KimiReleaseCapability[] = [];
-const HOOK_SCHEMA: readonly KimiReleaseCapability[] = ["hook-schema"];
-const WEB: readonly KimiReleaseCapability[] = [...HOOK_SCHEMA, "web-preactivation"];
-const LOCAL: readonly KimiReleaseCapability[] = [...WEB, "local-environment", "agent-state"];
-const MODERN_WS: readonly KimiReleaseCapability[] = [...LOCAL, "modern-ws-control"];
-const BOUNDED: readonly KimiReleaseCapability[] = [...MODERN_WS, "bounded-swarm"];
-const JSON_READY: readonly KimiReleaseCapability[] = [...BOUNDED, "web-json-ready"];
+// Rows share these arrays, so each is frozen: a mutated preset would change every row using it.
+const preset = (...capabilities: KimiReleaseCapability[]): readonly KimiReleaseCapability[] =>
+  Object.freeze(capabilities);
+const NONE = preset();
+const HOOK_SCHEMA = preset("hook-schema");
+const WEB = preset(...HOOK_SCHEMA, "web-preactivation");
+const LOCAL = preset(...WEB, "local-environment", "agent-state");
+const MODERN_WS = preset(...LOCAL, "modern-ws-control");
+const BOUNDED = preset(...MODERN_WS, "bounded-swarm");
+const JSON_READY = preset(...BOUNDED, "web-json-ready");
 
 /** Ascending. Order is visible in error messages and in the exported version arrays. */
 export const KIMI_V2_RELEASES: readonly KimiRelease[] = Object.freeze([
