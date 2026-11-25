@@ -375,9 +375,10 @@ function withoutExperimentalMasterFlag(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
 }
 
 /**
- * Marker-repair warnings from the job-time hook check (G6). The command's own
- * hook gate already refused an uninstalled hook; an unverifiable result here
- * adds nothing and never refuses.
+ * Warnings from the job-time hook check: marker repair (G6) and other hosts'
+ * older hooks that still apply their own rules to this job (H2). The command's
+ * own hook gate already refused an uninstalled hook; an unverifiable result
+ * here adds nothing and never refuses.
  */
 async function hookMarkerWarnings(env: NodeJS.ProcessEnv): Promise<readonly string[]> {
   try {

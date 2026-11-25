@@ -15,12 +15,12 @@
 //
 //   The harness pattern mirrors tests/runtime/review-gate-hook.test.ts.
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { realpath, symlink } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { JOB_HOST_ENV, jobHostForHookScript } from "../../runtime/hooks/job-host.js";
+import { JOB_HOOK_ENV, JOB_HOST_ENV, jobHostForHookScript } from "../../runtime/hooks/job-host.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const hookScriptPath = path.join(process.cwd(), "runtime/hooks/approval-hook.ts");
@@ -328,11 +328,34 @@ describe("job host: a hook decides only for its own host's jobs", () => {
   const bash = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "rm -rf x" } };
   const ownHost = jobHostForHookScript(hookScriptPath);
 
+  let launchDir: string;
+  let codexHook: string;
+  beforeAll(async () => {
+    launchDir = await createTestPluginDataRoot("job-host-launcher");
+    codexHook = path.join(launchDir, ".codex", "plugins", "cache", "kimi-marketplace", "kimi", "3.0.0", "dist", "hooks", "approval-hook.js");
+    await mkdir(path.dirname(codexHook), { recursive: true });
+    await writeFile(codexHook, "", "utf8");
+  });
+  afterAll(async () => {
+    await cleanupTestPath(launchDir);
+  });
+  const codexJob = (): NodeJS.ProcessEnv => ({ ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: "codex", [JOB_HOOK_ENV]: codexHook });
+
   test("another host's job: the hook abstains (exit 0, no output) for a call its policy denies", async () => {
-    const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: "codex" });
+    const result = await invokeHook(bash, codexJob());
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).not.toContain("kimi-plugin-cc safety hook");
+  });
+
+  test("another host's job whose launching script is gone: the hook enforces", async () => {
+    const gone = codexHook.replace("3.0.0", "2.9.9");
+    const result = await invokeHook(bash, { ...codexJob(), [JOB_HOOK_ENV]: gone });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("Bash");
+    const unset = codexJob();
+    delete unset[JOB_HOOK_ENV];
+    expect((await invokeHook(bash, unset)).exitCode).toBe(2);
   });
 
   test("its own job enforces: deny and allow", async () => {
@@ -361,7 +384,7 @@ describe("job host: a hook decides only for its own host's jobs", () => {
         const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: host }, { scriptPath: link });
         expect(result.exitCode).toBe(2);
       }
-      const other = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: "claude-code" }, { scriptPath: link });
+      const other = await invokeHook(bash, codexJob(), { scriptPath: link });
       expect(other.exitCode).toBe(0);
     } finally {
       await cleanupTestPath(dir);
