@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { renderSetupResult, runSetup } from "../../runtime/commands/setup.js";
+import { highestCertifiedKimiVersion, renderSetupResult, runSetup } from "../../runtime/commands/setup.js";
 import { buildHookShellCommand, resolveNodeBinary } from "../../runtime/hooks/install-paths.js";
 import { ORPHAN_MARKER_REMEDY } from "../../runtime/hooks/managed-block.js";
 import type { CommandContext } from "../../runtime/types.js";
@@ -39,6 +39,8 @@ async function makeCase(name: string, extra: NodeJS.ProcessEnv = {}) {
     CLAUDE_PLUGIN_DATA: data,
     KIMI_PLUGIN_CC_HOST_ID: HOST,
     KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+    // Pin the binary-selection line: no operator override, no plugin-owned install.
+    KIMI_PLUGIN_CC_KIMI_BIN: undefined,
     ...extra,
   };
   const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr: process.stderr };
@@ -70,6 +72,9 @@ function render(args: {
     `- Companion runtime: Node ${process.version}`,
     `- Plugin version:   ${KIMI_PLUGIN_CC_VERSION}`,
     ...(args.hostId ? [`- Host id:          ${args.hostId}`] : []),
+    ...(args.action === "uninstall"
+      ? []
+      : [`- Kimi binary:      kimi on PATH (no plugin-owned install; setup --install-kimi installs ${highestCertifiedKimiVersion()})`]),
     `- Config file:      ${args.configPath}`,
     `- Hook script:      ${args.hookScript}`,
     "- Review gate:      disabled",

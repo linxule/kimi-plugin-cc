@@ -12,13 +12,15 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // denies, repairs orphan marker comments, and refuses remaining
 // duplicate, orphaned, or malformed managed blocks.
 //
-// Subcommands: install (default), --check, --uninstall [--all], and
-// --enable-review-gate/--disable-review-gate.
+// Subcommands: install (default), --check, --uninstall [--all],
+// --enable-review-gate/--disable-review-gate, and the explicit, network-using
+// --install-kimi [--json], which installs the highest certified kimi-code into
+// plugin data. Nothing else in setup or any job installs or downloads.
 //
 // Managed-block splicing is line-based and preserves user bytes outside owned
 // edits; whole-file validation and inline-hook normalization use the TOML parser.
 import { spawn } from "node:child_process";
-import { access, mkdir, open, readFile, rename, unlink, } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile, } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
@@ -28,10 +30,11 @@ import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKi
 import { buildHookShellCommand, hostIdFromHookCommand, parseHookShellCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
 import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, ORPHAN_MARKER_REMEDY, pairBlocks, parseManagedBlock, } from "../hooks/managed-block.js";
 import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
-import { isNativeV2CertifiedVersion, NATIVE_V2_ANY_OPERATION_VERSIONS, NATIVE_V2_NON_SWARM_VERSIONS, } from "../kimi-engine.js";
+import { inspectPluginOwnedKimi, selectKimiBinary } from "../kimi-command.js";
+import { isNativeV2CertifiedVersion, NATIVE_V2_ANY_OPERATION_VERSIONS, NATIVE_V2_CERTIFIED_VERSIONS, NATIVE_V2_NON_SWARM_VERSIONS, } from "../kimi-engine.js";
 import { resolveKimiCodeConfigPath, resolveKimiHome } from "../kimi-home.js";
 import { formatVersionChoice, kimiReleaseHas, kimiVersionsWith } from "../kimi-releases.js";
-import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
+import { ensurePluginPaths, resolveKimiBinDir, resolvePluginPaths } from "../paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 const BEGIN_MARKER_PREFIX = "# === BEGIN kimi-plugin-cc-managed";
@@ -47,6 +50,9 @@ const PROBE_TIMEOUT_MS = 5_000;
 const PATH_FORBIDDEN_RE = /[\x00-\x1f"\\\n\r\t]/;
 export async function runSetup(argv, context) {
     const parsed = parseArgs(argv);
+    if (parsed.mode === "install-kimi") {
+        return await runInstallKimi(parsed.json, context);
+    }
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     // Reconcile the review-gate flag first — it's independent of the
@@ -82,8 +88,16 @@ function parseArgs(argv) {
     let enableReviewGate = false;
     let disableReviewGate = false;
     let removeAllHosts = false;
+    let installKimi = false;
+    let json = false;
     for (const token of argv) {
         switch (token) {
+            case "--install-kimi":
+                installKimi = true;
+                break;
+            case "--json":
+                json = true;
+                break;
             case "--check":
                 if (mode === "uninstall") {
                     throw new RuntimeError("INVALID_ARGS", "setup accepts at most one of --check, --uninstall.", "setup.parse");
@@ -115,7 +129,16 @@ function parseArgs(argv) {
     if (removeAllHosts && mode !== "uninstall") {
         throw new RuntimeError("INVALID_ARGS", "--all is only valid with --uninstall (it removes EVERY host's managed block).", "setup.parse");
     }
-    return { mode, enableReviewGate, disableReviewGate, removeAllHosts };
+    if (installKimi) {
+        if (argv.some((token) => token !== "--install-kimi" && token !== "--json")) {
+            throw new RuntimeError("INVALID_ARGS", "--install-kimi does not combine with other setup flags except --json.", "setup.parse");
+        }
+        return { mode: "install-kimi", json, enableReviewGate, disableReviewGate, removeAllHosts };
+    }
+    if (json) {
+        throw new RuntimeError("INVALID_ARGS", "--json is only valid with --install-kimi or --models.", "setup.parse");
+    }
+    return { mode, json, enableReviewGate, disableReviewGate, removeAllHosts };
 }
 async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context) {
     await assertHookScriptExists(hookScriptPath);
@@ -190,6 +213,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
     });
     const { blockWritten, next, expectedCommand } = mutation;
     collectPermissionRuleWarnings(next, warnings);
+    const kimiBinary = describeKimiBinary(context.env, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
     await collectInstalledKimiPluginsNotice(context.env, warnings);
     const probe = await probeHook(hookScriptPath, expectedCommand, context.env);
@@ -219,6 +243,7 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
             probe,
             warnings,
             hostId,
+            kimiBinary,
         }),
     };
 }
@@ -242,8 +267,11 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
             probe: { ok: false, reason: result.detailReason ?? result.reason },
             warnings,
             hostId: result.hostId,
+            kimiBinary,
         }),
     });
+    // Reported on every check path, including early failures.
+    const kimiBinary = describeKimiBinary(context.env, warnings);
     const existing = await readConfigSafe(configPath);
     const hookSet = await validateKimiHookSetForEnvironment(existing, context.env);
     if (!hookSet.valid) {
@@ -353,6 +381,7 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
             probe,
             warnings,
             hostId,
+            kimiBinary,
         }),
     };
 }
@@ -846,6 +875,315 @@ function truncate(value, max) {
         return value;
     return `${value.slice(0, max)}…`;
 }
+// ----- Plugin-owned kimi-code (--install-kimi) ---------------------------
+const KIMI_PACKAGE = "@moonshot-ai/kimi-code";
+const KIMI_INSTALL_TIMEOUT_MS = 300_000;
+const KIMI_INSTALL_KILL_GRACE_MS = 2_000;
+// First start of a fresh install loads a large bundle; allow more than the
+// 5s job-time probe.
+const KIMI_INSTALL_PROBE_TIMEOUT_MS = 30_000;
+const STDERR_TAIL_BYTES = 2_000;
+/** Numeric, not lexical: "2.10.0" is above "2.9.0". */
+export function highestCertifiedKimiVersion(versions = NATIVE_V2_CERTIFIED_VERSIONS) {
+    const parse = (v) => v.split(".").map(Number);
+    const sorted = [...versions].sort((a, b) => {
+        const [x, y] = [parse(a), parse(b)];
+        for (let i = 0; i < 3; i += 1) {
+            if (x[i] !== y[i])
+                return (x[i] ?? 0) - (y[i] ?? 0);
+        }
+        return 0;
+    });
+    const highest = sorted[sorted.length - 1];
+    if (highest === undefined || !/^\d+\.\d+\.\d+$/.test(highest)) {
+        throw new RuntimeError("KIMI_INSTALL_FAILED", "No exact certified kimi-code version is available to install.", "setup.install-kimi");
+    }
+    return highest;
+}
+function compareExactVersions(a, b) {
+    const [x, y] = [a.split(".").map(Number), b.split(".").map(Number)];
+    for (let i = 0; i < 3; i += 1) {
+        if (x[i] !== y[i])
+            return (x[i] ?? 0) - (y[i] ?? 0);
+    }
+    return 0;
+}
+async function runInstallKimi(json, context) {
+    let version = "";
+    try {
+        version = highestCertifiedKimiVersion();
+        const outcome = await installPluginOwnedKimi(version, context.env);
+        const selection = selectKimiBinary(context.env);
+        const jobsUseIt = selection.source === "plugin-owned" && selection.command === outcome.binary;
+        const summary = outcome.downloaded
+            ? `Installed kimi-code ${version} for kimi-plugin-cc.`
+            : `kimi-code ${version} is already installed for kimi-plugin-cc; nothing was downloaded.`;
+        const jobsLine = jobsUseIt
+            ? "Jobs will now use this binary."
+            : selection.source === "override"
+                ? `KIMI_PLUGIN_CC_KIMI_BIN is set, so jobs keep using ${selection.command} until it is unset.`
+                : `Jobs do not use this binary yet: ${selection.pluginOwned.reason ?? "selection did not pick it"}.`;
+        return installKimiResult({
+            summary,
+            failed: false,
+            details: [
+                `Version:          ${version}`,
+                `Binary:           ${outcome.binary}`,
+                `Current link:     ${outcome.current} -> ${path.join(version, "node_modules", ".bin", "kimi")}`,
+                `Jobs:             ${jobsLine}`,
+            ],
+            nextStep: jobsUseIt
+                ? "Run /kimi:setup --check to confirm the hook and the selected binary."
+                : "Unset KIMI_PLUGIN_CC_KIMI_BIN to use the plugin-owned binary, then run /kimi:setup --check.",
+            report: {
+                ok: true,
+                json,
+                version,
+                downloaded: outcome.downloaded,
+                binary: outcome.binary,
+                current: outcome.current,
+                selectedBinary: selection.command,
+                selectedSource: selection.source,
+            },
+        });
+    }
+    catch (error) {
+        const runtimeError = error instanceof RuntimeError
+            ? error
+            : new RuntimeError("KIMI_INSTALL_FAILED", error instanceof Error ? error.message : String(error), "setup.install-kimi");
+        return installKimiResult({
+            summary: `Failed to install kimi-code${version ? ` ${version}` : ""} for kimi-plugin-cc; the selected binary is unchanged.`,
+            failed: true,
+            probeError: `[${runtimeError.code}] ${runtimeError.message}`,
+            details: [`Error:            [${runtimeError.code}] ${runtimeError.message}`],
+            nextStep: "Fix the cause above and re-run setup --install-kimi. Jobs keep using the previously selected binary.",
+            report: {
+                ok: false,
+                json,
+                version,
+                downloaded: false,
+                error: { code: runtimeError.code, message: runtimeError.message, details: runtimeError.details },
+            },
+        });
+    }
+}
+function installKimiResult(args) {
+    return {
+        action: "install-kimi",
+        summary: args.summary,
+        configPath: "",
+        hookScriptPath: "",
+        blockWritten: false,
+        blockRemoved: false,
+        // "failed" makes the companion exit 1; the hook itself is not probed here.
+        probe: args.failed ? "failed" : "skipped",
+        probeError: args.probeError,
+        warnings: [],
+        reviewGateEnabled: false,
+        nextStep: args.nextStep,
+        details: args.details,
+        kimiInstall: args.report,
+    };
+}
+/**
+ * Install exactly `version` into `<data root>/kimi-bin/<version>/` and point
+ * `current` at it. A verified existing install is reused without network
+ * access. Downloads stage in a sibling directory that is verified with the
+ * exact-version probe before it is renamed into place; any failure removes
+ * the staging directory and leaves `current` untouched.
+ */
+async function installPluginOwnedKimi(version, env) {
+    if (process.platform === "win32") {
+        throw new RuntimeError("KIMI_INSTALL_UNSUPPORTED_PLATFORM", "setup --install-kimi is not supported on Windows. Install kimi-code yourself and set KIMI_PLUGIN_CC_KIMI_BIN to its path.", "setup.install-kimi");
+    }
+    const binDir = resolveKimiBinDir(env);
+    await mkdir(binDir, { recursive: true });
+    const versionDir = path.join(binDir, version);
+    const binRelative = path.join(version, "node_modules", ".bin", "kimi");
+    const binPath = path.join(binDir, binRelative);
+    const currentPath = path.join(binDir, "current");
+    const existing = await verifyKimiBinary(binPath, version, env);
+    if (existing.ok) {
+        await pointCurrentAt(binDir, binRelative, currentPath, env);
+        return { version, downloaded: false, binary: await realpath(binPath), current: currentPath };
+    }
+    const staging = await mkdtemp(path.join(binDir, `.staging-${version}-`));
+    let trash;
+    try {
+        await writeFile(path.join(staging, "package.json"), `${JSON.stringify({ name: "kimi-plugin-cc-kimi-bin", private: true })}\n`, "utf8");
+        await runNpmInstall(staging, version, env);
+        const staged = await verifyKimiBinary(path.join(staging, "node_modules", ".bin", "kimi"), version, env);
+        if (!staged.ok) {
+            throw new RuntimeError("KIMI_INSTALL_VERIFY_FAILED", `The installed kimi-code did not verify as exactly ${version}: ${staged.reason}.`, "setup.install-kimi", { details: { expected_version: version } });
+        }
+        if (await pathExists(versionDir)) {
+            // A present but unverifiable version directory is set aside, not reused.
+            trash = path.join(binDir, `.trash-${version}-${randomBytes(4).toString("hex")}`);
+            await rename(versionDir, trash);
+        }
+        try {
+            await rename(staging, versionDir);
+        }
+        catch (error) {
+            if (trash) {
+                await rename(trash, versionDir).catch(() => undefined);
+                trash = undefined;
+            }
+            throw error;
+        }
+        await pointCurrentAt(binDir, binRelative, currentPath, env);
+        return { version, downloaded: true, binary: await realpath(binPath), current: currentPath };
+    }
+    finally {
+        await rm(staging, { recursive: true, force: true });
+        if (trash)
+            await rm(trash, { recursive: true, force: true });
+    }
+}
+async function verifyKimiBinary(binary, version, env) {
+    if (!(await pathExists(binary)))
+        return { ok: false, reason: `${binary} is missing` };
+    const probe = await probeKimiVersion({ kimiBin: binary, env, timeoutMs: KIMI_INSTALL_PROBE_TIMEOUT_MS });
+    if (probe.kind !== "ok")
+        return { ok: false, reason: probe.reason };
+    const observed = probe.version.replace(/^v/, "");
+    return observed === version ? { ok: true } : { ok: false, reason: `\`--version\` reported ${probe.version}` };
+}
+/**
+ * Atomically replace `current` (POSIX rename over the old link), then confirm
+ * binary resolution accepts the new link; otherwise restore the old one.
+ */
+async function pointCurrentAt(binDir, binRelative, currentPath, env) {
+    let previous;
+    try {
+        previous = await readlink(currentPath);
+    }
+    catch {
+        previous = undefined;
+    }
+    if (previous === binRelative && inspectPluginOwnedKimi(env).status === "active")
+        return;
+    const swap = async (target) => {
+        const temp = path.join(binDir, `.current-${randomBytes(4).toString("hex")}`);
+        await symlink(target, temp);
+        try {
+            await rename(temp, currentPath);
+        }
+        catch (error) {
+            await rm(temp, { force: true });
+            throw error;
+        }
+    };
+    await swap(binRelative);
+    const state = inspectPluginOwnedKimi(env);
+    if (state.status !== "active") {
+        if (previous !== undefined)
+            await swap(previous);
+        else
+            await rm(currentPath, { force: true });
+        throw new RuntimeError("KIMI_INSTALL_VERIFY_FAILED", `The new ${currentPath} link was not accepted by binary resolution: ${state.reason ?? state.status}. The previous link was restored.`, "setup.install-kimi");
+    }
+}
+async function runNpmInstall(prefix, version, env) {
+    // Never a global install, whatever the caller's npm environment says.
+    const npmEnv = { ...env };
+    for (const key of Object.keys(npmEnv)) {
+        if (/^npm_config_(global|location|prefix)$/i.test(key))
+            delete npmEnv[key];
+    }
+    const args = [
+        "install",
+        "--prefix", prefix,
+        "--no-global",
+        // kimi-code's postinstall only acts on global installs and no runtime
+        // dependency declares an install script.
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "--no-update-notifier",
+        "--save-exact",
+        `${KIMI_PACKAGE}@${version}`,
+    ];
+    await new Promise((resolve, reject) => {
+        let child;
+        try {
+            child = spawn("npm", args, { cwd: prefix, env: npmEnv, stdio: ["ignore", "ignore", "pipe"], detached: true });
+        }
+        catch (error) {
+            reject(npmFailure(`could not start npm: ${error.message}`, version));
+            return;
+        }
+        let stderr = "";
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk) => {
+            stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES);
+        });
+        let timedOut = false;
+        const killGroup = (signal) => {
+            try {
+                if (child.pid !== undefined)
+                    process.kill(-child.pid, signal);
+            }
+            catch {
+            }
+        };
+        const timer = setTimeout(() => {
+            timedOut = true;
+            killGroup("SIGTERM");
+            setTimeout(() => killGroup("SIGKILL"), KIMI_INSTALL_KILL_GRACE_MS).unref();
+        }, KIMI_INSTALL_TIMEOUT_MS);
+        child.on("error", (error) => {
+            clearTimeout(timer);
+            reject(npmFailure(`could not start npm: ${error.message}`, version));
+        });
+        child.on("close", (code, signal) => {
+            clearTimeout(timer);
+            if (timedOut) {
+                reject(npmFailure(`npm install timed out after ${KIMI_INSTALL_TIMEOUT_MS / 1000}s`, version, stderr));
+            }
+            else if (code !== 0) {
+                reject(npmFailure(`npm install exited ${code ?? signal}`, version, stderr));
+            }
+            else {
+                resolve();
+            }
+        });
+    });
+}
+function npmFailure(reason, version, stderr = "") {
+    return new RuntimeError("KIMI_INSTALL_FAILED", `Could not install ${KIMI_PACKAGE}@${version}: ${reason}.`, "setup.install-kimi", { details: { package: `${KIMI_PACKAGE}@${version}`, ...(stderr.trim() ? { npm_stderr_tail: stderr.trim() } : {}) } });
+}
+async function pathExists(target) {
+    try {
+        await access(target);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/** Which binary jobs will use and why, plus a note when the plugin-owned one is stale or unusable. */
+function describeKimiBinary(env, warnings) {
+    const selection = selectKimiBinary(env);
+    const owned = selection.pluginOwned;
+    const highest = highestCertifiedKimiVersion();
+    if (owned.status === "active" && owned.version && compareExactVersions(owned.version, highest) < 0) {
+        warnings.push(`NOTE: the plugin-owned kimi-code ${owned.version} is behind the highest certified version ${highest}. Run setup --install-kimi to install ${highest}.`);
+    }
+    if (owned.status === "rejected") {
+        warnings.push(`The plugin-owned kimi-code install is not used: ${owned.reason}. Run setup --install-kimi to repair it.`);
+    }
+    switch (selection.source) {
+        case "override":
+            return `${selection.command} (KIMI_PLUGIN_CC_KIMI_BIN override)`;
+        case "plugin-owned":
+            return `${selection.command} (plugin-owned kimi-code ${owned.version} from setup --install-kimi)`;
+        case "path":
+            return owned.status === "absent"
+                ? `kimi on PATH (no plugin-owned install; setup --install-kimi installs ${highest})`
+                : `kimi on PATH (plugin-owned install ${owned.status}${owned.reason ? `: ${owned.reason}` : ""})`;
+    }
+}
 // ----- Permission rules scan --------------------------------------------
 /**
  * Warn only when the installed kimi is demonstrably outside the certified
@@ -857,8 +1195,9 @@ function truncate(value, max) {
 async function collectKimiVersionWarnings(env, warnings) {
     if (env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1")
         return;
+    // The same binary jobs select (override, plugin-owned, then PATH).
     const probe = await probeKimiVersion({
-        kimiBin: env.KIMI_PLUGIN_CC_KIMI_BIN || undefined,
+        kimiBin: selectKimiBinary(env).command,
         env,
     });
     if (probe.kind === "failed") {
@@ -991,6 +1330,7 @@ function buildDetails(args) {
         `Companion runtime: Node ${process.version}`,
         `Plugin version:   ${KIMI_PLUGIN_CC_VERSION}`,
         ...(args.hostId ? [`Host id:          ${args.hostId}`] : []),
+        ...(args.kimiBinary ? [`Kimi binary:      ${args.kimiBinary}`] : []),
         `Config file:      ${args.configPath}`,
         `Hook script:      ${args.hookScriptPath}`,
         `Review gate:      ${args.reviewGateEnabled ? "enabled" : "disabled"}`,
@@ -1005,6 +1345,8 @@ function buildDetails(args) {
     return details;
 }
 export function renderSetupResult(result) {
+    if (result.kimiInstall)
+        return renderInstallKimiResult(result, result.kimiInstall);
     return [
         result.summary,
         "",
@@ -1019,5 +1361,31 @@ export function renderSetupResult(result) {
         "",
         `Next step: ${result.nextStep}`,
         "Models: run setup --models to list configured aliases and provider setup guidance without making a model call.",
+    ].join("\n");
+}
+function renderInstallKimiResult(result, report) {
+    if (report.json) {
+        return JSON.stringify({
+            action: "install-kimi",
+            ok: report.ok,
+            version: report.version,
+            downloaded: report.downloaded,
+            binary: report.binary ?? null,
+            current: report.current ?? null,
+            selected_binary: report.selectedBinary ?? null,
+            selected_source: report.selectedSource ?? null,
+            error: report.error ?? null,
+            next_step: result.nextStep,
+        }, null, 2);
+    }
+    return [
+        result.summary,
+        "",
+        `Action:      ${result.action}`,
+        "",
+        "Details:",
+        ...result.details.map((detail) => `- ${detail}`),
+        "",
+        `Next step: ${result.nextStep}`,
     ].join("\n");
 }
