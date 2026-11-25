@@ -379,32 +379,44 @@ async function runCheck(
   warnings: string[],
   context: CommandContext,
 ): Promise<SetupResult> {
+  const failedCheck = (result: {
+    summary: string;
+    reason: string;
+    detailReason?: string;
+    nextStep: string;
+    hostId?: string;
+  }): SetupResult => ({
+    action: "check",
+    summary: result.summary,
+    configPath,
+    hookScriptPath,
+    blockWritten: false,
+    blockRemoved: false,
+    probe: "failed",
+    probeError: result.reason,
+    warnings,
+    reviewGateEnabled,
+    nextStep: result.nextStep,
+    details: buildDetails({
+      configPath,
+      hookScriptPath,
+      reviewGateEnabled,
+      probe: { ok: false, reason: result.detailReason ?? result.reason },
+      warnings,
+      hostId: result.hostId,
+    }),
+  });
+
   const existing = await readConfigSafe(configPath);
   const hookSet = await validateKimiHookSetForEnvironment(existing, context.env);
   if (!hookSet.valid) {
-    const reason = hookSet.reason ?? "configured hooks failed validation";
-    return {
-      action: "check",
+    return failedCheck({
       summary: `kimi-code hook configuration is invalid; the configured hooks array will not load.`,
-      configPath,
-      hookScriptPath,
-      blockWritten: false,
-      blockRemoved: false,
-      probe: "failed",
-      probeError: reason,
-      warnings,
-      reviewGateEnabled,
+      reason: hookSet.reason ?? "configured hooks failed validation",
       nextStep:
         "Repair or remove the invalid [[hooks]] entry named above, then run /kimi:setup --check again. No model call is required.",
-      details: buildDetails({
-        configPath,
-        hookScriptPath,
-        reviewGateEnabled,
-        probe: { ok: false, reason },
-        warnings,
-        hostId,
-      }),
-    };
+      hostId,
+    });
   }
   const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
   // nodeExists refines mismatch prose into drift classification; hostId checks
@@ -463,34 +475,20 @@ async function runCheck(
   }
 
   if (!installedCheck.installed) {
-    return {
-      action: "check",
+    return failedCheck({
       summary:
         installedCheck.state.kind === "absent"
           ? `kimi-plugin-cc managed block is NOT installed in ${configPath}.`
           : `kimi-plugin-cc managed block is present but invalid: ${installedCheck.reason}.`,
-      configPath,
-      hookScriptPath,
-      blockWritten: false,
-      blockRemoved: false,
-      probe: "failed",
-      probeError: installedCheck.reason ?? "managed block missing or invalid",
-      warnings,
-      reviewGateEnabled,
+      reason: installedCheck.reason ?? "managed block missing or invalid",
+      detailReason: installedCheck.reason ?? "block missing/invalid",
       nextStep:
         installedCheck.state.kind === "absent"
           ? "Run /kimi:setup (without --check) to install the managed block."
           : installedCheck.state.kind === "orphan"
             ? ORPHAN_MARKER_REMEDY
             : "Run /kimi:setup --uninstall, then /kimi:setup to repair.",
-      details: buildDetails({
-        configPath,
-        hookScriptPath,
-        reviewGateEnabled,
-        probe: { ok: false, reason: installedCheck.reason ?? "block missing/invalid" },
-        warnings,
-      }),
-    };
+    });
   }
 
   collectPermissionRuleWarnings(existing, warnings);
@@ -502,28 +500,12 @@ async function runCheck(
   try {
     await assertHookScriptExists(hookScriptPath);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      action: "check",
+    return failedCheck({
       summary: `Managed block references ${hookScriptPath} but that path is unreadable.`,
-      configPath,
-      hookScriptPath,
-      blockWritten: false,
-      blockRemoved: false,
-      probe: "failed",
-      probeError: message,
-      warnings,
-      reviewGateEnabled,
+      reason: err instanceof Error ? err.message : String(err),
       nextStep:
         "Reinstall the plugin so dist/hooks/approval-hook.js is present, or run /kimi:setup to refresh the managed block.",
-      details: buildDetails({
-        configPath,
-        hookScriptPath,
-        reviewGateEnabled,
-        probe: { ok: false, reason: message },
-        warnings,
-      }),
-    };
+    });
   }
 
   const probe = await probeHook(hookScriptPath, expectedCommand, context.env);
@@ -568,119 +550,99 @@ async function runUninstall(
   warnings: string[],
   context: CommandContext,
 ): Promise<SetupResult> {
-  return await withKimiConfigLock(configPath, () =>
-    runUninstallLocked(
-      configPath,
-      hookScriptPath,
+  return await withKimiConfigLock(configPath, async () => {
+    const existing = await readConfigSafe(configPath);
+    if (existing.length === 0) {
+      return {
+        action: "uninstall",
+        summary: `Nothing to remove — ${configPath} does not exist or is empty.`,
+        configPath,
+        hookScriptPath,
+        blockWritten: false,
+        blockRemoved: false,
+        probe: "skipped",
+        warnings,
+        reviewGateEnabled,
+        nextStep: "Run /kimi:setup to install the managed block again.",
+        details: buildDetails({
+          configPath,
+          hookScriptPath,
+          reviewGateEnabled,
+          probe: { ok: true, reason: "no-op (config absent)" },
+          warnings,
+        }),
+      };
+    }
+
+    // Scoped uninstall removes only this host's marked and marker-less blocks;
+    // other hosts' blocks and live marker-less tables remain intact. `--all` is
+    // the explicit every-host sweep for all of this plugin's hook tables.
+    const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(
+      existing,
       hostId,
       removeAllHosts,
-      reviewGateEnabled,
-      warnings,
-      context,
-    )
-  );
-}
+    );
+    // Exact current command bytes also identify this host's table when a host-id
+    // override disagrees with path derivation or a dev path is outside the strict
+    // ownership pattern.
+    const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
+    const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(
+      strippedMarkers,
+      removeAllHosts ? undefined : hostId,
+      expectedCommand,
+    );
+    const changed = stripped !== existing;
+    if (changed) {
+      await writeConfigAtomic(configPath, stripped);
+    }
 
-async function runUninstallLocked(
-  configPath: string,
-  hookScriptPath: string,
-  hostId: string,
-  removeAllHosts: boolean,
-  reviewGateEnabled: boolean,
-  warnings: string[],
-  context: CommandContext,
-): Promise<SetupResult> {
-  const existing = await readConfigSafe(configPath);
-  if (existing.length === 0) {
+    if (orphansLeft.length > 0) {
+      warnings.push(
+        `Detected ${orphansLeft.length} orphan marker line(s) at ${orphansLeft
+          .map((line) => `line ${line + 1}`)
+          .join(", ")}. Removed the marker line(s) but preserved surrounding user content — verify the config visually.`,
+      );
+    }
+    if (prunedCount > 0) {
+      warnings.push(
+        `Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) with no managed marker.`,
+      );
+    }
+    const { blocks: remainingBlocks } = parseManagedBlock(stripped, hostId);
+    const remainingHosts = [
+      ...new Set(remainingBlocks.map((b) => effectiveHost(b, hostId))),
+    ];
+    if (!removeAllHosts && remainingHosts.length > 0) {
+      warnings.push(
+        `Left ${remainingHosts.length} other host block(s) in place: ${remainingHosts.join(", ")}. ` +
+          `Use \`/kimi:setup --uninstall --all\` to remove every host's block.`,
+      );
+    }
+
     return {
       action: "uninstall",
-      summary: `Nothing to remove — ${configPath} does not exist or is empty.`,
+      summary: changed
+        ? `Removed ${removedBlocks} managed block(s)${prunedCount > 0 ? ` + ${prunedCount} orphan hook block(s)` : ""} from ${configPath}.`
+        : `No kimi-plugin-cc managed block to remove from ${configPath}.`,
       configPath,
       hookScriptPath,
       blockWritten: false,
-      blockRemoved: false,
+      blockRemoved: changed,
       probe: "skipped",
       warnings,
       reviewGateEnabled,
-      nextStep: "Run /kimi:setup to install the managed block again.",
+      nextStep: changed
+        ? "Run /kimi:setup again to reinstall the hook, or leave the plugin uninstalled."
+        : "Run /kimi:setup to install the hook.",
       details: buildDetails({
         configPath,
         hookScriptPath,
         reviewGateEnabled,
-        probe: { ok: true, reason: "no-op (config absent)" },
+        probe: { ok: true, reason: changed ? `removed ${removedBlocks} block(s)` : "no-op (no markers)" },
         warnings,
       }),
     };
-  }
-
-  // Scoped uninstall removes only this host's marked and marker-less blocks;
-  // other hosts' blocks and live marker-less tables remain intact. `--all` is
-  // the explicit every-host sweep for all of this plugin's hook tables.
-  const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(
-    existing,
-    hostId,
-    removeAllHosts,
-  );
-  // Exact current command bytes also identify this host's table when a host-id
-  // override disagrees with path derivation or a dev path is outside the strict
-  // ownership pattern.
-  const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-  const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(
-    strippedMarkers,
-    removeAllHosts ? undefined : hostId,
-    expectedCommand,
-  );
-  const changed = stripped !== existing;
-  if (changed) {
-    await writeConfigAtomic(configPath, stripped);
-  }
-
-  if (orphansLeft.length > 0) {
-    warnings.push(
-      `Detected ${orphansLeft.length} orphan marker line(s) at ${orphansLeft
-        .map((line) => `line ${line + 1}`)
-        .join(", ")}. Removed the marker line(s) but preserved surrounding user content — verify the config visually.`,
-    );
-  }
-  if (prunedCount > 0) {
-    warnings.push(
-      `Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) with no managed marker.`,
-    );
-  }
-  const { blocks: remainingBlocks } = parseManagedBlock(stripped, hostId);
-  const remainingHosts = [
-    ...new Set(remainingBlocks.map((b) => effectiveHost(b, hostId))),
-  ];
-  if (!removeAllHosts && remainingHosts.length > 0) {
-    warnings.push(
-      `Left ${remainingHosts.length} other host block(s) in place: ${remainingHosts.join(", ")}. ` +
-        `Use \`/kimi:setup --uninstall --all\` to remove every host's block.`,
-    );
-  }
-
-  return {
-    action: "uninstall",
-    summary: changed
-      ? `Removed ${removedBlocks} managed block(s)${prunedCount > 0 ? ` + ${prunedCount} orphan hook block(s)` : ""} from ${configPath}.`
-      : `No kimi-plugin-cc managed block to remove from ${configPath}.`,
-    configPath,
-    hookScriptPath,
-    blockWritten: false,
-    blockRemoved: changed,
-    probe: "skipped",
-    warnings,
-    reviewGateEnabled,
-    nextStep: changed
-      ? "Run /kimi:setup again to reinstall the hook, or leave the plugin uninstalled."
-      : "Run /kimi:setup to install the hook.",
-    details: buildDetails({
-      configPath,
-      hookScriptPath,
-      reviewGateEnabled,
-      probe: { ok: true, reason: changed ? `removed ${removedBlocks} block(s)` : "no-op (no markers)" },
-      warnings,
-    }),
-  };
+  });
 }
 
 // ----- Config IO ---------------------------------------------------------
