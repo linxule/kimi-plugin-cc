@@ -1,4 +1,8 @@
+import { kimiVersionsWith } from "../runtime/kimi-releases.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../runtime/version.js";
+
+// Generated skill text names these from the release table, so a certification cannot leave it stale.
+const BOUNDED_SWARM_RELEASES = kimiVersionsWith("bounded-swarm").join("/");
 
 export const PLUGIN_NAME = "kimi";
 export const MARKETPLACE_NAME = "kimi-marketplace";
@@ -486,7 +490,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       ...MODEL_SELECTION_GUIDANCE,
       "Require many independent review targets plus explicit fan-out intent.",
       "Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.",
-      "On exact Kimi Code 2.6.2/2.6.3/2.7.2, concurrency 1 runs one direct worker; larger values use bounded sequential waves. Older certified versions retain their normal-launch limit and recovery limitation.",
+      `On exact Kimi Code ${BOUNDED_SWARM_RELEASES}, concurrency 1 runs one direct worker; larger values use bounded sequential waves. Older certified versions retain their normal-launch limit and recovery limitation.`,
       "The bound counts simultaneous Kimi child-agent turns, not OS subprocesses. Fresh-only waves need at least two entries; group odd target counts into disjoint worker assignments.",
       "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
       "Return the consolidated companion report verbatim.",
@@ -507,7 +511,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       ...MODEL_SELECTION_GUIDANCE,
       "Require both many disjoint write targets and explicit parallel fan-out intent.",
       "Keep `--max-concurrency` conservative, normally 1, unless the user explicitly asks to widen it.",
-      "On exact Kimi Code 2.6.2/2.6.3/2.7.2, the default concurrency 1 runs a single worker in the throwaway worktree. Explicit concurrency 2 or higher uses bounded waves; every mode returns a patch for review.",
+      `On exact Kimi Code ${BOUNDED_SWARM_RELEASES}, the default concurrency 1 runs a single worker in the throwaway worktree. Explicit concurrency 2 or higher uses bounded waves; every mode returns a patch for review.`,
       "Parallel Kimi workers cannot background shell commands; native foreground Bash has a 60-second default and 300-second maximum timeout. Choose concurrency 1 for longer tests. Owned process cleanup must finish before patch capture; failed verification retains the worktree instead.",
       "The runtime rejects `--background`, but detaching your own shell call is expected: a fan-out routinely outlives a foreground timeout, and the run is patch-only and worktree-confined. Keep `--budget` and `--max-concurrency` finite. To stop a run, use `companion.sh cancel` with NO id — it targets the latest running job for the repo, and no UUID crosses you or the user (a detached run prints nothing at launch; the id first arrives with the final report). Prefer that over an interrupt: an interrupt gives the companion only ~1.35s before SIGKILL, less than its teardown plus `git diff --binary` patch capture, so interrupting can lose the patch.",
       "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",

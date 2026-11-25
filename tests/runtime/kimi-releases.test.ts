@@ -69,11 +69,14 @@ describe("kimi-releases table", () => {
 describe("surfaces that name the bounded-swarm releases", () => {
   const bounded = kimiVersionsWith("bounded-swarm").join("/");
   // Hash-pinned Claude surfaces are hand-written, so a certification has to
-  // edit them. One going stale fails here.
+  // edit them; generated Codex skills derive the list. Either kind going stale
+  // fails here.
   const surfaces = [
     "commands/swarm.md",
     "agents/kimi-swarm.md",
     "agents/kimi-swarm-write.md",
+    "plugins/kimi-codex/skills/kimi-swarm/SKILL.md",
+    "plugins/kimi-codex/skills/kimi-swarm-write/SKILL.md",
   ];
   for (const surface of surfaces) {
     test(`${surface} names every bounded-swarm release wherever it lists them`, () => {
