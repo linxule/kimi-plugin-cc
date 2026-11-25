@@ -67,9 +67,9 @@ export class JobStore {
         error TEXT
       );
     `);
-            const jobColumns = existingColumns(this.db, "jobs");
             for (const [column, type] of ADDED_JOB_COLUMNS) {
-                if (!jobColumns.has(column)) {
+                // Re-read per column: another process may be migrating the same store.
+                if (!existingColumns(this.db, "jobs").has(column)) {
                     this.db.exec(`ALTER TABLE jobs ADD COLUMN ${column} ${type};`);
                 }
             }
