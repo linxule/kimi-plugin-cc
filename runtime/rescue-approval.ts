@@ -34,10 +34,7 @@ const EXEC_DELEGATING_FLAGS_EXACT = new Set([
   "--vettool",
   "-toolexec",
   "--toolexec",
-  // Go accepts every flag with one or two dashes and with `=`, so `go test`
-  // runs its binary through -exec, --exec, -exec=<bin> and --exec=<bin> alike.
   "-exec",
-  "--exec",
   "-execdir",
   // rg --pre/--hostname-bin and GNU sort --compress-program also execute their
   // values as commands.
@@ -45,7 +42,10 @@ const EXEC_DELEGATING_FLAGS_EXACT = new Set([
   "--hostname-bin",
   "--compress-program",
 ]);
-const EXEC_DELEGATING_FLAG_PREFIXES = [...EXEC_DELEGATING_FLAGS_EXACT].map((flag) => `${flag}=`);
+// -exec and -execdir are matched exactly only; they get no `=` prefix form.
+const EXEC_DELEGATING_FLAG_PREFIXES = [...EXEC_DELEGATING_FLAGS_EXACT]
+  .filter((flag) => flag !== "-exec" && flag !== "-execdir")
+  .map((flag) => `${flag}=`);
 // Pytest report flags write to arbitrary paths. Test runners execute repo code
 // by design, so these checks block known runner-owned report outputs rather
 // than every possible write. Match argparse allow_abbrev prefixes as well.

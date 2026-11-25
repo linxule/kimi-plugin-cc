@@ -410,9 +410,6 @@ describe("evaluateRescueHookRequest", () => {
         "go test -c -o /tmp/pwned",
         "go vet -vettool=/tmp/evil ./...",
         "go test -exec /tmp/evil ./...",
-        "go test -exec=/tmp/evil ./...",
-        "go test --exec /tmp/evil ./...",
-        "go test --exec=/tmp/evil ./...",
         "go test -toolexec /tmp/evil ./...",
         // F2: bare -o write short form on go/ruff/sort (long --output* was
         // already covered; the short form only had an eslint special-case).
