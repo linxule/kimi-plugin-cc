@@ -184,7 +184,8 @@ export async function inspectPlanModeConfig(
 }
 
 export type EnvironmentConfigInspection =
-  | { readonly kind: "ok" }
+  /** `trustDisabled`: `[workspace] require_trust = false`, surfaced as a W warning. */
+  | { readonly kind: "ok"; readonly trustDisabled?: true }
   | {
       readonly kind: "refuse";
       readonly refusalKind: "v2-environment-configured" | "v2-workspace-trust-disabled" | "v2-config-unreadable";
@@ -233,19 +234,25 @@ export async function inspectEnvironmentConfig(
         reason: "The [workspace] section is not a table, so project trust requirements cannot be verified.",
       };
     }
-    const trustDisabled = Object.entries(workspace as Record<string, unknown>).some(
-      ([key, value]) => upstreamSnakeToCamel(key) === "requireTrust" && value !== true,
-    );
-    if (trustDisabled) {
+    const trustValues = Object.entries(workspace as Record<string, unknown>)
+      .filter(([key]) => upstreamSnakeToCamel(key) === "requireTrust")
+      .map(([, value]) => value);
+    // Literal false is the user's own choice and becomes a warning; any other
+    // non-true value is malformed and still refuses.
+    if (trustValues.some((value) => value !== true && value !== false)) {
       return {
         kind: "refuse",
         refusalKind: "v2-workspace-trust-disabled",
-        reason: "Workspace trust is disabled in [workspace]; plugin-managed jobs require project trust enforcement to remain enabled.",
+        reason: "[workspace] require_trust is not a boolean, so project trust requirements cannot be verified.",
       };
     }
+    if (trustValues.includes(false)) return { kind: "ok", trustDisabled: true };
   }
   return { kind: "ok" };
 }
+
+export const WORKSPACE_TRUST_DISABLED_WARNING =
+  "Workspace trust is disabled in kimi-code's config: MCP servers configured by this repository can start outside the plugin's hook.";
 
 export type ExperimentalSelectorInspection =
   | { readonly kind: "ok" }
@@ -631,6 +638,7 @@ export async function assertNativeV2Preflight(
       details: { refusal_kind: environment.refusalKind, retryable_after_setup: false },
     });
   }
+  if (environment.trustDisabled === true) warnings.push(WORKSPACE_TRUST_DISABLED_WARNING);
 
   // Certified and test-bypass children run with tower and subagent fork forced
   // off by per-flag env, which outranks config and the master flag on every

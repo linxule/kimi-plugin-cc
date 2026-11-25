@@ -199,17 +199,24 @@ export async function inspectEnvironmentConfig(kimiHome, options = {}) {
                 reason: "The [workspace] section is not a table, so project trust requirements cannot be verified.",
             };
         }
-        const trustDisabled = Object.entries(workspace).some(([key, value]) => upstreamSnakeToCamel(key) === "requireTrust" && value !== true);
-        if (trustDisabled) {
+        const trustValues = Object.entries(workspace)
+            .filter(([key]) => upstreamSnakeToCamel(key) === "requireTrust")
+            .map(([, value]) => value);
+        // Literal false is the user's own choice and becomes a warning; any other
+        // non-true value is malformed and still refuses.
+        if (trustValues.some((value) => value !== true && value !== false)) {
             return {
                 kind: "refuse",
                 refusalKind: "v2-workspace-trust-disabled",
-                reason: "Workspace trust is disabled in [workspace]; plugin-managed jobs require project trust enforcement to remain enabled.",
+                reason: "[workspace] require_trust is not a boolean, so project trust requirements cannot be verified.",
             };
         }
+        if (trustValues.includes(false))
+            return { kind: "ok", trustDisabled: true };
     }
     return { kind: "ok" };
 }
+export const WORKSPACE_TRUST_DISABLED_WARNING = "Workspace trust is disabled in kimi-code's config: MCP servers configured by this repository can start outside the plugin's hook.";
 /**
  * Refuse v2-only experimental features this plugin does not certify.
  * Sources (per-flag precedence upstream is env → [experimental] config →
@@ -499,6 +506,8 @@ export async function assertNativeV2Preflight(options) {
             details: { refusal_kind: environment.refusalKind, retryable_after_setup: false },
         });
     }
+    if (environment.trustDisabled === true)
+        warnings.push(WORKSPACE_TRUST_DISABLED_WARNING);
     // Certified and test-bypass children run with tower and subagent fork forced
     // off by per-flag env, which outranks config and the master flag on every
     // reviewed release. An uncertified release's flag names are unreviewed.

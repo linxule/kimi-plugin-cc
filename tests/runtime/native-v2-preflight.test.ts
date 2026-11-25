@@ -8,6 +8,7 @@ import {
   inspectPlanModeConfig,
   upstreamSnakeToCamel,
   scanSessionJournalsForPlan,
+  WORKSPACE_TRUST_DISABLED_WARNING,
 } from "../../runtime/native-v2-preflight.js";
 import { buildKimiCliEnvironment } from "../../runtime/cli-client.js";
 import { RuntimeError } from "../../runtime/errors.js";
@@ -518,8 +519,26 @@ describe("assertNativeV2Preflight", () => {
     });
   });
 
-  test.each(["require_trust = false", "requireTrust = false", 'require_trust = "true"'])(
-    "refuses disabled or malformed workspace trust: %s",
+  test.each(["require_trust = false", "requireTrust = false"])(
+    "G5: disabled workspace trust is a warning, not a refusal: %s",
+    async (setting) => {
+      await withHome("assert-workspace-trust-warning", async (home) => {
+        await writeConfig(home, `[workspace]\n${setting}\n`);
+        await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).resolves.toEqual({
+          warnings: [WORKSPACE_TRUST_DISABLED_WARNING],
+        });
+      });
+    },
+  );
+
+  test("G5: the warning text is the documented contract", () => {
+    expect(WORKSPACE_TRUST_DISABLED_WARNING).toBe(
+      "Workspace trust is disabled in kimi-code's config: MCP servers configured by this repository can start outside the plugin's hook.",
+    );
+  });
+
+  test.each(['require_trust = "true"', 'require_trust = "false"', "require_trust = 0", "require_trust = []"])(
+    "refuses malformed workspace trust: %s",
     async (setting) => {
       await withHome("assert-workspace-trust", async (home) => {
         await writeConfig(home, `[workspace]\n${setting}\n`);
@@ -530,6 +549,16 @@ describe("assertNativeV2Preflight", () => {
       });
     },
   );
+
+  test("G5: a non-table [workspace] still refuses", async () => {
+    await withHome("assert-workspace-nontable", async (home) => {
+      await writeConfig(home, 'workspace = "trusted"\n');
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV })).rejects.toMatchObject({
+        code: "CLI_V2_WORKSPACE_TRUST_UNSAFE",
+        details: { refusal_kind: "v2-workspace-trust-disabled" },
+      });
+    });
+  });
 
   test("accepts literal workspace trust enforcement", async () => {
     await withHome("assert-workspace-trust-enabled", async (home) => {

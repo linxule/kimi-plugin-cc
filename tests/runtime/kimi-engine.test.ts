@@ -17,6 +17,7 @@ import {
   reconcileHistoricalJobProvenance,
 } from "../../runtime/kimi-engine.js";
 import { JobStore } from "../../runtime/job-store.js";
+import { WORKSPACE_TRUST_DISABLED_WARNING } from "../../runtime/native-v2-preflight.js";
 import { maxTestedMinor } from "../../runtime/kimi-version-probe.js";
 import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
@@ -278,6 +279,34 @@ describe("kimi execution plan", () => {
           operationKind, cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version }, stderr,
         })).rejects.toMatchObject({ code: "CLI_V2_ENVIRONMENT_UNSAFE" });
       }
+    } finally {
+      await cleanupTestPath(cwd);
+    }
+  });
+
+  test("G5: disabled workspace trust reaches the plan warnings and stderr", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-g5");
+    const kimiHome = path.join(cwd, "kimi-home");
+    await mkdir(kimiHome, { recursive: true });
+    await writeFile(path.join(kimiHome, "config.toml"), "[workspace]\nrequire_trust = false\n");
+    const chunks: string[] = [];
+    const stderr = { write: (chunk: string) => { chunks.push(chunk); return true; } } as unknown as NodeJS.WritableStream;
+    try {
+      const plan = await prepareKimiExecutionPlan({
+        operationKind: "ask",
+        cwd,
+        env: {
+          ...process.env,
+          KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+          KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+          KIMI_CODE_HOME: kimiHome,
+          KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
+        },
+        stderr,
+      });
+      expect(plan.warnings).toEqual([WORKSPACE_TRUST_DISABLED_WARNING]);
+      expect(JSON.parse(persistedExecutionPlanFields(plan).warnings!)).toEqual([WORKSPACE_TRUST_DISABLED_WARNING]);
+      expect(chunks.join("")).toContain(WORKSPACE_TRUST_DISABLED_WARNING);
     } finally {
       await cleanupTestPath(cwd);
     }
