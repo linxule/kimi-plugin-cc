@@ -132,24 +132,7 @@ export async function preactivateSwarmSession(
     );
     options.onRecoveryEvent?.({ kind: "session", ...identity });
     profileMutationAttempted = true;
-    await postSwarmProfile(web, identity, true, model, options.signal, failureCode);
-    await verifySwarmStatus(
-      web,
-      identity,
-      true,
-      model,
-      prepared.expectedVersion,
-      options.signal,
-      failureCode,
-    );
-    await shutdownWeb(web, options.signal, failureCode);
-    await requireSwarmJournal(
-      prepared.kimiHome,
-      identity,
-      "enter",
-      options.signal,
-      failureCode,
-    );
+    await setSwarmMode(web, prepared, identity, true, model, options.signal, failureCode);
     if (usesBoundedSwarmPolicy(options.executionPlan) && options.swarmMaxConcurrency! > 1) {
       await installBoundedSwarmToolPolicy(prepared.kimiHome, identity, options.signal);
     }
@@ -212,31 +195,7 @@ export async function deactivateSwarmSession(
       options.signal,
       failureCode,
     );
-    await postSwarmProfile(
-      web,
-      options,
-      false,
-      undefined,
-      options.signal,
-      failureCode,
-    );
-    await verifySwarmStatus(
-      web,
-      options,
-      false,
-      undefined,
-      prepared.expectedVersion,
-      options.signal,
-      failureCode,
-    );
-    await shutdownWeb(web, options.signal, failureCode);
-    await requireSwarmJournal(
-      prepared.kimiHome,
-      options,
-      "exit",
-      options.signal,
-      failureCode,
-    );
+    await setSwarmMode(web, prepared, options, false, undefined, options.signal, failureCode);
     options.onRecoveryEvent?.({ kind: "disabled" });
     throwIfAborted(options.signal, failureCode, "swarm-deactivation.complete");
   } catch (error) {
@@ -251,6 +210,22 @@ export async function deactivateSwarmSession(
     }
     throw primary;
   }
+}
+
+/** Set swarm mode, prove the resulting state, stop the web child, then require the journal record. */
+async function setSwarmMode(
+  web: ReadyWebChild,
+  prepared: PreparedSpawn,
+  identity: SwarmSessionIdentity,
+  active: boolean,
+  model: string | undefined,
+  signal: AbortSignal | undefined,
+  failureCode: FailureCode,
+): Promise<void> {
+  await postSwarmProfile(web, identity, active, model, signal, failureCode);
+  await verifySwarmStatus(web, identity, active, model, prepared.expectedVersion, signal, failureCode);
+  await shutdownWeb(web, signal, failureCode);
+  await requireSwarmJournal(prepared.kimiHome, identity, active ? "enter" : "exit", signal, failureCode);
 }
 
 async function prepareWebSpawn(
