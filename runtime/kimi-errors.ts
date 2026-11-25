@@ -1,4 +1,5 @@
 import { RuntimeError, formatError } from "./errors.js";
+import { MAX_DURATION_MS as BUDGET_CEILING_MS } from "./parsing.js";
 import type { ManagedCommandType, RuntimeCommandType } from "./types.js";
 
 type AvailabilityKind =
@@ -16,11 +17,7 @@ interface AvailabilityClassification {
   kind: Exclude<AvailabilityKind, null>;
   summary: string;
   nextStep: string;
-  runtimeProbe: "ok" | "failed";
-  authProbe: "ok" | "failed";
 }
-
-const BUDGET_CEILING_MS = 24 * 60 * 60 * 1_000;
 
 function formatBudgetMs(ms: number): string {
   if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
@@ -117,31 +114,19 @@ export function summarizeKimiAvailabilityWarning(
     return null;
   }
 
-  if (classification.kind === "auth_unavailable") {
-    return `Kimi ${formatCommandLabel(commandType).toLowerCase()} is not configured for model access; allowing stop.`;
-  }
-
-  if (classification.kind === "binary_unavailable") {
-    return `Kimi ${formatCommandLabel(commandType).toLowerCase()} could not find the Kimi CLI; allowing stop.`;
-  }
-
-  if (classification.kind === "startup_failed") {
-    return `Kimi ${formatCommandLabel(commandType).toLowerCase()} could not start a usable Kimi subprocess; allowing stop.`;
-  }
-
-  switch (classification.kind) {
-    case "startup_timeout":
-      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not respond during startup; allowing stop.`;
-    case "initialize_timeout":
-      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not complete session initialization; allowing stop.`;
-    case "response_timeout":
-      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} did not return a final response; allowing stop.`;
-    case "max_steps_reached":
-      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} exhausted its step budget; allowing stop.`;
-    case "timeout":
-      return `Kimi ${formatCommandLabel(commandType).toLowerCase()} timed out; allowing stop.`;
-  }
+  return `Kimi ${formatCommandLabel(commandType).toLowerCase()} ${AVAILABILITY_WARNING_PHRASES[classification.kind]}; allowing stop.`;
 }
+
+const AVAILABILITY_WARNING_PHRASES: Record<AvailabilityClassification["kind"], string> = {
+  auth_unavailable: "is not configured for model access",
+  binary_unavailable: "could not find the Kimi CLI",
+  startup_failed: "could not start a usable Kimi subprocess",
+  startup_timeout: "did not respond during startup",
+  initialize_timeout: "did not complete session initialization",
+  response_timeout: "did not return a final response",
+  max_steps_reached: "exhausted its step budget",
+  timeout: "timed out",
+};
 
 export function classifySetupFailure(error: unknown): AvailabilityClassification | null {
   return classifyKimiAvailability(error);
@@ -163,8 +148,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       kind: "auth_unavailable",
       summary: "the local Kimi CLI is logged out (its OAuth login is missing or expired).",
       nextStep: "Run `kimi login` to re-authenticate, then retry. `/kimi:setup` does not repair auth.",
-      runtimeProbe: "ok",
-      authProbe: "failed",
     };
   }
 
@@ -173,8 +156,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       kind: "auth_unavailable",
       summary: "local Kimi authentication or model configuration is not usable.",
       nextStep: "Run `/kimi:setup`, then `kimi login` or fix the local Kimi model configuration and retry.",
-      runtimeProbe: "ok",
-      authProbe: "failed",
     };
   }
 
@@ -189,8 +170,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
         kind: "startup_failed",
         summary: "the Kimi subprocess could not be started or used.",
         nextStep: "Check the underlying process error; shorten the prompt or environment if an argument-size limit was exceeded, then retry.",
-        runtimeProbe: "failed",
-        authProbe: "failed",
       };
     }
     // Keep opaque synchronous failures and legacy async ENOENT diagnostics compatible.
@@ -199,8 +178,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
         kind: "binary_unavailable",
         summary: "the Kimi CLI is missing from PATH or not executable in this environment.",
         nextStep: "Run `/kimi:setup` to verify the install, then expose `kimi` on PATH and retry.",
-        runtimeProbe: "failed",
-        authProbe: "failed",
       };
     }
   }
@@ -218,8 +195,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       kind: "startup_failed",
       summary: "the Kimi CLI exited before completing the requested operation.",
       nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
-      runtimeProbe: "failed",
-      authProbe: "failed",
     };
   }
 
@@ -228,8 +203,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       kind: "max_steps_reached",
       summary: "Kimi exhausted its step budget before finalizing the turn.",
       nextStep: "Retry with a more focused prompt or a higher step budget.",
-      runtimeProbe: "ok",
-      authProbe: "ok",
     };
   }
 
@@ -244,8 +217,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
         kind: "startup_timeout",
         summary: "the Kimi CLI did not respond during startup.",
         nextStep: "Run `/kimi:setup` to verify local Kimi health, then retry.",
-        runtimeProbe: "failed",
-        authProbe: "failed",
       };
     }
 
@@ -254,8 +225,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
         kind: "initialize_timeout",
         summary: "the Kimi session started but did not finish initializing in time.",
         nextStep: "Run `/kimi:setup` to verify local Kimi configuration and retry.",
-        runtimeProbe: "failed",
-        authProbe: "failed",
       };
     }
 
@@ -264,8 +233,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
         kind: "response_timeout",
         summary: "Kimi started and accepted the prompt but never returned a final response.",
         nextStep: "Narrow the prompt or raise the budget (`--budget <dur>`, at most 24h). Check the job artifact (`result <jobId>`) for any captured partial output. Backgrounding does not extend the runtime budget.",
-        runtimeProbe: "ok",
-        authProbe: "ok",
       };
     }
   }
@@ -275,8 +242,6 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       kind: "timeout",
       summary: "the Kimi runtime did not become ready within the expected time budget.",
       nextStep: "Run `/kimi:setup` to check local Kimi auth and network health, then retry.",
-      runtimeProbe: "failed",
-      authProbe: "failed",
     };
   }
 
@@ -287,34 +252,9 @@ function mapAvailabilityCode(
   kind: Exclude<AvailabilityKind, null>,
   commandType: ManagedCommandType | "review_gate",
 ): string {
-  const prefix = commandType.toUpperCase();
-  switch (kind) {
-    case "auth_unavailable":
-      return `${prefix}_KIMI_AUTH_UNAVAILABLE`;
-    case "binary_unavailable":
-      return `${prefix}_KIMI_BINARY_UNAVAILABLE`;
-    case "startup_failed":
-      return `${prefix}_KIMI_STARTUP_FAILED`;
-    case "startup_timeout":
-      return `${prefix}_KIMI_STARTUP_TIMEOUT`;
-    case "initialize_timeout":
-      return `${prefix}_KIMI_INITIALIZE_TIMEOUT`;
-    case "response_timeout":
-      return `${prefix}_KIMI_RESPONSE_TIMEOUT`;
-    case "timeout":
-      return `${prefix}_KIMI_TIMEOUT`;
-    case "max_steps_reached":
-      return `${prefix}_KIMI_MAX_STEPS_REACHED`;
-  }
+  return `${commandType.toUpperCase()}_KIMI_${kind.toUpperCase()}`;
 }
 
 function formatCommandLabel(commandType: ManagedCommandType | RuntimeCommandType): string {
-  switch (commandType) {
-    case "challenge":
-      return "challenge";
-    case "review_gate":
-      return "review gate";
-    default:
-      return commandType.replaceAll("_", " ");
-  }
+  return commandType.replaceAll("_", " ");
 }
