@@ -76,7 +76,7 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { access, appendFile, cp, mkdir, readdir, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
+import { access, appendFile, cp, lstat, mkdir, readdir, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -89,7 +89,10 @@ import { decideHookOutcome } from "../../runtime/hooks/approval-policy.js";
 import { readScopeEnvironment, resolveReadScope, type ReadScope } from "../../runtime/read-scope.js";
 import { evaluateRescueHookRequest } from "../../runtime/rescue-approval.js";
 import { runRescue } from "../../runtime/commands/rescue.js";
-import { runSetup } from "../../runtime/commands/setup.js";
+import { runSetup, type SetupResult } from "../../runtime/commands/setup.js";
+import { buildHookShellCommand, resolveHookScriptPath, resolveHostId } from "../../runtime/hooks/install-paths.js";
+import { findUnmanagedApprovalHookBlocks, parseManagedBlock } from "../../runtime/hooks/managed-block.js";
+import { resolveKimiCodeConfigPath } from "../../runtime/kimi-home.js";
 import { buildGoalPrompt } from "../../runtime/commands/pursue.js";
 import { runSwarm } from "../../runtime/commands/swarm.js";
 import {
@@ -610,6 +613,44 @@ async function seedKimiHome(seedHome: string, destHome: string): Promise<void> {
     if (SHARED_TOKEN_STORES.has(entry)) await symlink(src, path.join(destHome, entry));
     else await cp(src, path.join(destHome, entry), { recursive: true });
   }
+  await stripPluginHooksFromIsolatedConfig(destHome);
+}
+
+// kimi-code runs every [[hooks]] entry and any deny wins, so a copied config
+// would let another installed host's (possibly older) hook deny, or mask, what
+// this checkout's hook decides. Remove every host's kimi-plugin-cc hook from the
+// ISOLATED copy with the runtime's own `setup --uninstall --all`; each lane then
+// installs this checkout's block alone (runCheckoutSetup asserts it). The seed
+// home is never written: config.toml is a copied regular file in destHome.
+// Hand-rolled user hooks are not ours and stay.
+async function stripPluginHooksFromIsolatedConfig(kimiHome: string): Promise<void> {
+  const configPath = path.join(kimiHome, "config.toml");
+  if (!existsSync(configPath)) return;
+  expect((await lstat(configPath)).isFile(), "isolated config.toml must be a copy, never a link").toBe(true);
+  const pluginData = await createTestPluginDataRoot("smoke-seed-strip");
+  try {
+    await runSetup(["--uninstall", "--all"], makeContext(kimiHome, {
+      ...process.env,
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_DATA: pluginData,
+      KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+    }));
+  } finally {
+    await cleanupTestPath(pluginData);
+  }
+}
+
+// Install this checkout's managed block, then prove it is the only
+// kimi-plugin-cc hook in the isolated config, so every decision the smoke
+// observes is this checkout's.
+async function runCheckoutSetup(argv: string[], context: CommandContext): Promise<SetupResult> {
+  const result = await runSetup(argv, context);
+  const contents = await readFile(resolveKimiCodeConfigPath(context.env), "utf8");
+  const ownCommand = buildHookShellCommand(resolveHookScriptPath(context.env), context.env);
+  const { blocks } = parseManagedBlock(contents, resolveHostId(context.env));
+  expect(blocks.map((block) => block.commandPath), "exactly one managed block, this checkout's").toEqual([ownCommand]);
+  expect(findUnmanagedApprovalHookBlocks(contents), "no marker-less kimi-plugin-cc hook tables").toEqual([]);
+  return result;
 }
 
 // Set the top-level kimi-code plan default in the isolated home without ever
@@ -871,6 +912,57 @@ test("setDefaultPlanMode creates config for env-model auth homes", async () => {
   }
 });
 
+test("seedKimiHome leaves other hosts' hooks out of the isolated config, never touching the seed", async () => {
+  const seedHome = await createTestPluginDataRoot("smoke-seed-fixture");
+  const kimiHome = await createTestPluginDataRoot("smoke-seed-dest");
+  const workspace = await createTestPluginDataRoot("smoke-seed-ws");
+  const pluginData = await createTestPluginDataRoot("smoke-seed-data");
+  try {
+    const foreign = (segment: string, version: string) =>
+      `'${process.execPath}' '/opt/${segment}/plugins/cache/kimi-marketplace/kimi/${version}/dist/hooks/approval-hook.js'`;
+    const seedConfig = [
+      `default_model = "fixture-model"`,
+      ``,
+      `# === BEGIN kimi-plugin-cc-managed:codex (v2.6.2) ===`,
+      `[[hooks]]`,
+      `event = "PreToolUse"`,
+      `command = ${JSON.stringify(foreign(".codex", "2.6.2"))}`,
+      `timeout = 15`,
+      `# === END kimi-plugin-cc-managed:codex ===`,
+      ``,
+      `[[hooks]]`,
+      `event = "PreToolUse"`,
+      `command = ${JSON.stringify(foreign(".claude", "2.5.0"))}`,
+      `timeout = 15`,
+      ``,
+      `[[hooks]]`,
+      `event = "PostToolUse"`,
+      `command = "/usr/bin/true"`,
+      ``,
+    ].join("\n");
+    await writeFile(path.join(seedHome, "config.toml"), seedConfig, "utf8");
+
+    await seedKimiHome(seedHome, kimiHome);
+    expect(await readFile(path.join(seedHome, "config.toml"), "utf8")).toBe(seedConfig);
+    const isolated = await readFile(path.join(kimiHome, "config.toml"), "utf8");
+    expect(isolated).not.toContain("kimi-plugin-cc-managed");
+    expect(isolated).not.toContain("approval-hook.js");
+    expect(isolated).toContain(`default_model = "fixture-model"`);
+    expect(isolated).toContain(`command = "/usr/bin/true"`);
+
+    const setup = await runCheckoutSetup([], makeContext(workspace, {
+      ...process.env,
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_DATA: pluginData,
+      KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+    }));
+    expect(setup.probe).toBe("ok");
+    expect(await readFile(path.join(seedHome, "config.toml"), "utf8")).toBe(seedConfig);
+  } finally {
+    for (const dir of [seedHome, kimiHome, workspace, pluginData]) await cleanupTestPath(dir);
+  }
+});
+
 // Always present so an operator who opted in but is misconfigured gets a
 // loud reason instead of a silent skip. When disabled, this just warns.
 test("real-binary smoke gating", () => {
@@ -948,7 +1040,7 @@ suite("real-binary smoke: read-only commands cannot write (H7)", () => {
             CLAUDE_PLUGIN_DATA: pluginData,
             KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           };
-          const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+          const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
           expect(
             setupResult.probe,
             `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1033,7 +1125,7 @@ suite("real-binary smoke: rescue writes only inside the workspace and confines B
         KIMI_CODE_HOME: kimiHome,
         CLAUDE_PLUGIN_DATA: pluginData,
       };
-      const setupResult = await runSetup([], makeContext(workspace, env));
+      const setupResult = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
       const sourceBefore = await readFile(path.join(workspace, "src.ts"), "utf8");
@@ -1094,7 +1186,7 @@ suite("real-binary smoke: rescue writes only inside the workspace and confines B
     const target = path.join(escapeDir, "BASH_CWD_SHOULD_NOT_EXIST.txt");
     try {
       await seedKimiHome(SEED_HOME, kimiHome);
-      const setupResult = await runSetup([], makeContext(workspace, {
+      const setupResult = await runCheckoutSetup([], makeContext(workspace, {
         ...process.env,
         KIMI_CODE_HOME: kimiHome,
         CLAUDE_PLUGIN_DATA: pluginData,
@@ -1175,7 +1267,7 @@ suite("real-binary smoke: the master experimental flag never reaches a model chi
           CLAUDE_PLUGIN_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
-        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1256,7 +1348,7 @@ suite("real-binary smoke: default_plan_mode is cancelled or refused (v2) or pinn
           CLAUDE_PLUGIN_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
-        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1469,7 +1561,7 @@ resumeSuite("real-binary smoke: native-v2 resume re-proves provenance and refuse
           ...baseEnv,
           CLAUDE_PLUGIN_DATA: pluginData,
         };
-        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1635,7 +1727,7 @@ goalSuite("real-binary smoke: autonomous goal mode denies writes across turns (p
           KIMI_MODEL_BASE_URL: `${provider.baseUrl}/v1`,
           KIMI_MODEL_CAPABILITIES: "tool_use",
         };
-        const setupResult = await runSetup([], makeContext(workspace, { ...baseEnv, CLAUDE_PLUGIN_DATA: pluginData }));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, { ...baseEnv, CLAUDE_PLUGIN_DATA: pluginData }));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1846,7 +1938,7 @@ swarmReadSuite("real-binary smoke: read-only swarm subagents cannot write (swarm
           CLAUDE_PLUGIN_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
-        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1985,7 +2077,7 @@ suite("real-binary smoke: pursue can terminate its current goal", () => {
         // also veto UpdateGoal; their coexistence intentionally remains deny-
         // winning. Never uninstall/rewrite them in the operator's real home.
         await runSetup(["--uninstall", "--all"], makeContext(workspace, env));
-        const setup = await runSetup([], makeContext(workspace, env));
+        const setup = await runCheckoutSetup([], makeContext(workspace, env));
         expect(setup.probe).toBe("ok");
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
         const controller = new AbortController();
@@ -2202,7 +2294,7 @@ swarmWriteSuite("real-binary smoke: write-swarm edits land in the worktree, neve
         // Install the managed hook into the throwaway KIMI_CODE_HOME via the real
         // setup path. write-swarm REFUSES without it, so this also proves the
         // swarm-write hook-install gate end to end.
-        const setupResult = await runSetup([], makeContext(userRepo, env));
+        const setupResult = await runCheckoutSetup([], makeContext(userRepo, env));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -2361,7 +2453,7 @@ swarmWriteSuite("real-binary smoke: write-swarm denies out-of-worktree writes (-
           CLAUDE_PLUGIN_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
-        const setupResult = await runSetup([], makeContext(workspace, setupEnv));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
         expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
 
         // Adversarial prompt: force each subagent to write an ABSOLUTE path that
@@ -2459,7 +2551,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       gitIn(workspace, ["commit", "-q", "-m", "read fixture"]);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
       const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
-      const setup = await runSetup([], makeContext(workspace, env));
+      const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       const report = await runSwarm([
         "--max-concurrency", "1", "--budget", `${Math.round(PER_RUN_BUDGET_MS / 1000)}s`,
@@ -2496,7 +2588,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       await initUserRepo(workspace);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
       const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
-      const setup = await runSetup([], makeContext(workspace, env));
+      const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       // Omit --max-concurrency deliberately: the write default must remain one.
       const report = await runSwarm([
@@ -2546,7 +2638,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       gitIn(workspace, ["commit", "-q", "-m", "wave fixtures"]);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
       const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
-      const setup = await runSetup([], makeContext(workspace, env));
+      const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       const objective = [
         "This disposable-repository task tests recovery from a permission-hook denial. The installed hook owns admission.",
@@ -2640,7 +2732,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       gitIn(workspace, ["commit", "-q", "-m", "natural wave fixtures"]);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
       const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
-      const setup = await runSetup([], makeContext(workspace, env));
+      const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       // Only the user task is supplied here. The production prompt owns all
       // wave-size/minimum guidance; no denial, grouping or remainder is coached.
@@ -3008,7 +3100,7 @@ async function installSmokeHook(label: string, workspace: string): Promise<{ kim
   const kimiHome = await createTestPluginDataRoot(`smoke-home-${label}`);
   const pluginData = await createTestPluginDataRoot(`smoke-data-${label}`);
   await seedKimiHome(SEED_HOME, kimiHome);
-  const setupResult = await runSetup([], makeContext(workspace, {
+  const setupResult = await runCheckoutSetup([], makeContext(workspace, {
     ...process.env,
     KIMI_CODE_HOME: kimiHome,
     CLAUDE_PLUGIN_DATA: pluginData,
@@ -3265,7 +3357,7 @@ boundedSwarmSuite("real-binary smoke: swarm children inherit the read scope", ()
       gitIn(f.workspace, ["add", "--", ...WRITE_TARGETS]);
       gitIn(f.workspace, ["commit", "-q", "-m", "scope fixtures"]);
       const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
-      const setup = await runSetup([], makeContext(f.workspace, env));
+      const setup = await runCheckoutSetup([], makeContext(f.workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       const objective = [
         "This is an authorized read-scope test in disposable directories.",
@@ -3355,7 +3447,7 @@ installSuite("real-binary smoke: the plugin-owned kimi-code binary runs jobs (se
       expect(payload.binary?.startsWith(`${binDir}${path.sep}`), `binary ${payload.binary} must be under ${binDir}`).toBe(true);
       expect(payload.selected_binary).toBe(payload.binary);
 
-      const setup = await runSetup([], makeContext(workspace, env));
+      const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, `managed-block install probe failed: ${setup.probeError ?? ""}`).toBe("ok");
       const answer = await runAsk([
         "--budget", `${Math.round(PER_RUN_BUDGET_MS / 1000)}s`,
