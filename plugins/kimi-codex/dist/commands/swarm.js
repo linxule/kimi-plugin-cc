@@ -409,9 +409,6 @@ async function capturePatchArtifact(paths, jobId, worktreePath, stderr, onFailur
 }
 /** Render the patch-handoff header prepended to a write-swarm report. */
 function renderWriteSwarmHeader(captured) {
-    if (captured === null) {
-        return "**Patch:** capture FAILED — no patch was written; inspect the run logs.";
-    }
     if (captured.empty) {
         return "**Patch:** the swarm made NO changes (empty patch).";
     }
@@ -500,10 +497,11 @@ writeMode, executionCwd) {
         const executionPlan = executionPlanFromPersisted(job);
         const boundedSwarm = usesBoundedSwarmPolicy(executionPlan);
         const singleWorker = boundedSwarm && maxConcurrency === 1;
-        const needsPreactivation = !singleWorker && requiresSwarmPreactivation(executionPlan.kimiVersion);
+        const preactivationVersion = requiresSwarmPreactivation(executionPlan.kimiVersion);
+        const needsPreactivation = !singleWorker && preactivationVersion;
         // A direct worker still needs durable print ownership and patch recovery.
         // Its record has no activated session and never requires web cleanup.
-        if (requiresSwarmPreactivation(executionPlan.kimiVersion)) {
+        if (preactivationVersion) {
             const owner = await probeProcessIdentity(process.pid);
             recovery = { schema: 1, jobId: job.job_id, ownerPid: process.pid, owner: owner.identity ?? null,
                 kimiHome: resolveKimiHome(context.env, writeMode?.spawnCwd ?? job.cwd),
@@ -511,17 +509,21 @@ writeMode, executionCwd) {
                 launches: [], session: null, sessionDirty: false, complete: false, patchPath: null };
             store.saveSwarmRecovery(job.job_id, recovery);
         }
-        activationOptions = {
+        // Shared by the web lifecycle and the print spawn; prefixArgs stay per call.
+        const spawnOptions = {
             cwd: executionCwd ?? writeMode?.spawnCwd ?? job.cwd,
             env: context.env,
             command: executionPlan.command,
-            prefixArgs: executionPlan.prefixArgs,
             executionPlan,
             commandLabel,
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
             swarmMaxConcurrency: maxConcurrency,
             trustedWorkspaceRoot: executionCwd ?? writeMode?.workspaceRoot,
+        };
+        activationOptions = {
+            ...spawnOptions,
+            prefixArgs: executionPlan.prefixArgs,
             expectedVersion: executionPlan.kimiVersion ?? undefined,
             onRecoveryEvent: recovery ? (event) => recordRecoveryEvent(store, recovery, event) : undefined,
         };
@@ -593,17 +595,9 @@ writeMode, executionCwd) {
         if (recovery)
             recordRecoveryEvent(store, recovery, { kind: "print-spawn" });
         const result = await runCliPromptWithBudget({
-            cwd: activationOptions.cwd,
-            env: context.env,
-            command: executionPlan.command,
+            ...spawnOptions,
             prefixArgs: [...executionPlan.prefixArgs],
-            executionPlan,
             prompt,
-            commandLabel,
-            swarmMaxConcurrency: maxConcurrency,
-            trustedWorkspaceRoot: executionCwd ?? writeMode?.workspaceRoot,
-            model: job.model ?? undefined,
-            thinkingEffort: job.thinking_effort ?? undefined,
             resumeSessionId: preactivated?.sessionId,
             logPath: job.stream_log_path,
             onSpawn: async (pid) => {
@@ -624,7 +618,8 @@ writeMode, executionCwd) {
         if (recovery)
             recordRecoveryEvent(store, recovery, { kind: "print-exit" });
         store.updateRunningJob(job.job_id, observedExecutionFields(result));
-        finalText = reassembleProseFromRecords(result.records);
+        const prose = reassembleProseFromRecords(result.records);
+        finalText = prose;
         let resultError;
         if (handlers.cancelling) {
             resultError = new RuntimeError("SWARM_CANCELLED", "Swarm cancelled by user request.", "swarm.runtime");
@@ -662,12 +657,10 @@ writeMode, executionCwd) {
             env: context.env,
             cwd: job.cwd,
             sessionId: result.sessionId ?? job.kimi_session_id,
-            title: buildKimiSessionTitle(writeMode ? "swarm-write" : "swarm", objective),
+            title: buildKimiSessionTitle(commandLabel, objective),
             stderr: context.stderr,
         });
         warnIfSessionIdMissing(result, "swarm", job.job_id, context.stderr);
-        const prose = reassembleProseFromRecords(result.records);
-        finalText = prose;
         if (writeMode) {
             const captured = await capturePatchArtifact(paths, job.job_id, writeMode.workspaceRoot, context.stderr, writeMode.onPatchCaptureFailure);
             if (captured === null) {
@@ -696,7 +689,7 @@ writeMode, executionCwd) {
         if (recovery)
             finishRecoveryRecord(store, recovery);
         return (store.markCompleted(job.job_id, {
-            summary: `[${writeMode ? "swarm-write" : "swarm"}] ${shorten(objective, SWARM_SUMMARY_MAX)}`,
+            summary: `[${commandLabel}] ${shorten(objective, SWARM_SUMMARY_MAX)}`,
             phase: "done",
             final_output_path: artifactPath,
             error: null,
