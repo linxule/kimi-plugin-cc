@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { transform } from "esbuild";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile, utimes } from "node:fs/promises";
@@ -514,6 +515,111 @@ describe("write-swarm lifecycle", () => {
     expect(outcome.error.details.worktreePath).toBe("/retained-worktree");
     expect(retained).toBe(true);
   });
+});
+
+describe("swarm job creation and log header", () => {
+  const modes = [
+    {
+      name: "read",
+      argv: ["inspect", "the", "header"],
+      logPrefix: "swarm",
+      commandType: "review",
+      agentProfile: "<swarm>",
+      headerLabel: "swarm",
+      failureSummary: "Swarm failed.",
+    },
+    {
+      name: "write",
+      argv: ["--write", "inspect", "the", "header"],
+      logPrefix: "swarm-write",
+      commandType: "rescue",
+      agentProfile: "<swarm-write>",
+      headerLabel: "swarm-write",
+      failureSummary: "Swarm (write) failed.",
+    },
+  ] as const;
+
+  for (const mode of modes) {
+    test(`${mode.name} mode marks the job failed when the log header cannot be written`, async () => {
+      const pluginDataRoot = await createTestPluginDataRoot(`swarm-header-fail-${mode.name}-data`);
+      const repoRoot = await createGitRepoFixture(`swarm-header-fail-${mode.name}-repo`);
+      const kimiHome = await createTestPluginDataRoot(`swarm-header-fail-${mode.name}-home`);
+      const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+      const env = makeMockEnv(pluginDataRoot, invocationPath, kimiHome);
+      const jobId = randomUUID();
+      const paths = resolvePluginPaths(env);
+      const repoId = (await resolveRepoIdentity(repoRoot)).repoId;
+      try {
+        await mkdir(path.join(paths.logsDir, `${mode.logPrefix}-${jobId}.jsonl`), { recursive: true });
+        const error = await runSwarm([...mode.argv], { ...makeContext(repoRoot, env), mcpJobId: jobId }).then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+        expect(error).toBeInstanceOf(RuntimeError);
+        expect((error as RuntimeError).code).toBe("SWARM_LOG_HEADER_FAILED");
+        expect((error as RuntimeError).stage).toBe("swarm.log-header");
+        expect((error as RuntimeError).message.startsWith(
+          `Failed to write ${mode.headerLabel} invocation log header: `,
+        )).toBe(true);
+        const store = new JobStore(paths);
+        try {
+          const job = store.getJob(jobId);
+          expect(job?.status).toBe("failed");
+          expect(job?.summary).toBe(mode.failureSummary);
+          expect(job?.phase).toBe("failed");
+          expect(job?.command_type).toBe(mode.commandType);
+          expect(job?.agent_profile).toBe(mode.agentProfile);
+          expect(job?.cwd).toBe(repoRoot);
+          expect(job?.budget_source).toBe("default");
+          expect(job?.error?.code).toBe("SWARM_LOG_HEADER_FAILED");
+        } finally {
+          store.close();
+        }
+        expect(existsSync(invocationPath)).toBe(false);
+        expect(existsSync(path.join(paths.worktreesDir, repoId, `swarm-write-${jobId}`))).toBe(false);
+      } finally {
+        await cleanupTestPath(pluginDataRoot);
+        await cleanupTestPath(repoRoot);
+        await cleanupTestPath(kimiHome);
+      }
+    });
+
+    test(`${mode.name} mode writes the invocation log header with the user cwd`, async () => {
+      const pluginDataRoot = await createTestPluginDataRoot(`swarm-header-ok-${mode.name}-data`);
+      const repoRoot = await createGitRepoFixture(`swarm-header-ok-${mode.name}-repo`);
+      const kimiHome = await createTestPluginDataRoot(`swarm-header-ok-${mode.name}-home`);
+      const env = makeMockEnv(pluginDataRoot, path.join(pluginDataRoot, "invocation.jsonl"), kimiHome);
+      const jobId = randomUUID();
+      const paths = resolvePluginPaths(env);
+      try {
+        await runSwarm([...mode.argv], { ...makeContext(repoRoot, env), mcpJobId: jobId });
+        const logPath = path.join(paths.logsDir, `${mode.logPrefix}-${jobId}.jsonl`);
+        const header = JSON.parse((await readFile(logPath, "utf8")).split("\n")[0]!);
+        expect(header.direction).toBe("meta");
+        expect(JSON.stringify(header.message)).toBe(JSON.stringify({
+          commandType: mode.headerLabel,
+          kimiSessionId: "(pending)",
+          cwd: repoRoot,
+        }));
+        const store = new JobStore(paths);
+        try {
+          const job = store.getJob(jobId);
+          expect(job?.status).toBe("completed");
+          expect(job?.cwd).toBe(repoRoot);
+          expect(job?.stream_log_path).toBe(logPath);
+          expect(job?.command_type).toBe(mode.commandType);
+          expect(job?.agent_profile).toBe(mode.agentProfile);
+          expect(job?.summary).toBe(`[${mode.headerLabel}] inspect the header`);
+        } finally {
+          store.close();
+        }
+      } finally {
+        await cleanupTestPath(pluginDataRoot);
+        await cleanupTestPath(repoRoot);
+        await cleanupTestPath(kimiHome);
+      }
+    });
+  }
 });
 
 describe("buildSwarmPrompt", () => {
