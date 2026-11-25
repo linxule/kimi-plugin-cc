@@ -42,7 +42,11 @@ printed="$version"
 if [ "$FAKE_NPM_MODE" = "mismatch" ]; then printed="0.0.1"; fi
 printf '#!/bin/sh\\necho %s\\n' "$printed" > "$pkg/dist/main.mjs"
 chmod 755 "$pkg/dist/main.mjs"
-ln -s ../@moonshot-ai/kimi-code/dist/main.mjs "$prefix/node_modules/.bin/kimi"
+if [ "$FAKE_NPM_MODE" = "outside" ]; then
+  ln -s "$FAKE_NPM_OUTSIDE" "$prefix/node_modules/.bin/kimi"
+else
+  ln -s ../@moonshot-ai/kimi-code/dist/main.mjs "$prefix/node_modules/.bin/kimi"
+fi
 `;
 
 interface Case {
@@ -100,6 +104,62 @@ async function seedPin(c: Case, version: string): Promise<void> {
   await chmod(binary, 0o755);
   await symlink(path.join(version, "node_modules", ".bin", "kimi"), path.join(c.binDir, "current"));
 }
+
+/** An executable outside kimi-bin that records any execution and claims `version`. */
+async function writeOutsideKimi(c: Case, version: string): Promise<{ binary: string; marker: string }> {
+  const marker = path.join(c.root, "outside-ran");
+  const binary = path.join(c.root, "outside", "kimi");
+  await mkdir(path.dirname(binary), { recursive: true });
+  await writeFile(binary, `#!/bin/sh\ntouch '${marker}'\necho ${version}\n`, "utf8");
+  await chmod(binary, 0o755);
+  return { binary, marker };
+}
+
+describe.skipIf(process.platform === "win32")("setup --install-kimi containment before execution", () => {
+  test("an existing .bin/kimi linking outside its version directory is never executed", async () => {
+    const c = await makeCase();
+    const outside = await writeOutsideKimi(c, HIGHEST);
+    const bin = path.join(c.binDir, HIGHEST, "node_modules", ".bin");
+    await mkdir(bin, { recursive: true });
+    await symlink(outside.binary, path.join(bin, "kimi"));
+    const result = await runSetup(["--install-kimi"], c.context);
+    expect(existsSync(outside.marker)).toBe(false);
+    expect(result.kimiInstall).toMatchObject({ ok: true, downloaded: true });
+    expect(await realpath(path.join(c.binDir, "current"))).toBe(
+      await realpath(path.join(c.binDir, HIGHEST, "node_modules", "@moonshot-ai", "kimi-code", "dist", "main.mjs")),
+    );
+  });
+
+  test("a version directory that is a symlink outside is never executed and its target survives", async () => {
+    const c = await makeCase();
+    const outside = await writeOutsideKimi(c, HIGHEST);
+    const outsideDir = path.join(c.root, "outside-version");
+    await mkdir(path.join(outsideDir, "node_modules", ".bin"), { recursive: true });
+    await symlink(outside.binary, path.join(outsideDir, "node_modules", ".bin", "kimi"));
+    await writeFile(path.join(outsideDir, "keep"), "x", "utf8");
+    await mkdir(c.binDir, { recursive: true });
+    await symlink(outsideDir, path.join(c.binDir, HIGHEST));
+    const result = await runSetup(["--install-kimi"], c.context);
+    expect(existsSync(outside.marker)).toBe(false);
+    expect(result.kimiInstall).toMatchObject({ ok: true, downloaded: true });
+    expect(existsSync(path.join(outsideDir, "keep"))).toBe(true);
+    expect(existsSync(path.join(outsideDir, "node_modules", ".bin", "kimi"))).toBe(true);
+  });
+
+  test("a staged .bin/kimi linking outside the staging directory is never executed", async () => {
+    const outsideCase = await makeCase({ FAKE_NPM_MODE: "outside" });
+    const outside = await writeOutsideKimi(outsideCase, HIGHEST);
+    const c = { ...outsideCase, env: { ...outsideCase.env, FAKE_NPM_OUTSIDE: outside.binary } };
+    c.context = { ...c.context, env: c.env };
+    await seedPin(c, "2.6.2");
+    const result = await runSetup(["--install-kimi"], c.context);
+    expect(existsSync(outside.marker)).toBe(false);
+    expect(result.kimiInstall?.error?.code).toBe("KIMI_INSTALL_VERIFY_FAILED");
+    expect(await readlink(path.join(c.binDir, "current"))).toBe(path.join("2.6.2", "node_modules", ".bin", "kimi"));
+    expect(existsSync(path.join(c.binDir, HIGHEST))).toBe(false);
+    expect(await leftovers(c)).toEqual([]);
+  });
+});
 
 describe.skipIf(process.platform === "win32")("setup --install-kimi", () => {
   test("picks the numerically highest certified version", () => {

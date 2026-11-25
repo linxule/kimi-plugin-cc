@@ -1012,7 +1012,7 @@ async function installPluginOwnedKimi(version, env) {
     const binRelative = path.join(version, "node_modules", ".bin", "kimi");
     const binPath = path.join(binDir, binRelative);
     const currentPath = path.join(binDir, "current");
-    const existing = await verifyKimiBinary(binPath, version, env);
+    const existing = await verifyKimiBinary(binPath, binDir, version, version, env);
     if (existing.ok) {
         await pointCurrentAt(binDir, binRelative, currentPath, env);
         return { version, downloaded: false, binary: await realpath(binPath), current: currentPath };
@@ -1022,7 +1022,7 @@ async function installPluginOwnedKimi(version, env) {
     try {
         await writeFile(path.join(staging, "package.json"), `${JSON.stringify({ name: "kimi-plugin-cc-kimi-bin", private: true })}\n`, "utf8");
         await runNpmInstall(staging, version, env);
-        const staged = await verifyKimiBinary(path.join(staging, "node_modules", ".bin", "kimi"), version, env);
+        const staged = await verifyKimiBinary(path.join(staging, "node_modules", ".bin", "kimi"), binDir, path.basename(staging), version, env);
         if (!staged.ok) {
             throw new RuntimeError("KIMI_INSTALL_VERIFY_FAILED", `The installed kimi-code did not verify as exactly ${version}: ${staged.reason}.`, "setup.install-kimi", { details: { expected_version: version } });
         }
@@ -1074,10 +1074,35 @@ async function removeStaleStaging(binDir, now = Date.now()) {
         }
     }
 }
-async function verifyKimiBinary(binary, version, env) {
-    if (!(await pathExists(binary)))
+/**
+ * Containment comes before execution: `binary` must resolve to an executable
+ * regular file physically inside `<realpath(binDir)>/<dirName>/`, and only
+ * that resolved path is probed. Anchoring at the real kimi-bin plus the
+ * expected name rejects a version or staging directory that is itself a link.
+ */
+async function verifyKimiBinary(binary, binDir, dirName, version, env) {
+    let resolved;
+    let root;
+    try {
+        resolved = await realpath(binary);
+        root = path.join(await realpath(binDir), dirName);
+    }
+    catch {
         return { ok: false, reason: `${binary} is missing` };
-    const probe = await probeKimiVersion({ kimiBin: binary, env, timeoutMs: KIMI_INSTALL_PROBE_TIMEOUT_MS });
+    }
+    if (!resolved.startsWith(`${root}${path.sep}`)) {
+        return { ok: false, reason: `${binary} resolves to ${resolved}, outside ${root}${path.sep}` };
+    }
+    try {
+        const info = await lstat(resolved);
+        if (!info.isFile())
+            return { ok: false, reason: `${resolved} is not a regular file` };
+        await access(resolved, fsConstants.X_OK);
+    }
+    catch {
+        return { ok: false, reason: `${resolved} is not executable` };
+    }
+    const probe = await probeKimiVersion({ kimiBin: resolved, env, timeoutMs: KIMI_INSTALL_PROBE_TIMEOUT_MS });
     if (probe.kind !== "ok")
         return { ok: false, reason: probe.reason };
     const observed = probe.version.replace(/^v/, "");
