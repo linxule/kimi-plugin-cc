@@ -157,6 +157,8 @@ describe("read-only command handlers", () => {
 
   test.each([
     ["review", [], "Kimi Review: current working tree changes", "Review target: current working tree changes"],
+    ["review", ["--base", "HEAD", "--", "edge", "cases"], "Kimi Review: edge cases",
+      "Review target: branch diff against HEAD. Focus: edge cases"],
     ["challenge", ["the", "retry", "design"], "Kimi Challenge: the retry design",
       "Review target: current working tree changes. Focus: the retry design"],
   ] as const)("native-v2 %s preview replaces Kimi's recorded prompt with the target and focus", async (commandType, focus, title, preview) => {

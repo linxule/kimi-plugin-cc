@@ -409,11 +409,7 @@ describe("ask session resume", () => {
         ...env,
         KIMI_PLUGIN_CC_MOCK_DELAY_MS: "0",
       }));
-      const initial = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
-      expect(initial.lastPrompt).toBe("Initial question");
-      // A preview holding this run's own submitted prompt (truncated), as
-      // earlier plugin releases wrote it.
-      await writeFile(statePath, JSON.stringify({ ...initial, lastPrompt: "Answer directly in free-form prose." }));
+      expect((JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>).lastPrompt).toBe("Initial question");
       const startOutput = await runAsk(["--background", "-r"], makeContext(repoRoot, env));
       const started = JSON.parse(startOutput) as { job_id: string };
       const store = new JobStore(resolvePluginPaths(env));
@@ -426,7 +422,9 @@ describe("ask session resume", () => {
       await waitForJobState(env, repoId, (job) => job?.job_id === started.job_id && job.status === "completed", 15_000);
       const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
       expect(state.title).toBe(`Kimi Ask: ${continuation}`);
-      expect(state.lastPrompt).toBe(continuation);
+      // Print mode never writes lastPrompt, and the first run's raw preview is
+      // not this run's submitted prompt, so a resume keeps the first request.
+      expect(state.lastPrompt).toBe("Initial question");
       const lines = (await readFile(invocationPath, "utf8")).trim().split("\n");
       const argv = (JSON.parse(lines[lines.length - 1]!) as { argv: string[] }).argv;
       expect(rawTaskTextFromSubmittedPrompt("ask", argv[argv.indexOf("-p") + 1]!)).toBe(continuation);
