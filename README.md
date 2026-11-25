@@ -981,6 +981,7 @@ codex plugin add kimi@kimi-marketplace
 バグの報告や変更の提案は、[GitHubのIssue](https://github.com/linxule/kimi-plugin-cc/issues)で行ってください。コントリビューターは、[ランタイム不変条件](./docs/invariants.md)と[CIの詳細](./docs/ci.md)を確認できます。
 
 </details>
+
 ---
 
 This plugin uses [Kimi Code](https://github.com/MoonshotAI/kimi-code). Its runtime design draws on [OpenAI's codex-plugin-cc](https://github.com/openai/codex-plugin-cc). It is licensed under [Apache-2.0](./LICENSE).
