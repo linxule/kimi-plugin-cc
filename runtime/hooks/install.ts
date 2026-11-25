@@ -19,6 +19,7 @@ import {
 } from "./install-paths.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 import type { KimiVersionProbeOk } from "../kimi-version-probe.js";
+import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 
 /**
  * Verify the managed PreToolUse hook and require its decoded command to equal
@@ -39,7 +40,7 @@ export interface HookInstallStatus {
   /**
    * Job-time only, recorded by the job (channel W): the setup remedy for an
    * installed hook whose markers need repair (duplicate or orphan), and a note
-   * for each other host's hook that predates abstaining for this host's jobs.
+   * for each other host's hook from an older plugin version, whose rules still apply.
    */
   warnings?: string[];
   /** Human-readable reason (filled when `installed === false`). */
@@ -212,25 +213,20 @@ export async function verifyHookInstalled(
     };
   }
 
-  // Transition notice (channel W): other hosts' older hooks still veto.
+  // Channel W notice: an older host hook still applies its own rules here.
   warnings.push(...await olderHostHookWarnings(raw, hostId, expected.command));
   return warnings.length > 0 ? { installed: true, configPath, warnings } : { installed: true, configPath };
 }
-
-/**
- * First plugin version whose hook abstains for jobs another host launched
- * (KIMI_PLUGIN_CC_JOB_HOST). Older hooks still apply their own rules to every
- * plugin job, and any deny wins.
- */
-export const FIRST_ABSTAINING_HOOK_VERSION = "3.0.0";
 
 const MANIFEST_WALK_LEVELS = 4;
 const MANIFEST_MAX_BYTES = 64 * 1024;
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
- * One launch warning per other host's hook that predates abstaining (or whose
- * version cannot be read). Covers other hosts' managed blocks and their
+ * One launch warning per other host's kimi-plugin-cc hook from an older plugin
+ * version than this one (or whose version cannot be read). kimi-code runs every
+ * host's hook for every tool call and any deny wins, so that hook's older rules
+ * still apply to this job. Covers other hosts' managed blocks and their
  * marker-less tables left by a config rewrite. Reads manifests only; never
  * executes anything and never refuses.
  */
@@ -255,11 +251,11 @@ export async function olderHostHookWarnings(
   const warnings: string[] = [];
   for (const [command, host] of others) {
     const version = await hookPluginVersion(command);
-    if (version !== undefined && !predatesAbstainingHook(version)) continue;
+    if (version !== undefined && !pluginVersionIsOlder(version)) continue;
     warnings.push(
       `The ${host} host's kimi-plugin-cc hook (${version === undefined ? "an unknown version" : `version ${version}`}) ` +
-        `also checks this job with its older rules; it can deny web access and rm, mv, cp and mkdir that this ` +
-        `version allows. Update the plugin in ${host} and run its setup.`,
+        `also checks this job with its older rules; it can deny what this version allows. ` +
+        `Update the plugin in ${host} and run its setup.`,
     );
   }
   return warnings;
@@ -292,16 +288,21 @@ export async function hookPluginVersion(command: string): Promise<string | undef
   return undefined;
 }
 
-/** True for a version below FIRST_ABSTAINING_HOOK_VERSION, its prereleases, or an unparseable one. */
-export function predatesAbstainingHook(version: string): boolean {
+/**
+ * True when `version` is older than `current` (this plugin by default). Any
+ * prerelease other than `current` itself, and any unparseable value, counts as
+ * older.
+ */
+export function pluginVersionIsOlder(version: string, current: string = KIMI_PLUGIN_CC_VERSION): boolean {
+  if (version === current) return false;
   const have = SEMVER_RE.exec(version);
-  const want = SEMVER_RE.exec(FIRST_ABSTAINING_HOOK_VERSION)!;
-  if (have === null) return true;
+  const want = SEMVER_RE.exec(current);
+  if (have === null || want === null || have[4] !== undefined) return true;
   for (let i = 1; i <= 3; i += 1) {
     const diff = Number(have[i]) - Number(want[i]);
     if (diff !== 0) return diff < 0;
   }
-  return have[4] !== undefined;
+  return false;
 }
 
 function semverOrUndefined(value: unknown): string | undefined {

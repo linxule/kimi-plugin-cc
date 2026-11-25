@@ -6,13 +6,13 @@ import path from "node:path";
 import { runSetup } from "../../runtime/commands/setup.js";
 import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
 import {
-  FIRST_ABSTAINING_HOOK_VERSION,
   hookPluginVersion,
   olderHostHookWarnings,
-  predatesAbstainingHook,
+  pluginVersionIsOlder,
   verifyHookInstalled,
 } from "../../runtime/hooks/install.js";
 import type { CommandContext } from "../../runtime/types.js";
+import { KIMI_PLUGIN_CC_VERSION } from "../../runtime/version.js";
 
 let scratch: string;
 
@@ -66,22 +66,23 @@ async function makeCase(name: string): Promise<{ dir: string; env: NodeJS.Proces
 
 function expectedWarning(host: string, version: string | undefined): string {
   return `The ${host} host's kimi-plugin-cc hook (${version === undefined ? "an unknown version" : `version ${version}`}) ` +
-    "also checks this job with its older rules; it can deny web access and rm, mv, cp and mkdir that this " +
-    `version allows. Update the plugin in ${host} and run its setup.`;
+    "also checks this job with its older rules; it can deny what this version allows. " +
+    `Update the plugin in ${host} and run its setup.`;
 }
 
-describe("predatesAbstainingHook", () => {
-  test("threshold is 3.0.0", () => {
-    expect(FIRST_ABSTAINING_HOOK_VERSION).toBe("3.0.0");
-  });
-
-  test.each([["2.7.3", true], ["2.99.99", true], ["3.0.0-rc.1", true], ["garbage", true],
-    ["3.0.0", false], ["3.0.1", false], ["3.1.0", false], ["10.0.0", false], ["3.0.0+build.1", false]])(
-    "%s → %p",
+describe("pluginVersionIsOlder", () => {
+  test.each([["3.1.9", true], ["2.7.3", true], ["3.2.0-rc.1", true], ["3.3.0-rc.1", true], ["garbage", true],
+    ["3.2.0", false], ["3.2.1", false], ["4.0.0", false], ["3.2.0+build.1", false]])(
+    "%s against 3.2.0 → %p",
     (version, older) => {
-      expect(predatesAbstainingHook(version)).toBe(older);
+      expect(pluginVersionIsOlder(version, "3.2.0")).toBe(older);
     },
   );
+
+  test("compares against this plugin's version by default", () => {
+    expect(pluginVersionIsOlder(KIMI_PLUGIN_CC_VERSION)).toBe(false);
+    expect(pluginVersionIsOlder("2.7.3")).toBe(true);
+  });
 });
 
 describe("hookPluginVersion", () => {
@@ -107,7 +108,7 @@ describe("hookPluginVersion", () => {
 describe("older host hook warning", () => {
   async function twoHosts(name: string, codexLayout: Layout, codexVersion: string) {
     const { dir, env } = await makeCase(name);
-    const claudeScript = await installTree(dir, ".claude", "claude", "3.0.0");
+    const claudeScript = await installTree(dir, ".claude", "claude", KIMI_PLUGIN_CC_VERSION);
     const codexScript = await installTree(dir, ".codex", codexLayout, codexVersion);
     const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOOK_SCRIPT: claudeScript };
     const codexEnv = { ...env, KIMI_PLUGIN_CC_HOOK_SCRIPT: codexScript };
@@ -131,7 +132,7 @@ describe("older host hook warning", () => {
   });
 
   test("a same or newer other host does not warn", async () => {
-    for (const version of ["3.0.0", "3.2.1"]) {
+    for (const version of [KIMI_PLUGIN_CC_VERSION, "99.0.0"]) {
       const { claudeEnv } = await twoHosts(`newer-${version}`, "codex", version);
       const status = await verifyHookInstalled(claudeEnv);
       expect(status).toEqual({ installed: true, configPath: status.configPath });
@@ -145,7 +146,7 @@ describe("older host hook warning", () => {
 
   test("its own host never warns, even from an older version", async () => {
     const { codexEnv } = await twoHosts("own", "codex", "2.7.3");
-    // codex is 2.7.3 but it is the verifying host; the other (claude) host is 3.0.0.
+    // codex is 2.7.3 but it is the verifying host; the other (claude) host is current.
     const status = await verifyHookInstalled(codexEnv);
     expect(status).toEqual({ installed: true, configPath: status.configPath });
   });
