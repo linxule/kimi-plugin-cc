@@ -8,24 +8,29 @@ The plugin makes promises about the sessions it launches and no longer polices t
 
 ### Breaking
 
-- PLACEHOLDER (surfaces change, to be written by the integrator): host slash commands, agents, MCP tools and DSH providers.
+- Claude Code slash commands `/kimi:ask`, `/kimi:rescue` and `/kimi:challenge` and agents `kimi-ask`, `kimi-rescue`, `kimi-challenge` and `kimi-swarm-write` are removed. `/kimi:task` and agent `kimi-task` replace ask (read-only by default) and rescue (a leading `--write`). `/kimi:review --challenge` and agent `kimi-review` with a leading `--challenge` replace challenge. Agent `kimi-swarm` with a leading `--write` replaces `kimi-swarm-write`. `/kimi:pursue`, `/kimi:swarm`, `/kimi:setup`, `/kimi:status`, `/kimi:result`, `/kimi:cancel` and `/kimi:replay` are unchanged.
+- MCP tool `kimi_challenge` is removed; call `kimi_review` with `mode: "challenge"`. The server lists six model tools and three job tools.
+- Codex skills go from twelve to nine: `kimi-ask`, `kimi-rescue`, `kimi-challenge` and `kimi-swarm-write` are removed and `kimi-task` is added. `kimi-task` is not implicitly invocable, so Codex no longer starts the read-only question skill on its own.
 - A configured `default_plan_mode`, `[environments] default`, `require_trust = false` or enabled tower/subagent-fork selector no longer refuses certified launches where the plugin can neutralize it. Plan mode, the environment default and the selectors are neutralized silently; disabled trust and job-time marker problems appear in `warnings`.
 - The native-v2 session preview now shows the run's raw request instead of the plugin's prefixed prompt, and replaces a differing preview after every settled run.
 
 ### Added
 
-- Read-only operations run on an unlisted plain 2.x kimi-code release newer than 2.0.0 with the warning `kimi-code <version> is not certified by this plugin release; running <operation> read-only with <row> mechanics.` `rescue`, `pursue`, `swarm` and `swarm --write` still refuse with `KIMI_CAPABILITY_NOT_CERTIFIED`. `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` restores exact-version refusal for every operation.
+- Read-only operations run on an unlisted plain 2.x kimi-code release newer than 2.0.0 with the warning `kimi-code <version> is not certified by this plugin release; running <operation> read-only with <row> mechanics.` `rescue`, `pursue`, `swarm` and `swarm --write` still refuse with `KIMI_CAPABILITY_NOT_CERTIFIED`. `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` restores exact-version refusal for every operation; the Codex MCP config forwards it.
 - `setup --install-kimi [--json]` installs the highest certified kimi-code into `<data root>/kimi-plugin-cc/kimi-bin/<version>/` and points `kimi-bin/current` at it. Jobs use `KIMI_PLUGIN_CC_KIMI_BIN`, then that binary, then `kimi` on PATH. `setup` and `setup --check` print a `Kimi binary:` line. New error codes: `KIMI_INSTALL_FAILED`, `KIMI_INSTALL_VERIFY_FAILED`, `KIMI_INSTALL_UNSUPPORTED_PLATFORM`.
 - A launch warnings channel: the nullable `warnings` job column, a `Warnings:` block at the top of stdout and the artifact, and a `warnings` key in `status`, `result --json` and MCP results. Output without warnings is unchanged.
-- `--read-root <absolute-directory>` (repeatable) and `--network` on `ask`, `review`, `challenge` and read-only `swarm`. `--read-root` confines `Read`, `Grep`, `Glob` and `ReadMediaFile` to the workspace and the named roots. `--network` allows `WebSearch` and `FetchURL` to public hosts and confines reads the same way. Scope is stored in the nullable `read_scope` job column and is not inherited by a resumed or follow-up job. New error code: `READ_SCOPE_INVALID`.
-- Rescue, pursue and write-swarm may run `rm`, `mv`, `cp` and `mkdir` on absolute paths inside the workspace, with exact flags, symlink-resolved containment, no `.git` targets, and a `.git` scan before `rm -r`.
+- `--read-root <absolute-directory>` (repeatable) and `--network` on `ask`, `review`, `challenge` and read-only `swarm`, and the matching `read_roots` and `network` arguments on MCP `kimi_ask`, `kimi_review` and `kimi_swarm`. `--read-root` confines `Read`, `Grep`, `Glob` and `ReadMediaFile` to the workspace and the named roots. `--network` allows `WebSearch` and `FetchURL` to public hosts and confines reads the same way. Scope is stored in the nullable `read_scope` job column and is not inherited by a resumed or follow-up job. New error code: `READ_SCOPE_INVALID`.
+- Rescue, pursue and write-swarm may run `rm`, `mv`, `cp` and `mkdir` on absolute paths inside the workspace, with exact flags, symlink-resolved containment, no `.git` targets, and a `.git` scan before `rm -r`. A relative operand is denied with `Rescue requires absolute paths for <cmd>; use paths under <root>: <command>`.
+- The MCP `initialize` and `server/discover` results carry an `instructions` string: prefer these tools for detached or long-running work, which tools write, that jobs survive a disconnect, and that warnings should be relayed.
+- DSH `/kimi-setup` accepts `--install-kimi [--json]`.
 
 ### Changed
 
-- On exact 2.4.0 through 2.7.3, a configured `default_plan_mode` no longer refuses non-swarm launches, fresh or resumed, because print mode cancels the create-time plan entry before any turn. Swarm launches, older versions and uncertified releases still refuse.
+- On exact 2.4.0 through 2.7.3, a configured `default_plan_mode` no longer refuses non-swarm launches, fresh or resumed, because print mode cancels the create-time plan entry before any turn. Swarm launches at any concurrency, older versions and uncertified releases still refuse.
 - Every child runs with `KIMI_CODE_EXPERIMENTAL_TOWER=0` and `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0`, and native-v2 children no longer receive `KIMI_CODE_EXPERIMENTAL_FLAG`. Enabled selectors no longer refuse certified releases.
 - On exact 2.5.0 through 2.7.3, a configured `[environments] default` no longer refuses a fresh non-swarm launch, because the plugin passes `--environment local`. Resumed and swarm launches still refuse.
 - `[workspace] require_trust = false` produces a warning instead of a refusal. A non-boolean value still refuses.
+- The runtime chooses the operation: `ask` with a leading `--write` runs rescue and `review` with a leading `--challenge` runs challenge (`runtime/surface-routing.ts`). Only flags before the first prompt word count, and MCP prompts always follow `--`. The companion spellings `task rescue`, `task challenge` and `task swarm --write` still work. DSH keeps its seven providers, including `kimi_challenge` and `kimi_swarm_write`.
 - At job time, duplicate or orphaned managed hook markers produce a warning instead of a refusal when the real TOML parser proves a clean, byte-exact managed entry. `setup` and `setup --check` still fail on them.
 - `repair-sessions` replaces a preview that is blank or one of the session's own verified plugin prompts, and reports `would-replace-preview` or `preview-replaced`.
 - Release facts live in one table, `runtime/kimi-releases.ts`. Background ask and rescue no longer set `KIMI_PLUGIN_CC_ASK_REUSED_SESSION` or `KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION`. The `setup --check` direct probe uses the Node path parsed from the installed hook command. `classifySetupFailure` no longer returns `runtimeProbe` or `authProbe`, and the `CODEX_SKILLS[].displayName` field and the `TimeoutKind` export are removed.
@@ -47,7 +52,6 @@ The plugin makes promises about the sessions it launches and no longer polices t
 - A Desktop turn that finishes after a plugin run and before its preview sync has its preview overwritten.
 - The review gate's `systemMessage` does not carry warnings, and `recover-swarm` still writes its notices to stderr.
 - `go test -exec=<bin>` and `--exec` are still approved under rescue while `-exec <bin>` is rejected; `rg -i`, `rg -w` and `grep -w` are still rejected.
-- The newly allowed paths have not yet been driven by a real kimi-code binary; live cases run before the tag.
 
 ## 2.7.3 — 2026-11-24
 
