@@ -273,3 +273,112 @@ function isWithin(root, candidate) {
     const relative = path.relative(root, candidate);
     return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
+// ---------------------------------------------------------------------------
+// FetchURL targets under --network: http(s) without credentials, and never a
+// local, private or numerically encoded host. The WHATWG parser canonicalizes
+// the hostname; the raw authority is compared so that integer, hex, octal or
+// percent-encoded IPv4 spellings are refused rather than decoded.
+// ---------------------------------------------------------------------------
+const PRIVATE_IPV4 = [
+    [0x00000000, 8], [0x0a000000, 8], [0x64400000, 10], [0x7f000000, 8],
+    [0xa9fe0000, 16], [0xac100000, 12], [0xc0a80000, 16],
+];
+/** True when `url` is an allowed FetchURL target. */
+export function isAllowedFetchUrl(url) {
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url))
+        return false;
+    let parsed;
+    try {
+        parsed = new URL(url);
+    }
+    catch {
+        return false;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+        return false;
+    if (parsed.username !== "" || parsed.password !== "")
+        return false;
+    const host = parsed.hostname;
+    if (host.startsWith("[")) {
+        const hextets = ipv6Hextets(host.slice(1, -1));
+        return hextets !== undefined && !isPrivateIpv6(hextets);
+    }
+    const ipv4 = ipv4Value(host);
+    if (ipv4 !== undefined) {
+        // The parser accepts many IPv4 spellings; only the canonical one is allowed.
+        if (rawHost(url) !== host)
+            return false;
+        return !PRIVATE_IPV4.some(([base, bits]) => inRange(ipv4, base, bits));
+    }
+    const name = host.replace(/\.+$/, "");
+    if (name.length === 0 || /^[0-9]+$/.test(name))
+        return false;
+    return !(name === "localhost" || name.endsWith(".localhost") || name.endsWith(".local") || name.endsWith(".internal"));
+}
+function rawHost(url) {
+    const authority = url.replace(/^https?:\/\//i, "").split(/[/\\?#]/, 1)[0];
+    const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
+    return hostPort.replace(/:[0-9]*$/, "").toLowerCase();
+}
+function ipv4Value(host) {
+    const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+    if (!match)
+        return undefined;
+    const octets = match.slice(1).map(Number);
+    if (octets.some((octet) => octet > 255))
+        return undefined;
+    return ((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
+}
+function inRange(value, base, bits) {
+    const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+    return ((value & mask) >>> 0) === base;
+}
+function ipv6Hextets(text) {
+    const halves = text.split("::");
+    if (halves.length > 2)
+        return undefined;
+    const parse = (part) => {
+        if (part === "")
+            return [];
+        const out = [];
+        for (const piece of part.split(":")) {
+            if (piece.includes(".")) {
+                const v4 = ipv4Value(piece);
+                if (v4 === undefined)
+                    return undefined;
+                out.push(v4 >>> 16, v4 & 0xffff);
+            }
+            else if (/^[0-9a-f]{1,4}$/i.test(piece)) {
+                out.push(parseInt(piece, 16));
+            }
+            else {
+                return undefined;
+            }
+        }
+        return out;
+    };
+    const head = parse(halves[0]);
+    const tail = halves.length === 2 ? parse(halves[1]) : [];
+    if (head === undefined || tail === undefined)
+        return undefined;
+    const fill = 8 - head.length - tail.length;
+    if (halves.length === 2 ? fill < 0 : fill !== 0)
+        return undefined;
+    return [...head, ...new Array(halves.length === 2 ? fill : 0).fill(0), ...tail];
+}
+function isPrivateIpv6(h) {
+    if (h.every((part) => part === 0))
+        return true; // unspecified
+    if (h.slice(0, 7).every((part) => part === 0) && h[7] === 1)
+        return true; // loopback
+    if ((h[0] & 0xffc0) === 0xfe80)
+        return true; // link-local
+    if ((h[0] & 0xfe00) === 0xfc00)
+        return true; // unique-local
+    // IPv4-mapped (::ffff:a.b.c.d) and the deprecated IPv4-compatible form.
+    if (h.slice(0, 5).every((part) => part === 0) && (h[5] === 0xffff || h[5] === 0)) {
+        const v4 = ((h[6] << 16) >>> 0) + h[7];
+        return PRIVATE_IPV4.some(([base, bits]) => inRange(v4, base, bits));
+    }
+    return false;
+}

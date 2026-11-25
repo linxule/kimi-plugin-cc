@@ -273,3 +273,50 @@ describe("child environment", () => {
     expect(JSON.parse(env.KIMI_PLUGIN_CC_READ_ROOTS!)).toEqual([workspace, extra]);
   });
 });
+
+describe("S5 FetchURL targets under --network", () => {
+  const scope = { readRoots: JSON.stringify(["/"]), network: "1" };
+  const fetch = (url: string) => decide("ask", "FetchURL", { url }, scope);
+
+  test("a public https URL is allowed", async () => {
+    for (const url of ["https://example.com/docs?q=1", "http://93.184.216.34/", "https://[2606:4700::1111]/", "https://localhost.example.com/"]) {
+      expect([url, await fetch(url)]).toEqual([url, { decision: "allow" }]);
+    }
+  });
+
+  test.each([
+    ["localhost name", "http://localhost:8080/"],
+    ["localhost trailing dot", "http://LOCALHOST./x"],
+    ["*.localhost", "https://api.localhost/"],
+    ["*.local", "http://printer.local/"],
+    ["*.internal", "http://metadata.google.internal/computeMetadata/v1/"],
+    ["percent-encoded localhost", "http://%6c%6f%63alhost/"],
+    ["0.0.0.0/8", "http://0.0.0.0/"],
+    ["10/8", "http://10.1.2.3/"],
+    ["100.64/10", "http://100.100.1.1/"],
+    ["127/8", "http://127.0.0.1:631/"],
+    ["169.254/16", "http://169.254.169.254/latest/meta-data/"],
+    ["172.16/12", "http://172.31.255.255/"],
+    ["192.168/16", "http://192.168.1.1/"],
+    ["IPv6 loopback", "http://[::1]/"],
+    ["IPv6 unspecified", "http://[::]/"],
+    ["IPv6 link-local", "http://[fe80::1]/"],
+    ["IPv6 unique-local", "http://[fd12:3456::1]/"],
+    ["IPv4-mapped loopback", "http://[::ffff:127.0.0.1]/"],
+    ["IPv4-mapped private (hex form)", "http://[::ffff:a00:1]/"],
+    ["bare integer host", "http://2130706433/"],
+    ["hex octets", "http://0x7f.0.0.1/"],
+    ["octal octets", "http://0177.0.0.1/"],
+    ["short dotted form", "http://127.1/"],
+    ["percent-encoded IPv4", "http://%31%32%37.0.0.1/"],
+    ["public IPv4 written as an integer", "http://1572395042/"],
+    ["credentials", "https://user:pass@example.com/"],
+    ["file scheme", "file:///etc/passwd"],
+    ["unparseable", "http://exa mple.com/"],
+  ])("denies %s", async (_label, url) => {
+    const result = await fetch(url);
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("FetchURL");
+  });
+});
+

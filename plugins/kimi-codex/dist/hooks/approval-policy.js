@@ -1,4 +1,4 @@
-import { evaluateScopedRead, parseScopeEnvironment, SCOPED_READ_TOOLS } from "../read-scope.js";
+import { evaluateScopedRead, isAllowedFetchUrl, parseScopeEnvironment, SCOPED_READ_TOOLS, } from "../read-scope.js";
 import { BOUNDED_SWARM_POLICY, evaluateSwarmWaveInput } from "../swarm-policy.js";
 /**
  * Tools considered read-only across review/challenge/review_gate/rescue.
@@ -238,20 +238,13 @@ function webToolDecision(label, toolName, toolInput, scope) {
     const url = typeof toolInput === "object" && toolInput !== null && !Array.isArray(toolInput)
         ? toolInput.url
         : undefined;
-    if (typeof url === "string" && /^https?:\/\//i.test(url)) {
-        try {
-            const parsed = new URL(url);
-            if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.username === "" && parsed.password === "") {
-                return { decision: "allow" };
-            }
-        }
-        catch {
-            // Unparseable URLs fall through to the denial.
-        }
-    }
+    if (isAllowedFetchUrl(url))
+        return { decision: "allow" };
     return {
         decision: "deny",
-        reason: "kimi-plugin-cc safety hook: FetchURL accepts only http:// and https:// URLs without embedded credentials.",
+        reason: "kimi-plugin-cc safety hook: FetchURL accepts only http:// and https:// URLs without embedded credentials " +
+            "whose host is a public name or a canonical public IP address; localhost, .local, .internal, private, " +
+            "loopback, link-local and numerically encoded hosts are denied.",
     };
 }
 function denyReadOnlyMessage(label, toolName) {
