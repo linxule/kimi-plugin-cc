@@ -4,6 +4,7 @@ import { observedExecutionFields, reconcileHistoricalJobProvenance } from "../ki
 import { capitalize } from "../render.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { recoverSessionIdFromStore } from "../session-recovery.js";
+import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { formatBudgetDuration } from "../render.js";
 /**
  * Reassemble prose final text from cli-client records.
@@ -246,4 +247,31 @@ export function resumeBudget(kind, explicitMs, source) {
         budget_ms: explicitMs ?? inherited ?? null,
         budget_source: explicitMs !== undefined ? "explicit" : inherited !== null ? "inherited" : "default",
     };
+}
+/** Repair sentences of the read-only (ask, review, challenge) hook refusal. */
+export const READ_ONLY_HOOK_REPAIR = [
+    "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
+    "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
+];
+/** Repair sentences of the write-capable (rescue, pursue) hook refusal. */
+export const WRITE_HOOK_REPAIR = [
+    "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+    "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
+];
+/**
+ * Verify the managed PreToolUse hook. Returns null when it is installed;
+ * otherwise warns once on stderr and returns the refusal. Calling agents read
+ * the message bytes, so each caller passes its exact sentences.
+ */
+export async function hookRefusal(context, warnLabel, code, stage, intro, repair) {
+    const installStatus = await verifyHookInstalled(context.env);
+    if (installStatus.installed)
+        return null;
+    maybeWarnHookMissing(installStatus, warnLabel, context.stderr);
+    return new RuntimeError(code, [
+        intro,
+        `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
+        ...repair,
+        hookRefusalRetryProtocol(context.env),
+    ].join(" "), stage, { details: hookRefusalDetails(installStatus) });
 }

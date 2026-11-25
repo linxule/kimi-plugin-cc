@@ -24,13 +24,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import type { CommandContext } from "../types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
-import {
-  hookRefusalDetails,
-  hookRefusalRetryProtocol,
-  maybeWarnHookMissing,
-  verifyHookInstalled,
-} from "../hooks/install.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget, hookRefusal, READ_ONLY_HOOK_REPAIR } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 
@@ -307,24 +301,9 @@ async function requireAskHookInstalled(context: CommandContext): Promise<void> {
     return;
   }
 
-  const installStatus = await verifyHookInstalled(context.env);
-  if (installStatus.installed) {
-    return;
-  }
-
-  maybeWarnHookMissing(installStatus, "ask", context.stderr);
-  throw new RuntimeError(
-    "ASK_HOOK_NOT_INSTALLED",
-    [
-      "ask refuses to run without the canonical kimi-plugin-cc PreToolUse hook.",
-      `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
-      "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
-      "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
-      hookRefusalRetryProtocol(context.env),
-    ].join(" "),
-    "ask.hook-check",
-    { details: hookRefusalDetails(installStatus) },
-  );
+  const refusal = await hookRefusal(context, "ask", "ASK_HOOK_NOT_INSTALLED", "ask.hook-check",
+    "ask refuses to run without the canonical kimi-plugin-cc PreToolUse hook.", READ_ONLY_HOOK_REPAIR);
+  if (refusal) throw refusal;
 }
 
 function buildAskPrompt(question: string | undefined, reusedSession: boolean): string {

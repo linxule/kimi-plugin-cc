@@ -16,8 +16,7 @@ import { parseReviewArgs } from "../parsing.js";
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, hookRefusal, READ_ONLY_HOOK_REPAIR } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 const REVIEW_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 export async function runReview(argv, context, commandType) {
@@ -152,18 +151,9 @@ async function requireReadOnlyHookInstalled(context, commandType) {
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
         return;
     }
-    const installStatus = await verifyHookInstalled(context.env);
-    if (installStatus.installed) {
-        return;
-    }
-    maybeWarnHookMissing(installStatus, commandType, context.stderr);
-    throw new RuntimeError(`${commandType.toUpperCase()}_HOOK_NOT_INSTALLED`, [
-        `${commandType} refuses to run without the canonical kimi-plugin-cc PreToolUse hook.`,
-        `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
-        "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
-        "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
-        hookRefusalRetryProtocol(context.env),
-    ].join(" "), `${commandType}.hook-check`, { details: hookRefusalDetails(installStatus) });
+    const refusal = await hookRefusal(context, commandType, `${commandType.toUpperCase()}_HOOK_NOT_INSTALLED`, `${commandType}.hook-check`, `${commandType} refuses to run without the canonical kimi-plugin-cc PreToolUse hook.`, READ_ONLY_HOOK_REPAIR);
+    if (refusal)
+        throw refusal;
 }
 function buildReviewPrompt(commandType, reviewContext, focus) {
     const modeInstructions = commandType === "challenge"

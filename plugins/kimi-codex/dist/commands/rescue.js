@@ -16,8 +16,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { startBackgroundJob } from "../background-spawn.js";
-import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget, hookRefusal, WRITE_HOOK_REPAIR } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 // "Continue working on the bug" verbs that auto-attach to the latest
@@ -136,16 +135,8 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     // an early return doesn't leak SIGTERM/SIGINT listeners. Tests /
     // setup probes / intentional bypass: KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1.
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
-        const installStatus = await verifyHookInstalled(context.env);
-        if (!installStatus.installed) {
-            maybeWarnHookMissing(installStatus, "rescue", context.stderr);
-            const classified = new RuntimeError("RESCUE_HOOK_NOT_INSTALLED", [
-                "rescue refuses to run without the kimi-plugin-cc PreToolUse hook.",
-                `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
-                "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
-                "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
-                hookRefusalRetryProtocol(context.env),
-            ].join(" "), "rescue.hook-check", { details: hookRefusalDetails(installStatus) });
+        const classified = await hookRefusal(context, "rescue", "RESCUE_HOOK_NOT_INSTALLED", "rescue.hook-check", "rescue refuses to run without the kimi-plugin-cc PreToolUse hook.", WRITE_HOOK_REPAIR);
+        if (classified) {
             try {
                 return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
             }
