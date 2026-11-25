@@ -200,8 +200,8 @@ describe.skipIf(process.platform === "win32")("setup --install-kimi", () => {
   test("plain setup and setup --check never invoke the installer", async () => {
     const c = await makeCase({ KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" });
     await mkdir(c.env.KIMI_CODE_HOME!, { recursive: true });
-    await runSetup([], c.context).catch(() => undefined);
-    await runSetup(["--check"], c.context).catch(() => undefined);
+    expect((await runSetup([], c.context)).action).toBe("install");
+    expect((await runSetup(["--check"], c.context)).action).toBe("check");
     expect(await npmCalls(c)).toEqual([]);
     expect(existsSync(c.binDir)).toBe(false);
   });
