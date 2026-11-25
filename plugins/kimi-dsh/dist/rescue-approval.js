@@ -445,7 +445,17 @@ export async function validateWorkspaceShellCommand(command, workspaceRoot) {
     }
     return { response: "approve" };
 }
+/**
+ * Longest Bash command the policy evaluates. The hook's deny timer shares the
+ * evaluation thread and kimi-code treats a hook timeout as allow, so input size
+ * must bound evaluation time: brace-expansion detection is quadratic, and
+ * measured worst cases are about 0.2 s at this length and 3 s at 64 KiB.
+ */
+export const MAX_SHELL_COMMAND_LENGTH = 16_384;
 function parseShellPipeline(command) {
+    if (command.length > MAX_SHELL_COMMAND_LENGTH) {
+        return rejectShell(`Rescue rejects shell commands longer than ${MAX_SHELL_COMMAND_LENGTH} characters (this one has ${command.length}); split the work into shorter commands.`);
+    }
     // shell-quote collapses raw newline/carriage-return separators into adjacent tokens, which
     // hides a second command from per-stage validation (`git status\nrm -rf /` parses as
     // ['git','status','rm','-rf','/']). Reject any line-break characters up front so every

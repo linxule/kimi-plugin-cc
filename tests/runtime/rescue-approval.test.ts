@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   GIT_SCAN_DEADLINE_MS,
+  MAX_SHELL_COMMAND_LENGTH,
   RM_RECURSIVE_SCAN_ENTRY_CAP,
   evaluateRescueHookRequest,
   scanTreesForGit,
@@ -145,6 +146,31 @@ describe("evaluateRescueHookRequest", () => {
       } finally {
         await cleanupTestPath(repoRoot);
         await cleanupTestPath(outsideRoot);
+      }
+    });
+  });
+
+  describe("Bash command length cap", () => {
+    test(`denies commands longer than ${MAX_SHELL_COMMAND_LENGTH} characters, quickly`, async () => {
+      const root = await createGitRepoFixture("rescue-command-cap");
+      try {
+        expect(MAX_SHELL_COMMAND_LENGTH).toBe(16_384);
+        const atCap = `rg ${"a".repeat(MAX_SHELL_COMMAND_LENGTH - 3)}`;
+        expect(atCap.length).toBe(MAX_SHELL_COMMAND_LENGTH);
+        expect(await evaluateRescueHookRequest(root, "Bash", { command: atCap })).toEqual({ decision: "allow" });
+        const over = `${atCap}a`;
+        expect(await evaluateRescueHookRequest(root, "Bash", { command: over })).toEqual({
+          decision: "deny",
+          reason: `Rescue rejects shell commands longer than ${MAX_SHELL_COMMAND_LENGTH} characters (this one has ${MAX_SHELL_COMMAND_LENGTH + 1}); split the work into shorter commands.`,
+        });
+        expect(validateShellCommand(over).response).toBe("reject");
+        // Brace scanning is quadratic; past the cap it must not run at all.
+        const started = performance.now();
+        const braces = `rg x ${"{".repeat(256 * 1024)}`;
+        expect((await evaluateRescueHookRequest(root, "Bash", { command: braces })).decision).toBe("deny");
+        expect(performance.now() - started).toBeLessThan(500);
+      } finally {
+        await cleanupTestPath(root);
       }
     });
   });
