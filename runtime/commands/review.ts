@@ -18,7 +18,7 @@ import { KIMI_REVIEW_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseReviewArgs } from "../parsing.js";
-import { resolveReadScope, serializeReadScope } from "../read-scope.js";
+import { assertScopeSupported, resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { RuntimeError } from "../errors.js";
@@ -60,6 +60,7 @@ export async function runReview(
     env: context.env,
     stderr: context.stderr,
   });
+  assertScopeSupported(readScope, executionPlan.certification, "INVALID_ARGS", `${commandType}.parse`);
   const store = new JobStore(paths);
 
   const jobId = allocateJobId(context);

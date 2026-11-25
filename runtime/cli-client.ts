@@ -24,6 +24,7 @@ import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
 import {
+  assertScopeSupported,
   NETWORK_ENV,
   READ_ROOTS_ENV,
   READ_SCOPE_LABELS,
@@ -1345,6 +1346,7 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
     if (opts.commandLabel === undefined || !READ_SCOPE_LABELS.has(opts.commandLabel)) {
       throw new RuntimeError("READ_SCOPE_INVALID", SCOPE_FLAGS_WRITE_MESSAGE, "cli-client.environment");
     }
+    assertScopeSupported(opts.readScope, opts.executionPlan.certification, "READ_SCOPE_INVALID", "cli-client.environment");
     Object.assign(env, scopeEnv);
   }
   return env;

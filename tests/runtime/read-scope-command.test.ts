@@ -9,7 +9,7 @@ import { runReview } from "../../runtime/commands/review.js";
 import { runSwarm } from "../../runtime/commands/swarm.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import { describeReadScope, parseJobReadScope, resolveReadScope, serializeReadScope } from "../../runtime/read-scope.js";
-import { renderManagedJobOutput } from "../../runtime/render.js";
+import { renderManagedJobOutput, renderTerminalJobArtifact } from "../../runtime/render.js";
 import {
   hasHelpFlag,
   parseAskArgs,
@@ -204,4 +204,50 @@ describe("S1 scope flags: commands", () => {
       await cleanupTestPath(repoRoot);
     }
   }, 30_000);
+
+  test("read-only swarm exports the scope to its spawn and shows it", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("read-scope-swarm");
+    const repoRoot = await createGitRepoFixture("read-scope-swarm-repo");
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+    try {
+      const extra = await realpath(pluginDataRoot);
+      const output = await runSwarm(["--network", "--read-root", pluginDataRoot, "audit", "modules"], makeContext(repoRoot, env));
+      expect(output.startsWith(`Scope: reads confined to the workspace and 1 read root (${extra}); network on\n\n`)).toBe(true);
+      const captured = await invocationEnv(invocationPath);
+      expect(captured.KIMI_PLUGIN_CC_CMD).toBe("swarm");
+      expect(JSON.parse(captured.KIMI_PLUGIN_CC_READ_ROOTS as string)).toEqual([await realpath(repoRoot), extra]);
+      expect(captured.KIMI_PLUGIN_CC_NETWORK).toBe("1");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  }, 30_000);
+
+  test("--network is refused on an uncertified release; --read-root alone still runs there", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("read-scope-uncertified");
+    const repoRoot = await createGitRepoFixture("read-scope-uncertified-repo");
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+    const env = { ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath), KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+      KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1", KIMI_PLUGIN_CC_STRICT_VERSIONS: "" };
+    try {
+      await expect(runAsk(["--network", "q"], makeContext(repoRoot, env))).rejects.toMatchObject({
+        code: "INVALID_ARGS", message: expect.stringContaining("uncertified"),
+      });
+      await expect(runReview(["--network"], makeContext(repoRoot, env), "review")).rejects.toMatchObject({ code: "INVALID_ARGS" });
+      const confined = await runAsk(["--read-root", pluginDataRoot, "q"], makeContext(repoRoot, env));
+      expect(confined).toContain("Scope: reads confined to the workspace and 1 read root");
+      expect(confined).toContain("not certified");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  }, 30_000);
+
+  test("terminal artifacts list a non-default scope", () => {
+    const job = { job_id: "j", command_type: "ask", status: "failed", summary: "s", kimi_session_id: null, error: null,
+      read_scope: serializeReadScope({ readRoots: [], network: true }) } as never;
+    expect(renderTerminalJobArtifact(job)).toContain("- Scope: reads confined to the workspace; network on");
+    expect(renderTerminalJobArtifact({ ...(job as object), read_scope: undefined } as never)).not.toContain("Scope:");
+  });
 });

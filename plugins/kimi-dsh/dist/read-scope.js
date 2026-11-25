@@ -42,6 +42,16 @@ export async function resolveReadScope(readRoots, network, stage) {
     }
     return Object.freeze({ readRoots: Object.freeze(resolved), network: network === true });
 }
+/**
+ * Read confinement rests on tool schemas verified at certified releases only.
+ * --read-root can only narrow, so it runs anywhere; --network is the
+ * relaxation and is refused on an uncertified release.
+ */
+export function assertScopeSupported(scope, certification, code, stage) {
+    if (scope?.network === true && certification === "uncertified") {
+        throw new RuntimeError(code, "--network is refused on an uncertified kimi-code release: read confinement is verified only against certified releases. Run without --network, or install a certified kimi-code release.", stage);
+    }
+}
 /** Child-environment values for one spawn; both absent for the default scope. */
 export function readScopeEnvironment(scope, cwd) {
     if (scope === undefined || (scope.readRoots.length === 0 && !scope.network))

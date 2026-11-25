@@ -252,4 +252,13 @@ describe("child environment", () => {
         commandLabel, readScope: { readRoots: [], network: true } })).toThrow(/read-only operations/);
     }
   });
+
+  test("network is refused on an uncertified plan; read roots alone are accepted", () => {
+    const uncertified = { ...plan("ask"), certification: "uncertified" as const };
+    expect(() => buildKimiCliEnvironment({ cwd: workspace, env: {}, executionPlan: uncertified as never,
+      commandLabel: "ask", readScope: { readRoots: [], network: true } })).toThrow(expect.objectContaining({ code: "READ_SCOPE_INVALID" }));
+    const env = buildKimiCliEnvironment({ cwd: workspace, env: {}, executionPlan: uncertified as never,
+      commandLabel: "ask", readScope: { readRoots: [extra], network: false } });
+    expect(JSON.parse(env.KIMI_PLUGIN_CC_READ_ROOTS!)).toEqual([workspace, extra]);
+  });
 });

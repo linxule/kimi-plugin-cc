@@ -16,7 +16,7 @@ import { resolveKimiHome } from "./kimi-home.js";
 import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
-import { NETWORK_ENV, READ_ROOTS_ENV, READ_SCOPE_LABELS, readScopeEnvironment, SCOPE_FLAGS_WRITE_MESSAGE, } from "./read-scope.js";
+import { assertScopeSupported, NETWORK_ENV, READ_ROOTS_ENV, READ_SCOPE_LABELS, readScopeEnvironment, SCOPE_FLAGS_WRITE_MESSAGE, } from "./read-scope.js";
 import { sleep } from "./util.js";
 import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
 import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
@@ -1050,6 +1050,7 @@ export function buildKimiCliEnvironment(opts) {
         if (opts.commandLabel === undefined || !READ_SCOPE_LABELS.has(opts.commandLabel)) {
             throw new RuntimeError("READ_SCOPE_INVALID", SCOPE_FLAGS_WRITE_MESSAGE, "cli-client.environment");
         }
+        assertScopeSupported(opts.readScope, opts.executionPlan.certification, "READ_SCOPE_INVALID", "cli-client.environment");
         Object.assign(env, scopeEnv);
     }
     return env;

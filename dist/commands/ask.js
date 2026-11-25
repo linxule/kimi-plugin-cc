@@ -13,7 +13,7 @@ import { KIMI_ASK_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
-import { parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
+import { assertScopeSupported, parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
@@ -71,6 +71,7 @@ export async function runAsk(argv, context) {
             resumeSessionId: sessionResolution.kimiSessionId ?? undefined,
             resumeSource: sessionResolution.sourceJob,
         });
+        assertScopeSupported(readScope, executionPlan.certification, "INVALID_ARGS", "ask.parse");
         const logPath = path.join(paths.logsDir, `ask-${jobId}.jsonl`);
         const job = store.createJob({
             job_id: jobId,
