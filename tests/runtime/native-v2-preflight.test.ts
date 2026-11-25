@@ -463,13 +463,53 @@ describe("assertNativeV2Preflight", () => {
       ]) {
         await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release })).rejects.toMatchObject(refused);
       }
-      // A resume keeps the refusal on a certified row too.
-      await writeJournal(home, "ws1", "session-1", "main", [
-        JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: home }),
-      ]);
-      await expect(assertNativeV2Preflight({
-        kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", expectedExecutionRoot: home, release: certified("ask"),
-      })).rejects.toMatchObject(refused);
+    });
+  });
+
+  test("G4b: a resume ignores environments.default; the stored binding stays the gate", async () => {
+    await withHome("assert-remote-default-g4b", async (home) => {
+      await writeConfig(home, '[environments]\ndefault = "build"\n[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
+      const certified = (operationKind: string, kimiVersion: string | null = "2.7.3") =>
+        ({ operationKind, kimiVersion, certification: "certified" as const });
+      const resume = (sessionId: string, release?: Parameters<typeof assertNativeV2Preflight>[0]["release"]) =>
+        assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: sessionId, expectedExecutionRoot: home, release });
+      const session = async (sessionId: string, binding: object, state?: object) => {
+        const journal = await writeJournal(home, "ws1", sessionId, "main", [
+          JSON.stringify({ type: "environment.set_binding", ...binding }),
+        ]);
+        if (state !== undefined) {
+          await writeFile(path.join(path.dirname(path.dirname(path.dirname(journal))), "state.json"), JSON.stringify(state));
+        }
+      };
+      await session("local", { environmentId: "local", cwd: home }, { environmentId: "local", environmentCwd: home });
+      await session("remote", { environmentId: "build", cwd: "/work" });
+      await session("remote-state", { environmentId: "local", cwd: home }, { environmentId: "build", environmentCwd: "/work" });
+      await session("wrong-root", { environmentId: "local", cwd: "/elsewhere" });
+      for (const operationKind of ["ask", "review", "rescue", "pursue", "review_gate"]) {
+        for (const version of ["2.5.0", "2.7.3"]) {
+          await expect(resume("local", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
+        }
+      }
+      for (const [sessionId, recordType] of [
+        ["remote", "environment.set_binding"],
+        ["remote-state", "session.metadata.environmentId"],
+        ["wrong-root", "environment.set_binding.cwd"],
+      ]) {
+        await expect(resume(sessionId!, certified("ask"))).rejects.toMatchObject({
+          code: "KIMI_SESSION_ENVIRONMENT_UNSAFE", details: { refusal_kind: "session-environment-unsafe", record_type: recordType },
+        });
+      }
+      const refused = { code: "CLI_V2_ENVIRONMENT_UNSAFE", details: { refusal_kind: "v2-environment-configured" } };
+      for (const release of [
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"),
+        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
+        undefined,
+      ]) {
+        await expect(resume("local", release)).rejects.toMatchObject(refused);
+      }
+      await writeConfig(home, 'environments = "build"\n');
+      await expect(resume("local", certified("ask"))).rejects.toMatchObject(refused);
     });
   });
 

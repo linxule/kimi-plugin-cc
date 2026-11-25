@@ -162,11 +162,13 @@ export async function inspectPlanModeConfig(kimiHome) {
     };
 }
 /**
- * `allowDefaultEnvironment`: a fresh print on a certified row that passes
- * `--environment local` never reads `environments.default` upstream
- * (sessionManagerService.openCreation skips declarations for the local id at
- * every local-environment row), so that one key stops refusing. A non-table
- * section still refuses.
+ * `allowDefaultEnvironment`: upstream reads `environments.default` only in
+ * sessionManagerService.openCreation, i.e. when a session is created. A fresh
+ * print on a certified row passes `--environment local`, which skips the
+ * declarations; a resume goes through doResume, which applies the session's
+ * stored binding (state.json) and never consults the default (2.5.0-2.7.3).
+ * The stored binding is checked separately by scanSessionJournalsForPlan, so
+ * that one key stops refusing. A non-table section still refuses.
  */
 export async function inspectEnvironmentConfig(kimiHome, options = {}) {
     const parsed = await readParsedConfig(kimiHome);
@@ -508,14 +510,6 @@ function certifiedPrintLaunchHas(options, capability) {
         release.operationKind !== "swarm-write" &&
         kimiCertifiedReleaseHas(release.kimiVersion, capability);
 }
-/**
- * A per-release config relaxation applies only to a fresh, non-swarm launch
- * of an exactly certified row that has the capability. Web-created swarm
- * sessions and every resume keep the strict check.
- */
-function freshCertifiedLaunchHas(options, capability) {
-    return options.resumeSessionId === undefined && certifiedPrintLaunchHas(options, capability);
-}
 export async function assertNativeV2Preflight(options) {
     const warnings = [];
     const stage = options.stage ?? "native-v2.preflight";
@@ -542,7 +536,7 @@ export async function assertNativeV2Preflight(options) {
         });
     }
     const environment = await inspectEnvironmentConfig(options.kimiHome, {
-        allowDefaultEnvironment: freshCertifiedLaunchHas(options, "local-environment"),
+        allowDefaultEnvironment: certifiedPrintLaunchHas(options, "local-environment"),
     });
     if (environment.kind === "refuse") {
         const code = environment.refusalKind === "v2-environment-configured"
