@@ -19,12 +19,17 @@
 // blind to the change.
 //
 // Run: KIMI_CODE_SOURCE_TAG_DIR=/path/to/kimi-code@<tag> bun test tests/audit/
-// Skips (does not fail) when the env var is unset.
+// Skips (does not fail) when the env var is unset. When the variable names the
+// top level of a kimi-code git clone, the per-release suite at the end of this
+// file also reads every certified row's tag through `git show`.
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
+
+import { KIMI_V2_RELEASES, kimiVersionsWith } from "../../runtime/kimi-releases.js";
 
 const SOURCE = process.env.KIMI_CODE_SOURCE_TAG_DIR;
 const suite = SOURCE !== undefined && existsSync(SOURCE) ? describe : describe.skip;
@@ -2232,4 +2237,171 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     ]);
     expect(read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`)).toContain("runInBackground: false,");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Per-release premises of the scope, flag and print relaxations, read from git.
+//
+// When KIMI_CODE_SOURCE_TAG_DIR is the top level of a kimi-code git clone, the
+// suite below reads every certified row's release tag with `git show` (no
+// checkout) and asserts the upstream facts each relaxation rests on. Rows and
+// capabilities come from the runtime's release table, so a new row is scanned
+// automatically; a row whose tag is missing from the clone fails.
+// ---------------------------------------------------------------------------
+
+function sourceIsGitClone(): boolean {
+  if (SOURCE === undefined || !existsSync(SOURCE)) return false;
+  try {
+    const top = execFileSync("git", ["-C", SOURCE, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return realpathSync(top) === realpathSync(SOURCE);
+  } catch {
+    return false;
+  }
+}
+
+const releaseTag = (version: string): string => `@moonshot-ai/kimi-code@${version}`;
+
+function gitShow(version: string, rel: string): string {
+  return execFileSync("git", ["-C", SOURCE!, "show", `${releaseTag(version)}:${rel}`], {
+    encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+/** Production .ts files at the tag that contain `needle` literally. */
+function gitFilesContaining(version: string, needle: string): string[] {
+  const tag = releaseTag(version);
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", SOURCE!, "grep", "-l", "-F", "-e", needle, tag, "--", "*.ts"], {
+      encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return [];
+    throw error;
+  }
+  return out.split("\n").filter(Boolean)
+    .map((line) => line.slice(`${tag}:`.length))
+    .filter((rel) => isProductionTs(rel) && !rel.includes("/tests/") && !rel.includes("/__tests__/"))
+    .sort();
+}
+
+function orderedIndexes(source: string, needles: readonly string[], label: string): void {
+  let previous = -1;
+  for (const needle of needles) {
+    const index = source.indexOf(needle, previous + 1);
+    expect(index, `${label}: missing "${needle}" after the previous step`).toBeGreaterThan(previous);
+    previous = index;
+  }
+}
+
+const releaseRowSuite = sourceIsGitClone() ? describe : describe.skip;
+
+releaseRowSuite("per-release premises of the scope, flag and print relaxations (git tags)", () => {
+  for (const row of KIMI_V2_RELEASES) {
+    const v = row.version;
+
+    test(`${v}: the release tag is the row's audited commit`, () => {
+      const commit = execFileSync("git", ["-C", SOURCE!, "rev-parse", `${releaseTag(v)}^{commit}`], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+      expect(commit.startsWith(row.commit), `${releaseTag(v)} is ${commit}, the table says ${row.commit}`).toBe(true);
+    });
+
+    test(`${v}: a per-flag env override beats config and the master flag, and "0" parses false`, () => {
+      const service = gitShow(v, `${CORE}/app/flag/flagService.ts`);
+      expect(service).toContain("export const MASTER_ENV = 'KIMI_CODE_EXPERIMENTAL_FLAG';");
+      const explain = service.slice(service.indexOf("explain(id: FlagId)"));
+      orderedIndexes(explain, [
+        "const override = parseBooleanEnv(this.bootstrap.getEnv(def.env));",
+        "if (override !== undefined) return this.state(def, override, 'env', configValue);",
+        "if (configValue !== undefined) return this.state(def, configValue, 'config', configValue);",
+        "if (parseBooleanEnv(this.bootstrap.getEnv(MASTER_ENV)) === true) {",
+      ], `${v} flagService.explain`);
+      expect(service).toContain("return this.explain(id)?.enabled ?? false;");
+
+      const env = gitShow(v, `${CORE}/_base/utils/env.ts`);
+      const falseSet = /const FALSE_BOOLEAN_ENV_VALUES = new Set\(\[([^\]]*)\]\);/.exec(env)?.[1];
+      const trueSet = /const TRUE_BOOLEAN_ENV_VALUES = new Set\(\[([^\]]*)\]\);/.exec(env)?.[1];
+      expect(falseSet, `${v}: FALSE_BOOLEAN_ENV_VALUES not found`).toBeDefined();
+      expect(falseSet!.split(",").map((item) => item.trim())).toContain("'0'");
+      expect(trueSet!.split(",").map((item) => item.trim())).not.toContain("'0'");
+      const parser = env.slice(env.indexOf("export function parseBooleanEnv("));
+      orderedIndexes(parser, [
+        "const normalized = value?.trim().toLowerCase();",
+        "if (TRUE_BOOLEAN_ENV_VALUES.has(normalized)) return true;",
+        "if (FALSE_BOOLEAN_ENV_VALUES.has(normalized)) return false;",
+      ], `${v} parseBooleanEnv`);
+
+      const tower = gitShow(v, `${CORE}/features/tower/flag.ts`);
+      expect(tower).toContain("export const TOWER_FLAG_ENV = 'KIMI_CODE_EXPERIMENTAL_TOWER';");
+      expect(tower).toContain("env: TOWER_FLAG_ENV,");
+      const fork = gitShow(v, `${CORE}/session/subagent/flag.ts`);
+      expect(fork).toContain("export const SUBAGENT_FORK_FLAG_ENV = 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK';");
+      expect(fork).toContain("env: SUBAGENT_FORK_FLAG_ENV,");
+    });
+
+    test(`${v}: the scoped read and web tools are default-approved, so the hook is their only gate`, () => {
+      const policy = gitShow(v, `${CORE}/agent/permissionPolicy/policies/default-tool-approve.ts`);
+      const list = /const DEFAULT_APPROVE_TOOLS = new Set\(\[([^\]]*)\]\);/.exec(policy)?.[1];
+      expect(list, `${v}: DEFAULT_APPROVE_TOOLS not found`).toBeDefined();
+      const tools = list!.split(",").map((item) => item.trim().replace(/^'|'$/g, "")).filter(Boolean);
+      for (const tool of ["Read", "Grep", "Glob", "ReadMediaFile", "WebSearch", "FetchURL"]) {
+        expect(tools, `${v}: ${tool} must be default-approved`).toContain(tool);
+      }
+    });
+
+    test(`${v}: Bash runs each call as cd <cwd> && <command> in a fresh shell`, () => {
+      const bash = gitShow(v, `${CORE}/agent/tools/os/bash/bashTool.ts`);
+      expect(bash).toContain("const shellCommand = `cd ${shellQuote(shellCwd)} && ${command}`;");
+      const spawn = /return processService\.spawn\(env\.shellPath, \['-c', shellCommand\], (\{[^}]*\})\);/.exec(bash);
+      expect(spawn, `${v}: Bash no longer spawns ['-c', shellCommand] per call`).not.toBeNull();
+      console.log(`[tag-scan] ${v} Bash spawn options: ${spawn![1]}`);
+    });
+  }
+
+  for (const v of kimiVersionsWith("print-cancels-plan")) {
+    test(`${v}: print cancels the create-time plan enter, the setting's only consumer`, () => {
+      const print = gitShow(v, `${CLI}/cli/v2/run-v2-print.ts`);
+      orderedIndexes(print, [
+        "const session = await sessions.create({",
+        "const plan = agent.accessor.get(IAgentPlanService);",
+        "if ((await plan.status()) !== null) {",
+        "plan.cancel();",
+      ], `${v} run-v2-print`);
+
+      const section = `${CORE}/features/plan/configSection.ts`;
+      const lifecycle = `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`;
+      expect(gitFilesContaining(v, "DEFAULT_PLAN_MODE_SECTION")).toEqual([section, lifecycle]);
+      const registration = gitShow(v, section);
+      expect(registration.split("DEFAULT_PLAN_MODE_SECTION").length - 1).toBe(2);
+      expect(registration).toContain("export const DEFAULT_PLAN_MODE_SECTION = 'defaultPlanMode';");
+      expect(registration).toContain("registerConfigSection(DEFAULT_PLAN_MODE_SECTION,");
+
+      const source = gitShow(v, lifecycle);
+      const uses: number[] = [];
+      for (let at = source.indexOf("DEFAULT_PLAN_MODE_SECTION"); at !== -1; at = source.indexOf("DEFAULT_PLAN_MODE_SECTION", at + 1)) {
+        uses.push(at);
+      }
+      expect(uses, `${v}: expected the import and one read`).toHaveLength(2);
+      expect(source.slice(source.lastIndexOf("\n", uses[0]!) + 1, uses[0]!)).toBe("import { ");
+      const create = source.indexOf("  async create(opts: CreateSessionOptions)");
+      const createEnd = source.indexOf("\n  }\n", create);
+      expect(create).toBeGreaterThan(-1);
+      expect(uses[1]!, `${v}: the read must sit inside sessionLifecycleService.create()`).toBeGreaterThan(create);
+      expect(uses[1]!).toBeLessThan(createEnd);
+    });
+  }
+
+  for (const v of kimiVersionsWith("local-environment")) {
+    test(`${v}: session creation prefers the explicit environment id over the configured default`, () => {
+      const manager = gitShow(v, `${CORE}/app/sessionManager/sessionManagerService.ts`);
+      const creation = manager.slice(manager.indexOf("private async openCreation("));
+      orderedIndexes(creation, [
+        "const declarations = options.environmentId === LOCAL_ENVIRONMENT_ID",
+        "const environmentId = options.environmentId ?? declarations?.defaultId;",
+      ], `${v} sessionManagerService.openCreation`);
+    });
+  }
 });
