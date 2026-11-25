@@ -22,9 +22,8 @@ export function renderManagedJobOutput(job, finalText) {
             }
             return {
                 output: trimmed,
-                rendered: renderAskArtifact(trimmed),
+                rendered: trimmed,
                 summary: trimmed.slice(0, 160),
-                error: null,
             };
         }
         case "review":
@@ -37,7 +36,6 @@ export function renderManagedJobOutput(job, finalText) {
                 output: trimmed,
                 rendered: renderReviewArtifact(job, trimmed),
                 summary: firstMeaningfulLine(trimmed),
-                error: null,
             };
         }
         case "review_gate": {
@@ -46,7 +44,6 @@ export function renderManagedJobOutput(job, finalText) {
                 output,
                 rendered: renderReviewGateArtifact(job, output),
                 summary: output.summary,
-                error: null,
             };
         }
         case "rescue": {
@@ -58,7 +55,6 @@ export function renderManagedJobOutput(job, finalText) {
                 output: finalText,
                 rendered: renderRescueArtifact(finalText),
                 summary: firstMeaningfulLine(finalText),
-                error: null,
             };
         }
         default:
@@ -81,9 +77,6 @@ export function assertOutputModeConsistency(commandType, finalText) {
         default:
             return assertNever(outputMode);
     }
-}
-export function renderAskArtifact(output) {
-    return output.trim();
 }
 export function renderReviewArtifact(job, output) {
     const header = [

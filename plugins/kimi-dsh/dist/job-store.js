@@ -630,17 +630,6 @@ export async function withJobStore(paths, fn) {
         store?.close();
     }
 }
-/** Synchronous companion to `withJobStore` for callers that don't await inside. */
-export function withJobStoreSync(paths, fn) {
-    let store;
-    try {
-        store = new JobStore(paths);
-        return fn(store);
-    }
-    finally {
-        store?.close();
-    }
-}
 /** Parsed `hook_escapes` column for JSON envelopes: [] when NULL or unreadable. */
 export function parseHookEscapes(raw) {
     if (!raw)

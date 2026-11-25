@@ -7,15 +7,13 @@ import { RuntimeError } from "./errors.js";
 import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
 import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
 import type { PluginPaths } from "./paths.js";
-import type { JobError, ManagedCommandType } from "./types.js";
+import type { ManagedCommandType } from "./types.js";
 
-export type RenderedManagedOutput =
-  | {
-      output: string | ReviewGateOutput | null;
-      rendered: string;
-      summary: string;
-      error: JobError | null;
-    };
+export interface RenderedManagedOutput {
+  output: string | ReviewGateOutput | null;
+  rendered: string;
+  summary: string;
+}
 
 const EMPTY_SUMMARY_FALLBACK = "Rescue did not return a final message.";
 
@@ -45,9 +43,8 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
 
       return {
         output: trimmed,
-        rendered: renderAskArtifact(trimmed),
+        rendered: trimmed,
         summary: trimmed.slice(0, 160),
-        error: null,
       };
     }
     case "review":
@@ -64,7 +61,6 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
         output: trimmed,
         rendered: renderReviewArtifact(job, trimmed),
         summary: firstMeaningfulLine(trimmed),
-        error: null,
       };
     }
     case "review_gate": {
@@ -73,7 +69,6 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
         output,
         rendered: renderReviewGateArtifact(job, output),
         summary: output.summary,
-        error: null,
       };
     }
     case "rescue": {
@@ -86,7 +81,6 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
         output: finalText,
         rendered: renderRescueArtifact(finalText),
         summary: firstMeaningfulLine(finalText),
-        error: null,
       };
     }
     default:
@@ -115,10 +109,6 @@ export function assertOutputModeConsistency(commandType: ManagedCommandType, fin
     default:
       return assertNever(outputMode);
   }
-}
-
-export function renderAskArtifact(output: string): string {
-  return output.trim();
 }
 
 export function renderReviewArtifact(job: JobRecord, output: string): string {

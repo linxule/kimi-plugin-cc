@@ -34,8 +34,6 @@ import {
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
-export { describeMissingResult } from "../background-spawn.js";
-
 // "Continue working on the bug" verbs that auto-attach to the latest
 // rescue session. Documented UX trap: a prompt matching this pattern
 // will resume the most recent rescue session regardless of whether
@@ -149,8 +147,6 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
         workerKind: "rescue",
         wait: parsed.wait,
         promptEnvVar: "KIMI_PLUGIN_CC_RESCUE_PROMPT_B64",
-        reusedSessionEnvVar: "KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION",
-        reusedSession: sessionResolution.reusedSession,
         failedSummary: rescueConfig.cancellation.failedSummary,
         missingResultErrorCode: "RESCUE_RESULT_MISSING",
         spawnFailedErrorCode: "RESCUE_WORKER_SPAWN_FAILED",
@@ -176,7 +172,7 @@ export async function executeRescueJob(
   jobId: string,
   prompt: string,
   context: CommandContext,
-  options?: { workerPid?: number; reusedSession?: boolean },
+  options?: { workerPid?: number },
 ): Promise<JobRecord> {
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);

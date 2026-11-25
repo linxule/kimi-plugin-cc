@@ -287,15 +287,6 @@ export async function removeWorktree(repoRoot: string, worktreePath: string): Pr
 }
 
 /**
- * Prune stale worktree admin entries (entries whose on-disk dir is gone). Cheap;
- * run at the start of every write-swarm. Does NOT remove on-disk worktrees whose
- * dirs still exist — the caller sweeps those by path. Never throws.
- */
-export async function pruneWorktrees(repoRoot: string): Promise<void> {
-  await runGitAllowFailure(["worktree", "prune"], repoRoot);
-}
-
-/**
  * True if the working tree at `cwd` has uncommitted changes (tracked or
  * untracked). write-swarm bases its worktree on HEAD, so a dirty tree means the
  * user's in-progress work is NOT visible to the swarm — the caller warns. Returns

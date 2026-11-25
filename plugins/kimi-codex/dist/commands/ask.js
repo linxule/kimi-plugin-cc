@@ -111,8 +111,6 @@ export async function runAsk(argv, context) {
                 workerKind: "ask",
                 wait: parsed.wait,
                 promptEnvVar: "KIMI_PLUGIN_CC_ASK_PROMPT_B64",
-                reusedSessionEnvVar: "KIMI_PLUGIN_CC_ASK_REUSED_SESSION",
-                reusedSession: sessionResolution.reusedSession,
                 failedSummary: askConfig.cancellation.failedSummary,
                 missingResultErrorCode: "ASK_RESULT_MISSING",
                 spawnFailedErrorCode: "ASK_WORKER_SPAWN_FAILED",

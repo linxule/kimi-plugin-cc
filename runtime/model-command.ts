@@ -1,9 +1,9 @@
 import { runAsk } from "./commands/ask.js";
-import { notImplementedCompanionCommand } from "./commands/not-implemented.js";
 import { runPursue } from "./commands/pursue.js";
 import { runRescue } from "./commands/rescue.js";
 import { runReview } from "./commands/review.js";
 import { runSwarm } from "./commands/swarm.js";
+import { RuntimeError } from "./errors.js";
 import type { CommandContext } from "./types.js";
 
 export async function runModelCommand(argv: string[], context: CommandContext): Promise<string | undefined> {
@@ -24,8 +24,10 @@ export async function runModelCommand(argv: string[], context: CommandContext): 
           return runPursue(taskArgs, context);
         case "swarm":
           return runSwarm(taskArgs, context);
-        default:
-          notImplementedCompanionCommand(taskType ? `task ${taskType}` : "task");
+        default: {
+          const label = taskType ? `task ${taskType}` : "task";
+          throw new RuntimeError("NOT_IMPLEMENTED", `Companion subcommand ${label} is not implemented.`, label);
+        }
       }
     }
     default:

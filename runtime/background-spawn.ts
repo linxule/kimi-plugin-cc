@@ -25,8 +25,6 @@ export interface BackgroundSpawnOptions {
   workerKind: "rescue" | "ask";
   wait: boolean;
   promptEnvVar: string;
-  reusedSessionEnvVar: string;
-  reusedSession: boolean;
   failedSummary: string;
   missingResultErrorCode: string;
   spawnFailedErrorCode: string;
@@ -34,7 +32,6 @@ export interface BackgroundSpawnOptions {
   nodeBinInvalidErrorCode: string;
   waitStage: string;
   spawnStage: string;
-  extraEnv?: Record<string, string>;
 }
 
 export async function startBackgroundJob(
@@ -96,8 +93,6 @@ export async function startBackgroundJob(
       ...context.env,
       KIMI_PLUGIN_CC_WORKSPACE_CWD: context.cwd,
       [options.promptEnvVar]: b64,
-      [options.reusedSessionEnvVar]: options.reusedSession ? "1" : "0",
-      ...(options.extraEnv ?? {}),
       // A worker must reopen the exact store its parent selected, regardless of cwd.
       KIMI_PLUGIN_CC_DATA: path.resolve(paths.claudePluginData),
     },

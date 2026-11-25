@@ -1,14 +1,3 @@
-export type CompanionCommand =
-  | "setup"
-  | "review"
-  | "task"
-  | "ask"
-  | "status"
-  | "result"
-  | "cancel"
-  | "replay"
-  | "mcp";
-
 export type RuntimeCommandType =
   | "setup"
   | "review"

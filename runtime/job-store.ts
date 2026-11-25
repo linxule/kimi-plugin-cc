@@ -953,20 +953,6 @@ export async function withJobStore<T>(
   }
 }
 
-/** Synchronous companion to `withJobStore` for callers that don't await inside. */
-export function withJobStoreSync<T>(
-  paths: PluginPaths,
-  fn: (store: JobStore) => T,
-): T {
-  let store: JobStore | undefined;
-  try {
-    store = new JobStore(paths);
-    return fn(store);
-  } finally {
-    store?.close();
-  }
-}
-
 /** Parsed `hook_escapes` column for JSON envelopes: [] when NULL or unreadable. */
 export function parseHookEscapes(raw: string | null | undefined): unknown[] {
   if (!raw) return [];

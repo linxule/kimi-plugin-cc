@@ -20,8 +20,7 @@ export async function runWorker(argv: string[], context: CommandContext): Promis
       throw new RuntimeError("MISSING_RESCUE_PROMPT", "Background rescue prompt is missing.", "worker");
     }
     const prompt = Buffer.from(encodedPrompt, "base64").toString("utf8");
-    const reusedSession = context.env.KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION === "1";
-    await executeRescueJob(jobId, prompt, context, { workerPid: process.pid, reusedSession });
+    await executeRescueJob(jobId, prompt, context, { workerPid: process.pid });
     return;
   }
 
