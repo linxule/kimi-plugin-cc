@@ -3139,6 +3139,7 @@ scopeSuite("real-binary smoke: per-call read scope and network access (ask)", ()
       });
       const onlineOutcomes = streamToolOutcomes(online.records);
       const searched = onlineOutcomes.find((outcome) => outcome.name === "WebSearch");
+      console.log(`[smoke] scope-net-search result: ${String(searched?.content).slice(0, 400)}`);
       expect(searched, `the --network turn must call WebSearch; calls: ${toolKeys(onlineOutcomes)}`).toBeDefined();
       expect(searched!.content, "WebSearch must return a same-call result").toBeDefined();
       expect(isManagedDenialText(searched!.content), "the hook must not deny WebSearch under --network").toBe(false);
@@ -3212,6 +3213,9 @@ rescueFileOpsSuite("real-binary smoke: rescue mv and rm inside the workspace", (
       });
       const insideOutcomes = streamToolOutcomes(inside.records);
       console.log(`[smoke] rescue-fileops calls: ${toolKeys(insideOutcomes)}`);
+      for (const outcome of insideOutcomes) {
+        console.log(`[smoke] rescue-fileops result: ${JSON.stringify(outcome.args).slice(0, 200)} => ${String(outcome.content).slice(0, 400)}`);
+      }
       expect(allowedCall(insideOutcomes, "Bash", (args) => args.command === commands.move), "mv must run unblocked").toBeDefined();
       expect(allowedCall(insideOutcomes, "Bash", (args) => args.command === commands.remove), "rm must run unblocked").toBeDefined();
       expect(insideOutcomes.filter((outcome) => RESCUE_DENIAL.test(outcome.content ?? "") || isManagedDenialText(outcome.content)))
