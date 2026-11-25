@@ -256,6 +256,8 @@ function ambiguousPathDenial(candidate, root) {
 function pathDecision(outcome, filePath) {
     if (outcome === "allow")
         return { decision: "allow" };
+    if (outcome === "hardlink")
+        return { decision: "deny", reason: `${HARD_LINK_REASON}: ${filePath}` };
     if (outcome === "symlink") {
         return {
             decision: "deny",
@@ -303,8 +305,19 @@ export async function checkApprovedPath(workspaceRoot, rawTargetPath) {
     const nearestExistingAncestor = await findNearestExistingAncestor(path.dirname(absoluteTarget));
     const ancestorRealPath = await realpath(nearestExistingAncestor);
     const candidatePath = path.resolve(ancestorRealPath, path.relative(nearestExistingAncestor, absoluteTarget));
-    return isWithinWorkspaceOutsideGit(workspaceRoot, candidatePath) ? "allow" : "reject";
+    if (!isWithinWorkspaceOutsideGit(workspaceRoot, candidatePath))
+        return "reject";
+    return isHardLinkedFile(targetStats) ? "hardlink" : "allow";
 }
+/**
+ * A regular file with more than one link may share its inode with a file
+ * outside the workspace (hard-linked package caches), and writing it in place
+ * changes that file too. Replacing the directory entry (mv, rm) does not.
+ */
+function isHardLinkedFile(stats) {
+    return stats !== null && stats.isFile() && stats.nlink > 1;
+}
+const HARD_LINK_REASON = "rescue does not write through hard links";
 async function checkApprovedDirectory(workspaceRoot, rawCwd) {
     const candidate = path.resolve(workspaceRoot, rawCwd);
     const stats = await statIfExists(candidate);
@@ -525,12 +538,18 @@ async function validateFileOperationStage(tokens, workspaceRoot) {
                     reason: `Rescue allows cp -R of a directory only to a destination that does not exist yet: ${shown}`,
                 };
             }
+            if (command === "cp" && isHardLinkedFile(destination.stats)) {
+                return { ok: false, reason: `${HARD_LINK_REASON}: ${destination.path}` };
+            }
             if (destination.stats?.isDirectory()) {
                 for (const source of sources) {
                     const target = path.join(destination.path, path.basename(source.path));
                     const targetStats = await statIfExists(target);
                     if (targetStats?.isSymbolicLink()) {
                         return { ok: false, reason: `Rescue rejects ${command} onto a symlink: ${target}` };
+                    }
+                    if (command === "cp" && isHardLinkedFile(targetStats)) {
+                        return { ok: false, reason: `${HARD_LINK_REASON}: ${target}` };
                     }
                     if (!isWithinWorkspaceOutsideAnyGit(workspaceRoot, target)) {
                         return { ok: false, reason: `Rescue rejects ${command} into .git: ${target}` };

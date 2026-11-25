@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -291,6 +291,9 @@ describe("evaluateRescueHookRequest", () => {
         await writeFile(path.join(root, "odd-case", "a", ".GIT."), "x");
         await mkdir(path.join(root, "via-link"), { recursive: true });
         await symlink(path.join(root, "two"), path.join(root, "via-link", "to-two"));
+        await link(path.join(outside, "victim.txt"), path.join(root, "hard.txt"));
+        await mkdir(path.join(root, "hdir"), { recursive: true });
+        await link(path.join(outside, "victim.txt"), path.join(root, "hdir", "a.txt"));
         await run(root, outside);
       } finally {
         await cleanupTestPath(fixture);
@@ -461,6 +464,30 @@ describe("evaluateRescueHookRequest", () => {
       // cwd validation still runs first
       { command: "rm <root>/a.txt", cwd: "link-out", reason: "Bash cwd symlinks" },
     ];
+
+    test("refuses writes through a hard-linked file and keeps mv, rm and plain writes", async () => {
+      await withFileOpFixture(async (root, outside) => {
+        const hardLink = { decision: "deny" as const, reason: expect.stringContaining("rescue does not write through hard links") };
+        for (const tool of ["Write", "Edit", "MultiEdit"]) {
+          expect(await evaluateRescueHookRequest(root, tool, { path: "hard.txt" })).toEqual(hardLink);
+          expect(await evaluateRescueHookRequest(root, tool, { path: path.join(root, "hdir", "a.txt") })).toEqual(hardLink);
+          expect(await evaluateRescueHookRequest(root, tool, { path: "a.txt" })).toEqual({ decision: "allow" });
+        }
+        expect(await decide(root, outside, { command: "cp <root>/a.txt <root>/hard.txt" })).toEqual(hardLink);
+        expect(await decide(root, outside, { command: "cp -f <root>/a.txt <root>/hdir" })).toEqual(hardLink);
+        expect(await decide(root, outside, { command: "cp <root>/a.txt <root>/hdir/" })).toEqual(hardLink);
+        for (const command of [
+          "cp <root>/hard.txt <root>/copy.txt",
+          "cp <root>/a.txt <root>/dir",
+          "mv <root>/a.txt <root>/hard.txt",
+          "mv <root>/hard.txt <root>/moved.txt",
+          "mv <root>/a.txt <root>/hdir",
+          "rm <root>/hard.txt",
+        ]) {
+          expect(await decide(root, outside, { command })).toEqual({ decision: "allow" });
+        }
+      });
+    });
 
     test.each(refused)("refuses $command", async (testCase) => {
       await withFileOpFixture(async (root, outside) => {
