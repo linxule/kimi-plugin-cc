@@ -28,7 +28,6 @@ export interface CodexSkillSpec {
   name: string;
   title: string;
   description: string;
-  displayName: string;
   shortDescription: string;
   defaultPrompt: string;
   command: string;
@@ -375,11 +374,19 @@ const MODEL_SELECTION_GUIDANCE = [
   "For subscription auth, guide native Kimi `/login`; for API keys or other providers, guide native `/provider` and have the user enter secrets there. Only an explicit saved-default request calls for native `/model`. Re-list after setup; use `setup --check` for hook readiness. Swarm `-m` selects the coordinator; `[secondary_model]` can select different child models."
 ] as const;
 
+const BUDGET_GUIDANCE =
+  "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).";
+
+const BACKGROUND_COMPLETION_GUIDANCE =
+  "A background job finishes silently: its completion is observable only through `companion.sh status` / `result <jobId>`, never through a notification. Re-check on your own schedule and never read silence as still running; a budget timeout leaves partial output in the artifact.";
+
+const SWARM_SETUP_REMEDY =
+  "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.";
+
 export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-ask",
     title: "Kimi Ask",
-    displayName: "Kimi Ask",
     shortDescription: "Ask Kimi a read-only repo question",
     defaultPrompt: "Use $kimi-ask to explain the current repository flow.",
     implicit: true,
@@ -389,10 +396,10 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       "Ask Kimi a read-only free-form question about the current repository. Use for prose explanations, flow tracing, module comparisons, or conceptual reasoning when the user wants an independent Kimi answer rather than implementation.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
-      "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).",
+      BUDGET_GUIDANCE,
       "Preserve the user's question and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested.",
       "Choose `--background` for broad or long-running questions and return the job id that the companion prints.",
-      "A background job finishes silently: its completion is observable only through `companion.sh status` / `result <jobId>`, never through a notification. Re-check on your own schedule and never read silence as still running; a budget timeout leaves partial output in the artifact.",
+      BACKGROUND_COMPLETION_GUIDANCE,
       "If the companion reports ASK_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
       "Return companion stdout verbatim; do not summarize or re-voice Kimi's prose.",
     ],
@@ -400,7 +407,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-review",
     title: "Kimi Review",
-    displayName: "Kimi Review",
     shortDescription: "Run Kimi read-only code review",
     defaultPrompt: "Use $kimi-review to review the current working tree.",
     implicit: true,
@@ -410,7 +416,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       "Run an independent read-only Kimi review over the current working tree, including untracked files, or a branch diff. Use when the user wants a second reviewer for defects, regressions, or implementation risks, not edits.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
-      "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).",
+      BUDGET_GUIDANCE,
       "Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, and any trailing focus text only.",
       "Do not invent file/path flags; working-tree review supplies Git status and diff context, with untracked files read from the workspace, plus optional focus text. `--base` keeps the branch diff as its scope.",
       "If the companion reports REVIEW_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
@@ -420,7 +426,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-challenge",
     title: "Kimi Challenge",
-    displayName: "Kimi Challenge",
     shortDescription: "Challenge a design or approach",
     defaultPrompt: "Use $kimi-challenge to stress-test this approach.",
     implicit: true,
@@ -430,7 +435,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       "Run a read-only adversarial Kimi challenge review that questions assumptions, design choices, and tradeoffs. Use when the user wants pushback on whether the approach is right, not a defect-only review.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
-      "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).",
+      BUDGET_GUIDANCE,
       "Preserve the user's adversarial framing as trailing focus text.",
       "Do not pass background/wait flags; the runtime rejects them for challenge.",
       "If the companion reports CHALLENGE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
@@ -440,7 +445,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-rescue",
     title: "Kimi Rescue",
-    displayName: "Kimi Rescue",
     shortDescription: "Delegate a bounded Kimi fix",
     defaultPrompt: "Use $kimi-rescue to delegate this bounded implementation task.",
     implicit: false,
@@ -450,17 +454,16 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       "Delegate a bounded write-capable investigation or implementation task to Kimi through the companion runtime. Use only when explicitly invoked or when the user clearly asks to hand off a substantial fix to Kimi.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
-      "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).",
+      BUDGET_GUIDANCE,
       "Preserve the task text and constraints with minimal reframing.",
       "Use background mode for long-running investigations and report the job id for status/result/cancel.",
-      "A background job finishes silently: its completion is observable only through `companion.sh status` / `result <jobId>`, never through a notification. Re-check on your own schedule and never read silence as still running; a budget timeout leaves partial output in the artifact.",
+      BACKGROUND_COMPLETION_GUIDANCE,
       "Do not inspect or edit the repository yourself as part of the skill; the companion result is the source of truth.",
     ],
   },
   {
     name: "kimi-pursue",
     title: "Kimi Pursue",
-    displayName: "Kimi Pursue",
     shortDescription: "Run autonomous Kimi goal mode",
     defaultPrompt: "Use $kimi-pursue to let Kimi pursue this objective with a budget.",
     implicit: false,
@@ -478,7 +481,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-swarm",
     title: "Kimi Swarm",
-    displayName: "Kimi Swarm",
     shortDescription: "Fan out Kimi read-only review",
     defaultPrompt: "Use $kimi-swarm to fan out a read-only review across these targets.",
     implicit: false,
@@ -492,14 +494,13 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       "Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.",
       `On exact Kimi Code ${BOUNDED_SWARM_RELEASES}, concurrency 1 runs one direct worker; larger values use bounded sequential waves. Older certified versions retain their normal-launch limit and recovery limitation.`,
       "The bound counts simultaneous Kimi child-agent turns, not OS subprocesses. Fresh-only waves need at least two entries; group odd target counts into disjoint worker assignments.",
-      "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+      SWARM_SETUP_REMEDY,
       "Return the consolidated companion report verbatim.",
     ],
   },
   {
     name: "kimi-swarm-write",
     title: "Kimi Swarm Write",
-    displayName: "Kimi Swarm Write",
     shortDescription: "Fan out patch-only Kimi edits",
     defaultPrompt: "Use $kimi-swarm-write to fan out these disjoint edits into a patch.",
     implicit: false,
@@ -514,14 +515,13 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       `On exact Kimi Code ${BOUNDED_SWARM_RELEASES}, the default concurrency 1 runs a single worker in the throwaway worktree. Explicit concurrency 2 or higher uses bounded waves; every mode returns a patch for review.`,
       "Parallel Kimi workers cannot background shell commands; native foreground Bash has a 60-second default and 300-second maximum timeout. Choose concurrency 1 for longer tests. Owned process cleanup must finish before patch capture; failed verification retains the worktree instead.",
       "The runtime rejects `--background`, but detaching your own shell call is expected: a fan-out routinely outlives a foreground timeout, and the run is patch-only and worktree-confined. Keep `--budget` and `--max-concurrency` finite. To stop a run, use `companion.sh cancel` with NO id — it targets the latest running job for the repo, and no UUID crosses you or the user (a detached run prints nothing at launch; the id first arrives with the final report). Prefer that over an interrupt: an interrupt gives the companion only ~1.35s before SIGKILL, less than its teardown plus `git diff --binary` patch capture, so interrupting can lose the patch.",
-      "If the companion reports SWARM_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+      SWARM_SETUP_REMEDY,
       "Return the patch path and companion output verbatim; do not apply the patch unless the user separately asks.",
     ],
   },
   {
     name: "kimi-setup",
     title: "Kimi Setup",
-    displayName: "Kimi Setup",
     shortDescription: "Check hooks, models and provider setup",
     defaultPrompt: "Use $kimi-setup to check the local Kimi companion setup.",
     implicit: false,
@@ -542,7 +542,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-status",
     title: "Kimi Status",
-    displayName: "Kimi Status",
     shortDescription: "Show Kimi job status",
     defaultPrompt: "Use $kimi-status to show the latest Kimi job status.",
     implicit: false,
@@ -558,7 +557,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-result",
     title: "Kimi Result",
-    displayName: "Kimi Result",
     shortDescription: "Return a Kimi job result",
     defaultPrompt: "Use $kimi-result to return the latest Kimi job result.",
     implicit: false,
@@ -574,7 +572,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-cancel",
     title: "Kimi Cancel",
-    displayName: "Kimi Cancel",
     shortDescription: "Cancel an active Kimi job",
     defaultPrompt: "Use $kimi-cancel to cancel this active Kimi job.",
     implicit: false,
@@ -590,7 +587,6 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-replay",
     title: "Kimi Replay",
-    displayName: "Kimi Replay",
     shortDescription: "Replay a Kimi event log",
     defaultPrompt: "Use $kimi-replay to re-render this Kimi job event log.",
     implicit: false,

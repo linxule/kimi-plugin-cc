@@ -401,7 +401,7 @@ function renderSkillMarkdown(skill: CodexSkillSpec): string {
 function renderOpenAiYaml(skill: CodexSkillSpec): string {
   return [
     "interface:",
-    `  display_name: ${yamlDoubleQuote(skill.displayName)}`,
+    `  display_name: ${yamlDoubleQuote(skill.title)}`,
     `  short_description: ${yamlDoubleQuote(skill.shortDescription)}`,
     `  default_prompt: ${yamlDoubleQuote(skill.defaultPrompt)}`,
     "policy:",
