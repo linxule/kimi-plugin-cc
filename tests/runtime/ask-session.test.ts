@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsk } from "../../runtime/commands/ask.js";
+import { rawTaskTextFromSubmittedPrompt } from "../../runtime/commands/repair-sessions.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { JobStore } from "../../runtime/job-store.js";
 import { runStatus } from "../../runtime/commands/status.js";
@@ -426,6 +427,9 @@ describe("ask session resume", () => {
       const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
       expect(state.title).toBe(`Kimi Ask: ${continuation}`);
       expect(state.lastPrompt).toBe(continuation);
+      const lines = (await readFile(invocationPath, "utf8")).trim().split("\n");
+      const argv = (JSON.parse(lines[lines.length - 1]!) as { argv: string[] }).argv;
+      expect(rawTaskTextFromSubmittedPrompt("ask", argv[argv.indexOf("-p") + 1]!)).toBe(continuation);
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);

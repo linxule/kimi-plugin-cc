@@ -340,7 +340,7 @@ function buildRescuePrompt(prompt: string | undefined, reusedSession: boolean): 
   throw new RuntimeError("INVALID_ARGS", "rescue requires a task description.", "rescue.parse");
 }
 
-function stripRescuePromptPrefix(prompt: string): string {
+export function stripRescuePromptPrefix(prompt: string): string {
   return prompt.startsWith(RESCUE_PROMPT_PREFIX) ? prompt.slice(RESCUE_PROMPT_PREFIX.length) : prompt;
 }
 

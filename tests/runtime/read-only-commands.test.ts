@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { runAsk } from "../../runtime/commands/ask.js";
 import { runReview } from "../../runtime/commands/review.js";
+import { rawTaskTextFromSubmittedPrompt } from "../../runtime/commands/repair-sessions.js";
 import type { CommandContext } from "../../runtime/types.js";
 import {
   cleanupTestPath,
@@ -163,8 +164,9 @@ describe("read-only command handlers", () => {
     const kimiHome = await createTestPluginDataRoot(`${commandType}-preview-kimi-home`);
     const repoRoot = await createGitRepoFixture(`${commandType}-preview-git`);
     const sessionId = "session_cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd";
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
     const env = {
-      ...makeMockEnv(pluginDataRoot, `${commandType}-success`, path.join(pluginDataRoot, "invocation.jsonl")),
+      ...makeMockEnv(pluginDataRoot, `${commandType}-success`, invocationPath),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
     };
@@ -176,6 +178,9 @@ describe("read-only command handlers", () => {
       await runReview([...focus], makeContext(repoRoot, env), commandType);
       const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
       expect(state).toMatchObject({ title, titleKind: "replaceable", lastPrompt: preview });
+      // repair-sessions derives the same preview from the verified submitted prompt.
+      const argv = (JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] }).argv;
+      expect(rawTaskTextFromSubmittedPrompt(commandType, argv[argv.indexOf("-p") + 1]!)).toBe(preview);
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(kimiHome);

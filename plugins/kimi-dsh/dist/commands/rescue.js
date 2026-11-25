@@ -257,7 +257,7 @@ function buildRescuePrompt(prompt, reusedSession) {
     }
     throw new RuntimeError("INVALID_ARGS", "rescue requires a task description.", "rescue.parse");
 }
-function stripRescuePromptPrefix(prompt) {
+export function stripRescuePromptPrefix(prompt) {
     return prompt.startsWith(RESCUE_PROMPT_PREFIX) ? prompt.slice(RESCUE_PROMPT_PREFIX.length) : prompt;
 }
 async function resolveRescueSession(store, repoId, parsed) {

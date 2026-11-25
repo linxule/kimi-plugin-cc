@@ -251,7 +251,7 @@ function buildAskPrompt(question, reusedSession) {
     }
     throw new RuntimeError("INVALID_ARGS", "ask requires a question after the flags.", "ask.parse");
 }
-function askPromptSubject(prompt) {
+export function askPromptSubject(prompt) {
     if (prompt.startsWith(ASK_PROMPT_PREFIX))
         return prompt.slice(ASK_PROMPT_PREFIX.length);
     return prompt === ASK_RESUME_PROMPT ? ASK_CONTINUE_TASK : prompt;

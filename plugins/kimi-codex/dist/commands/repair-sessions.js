@@ -8,6 +8,10 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt } from "../jobs.js";
 import { resolvePluginPaths } from "../paths.js";
 import { syncKimiSessionTitle } from "../session-title.js";
+import { askPromptSubject } from "./ask.js";
+import { buildGoalPrompt } from "./pursue.js";
+import { stripRescuePromptPrefix } from "./rescue.js";
+import { buildSwarmPrompt, buildSwarmWritePrompt } from "./swarm.js";
 // Repair is deliberately finite and local. Stream logs may be very large, but
 // the spawn record follows the invocation header: read only a bounded prefix.
 const MAX_JOBS = 1000;
@@ -25,27 +29,46 @@ export async function runRepairSessions(argv, context) {
     const paths = resolvePluginPaths(context.env);
     const repoId = all ? undefined : (await resolveRepoIdentity(context.cwd)).repoId;
     const jobs = await readRepairJobs(paths.stateDbPath, repoId);
-    const sessions = new Set();
-    const results = [];
+    // Newest job first per session: it supplies the preview, while every
+    // verified prompt of the session counts as the plugin's own.
+    const sessions = new Map();
     for (const job of jobs) {
-        if (sessions.has(job.kimi_session_id))
-            continue;
-        sessions.add(job.kimi_session_id);
-        const promptText = await readVerifiedPrompt(job, paths.logsDir, paths.worktreesDir);
-        const status = promptText === undefined
-            ? "unavailable-verified-prompt"
-            : await syncKimiSessionTitle({
+        const sessionJobs = sessions.get(job.kimi_session_id);
+        if (sessionJobs)
+            sessionJobs.push(job);
+        else
+            sessions.set(job.kimi_session_id, [job]);
+    }
+    const results = [];
+    for (const [sessionId, [job, ...earlier]] of sessions) {
+        const prompt = await readVerifiedPrompt(job, paths.logsDir, paths.worktreesDir);
+        let status = "unavailable-verified-prompt";
+        if (prompt !== undefined) {
+            const raw = rawTaskTextFromSubmittedPrompt(job.operation_kind, prompt);
+            const own = [prompt];
+            if (raw !== undefined) {
+                for (const other of earlier) {
+                    const otherPrompt = await readVerifiedPrompt(other, paths.logsDir, paths.worktreesDir);
+                    if (otherPrompt !== undefined)
+                        own.push(otherPrompt);
+                }
+            }
+            status = await syncKimiSessionTitle({
                 env: context.env,
                 cwd: job.cwd,
-                sessionId: job.kimi_session_id,
+                sessionId,
                 title: "",
-                promptText,
+                // Without an exact raw-text derivation, only a missing preview is
+                // filled, with the verified prompt itself.
+                promptText: raw ?? prompt,
+                submittedPrompt: raw === undefined ? undefined : own,
                 dryRun: !apply,
                 preserveTitle: true,
                 requireNativeV2: true,
                 stderr: context.stderr,
             });
-        results.push({ job_id: job.job_id, session_id: job.kimi_session_id, status });
+        }
+        results.push({ job_id: job.job_id, session_id: sessionId, status });
     }
     const counts = {};
     for (const { status } of results)
@@ -157,4 +180,87 @@ async function readVerifiedPrompt(job, logsDir, worktreesDir) {
     catch {
         return undefined;
     }
+}
+const TASK_SLOT = "\u0000kimi-plugin-cc-task\u0000";
+/**
+ * Recover the raw task text a live run previews from its verified submitted
+ * prompt. Derivations are exact or absent: prompts from other plugin releases,
+ * ambiguous parameter choices and unknown operations return undefined.
+ */
+export function rawTaskTextFromSubmittedPrompt(operationKind, prompt) {
+    switch (operationKind) {
+        case "ask":
+            return strippedOrUndefined(prompt, askPromptSubject(prompt));
+        case "rescue":
+            return strippedOrUndefined(prompt, stripRescuePromptPrefix(prompt));
+        case "pursue":
+            return uniqueInversion(prompt, [undefined, ...numbersAfter(prompt, /at most (\d+) turns/g)]
+                .map((turns) => (task) => buildGoalPrompt(task, turns)));
+        case "swarm":
+        case "swarm-write": {
+            const build = operationKind === "swarm" ? buildSwarmPrompt : buildSwarmWritePrompt;
+            const caps = [undefined, ...numbersAfter(prompt, /at most (\d+) subagents/g)];
+            const waves = [undefined, 1, ...numbersAfter(prompt, /at most (\d+) entries/g)];
+            return uniqueInversion(prompt, caps.flatMap((cap) => waves.map((wave) => (task) => build(task, cap, wave))));
+        }
+        case "review":
+        case "challenge":
+            return reviewTaskText(prompt);
+        default:
+            return undefined;
+    }
+}
+function strippedOrUndefined(prompt, stripped) {
+    return stripped !== prompt && stripped.trim() ? stripped : undefined;
+}
+function numbersAfter(prompt, pattern) {
+    return [...new Set([...prompt.matchAll(pattern)].map((match) => Number(match[1])))];
+}
+/**
+ * Split each candidate template around the task slot and require an exact
+ * rebuild. The template explaining the most prompt text wins (without --turns
+ * the turn guidance would otherwise read as objective); a tie is ambiguous.
+ */
+function uniqueInversion(prompt, builders) {
+    let found = new Set();
+    let bestTemplate = -1;
+    for (const build of builders) {
+        try {
+            const template = build(TASK_SLOT);
+            const at = template.indexOf(TASK_SLOT);
+            if (at < 0)
+                continue;
+            const head = template.slice(0, at);
+            const tail = template.slice(at + TASK_SLOT.length);
+            if (prompt.length < head.length + tail.length || !prompt.startsWith(head) || !prompt.endsWith(tail))
+                continue;
+            const task = prompt.slice(head.length, prompt.length - tail.length);
+            if (!task.trim() || build(task) !== prompt || head.length + tail.length < bestTemplate)
+                continue;
+            if (head.length + tail.length > bestTemplate)
+                found = new Set();
+            bestTemplate = head.length + tail.length;
+            found.add(task);
+        }
+        catch {
+            continue;
+        }
+    }
+    return found.size === 1 ? [...found][0] : undefined;
+}
+// Mirrors the review/challenge preview built at the review.ts sync call; the
+// review command tests pin the two against real submitted prompts.
+const REVIEW_PROMPT_START = "Perform a read-only code review of the supplied repository changes.\n";
+const REVIEW_TARGET_LINES = /\n\nTarget: (current working tree changes|branch diff against [^\n]+)\nScope: (?:branch diff only; all working-tree changes are out of scope|current working tree, including tracked and untracked changes)\nRepository root: /;
+const REVIEW_FOCUS_LINE = "\nReview focus: ";
+function reviewTaskText(prompt) {
+    if (!prompt.startsWith(REVIEW_PROMPT_START))
+        return undefined;
+    const target = REVIEW_TARGET_LINES.exec(prompt);
+    if (!target)
+        return undefined;
+    const header = prompt.slice(0, target.index);
+    const focusAt = header.indexOf(REVIEW_FOCUS_LINE);
+    const focus = focusAt < 0 ? undefined : header.slice(focusAt + REVIEW_FOCUS_LINE.length);
+    return `Review target: ${target[1]}${focus ? `. Focus: ${focus}` : ""}`;
 }

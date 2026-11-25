@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { runRepairSessions } from "../../runtime/commands/repair-sessions.js";
+import { rawTaskTextFromSubmittedPrompt, runRepairSessions } from "../../runtime/commands/repair-sessions.js";
+import { buildGoalPrompt } from "../../runtime/commands/pursue.js";
+import { buildSwarmPrompt, buildSwarmWritePrompt } from "../../runtime/commands/swarm.js";
+import { promptMetadataText } from "../../runtime/session-title.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { digestPrompt } from "../../runtime/jobs.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
@@ -31,8 +34,8 @@ async function fixture() {
   db.close();
   const repoId = (await resolveRepoIdentity(cwd)).repoId;
   const context: CommandContext = { cwd, env, stdout: process.stdout, stderr: process.stderr };
-  async function seed(id: string, overrides: Record<string, string | null> = {}, state: Record<string, unknown> = {}, spawnOverrides: Record<string, unknown> = {}) {
-    const prompt = `Investigate ${id} with the original user prompt.\nDo not substitute the answer summary.`;
+  async function seed(id: string, overrides: Record<string, string | null> = {}, state: Record<string, unknown> = {}, spawnOverrides: Record<string, unknown> = {}, submitted?: string) {
+    const prompt = submitted ?? `Investigate ${id} with the original user prompt.\nDo not substitute the answer summary.`;
     const sessionId = `session-${id}`;
     const sessionDir = path.join(home, "sessions", "workspace", sessionId);
     await mkdir(sessionDir, { recursive: true });
@@ -234,5 +237,111 @@ describe("repair-sessions", () => {
     for (const args of [["--bogus"], ["--apply", "--apply"], ["session-id"]]) {
       await expect(runRepairSessions(args, f.context)).rejects.toMatchObject({ code: "INVALID_ARGS" });
     }
+  });
+
+  test("replaces a preview that is the plugin's own prefixed prompt, under a distinct status", async () => {
+    const f = await fixture();
+    const own = await f.seed("own", {}, {}, {}, ASK_PREFIX + "Where are sessions stored?");
+    await writeFile(own.statePath, JSON.stringify({ version: 2, title: "My custom title", isCustomTitle: true,
+      lastPrompt: promptMetadataText(own.prompt) }));
+    const truncated = await f.seed("truncated", { operation_kind: "rescue", command_type: "rescue" }, {}, {}, RESCUE_PREFIX + "Fix the flaky test");
+    await writeFile(truncated.statePath, JSON.stringify({ version: 2, title: "Native generated title", titleKind: "generated",
+      lastPrompt: "Follow repository instructions and inspect" }));
+    const foreign = await f.seed("foreign", {}, { lastPrompt: "Typed later in Kimi Desktop" }, {}, ASK_PREFIX + "Another question");
+    const missing = await f.seed("missing", {}, {}, {}, ASK_PREFIX + "A question with no preview");
+    const before = await readFile(own.statePath, "utf8");
+    const preview = parse(await runRepairSessions([], f.context));
+    expect(preview.counts).toEqual({ "would-replace-preview": 2, "would-update": 1, unchanged: 1 });
+    expect(await readFile(own.statePath, "utf8")).toBe(before);
+    const applied = parse(await runRepairSessions(["--apply"], f.context));
+    expect(applied.counts).toEqual({ "preview-replaced": 2, updated: 1, unchanged: 1 });
+    expect(JSON.parse(await readFile(own.statePath, "utf8"))).toEqual({ version: 2, title: "My custom title",
+      isCustomTitle: true, lastPrompt: "Where are sessions stored?" });
+    expect(JSON.parse(await readFile(truncated.statePath, "utf8"))).toMatchObject({ title: "Native generated title",
+      titleKind: "generated", lastPrompt: "Fix the flaky test" });
+    expect(JSON.parse(await readFile(foreign.statePath, "utf8")).lastPrompt).toBe("Typed later in Kimi Desktop");
+    expect(JSON.parse(await readFile(missing.statePath, "utf8")).lastPrompt).toBe("A question with no preview");
+    expect(parse(await runRepairSessions(["--apply"], f.context)).counts).toEqual({ unchanged: 4 });
+  });
+
+  test("an earlier run's own prompt in a resumed session is replaced by the newest run's raw text", async () => {
+    const f = await fixture();
+    const first = await f.seed("first", { updated_at: "2026-09-01T00:00:00Z" }, {}, {}, ASK_PREFIX + "First question");
+    await f.seed("second", { kimi_session_id: first.sessionId }, {}, {}, ASK_PREFIX + "Follow-up question");
+    await writeFile(first.statePath, JSON.stringify({ version: 2, title: "Manual", titleKind: "custom",
+      lastPrompt: promptMetadataText(first.prompt) }));
+    const result = parse(await runRepairSessions(["--apply"], f.context));
+    expect(result).toMatchObject({ sessions: 1, counts: { "preview-replaced": 1 } });
+    expect(result.results[0]!.job_id).toBe("second");
+    expect(JSON.parse(await readFile(first.statePath, "utf8")).lastPrompt).toBe("Follow-up question");
+  });
+
+  test("keeps an own-prompt preview when no exact raw text can be derived", async () => {
+    const f = await fixture();
+    const session = await f.seed("underivable");
+    await writeFile(session.statePath, JSON.stringify({ version: 2, title: "Manual", titleKind: "custom",
+      lastPrompt: promptMetadataText(session.prompt) }));
+    const before = await readFile(session.statePath, "utf8");
+    expect(parse(await runRepairSessions(["--apply"], f.context)).counts).toEqual({ unchanged: 1 });
+    expect(await readFile(session.statePath, "utf8")).toBe(before);
+  });
+});
+
+const ASK_PREFIX = [
+  "Answer directly in free-form prose.",
+  "For repository-dependent questions, inspect the relevant code with the allowed read tools and cite file:line for concrete code claims where useful.",
+  "Distinguish evidence from inference and state unknowns explicitly.",
+  "Do not use shell/Bash, writes, background tasks, or delegated operations.",
+  "Do not emit JSON unless the user explicitly asks for it.",
+  "Do not narrate tool progress; make the final response self-contained.",
+  "",
+  "User question:",
+  "",
+].join("\n");
+const RESCUE_PREFIX = [
+  "Follow repository instructions and inspect the current state before editing.",
+  "Implement the smallest complete change that satisfies the task instead of stopping at a plan.",
+  "Do not mutate git state.",
+  "Run proportionate relevant checks, and never claim unrun checks passed.",
+  "Do not narrate progress.",
+  "Finish with a self-contained report of changed files, verification commands and results, and unfinished work or blockers.",
+  "",
+  "Rescue task:",
+  "",
+].join("\n");
+
+describe("rawTaskTextFromSubmittedPrompt", () => {
+  test("recovers ask and rescue tasks, including the bare-resume continuation", () => {
+    expect(rawTaskTextFromSubmittedPrompt("ask", ASK_PREFIX + "Where are sessions stored?")).toBe("Where are sessions stored?");
+    expect(rawTaskTextFromSubmittedPrompt("ask", ASK_PREFIX.replace(/\n\nUser question:\n\n$/, "\n\n") +
+      "Continue the previous ask conversation and answer any outstanding question."))
+      .toBe("Continue the previous ask conversation and answer any outstanding question.");
+    expect(rawTaskTextFromSubmittedPrompt("rescue", RESCUE_PREFIX + "Fix the flaky test")).toBe("Fix the flaky test");
+  });
+
+  test.each([
+    [undefined], [5],
+  ])("inverts the pursue goal prompt exactly (turns %p)", (turns) => {
+    const objective = "finish the report and run the tests";
+    expect(rawTaskTextFromSubmittedPrompt("pursue", buildGoalPrompt(objective, turns))).toBe(objective);
+  });
+
+  test.each([
+    [undefined, undefined], [3, undefined], [undefined, 4], [3, 4], [undefined, 1],
+  ])("inverts read and write swarm prompts exactly (cap %p, wave %p)", (cap, wave) => {
+    const objective = "audit every handler\nunder runtime/commands for at most 2 entries";
+    expect(rawTaskTextFromSubmittedPrompt("swarm", buildSwarmPrompt(objective, cap, wave))).toBe(objective);
+    expect(rawTaskTextFromSubmittedPrompt("swarm-write", buildSwarmWritePrompt(objective, cap, wave))).toBe(objective);
+  });
+
+  test("fails closed on prompts from other templates, edited prompts and unknown operations", () => {
+    expect(rawTaskTextFromSubmittedPrompt("ask", "Investigate this without the plugin preamble")).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("ask", ASK_PREFIX)).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("rescue", ASK_PREFIX + "question")).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("pursue", "/goal --  spaced  objective")).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("swarm", buildSwarmPrompt("objective") + "\nextra")).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("swarm", buildSwarmWritePrompt("objective"))).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("review", "Review this please")).toBeUndefined();
+    expect(rawTaskTextFromSubmittedPrompt("unsupported-future-operation", ASK_PREFIX + "x")).toBeUndefined();
   });
 });

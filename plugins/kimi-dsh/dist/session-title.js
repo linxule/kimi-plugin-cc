@@ -55,7 +55,7 @@ function isOwnSubmittedPrompt(existing, submitted) {
     const current = normalizeTitleFragment(existing);
     if (!current)
         return false;
-    return [normalizeTitleFragment(submitted), sanitizePromptMetadata(submitted)].some((own) => own.length > 0 && (current === own || own.startsWith(current) || current.startsWith(own)));
+    return (typeof submitted === "string" ? [submitted] : submitted).some((prompt) => [normalizeTitleFragment(prompt), sanitizePromptMetadata(prompt)].some((own) => own.length > 0 && (current === own || own.startsWith(current) || current.startsWith(own))));
 }
 export function shortenForTitle(text, maxLength) {
     const normalized = normalizeTitleFragment(text);
@@ -138,10 +138,12 @@ export async function syncKimiSessionTitle(options) {
     const generatedTitle = state.titleKind === "generated";
     const next = { ...state };
     const preview = options.promptText === undefined ? undefined : promptMetadataText(options.promptText);
-    if (nativeV2 && preview && (typeof state.lastPrompt !== "string" || !state.lastPrompt.trim() ||
-        isOwnSubmittedPrompt(state.lastPrompt, options.submittedPrompt))) {
+    const blankPreview = typeof state.lastPrompt !== "string" || !state.lastPrompt.trim();
+    const ownPreview = !blankPreview && isOwnSubmittedPrompt(state.lastPrompt, options.submittedPrompt);
+    if (nativeV2 && preview && (blankPreview || ownPreview)) {
         next.lastPrompt = preview;
     }
+    const replacedPreview = nativeV2 && ownPreview && next.lastPrompt !== state.lastPrompt;
     if (!options.preserveTitle && !customTitle && !generatedTitle) {
         next.title = promptMetadataText(options.title)?.slice(0, KIMI_SESSION_TITLE_MAX_LENGTH) ?? "Kimi Session";
         // Native UI generation must remain eligible; a deterministic fallback is not
@@ -152,7 +154,7 @@ export async function syncKimiSessionTitle(options) {
     }
     const changed = JSON.stringify(next) !== JSON.stringify(state);
     if (options.dryRun)
-        return changed ? "would-update" : "unchanged";
+        return !changed ? "unchanged" : replacedPreview ? "would-replace-preview" : "would-update";
     try {
         if (changed && !(await writeStateFileAtomic(statePath, `${JSON.stringify(next, null, 2)}\n`, stateFileMode, stateRead.text))) {
             warn(options.stderr, "session metadata sync skipped: state changed concurrently; retry after the session is idle");
@@ -174,7 +176,9 @@ export async function syncKimiSessionTitle(options) {
             return "index-failed";
         }
     }
-    return changed ? "updated" : customTitle && !options.preserveTitle ? "custom-title" : "unchanged";
+    if (changed)
+        return replacedPreview ? "preview-replaced" : "updated";
+    return customTitle && !options.preserveTitle ? "custom-title" : "unchanged";
 }
 function findSessionIndexEntry(indexText, sessionId, stderr) {
     for (const line of indexText.split(/\r?\n/)) {

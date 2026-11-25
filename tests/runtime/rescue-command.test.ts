@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { runCancel } from "../../runtime/commands/cancel.js";
 import { runRescue } from "../../runtime/commands/rescue.js";
+import { rawTaskTextFromSubmittedPrompt } from "../../runtime/commands/repair-sessions.js";
 import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
 import { JobStore } from "../../runtime/job-store.js";
@@ -144,6 +145,8 @@ describe("rescue command lifecycle", () => {
       const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
       expect(state).toMatchObject({ title: "Kimi Rescue: Implement the requested fix", titleKind: "replaceable",
         lastPrompt: "Implement the requested fix" });
+      const argv = (JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] }).argv;
+      expect(rawTaskTextFromSubmittedPrompt("rescue", promptFromArgv(argv))).toBe("Implement the requested fix");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);

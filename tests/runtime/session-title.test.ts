@@ -604,7 +604,9 @@ describe("native-v2 preview shows the raw task text", () => {
   }
 
   test("fills a missing or blank preview with the raw text", async () => {
-    expect((await syncWith({})).state.lastPrompt).toBe(raw);
+    const filled = await syncWith({});
+    expect(filled.result).toBe("updated");
+    expect(filled.state.lastPrompt).toBe(raw);
     expect((await syncWith({ lastPrompt: " \n " })).state.lastPrompt).toBe(raw);
   });
 
@@ -616,7 +618,7 @@ describe("native-v2 preview shows the raw task text", () => {
     ["submitted prompt followed by more text", `${kimiStored} [image]`],
   ])("replaces the plugin's own submitted prompt (%s)", async (_label, existing) => {
     const { result, state } = await syncWith({ lastPrompt: existing });
-    expect(result).toBe("updated");
+    expect(result).toBe("preview-replaced");
     expect(state.lastPrompt).toBe(raw);
   });
 
@@ -637,6 +639,13 @@ describe("native-v2 preview shows the raw task text", () => {
     const { result, before, after } = await syncWith({ lastPrompt: existing, title: "Manual", isCustomTitle: true });
     expect(result).toBe("custom-title");
     expect(after).toBe(before);
+  });
+
+  test("matches any of several submitted prompts", async () => {
+    const { result, state } = await syncWith({ lastPrompt: kimiStored, title: "Manual", isCustomTitle: true },
+      { submittedPrompt: ["Another run's prompt", submitted] });
+    expect(result).toBe("preview-replaced");
+    expect(state.lastPrompt).toBe(raw);
   });
 
   test("never treats a preview as its own without the submitted prompt, or with a blank one", async () => {
@@ -680,7 +689,7 @@ describe("native-v2 preview shows the raw task text", () => {
 
   test("dry-run reports the replacement without writing", async () => {
     const { result, before, after } = await syncWith({ lastPrompt: kimiStored, title: "Manual", titleKind: "custom" }, { dryRun: true });
-    expect(result).toBe("would-update");
+    expect(result).toBe("would-replace-preview");
     expect(after).toBe(before);
   });
 
