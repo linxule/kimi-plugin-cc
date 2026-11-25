@@ -147,14 +147,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       return startBackgroundJob(job, prompt, context, paths, {
         workerKind: "rescue",
         wait: parsed.wait,
-        promptEnvVar: "KIMI_PLUGIN_CC_RESCUE_PROMPT_B64",
         failedSummary: rescueConfig.cancellation.failedSummary,
-        missingResultErrorCode: "RESCUE_RESULT_MISSING",
-        spawnFailedErrorCode: "RESCUE_WORKER_SPAWN_FAILED",
-        earlyExitErrorCode: "RESCUE_WORKER_EXITED_EARLY",
-        nodeBinInvalidErrorCode: "RESCUE_NODE_BIN_INVALID",
-        waitStage: "rescue.wait",
-        spawnStage: "rescue.worker.spawn",
       });
     }
 

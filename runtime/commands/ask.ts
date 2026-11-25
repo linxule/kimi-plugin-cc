@@ -150,14 +150,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       return startBackgroundJob(job, askPrompt, context, paths, {
         workerKind: "ask",
         wait: parsed.wait,
-        promptEnvVar: "KIMI_PLUGIN_CC_ASK_PROMPT_B64",
         failedSummary: askConfig.cancellation.failedSummary,
-        missingResultErrorCode: "ASK_RESULT_MISSING",
-        spawnFailedErrorCode: "ASK_WORKER_SPAWN_FAILED",
-        earlyExitErrorCode: "ASK_WORKER_EXITED_EARLY",
-        nodeBinInvalidErrorCode: "ASK_NODE_BIN_INVALID",
-        waitStage: "ask.wait",
-        spawnStage: "ask.worker.spawn",
       });
     }
 

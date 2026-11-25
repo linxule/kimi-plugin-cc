@@ -22,17 +22,12 @@ const companionEntrypoint = fileURLToPath(
 const companionProjectRoot = path.resolve(path.dirname(companionEntrypoint), "..");
 const FAILURE_PERSIST_RETRY_DELAYS_MS = [100, 200, 400] as const;
 
+// Error codes, stages and the prompt env name all derive from workerKind,
+// e.g. RESCUE_WORKER_SPAWN_FAILED at stage rescue.worker.spawn.
 export interface BackgroundSpawnOptions {
   workerKind: "rescue" | "ask";
   wait: boolean;
-  promptEnvVar: string;
   failedSummary: string;
-  missingResultErrorCode: string;
-  spawnFailedErrorCode: string;
-  earlyExitErrorCode: string;
-  nodeBinInvalidErrorCode: string;
-  waitStage: string;
-  spawnStage: string;
 }
 
 export async function startBackgroundJob(
@@ -42,6 +37,8 @@ export async function startBackgroundJob(
   paths: PluginPaths,
   options: BackgroundSpawnOptions,
 ): Promise<string> {
+  const stem = options.workerKind.toUpperCase();
+  const spawnStage = `${options.workerKind}.worker.spawn`;
   // Background spawn and hook verification must resolve the same stable Node
   // path: the worker re-verifies the byte-exact hook command from its own
   // runtime path, so a different spelling than setup pinned fails closed. For
@@ -61,7 +58,7 @@ export async function startBackgroundJob(
   // Only fast-path the `fs.access` check for absolute/relative paths. A bare
   // name like "node" is resolved by spawn() via PATH; the spawn `error` listener
   // will still surface ENOENT on nextTick for that path, classified as
-  // spawnFailedErrorCode via the listener below.
+  // <KIND>_WORKER_SPAWN_FAILED via the listener below.
   if (nodeBinary.includes("/") || nodeBinary.includes("\\")) {
     try {
       await access(nodeBinary, fsConstants.X_OK);
@@ -69,9 +66,9 @@ export async function startBackgroundJob(
       const code = (accessError as NodeJS.ErrnoException).code;
       if (code === "ENOENT" || code === "EACCES" || code === "EPERM") {
         const classified = new RuntimeError(
-          options.nodeBinInvalidErrorCode,
+          `${stem}_NODE_BIN_INVALID`,
           `Configured Node binary is not executable: ${nodeBinary}. Set KIMI_PLUGIN_CC_NODE_BIN to a valid Node >=22.5 executable and retry.`,
-          options.spawnStage,
+          spawnStage,
           accessError instanceof Error ? { cause: accessError } : undefined,
         );
         await persistBackgroundFailure(paths, job.job_id, classified, options.failedSummary, "node-bin-invalid");
@@ -93,7 +90,7 @@ export async function startBackgroundJob(
     env: {
       ...context.env,
       KIMI_PLUGIN_CC_WORKSPACE_CWD: context.cwd,
-      [options.promptEnvVar]: b64,
+      [`KIMI_PLUGIN_CC_${stem}_PROMPT_B64`]: b64,
       // A worker must reopen the exact store its parent selected, regardless of cwd.
       KIMI_PLUGIN_CC_DATA: path.resolve(paths.claudePluginData),
     },
@@ -113,9 +110,9 @@ export async function startBackgroundJob(
       spawnReportedFailure = true;
       settle(
         new RuntimeError(
-          options.spawnFailedErrorCode,
+          `${stem}_WORKER_SPAWN_FAILED`,
           `Background ${options.workerKind} worker failed to spawn: ${spawnError.message}`,
-          options.spawnStage,
+          spawnStage,
           { cause: spawnError },
         ),
       );
@@ -136,9 +133,9 @@ export async function startBackgroundJob(
     // The worker exited non-zero before any state update. If the job is
     // still in its spawn phase, the worker never reached executeJob.
     const classified = new RuntimeError(
-      options.earlyExitErrorCode,
+      `${stem}_WORKER_EXITED_EARLY`,
       `Background ${options.workerKind} worker exited with code ${exitCode}${signal ? ` (signal ${signal})` : ""} before reporting a result.`,
-      options.spawnStage,
+      spawnStage,
     );
     void markEarlyExit(paths, job.job_id, classified, options.failedSummary);
   });
@@ -146,7 +143,7 @@ export async function startBackgroundJob(
 
   const spawnError = await spawnErrorPromise;
   if (spawnError) {
-    await markSpawnFailure(paths, job.job_id, spawnError, options.failedSummary);
+    await persistBackgroundFailure(paths, job.job_id, spawnError, options.failedSummary, "spawn-failed");
     throw spawnError;
   }
 
@@ -164,9 +161,9 @@ export async function startBackgroundJob(
     const completed = await waitForTerminalJob(() => new JobStore(paths), job.job_id);
     if (!completed.final_output_path) {
       throw new RuntimeError(
-        options.missingResultErrorCode,
+        `${stem}_RESULT_MISSING`,
         describeMissingResult(completed, options.workerKind),
-        options.waitStage,
+        `${options.workerKind}.wait`,
       );
     }
 
@@ -181,15 +178,6 @@ export async function startBackgroundJob(
     null,
     2,
   )}\n`;
-}
-
-async function markSpawnFailure(
-  paths: PluginPaths,
-  jobId: string,
-  classified: RuntimeError,
-  failedSummary: string,
-): Promise<void> {
-  await persistBackgroundFailure(paths, jobId, classified, failedSummary, "spawn-failed");
 }
 
 async function markEarlyExit(
