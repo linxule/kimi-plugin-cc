@@ -27,6 +27,7 @@ Plugin 3.0.0 replaces seven model commands with four. The operations behind them
 - `--write` and `--challenge` select the operation only as leading flags, before the first word of the prompt. The same text inside the prompt, or after `--`, keeps the read-only operation.
 - Scripts that call `companion.sh` directly keep working: `ask`, `task rescue`, `review`, `task challenge`, `task pursue`, `task swarm` and `task swarm --write` are unchanged.
 - Codex lists nine skills instead of twelve. `$kimi-task` is not implicitly invocable, so Codex no longer starts the read-only question skill on its own; name it when you want it. `$kimi-review` stays implicitly invocable.
+- Update the plugin on every host you use. Every installed hook checks every plugin job, so another host's older hook still applies its own rules and can deny what 3.0 allows; each job launch and each setup warns about it.
 - The MCP server lists six model tools and the three job tools. A client that called `kimi_challenge` must call `kimi_review` with `mode: "challenge"`. `kimi_ask`, `kimi_review` and `kimi_swarm` also accept `read_roots` and `network`.
 - DeepSeek Harness keeps all seven providers, including `kimi_challenge` and `kimi_swarm_write`.
 
