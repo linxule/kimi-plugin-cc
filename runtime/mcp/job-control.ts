@@ -93,7 +93,6 @@ export async function getMcpTaskView(env: NodeJS.ProcessEnv, input: unknown): Pr
       case "running":
         return taskView(task, job, "working", undefined, `${task.operation_kind}: ${job.phase ?? "running"}`);
       case "completed":
-        return taskView(task, job, "completed", await terminalJobResult(task, job), job.summary);
       case "failed":
         return taskView(task, job, "completed", await terminalJobResult(task, job), job.summary);
       case "cancelled":
@@ -415,7 +414,7 @@ function mcpJobMetadata(task: McpTaskRecord, job: JobRecord | null): Record<stri
   };
 }
 
-function taskView(
+export function taskView(
   task: McpTaskRecord,
   job: JobRecord | null,
   status: McpTaskView["status"],

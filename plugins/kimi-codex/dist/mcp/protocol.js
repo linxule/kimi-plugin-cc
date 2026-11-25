@@ -1,6 +1,6 @@
 import { formatError, RuntimeError } from "../errors.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
-import { cancelMcpJob, getMcpJobResult, getMcpJobStatus, getMcpTaskView } from "./job-control.js";
+import { cancelMcpJob, getMcpJobResult, getMcpJobStatus, getMcpTaskView, taskView } from "./job-control.js";
 import { launchMcpOperation } from "./launcher.js";
 import { buildMcpOperationInvocation, isMcpModelToolName, MCP_TOOL_DEFINITIONS, } from "./operations.js";
 import { textResult } from "./tool-result.js";
@@ -167,16 +167,9 @@ function launchResult(launched) {
     return textResult(`Started ${task.operation_kind} job ${task.task_id}. This is a launch handle, not the finished answer. Use kimi_job_status and kimi_job_result with this job_id until the job is terminal; use kimi_job_cancel to stop it.`, metadata);
 }
 function taskHandle({ task, job }) {
-    return {
-        resultType: "task",
-        taskId: task.task_id,
-        status: job.status === "running" ? "working" : job.status === "cancelled" ? "cancelled" : "completed",
-        ...(job.status === "running" ? { statusMessage: `${task.operation_kind}: ${job.phase ?? "running"}` } : job.summary ? { statusMessage: job.summary } : {}),
-        createdAt: task.created_at,
-        lastUpdatedAt: job.updated_at,
-        ttlMs: null,
-        pollIntervalMs: 2_000,
-    };
+    const status = job.status === "running" ? "working" : job.status === "cancelled" ? "cancelled" : "completed";
+    const statusMessage = job.status === "running" ? `${task.operation_kind}: ${job.phase ?? "running"}` : job.summary;
+    return { resultType: "task", ...taskView(task, job, status, undefined, statusMessage) };
 }
 function parseRequest(message) {
     if (!isRecord(message))

@@ -63,7 +63,6 @@ export async function getMcpTaskView(env, input) {
             case "running":
                 return taskView(task, job, "working", undefined, `${task.operation_kind}: ${job.phase ?? "running"}`);
             case "completed":
-                return taskView(task, job, "completed", await terminalJobResult(task, job), job.summary);
             case "failed":
                 return taskView(task, job, "completed", await terminalJobResult(task, job), job.summary);
             case "cancelled":
@@ -328,7 +327,7 @@ function mcpJobMetadata(task, job) {
         error: job.error,
     };
 }
-function taskView(task, job, status, result, statusMessage) {
+export function taskView(task, job, status, result, statusMessage) {
     return {
         taskId: task.task_id,
         status,
