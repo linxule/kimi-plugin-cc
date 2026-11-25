@@ -339,6 +339,9 @@ describe("evaluateRescueHookRequest", () => {
       { command: "mv -f <root>/a.txt <root>/dir/" },
       { command: "mv -n <root>/a.txt <root>/dir/c.txt" },
       { command: "mv <root>/dir <root>/moved" },
+      { command: "mv <root>/deep <root>/moved" },
+      { command: "mv <root>/via-link <root>/moved" },
+      { command: "cp -R <root>/deep <root>/copy" },
       { command: "mv <root>/a.txt <root>/dir/b.txt <root>/existing" },
       { command: "mv -- <root>/a.txt <root>/a2.txt" },
       { command: "mv <root>/dir/b.txt <root>", cwd: "dir" },
@@ -406,6 +409,10 @@ describe("evaluateRescueHookRequest", () => {
       { command: "rm -R <root>/submodule-file", reason: ".git entry at any depth" },
       { command: "rm -rf <root>/odd-case", reason: ".git entry at any depth" },
       { command: "rm -rf <root>/deep <root>/three", reason: ".git entry at any depth" },
+      { command: "mv <root>/two <root>/moved", reason: "Rescue rejects mv of a tree that holds a .git entry at any depth" },
+      { command: "mv <root>/deep <root>/nested-repo <root>/existing", reason: ".git entry at any depth" },
+      { command: "cp -R <root>/three <root>/copy", reason: "Rescue rejects cp -R of a tree that holds a .git entry at any depth" },
+      { command: "cp -r <root>/submodule-file <root>/copy", reason: ".git entry at any depth" },
       // the root itself
       { command: "rm -rf <root>", reason: "workspace root" },
       { command: "rm -rf <root>/", reason: "workspace root" },
@@ -529,6 +536,14 @@ describe("evaluateRescueHookRequest", () => {
         expect(await decide(root, outside, { command: "rm -rf <root>/big" })).toEqual({
           decision: "deny",
           reason: expect.stringContaining("smaller pieces"),
+        });
+        expect(await decide(root, outside, { command: "mv <root>/big <root>/big2" })).toEqual({
+          decision: "deny",
+          reason: expect.stringContaining("move in smaller pieces"),
+        });
+        expect(await decide(root, outside, { command: "cp -R <root>/big <root>/big2" })).toEqual({
+          decision: "deny",
+          reason: expect.stringContaining("copy in smaller pieces"),
         });
         await rm(path.join(big, "f0"));
         expect(await decide(root, outside, { command: "rm -rf <root>/big" })).toEqual({ decision: "allow" });

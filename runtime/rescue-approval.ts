@@ -579,19 +579,29 @@ async function validateFileOperationStage(
     }
 
     const recursive = flags.has("-r") || flags.has("-R") || flags.has("-rf") || flags.has("-fr");
-    if (command === "rm" && recursive) {
+    // rm -r deletes, mv relocates and cp -R duplicates whole trees, so a nested
+    // repository would be affected without `.git` ever being named.
+    const treeOperation =
+      command === "rm" && recursive ? { label: "rm -r", remedy: "delete" }
+      : command === "mv" ? { label: "mv", remedy: "move" }
+      : command === "cp" && recursive ? { label: "cp -R", remedy: "copy" }
+      : null;
+    if (treeOperation !== null) {
       const scan = await scanTreesForGit(
-        resolved.filter((operand) => operand.stats?.isDirectory()).map((operand) => operand.path),
+        sources.filter((operand) => operand.stats?.isDirectory()).map((operand) => operand.path),
       );
       if (scan === "git") {
-        return { ok: false, reason: `Rescue rejects rm -r of a tree that holds a .git entry at any depth: ${shown}` };
+        return {
+          ok: false,
+          reason: `Rescue rejects ${treeOperation.label} of a tree that holds a .git entry at any depth: ${shown}`,
+        };
       }
       if (scan !== "clean") {
         return {
           ok: false,
           reason:
-            `Rescue could not prove rm -r leaves every .git intact (${scan}); ` +
-            `delete in smaller pieces: ${shown}`,
+            `Rescue could not prove ${treeOperation.label} leaves every .git intact (${scan}); ` +
+            `${treeOperation.remedy} in smaller pieces: ${shown}`,
         };
       }
     }
