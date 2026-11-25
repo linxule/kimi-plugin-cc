@@ -147,12 +147,10 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--thinking" || token.startsWith("--thinking=")) {
-      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+    const thinking = readThinkingFlag(argv, index);
+    if (thinking) {
+      [thinkingEffort, index] = thinking;
       continue;
-    }
-    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
-      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
     }
 
     if (token === "--") {
@@ -167,48 +165,21 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
 
     switch (token) {
       case "-m":
-      case "--model": {
-        const value = argv[index + 1];
-        if (!value) {
-          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "swarm.parse");
-        }
-        if (value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            `${token} value cannot start with '-'; pass a model name`,
-            "swarm.parse",
-          );
-        }
-        model = value;
-        index += 1;
+      case "--model":
+        model = readModel(token, argv[++index], "swarm.parse");
         break;
-      }
       case "--write":
         write = true;
         break;
-      case "--budget": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            "--budget requires a duration (e.g. 30m, 1h, 90s).",
-            "swarm.parse",
-          );
-        }
-        budgetMs = parseDurationMs(value, "--budget", "swarm.parse", "safety");
-        index += 1;
+      case "--budget":
+        budgetMs = readBudget(argv[++index], "swarm.parse", "safety");
         break;
-      }
-      case "--cap": {
-        cap = parsePositiveIntFlag("--cap", argv[index + 1]);
-        index += 1;
+      case "--cap":
+        cap = parsePositiveIntFlag("--cap", argv[++index], "swarm.parse");
         break;
-      }
-      case "--max-concurrency": {
-        maxConcurrency = parsePositiveIntFlag("--max-concurrency", argv[index + 1]);
-        index += 1;
+      case "--max-concurrency":
+        maxConcurrency = parsePositiveIntFlag("--max-concurrency", argv[++index], "swarm.parse");
         break;
-      }
       default:
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
@@ -235,21 +206,52 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
 }
 
 /**
- * Shared positive-integer flag parser for swarm's `--cap` / `--max-concurrency`.
- * Both must be a strict positive integer; `--max-concurrency` in particular maps
- * to kimi-code's `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`, whose upstream resolver
- * THROWS on a non-positive-integer — so the same `Number.isInteger && > 0`
- * predicate guarantees every accepted value round-trips through `String()`.
+ * Shared positive-integer flag parser for swarm's `--cap` / `--max-concurrency`
+ * and pursue's `--turns`. Each must be a strict positive integer;
+ * `--max-concurrency` in particular maps to kimi-code's
+ * `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`, whose upstream resolver THROWS on a
+ * non-positive-integer — so the same `Number.isInteger && > 0` predicate
+ * guarantees every accepted value round-trips through `String()`.
  */
-function parsePositiveIntFlag(flag: string, value: string | undefined): number {
+function parsePositiveIntFlag(flag: string, value: string | undefined, stage: string): number {
   if (!value || value.startsWith("-")) {
-    throw new RuntimeError("INVALID_ARGS", `${flag} requires a positive integer.`, "swarm.parse");
+    throw new RuntimeError("INVALID_ARGS", `${flag} requires a positive integer.`, stage);
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive integer.`, "swarm.parse");
+    throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive integer.`, stage);
   }
   return parsed;
+}
+
+/** `--thinking <effort>` / `--thinking=<effort>`: [effort, last consumed index]; undefined for other tokens. */
+function readThinkingFlag(argv: string[], index: number): [string, number] | undefined {
+  const token = argv[index];
+  if (token === "--thinking" || token.startsWith("--thinking=")) {
+    const value = token === "--thinking" ? argv[++index] : token.slice("--thinking=".length);
+    return [validateThinkingEffort(value), index];
+  }
+  if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+    throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
+  }
+  return undefined;
+}
+
+function readModel(flag: string, value: string | undefined, stage: string): string {
+  if (!value) {
+    throw new RuntimeError("INVALID_ARGS", `${flag} requires a model value.`, stage);
+  }
+  if (value.startsWith("-")) {
+    throw new RuntimeError("INVALID_ARGS", `${flag} value cannot start with '-'; pass a model name`, stage);
+  }
+  return value;
+}
+
+function readBudget(value: string | undefined, stage: string, budgetKind: "safety" | "response"): number {
+  if (!value || value.startsWith("-")) {
+    throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", stage);
+  }
+  return parseDurationMs(value, "--budget", stage, budgetKind);
 }
 
 /**
@@ -317,12 +319,10 @@ export function parsePursueArgs(argv: string[]): PursueArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--thinking" || token.startsWith("--thinking=")) {
-      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+    const thinking = readThinkingFlag(argv, index);
+    if (thinking) {
+      [thinkingEffort, index] = thinking;
       continue;
-    }
-    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
-      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
     }
 
     if (token === "--") {
@@ -337,48 +337,15 @@ export function parsePursueArgs(argv: string[]): PursueArgs {
 
     switch (token) {
       case "-m":
-      case "--model": {
-        const value = argv[index + 1];
-        if (!value) {
-          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "pursue.parse");
-        }
-        if (value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            `${token} value cannot start with '-'; pass a model name`,
-            "pursue.parse",
-          );
-        }
-        model = value;
-        index += 1;
+      case "--model":
+        model = readModel(token, argv[++index], "pursue.parse");
         break;
-      }
-      case "--budget": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            "--budget requires a duration (e.g. 30m, 1h, 90s).",
-            "pursue.parse",
-          );
-        }
-        budgetMs = parseDurationMs(value, "--budget", "pursue.parse", "safety");
-        index += 1;
+      case "--budget":
+        budgetMs = readBudget(argv[++index], "pursue.parse", "safety");
         break;
-      }
-      case "--turns": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError("INVALID_ARGS", "--turns requires a positive integer.", "pursue.parse");
-        }
-        const parsedTurns = Number(value);
-        if (!Number.isInteger(parsedTurns) || parsedTurns <= 0) {
-          throw new RuntimeError("INVALID_ARGS", "--turns must be a positive integer.", "pursue.parse");
-        }
-        turns = parsedTurns;
-        index += 1;
+      case "--turns":
+        turns = parsePositiveIntFlag("--turns", argv[++index], "pursue.parse");
         break;
-      }
       default:
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
@@ -451,12 +418,10 @@ export function parseAskArgs(argv: string[]): AskArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--thinking" || token.startsWith("--thinking=")) {
-      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+    const thinking = readThinkingFlag(argv, index);
+    if (thinking) {
+      [thinkingEffort, index] = thinking;
       continue;
-    }
-    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
-      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
     }
 
     if (token === "--") {
@@ -470,32 +435,13 @@ export function parseAskArgs(argv: string[]): AskArgs {
     }
 
     switch (token) {
-      case "--budget": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "ask.parse");
-        }
-        budgetMs = parseDurationMs(value, "--budget", "ask.parse", "response");
-        index += 1;
+      case "--budget":
+        budgetMs = readBudget(argv[++index], "ask.parse", "response");
         break;
-      }
       case "-m":
-      case "--model": {
-        const value = argv[index + 1];
-        if (!value) {
-          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
-        }
-        if (value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            `${token} value cannot start with '-'; pass a model name`,
-            "args.parse",
-          );
-        }
-        model = value;
-        index += 1;
+      case "--model":
+        model = readModel(token, argv[++index], "args.parse");
         break;
-      }
       case "--background":
         background = true;
         break;
@@ -599,12 +545,10 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--thinking" || token.startsWith("--thinking=")) {
-      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+    const thinking = readThinkingFlag(argv, index);
+    if (thinking) {
+      [thinkingEffort, index] = thinking;
       continue;
-    }
-    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
-      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
     }
 
     if (token === "--") {
@@ -618,32 +562,13 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
     }
 
     switch (token) {
-      case "--budget": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "rescue.parse");
-        }
-        budgetMs = parseDurationMs(value, "--budget", "rescue.parse", "response");
-        index += 1;
+      case "--budget":
+        budgetMs = readBudget(argv[++index], "rescue.parse", "response");
         break;
-      }
       case "-m":
-      case "--model": {
-        const value = argv[index + 1];
-        if (!value) {
-          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
-        }
-        if (value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            `${token} value cannot start with '-'; pass a model name`,
-            "args.parse",
-          );
-        }
-        model = value;
-        index += 1;
+      case "--model":
+        model = readModel(token, argv[++index], "args.parse");
         break;
-      }
       case "--background":
         background = true;
         break;
@@ -800,12 +725,10 @@ function parseKnownFlags(
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
-    if (token === "--thinking" || token.startsWith("--thinking=")) {
-      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+    const thinking = readThinkingFlag(argv, index);
+    if (thinking) {
+      [thinkingEffort, index] = thinking;
       continue;
-    }
-    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
-      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
     }
 
     if (token === "--") {
@@ -826,32 +749,13 @@ function parseKnownFlags(
     }
 
     switch (token) {
-      case "--budget": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", `${commandName}.parse`);
-        }
-        budgetMs = parseDurationMs(value, "--budget", `${commandName}.parse`, "response");
-        index += 1;
+      case "--budget":
+        budgetMs = readBudget(argv[++index], `${commandName}.parse`, "response");
         break;
-      }
       case "-m":
-      case "--model": {
-        const value = argv[index + 1];
-        if (!value) {
-          throw new RuntimeError("INVALID_ARGS", `${token} requires a model value.`, "args.parse");
-        }
-        if (value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            `${token} value cannot start with '-'; pass a model name`,
-            "args.parse",
-          );
-        }
-        model = value;
-        index += 1;
+      case "--model":
+        model = readModel(token, argv[++index], "args.parse");
         break;
-      }
       case "--base": {
         const value = argv[index + 1];
         if (!value) {
