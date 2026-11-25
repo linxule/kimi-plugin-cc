@@ -33,7 +33,16 @@ such as 2.0.001 are invalid [SemVer](https://semver.org/); build metadata does n
 Published versions and tags remain immutable. The source audit, exact-binary controls,
 per-operation smoke and full check must pass before extending the runtime table.
 
-Hook-schema review is a separate, narrower gate than execution certification.
+The runtime table is `KIMI_V2_RELEASES` in `runtime/kimi-releases.ts`: one row per
+exact release, carrying its upstream commit, its certification scope and the upstream
+behaviours (capabilities) re-proven for it. `NATIVE_V2_CERTIFIED` in
+`runtime/kimi-engine.ts` derives its per-operation lists from the rows' scope. Every
+version-gated branch asks the table by exact version string; no branch spells a
+version list, and nothing is a range. `tests/runtime/kimi-releases.test.ts` pins each
+capability to an explicit list, so adding a row is never enough to widen a gate.
+
+Hook-schema review is a separate, narrower gate than execution certification: it is
+the `hook-schema` capability, reviewed and pinned on its own.
 Exact 2.1.0, 2.1.1, 2.2.0, 2.3.0, 2.3.1, 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.2, 2.6.3, 2.7.2 and 2.7.3 passed the source and live gates for all eight operations and are included in `NATIVE_V2_CERTIFIED`.
 See the [2.1 certification evidence](upstream-2.1-certification.md), the [2.2.0 certification evidence](upstream-2.2.0-certification.md), the [2.3.0 certification evidence](upstream-2.3.0-certification.md), the [2.3.1 certification evidence](upstream-2.3.1-certification.md), the [2.3.2 certification evidence](upstream-2.3.2-certification.md), the [2.3.3 certification evidence](upstream-2.3.3-certification.md), the [2.4.0 certification evidence](upstream-2.4.0-certification.md), the [2.4.1 certification evidence](upstream-2.4.1-certification.md), the [2.5.0 certification evidence](upstream-2.5.0-certification.md), the [2.5.1 certification evidence](upstream-2.5.1-certification.md), [2.5.2 certification evidence](upstream-2.5.2-certification.md), and [2.5.3 certification evidence](upstream-2.5.3-certification.md). The [2.6.2 release evidence](upstream-2.6.2-certification.md), [2.6.3 checkout evidence](upstream-2.6.3-certification.md), [2.7.2 checkout evidence](upstream-2.7.2-certification.md) and [2.7.3 checkout evidence](upstream-2.7.3-certification.md) own the bounded-swarm rows.
 Exact 2.6.0 (`740d6c0bdd777cd8ed0d91eb3d62766910401173`) remains included for review, challenge, ask, rescue, review_gate and pursue only. Exact 2.6.2 (`6a8493df3e1d796a63f7c7ca0de76c1e690cd943`) is certified for all eight operations using the plugin-owned bounded swarm construction and the final [2.6.2 evidence](upstream-2.6.2-certification.md). Exact 2.6.3 (`b0de2fbd2de04d87689225aafd3912e5d193b62d`) is certified for all eight operations under that construction with the [2.6.3 checkout evidence](upstream-2.6.3-certification.md). Exact 2.7.2 (`56145f849caa305d42acd09b67fb65d11146f887`) is certified under the same construction with the [2.7.2 checkout evidence](upstream-2.7.2-certification.md). Exact 2.7.3 (`a8f643ad2e7f197d6ec4409b7cdad8a544afad86`) is certified under that construction with the [2.7.3 checkout evidence](upstream-2.7.3-certification.md). The unchanged native scheduler is not treated as repaired. The [2.6.0 record](upstream-2.6.0-certification.md) owns its narrower scope.
