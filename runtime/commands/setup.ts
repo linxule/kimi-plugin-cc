@@ -7,8 +7,8 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // canonical `'<absolute-node>' '<absolute-hook-script>'` command from
 // resolveNodeBinary/buildHookShellCommand. Both tokens are shell-quoted and the
 // absolute Node path avoids PATH dependence under sanitized launches. Setup
-// probes the hook directly with resolveNodeBinary and through `/bin/sh -c`
-// using the exact installed command bytes. It also warns about broad permission
+// probes the hook directly with the Node binary parsed back from that command
+// and through `/bin/sh -c` using the exact installed command bytes. It also warns about broad permission
 // denies, repairs orphan marker comments, and refuses remaining
 // duplicate, orphaned, or malformed managed blocks.
 //
@@ -41,6 +41,7 @@ import {
 import {
   buildHookShellCommand,
   hostIdFromHookCommand,
+  parseHookShellCommand,
   resolveHookScriptPath,
   resolveHostId,
   resolveNodeBinary,
@@ -322,7 +323,7 @@ async function runInstall(
       );
     }
 
-    const block = buildManagedBlock(hookScriptPath, context.env, lineEnding, hostId);
+    const block = buildManagedBlock(expectedCommand, lineEnding, hostId);
     const next = state.kind === "found"
       ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
       : insertBlockNearManagedBlocks(existing, blocks, block, lineEnding);
@@ -330,15 +331,15 @@ async function runInstall(
 
     const blockWritten = next !== original;
     if (blockWritten) await writeConfigAtomic(configPath, next);
-    return { blockWritten, next };
+    return { blockWritten, next, expectedCommand };
   });
-  const { blockWritten, next } = mutation;
+  const { blockWritten, next, expectedCommand } = mutation;
 
   collectPermissionRuleWarnings(next, warnings);
   await collectKimiVersionWarnings(context.env, warnings);
   await collectInstalledKimiPluginsNotice(context.env, warnings);
 
-  const probe = await probeHook(hookScriptPath, context.env);
+  const probe = await probeHook(hookScriptPath, expectedCommand, context.env);
 
   const summary = probe.ok
     ? blockWritten
@@ -525,7 +526,7 @@ async function runCheck(
     };
   }
 
-  const probe = await probeHook(hookScriptPath, context.env);
+  const probe = await probeHook(hookScriptPath, expectedCommand, context.env);
 
   return {
     action: "check",
@@ -955,12 +956,10 @@ function pruneOrphanApprovalHooks(
 // ----- Block content -----------------------------------------------------
 
 function buildManagedBlock(
-  hookScriptPath: string,
-  env: NodeJS.ProcessEnv,
+  shellCommand: string,
   lineEnding: "\n" | "\r\n" = "\n",
   hostId = "",
 ): string {
-  const shellCommand = buildHookShellCommand(hookScriptPath, env);
   const commandLine = `command = ${tomlBasicString(shellCommand)}`;
   const suffix = hostId.length > 0 ? `:${hostId}` : "";
   return [
@@ -1047,11 +1046,12 @@ interface ProbeOutcome {
 /**
  * Two-layer probe; both layers require exit 2 and a non-empty denial reason.
  *
- *   1. Directly spawn the hook with the absolute path from resolveNodeBinary,
- *      catching missing/broken scripts and incorrect hook exit behavior without
- *      relying on PATH.
- *   2. Execute the exact canonical command from buildHookShellCommand through
- *      `/bin/sh -c`: two shell-quoted absolute tokens for Node and the script.
+ *   1. Directly spawn the hook with the absolute Node path parsed back from
+ *      `command`, catching missing/broken scripts and incorrect hook exit
+ *      behavior without relying on PATH.
+ *   2. Execute `command`, the exact canonical bytes from buildHookShellCommand,
+ *      through `/bin/sh -c`: two shell-quoted absolute tokens for Node and the
+ *      script.
  *      This catches pinned-interpreter execution and quoting failures. It does
  *      NOT test PATH discovery or compatibility of some other `node` on PATH.
  *
@@ -1060,12 +1060,13 @@ interface ProbeOutcome {
  */
 async function probeHook(
   hookScriptPath: string,
+  command: string,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeOutcome> {
-  const directResult = await probeHookDirect(hookScriptPath, env);
+  const directResult = await probeHookDirect(hookScriptPath, command, env);
   if (!directResult.ok) return directResult;
 
-  const shellResult = await probeHookViaShell(hookScriptPath, env);
+  const shellResult = await probeHookViaShell(command, env);
   if (!shellResult.ok) return shellResult;
 
   return {
@@ -1076,9 +1077,11 @@ async function probeHook(
 
 async function probeHookDirect(
   hookScriptPath: string,
+  command: string,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeOutcome> {
-  const nodeBin = resolveNodeBinary(env);
+  // Parsed back from the command, never re-resolved; the fallback is unreachable.
+  const nodeBin = parseHookShellCommand(command)?.nodeBin ?? resolveNodeBinary(env);
   return await spawnProbe(
     nodeBin,
     [hookScriptPath],
@@ -1088,7 +1091,7 @@ async function probeHookDirect(
 }
 
 async function probeHookViaShell(
-  hookScriptPath: string,
+  shellCommand: string,
   env: NodeJS.ProcessEnv,
 ): Promise<ProbeOutcome> {
   if (process.platform === "win32") {
@@ -1097,9 +1100,8 @@ async function probeHookViaShell(
     // shell probe so we don't false-fail on a platform we don't run on.
     return { ok: true, reason: "shell probe skipped (Windows)" };
   }
-  // Reuse the exact command string the managed block wrote into
-  // kimi-code's config so probe and runtime cannot drift.
-  const shellCommand = buildHookShellCommand(hookScriptPath, env);
+  // The exact command string the managed block wrote into kimi-code's config,
+  // so probe and runtime cannot drift.
   return await spawnProbe(
     "/bin/sh",
     ["-c", shellCommand],
