@@ -27,7 +27,7 @@ export function companionHelp(argv) {
             }
         case "ask": return usage(command, "[options] [--] [prompt]", ASK_SUPPORTED_FLAGS, "Read-only question; default budget 30m. Backgrounding does not extend the budget. A leading --write runs the write-capable task rescue instead.");
         case "review": return usage(command, "[options] [--] [focus]", REVIEW_SUPPORTED_FLAGS, "Read-only review; default budget 30m. Foreground-only (no --background/--wait). A leading --challenge runs task challenge instead.");
-        case "setup": return usage(command, "[options]", SETUP_SUPPORTED_FLAGS, "Install, check, or remove this host's managed hook, or list configured models.");
+        case "setup": return usage(command, "[options]", SETUP_SUPPORTED_FLAGS, "Install, check, or remove this host's managed hook, list configured models, or install the highest certified Kimi Code CLI for the plugin's own use (--install-kimi).");
         case "status":
         case "result":
         case "cancel":
