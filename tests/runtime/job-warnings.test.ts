@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { runAsk } from "../../runtime/commands/ask.js";
 import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
@@ -122,4 +123,34 @@ describe("channel W JSON surfaces", () => {
       await cleanupTestPath(repo);
     }
   });
+});
+
+describe("channel W end to end", () => {
+  test("an uncertified ask carries its warning in stdout, the artifact, status and result --json", async () => {
+    const root = await createTestPluginDataRoot("job-warnings-e2e");
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: root,
+        KIMI_CODE_HOME: path.join(root, "home"),
+        KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
+        KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", path.resolve("tests/helpers/mock-kimi-cli-v1.ts")]),
+        KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+        KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1",
+        KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
+      };
+      const warning = "kimi-code 2.8.0 is not certified by this plugin release; running ask read-only with 2.7.3 mechanics.";
+      const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr: process.stderr };
+      const output = await runAsk(["What", "changed?"], context);
+      expect(output.startsWith(`Warnings:\n- ${warning}\n\n`)).toBe(true);
+      const status = JSON.parse(await runStatus(["--type", "ask"], context));
+      expect(status.warnings).toEqual([warning]);
+      expect(status.plan_certification).toBe("uncertified");
+      expect(JSON.parse(await runResult([status.job_id, "--json"], context)).warnings).toEqual([warning]);
+      expect(await Bun.file(status.final_output_path).text()).toContain(warning);
+    } finally {
+      await cleanupTestPath(root);
+    }
+  }, 30_000);
 });
