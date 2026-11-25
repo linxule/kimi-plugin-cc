@@ -168,7 +168,7 @@ export class JobStore {
       throw translateSqliteError(error);
     }
     this.db = db;
-    // Every `this.db.exec` / `tableHasColumn` below can throw on a
+    // Every `this.db.exec` / `existingColumns` below can throw on a
     // corrupt DB, full disk, mid-migration failure, etc. Catch
     // internally, close the adapter, and rethrow the translated error
     // so the SQLite handle never leaks past a failed migration.
@@ -209,38 +209,10 @@ export class JobStore {
       );
     `);
 
-    if (!tableHasColumn(this.db, "phase")) {
-      this.db.exec(`ALTER TABLE jobs ADD COLUMN phase TEXT;`);
-    }
-
-    if (!tableHasColumn(this.db, "budget_ms")) {
-      this.db.exec(`ALTER TABLE jobs ADD COLUMN budget_ms INTEGER;`);
-    }
-
-    for (const column of ["kimi_session_id_source", "budget_source", "thinking_effort", "hook_escapes"]) {
-      if (!tableHasColumn(this.db, column)) {
-        this.db.exec("ALTER TABLE jobs ADD COLUMN " + column + " TEXT;");
-      }
-    }
-
-    // Additive provenance migration. Existing rows deliberately remain NULL:
-    // v1.9.5 plus kimi-code 0.33/0.34 could have routed to native v2 before the
-    // legacy pin landed, so a blanket historical v1 backfill would invent fact.
-    const provenanceColumns = [
-      "operation_kind",
-      "intended_engine",
-      "observed_engine",
-      "kimi_version",
-      "system_version",
-      "kimi_command",
-      "kimi_prefix_args",
-      "plan_certification",
-      "resumed_from_job_id",
-      "safety_profile",
-    ] as const;
-    for (const column of provenanceColumns) {
-      if (!tableHasColumn(this.db, column)) {
-        this.db.exec(`ALTER TABLE jobs ADD COLUMN ${column} TEXT;`);
+    const jobColumns = existingColumns(this.db, "jobs");
+    for (const [column, type] of ADDED_JOB_COLUMNS) {
+      if (!jobColumns.has(column)) {
+        this.db.exec(`ALTER TABLE jobs ADD COLUMN ${column} ${type};`);
       }
     }
 
@@ -317,7 +289,7 @@ export class JobStore {
       -- 0.1.6 migration: rename adversarial_review to challenge
       UPDATE jobs SET command_type = 'challenge' WHERE command_type = 'adversarial_review';
     `);
-    if (!mcpTableHasColumn(this.db, "kimi_identity")) {
+    if (!existingColumns(this.db, "mcp_tasks").has("kimi_identity")) {
       this.db.exec("ALTER TABLE mcp_tasks ADD COLUMN kimi_identity TEXT;");
     }
     } catch (error) {
@@ -354,29 +326,11 @@ export class JobStore {
   createJob(input: CreateJobInput): JobRecord {
     const now = new Date().toISOString();
     try {
-      this.db.run(
-        `
-          INSERT INTO jobs (
-            job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking, thinking_effort,
-            background, pid, kimi_pid, status, kimi_session_id, kimi_session_id_source, budget_source,
-            operation_kind, intended_engine, observed_engine, kimi_version, system_version,
-            kimi_command, kimi_prefix_args, plan_certification, resumed_from_job_id, safety_profile,
-            agent_profile, prompt_digest, summary, phase, budget_ms, final_output_path, stream_log_path, error
-          )
-          VALUES (
-            @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking, @thinking_effort,
-            @background, @pid, @kimi_pid, @status, @kimi_session_id, @kimi_session_id_source, @budget_source,
-            @operation_kind, @intended_engine, @observed_engine, @kimi_version, @system_version,
-            @kimi_command, @kimi_prefix_args, @plan_certification, @resumed_from_job_id, @safety_profile,
-            @agent_profile, @prompt_digest, @summary, @phase, @budget_ms, @final_output_path, @stream_log_path, @error
-          )
-        `,
-        {
-          ...serializeRecord(input),
-          created_at: now,
-          updated_at: now,
-        },
-      );
+      this.db.run(INSERT_JOB_SQL, {
+        ...serializeRecord(input),
+        created_at: now,
+        updated_at: now,
+      });
     } catch (error) {
       if (isSqliteConstraintError(error)) {
         if (input.command_type === "rescue") {
@@ -448,35 +402,26 @@ export class JobStore {
   }
 
   findRescueJobBySession(repoId: string, sessionId: string): JobRecord | null {
-    const row = this.db.get<DbRow>(
-      `
-        SELECT *
-        FROM jobs
-        WHERE repo_id = ?
-          AND command_type = 'rescue'
-          AND kimi_session_id = ?
-        ORDER BY updated_at DESC
-        LIMIT 1
-      `,
-      repoId,
-      sessionId,
-    );
-
-    return row ? hydrateRow(row) : null;
+    return this.findJobBySession("rescue", repoId, sessionId);
   }
 
   findAskJobBySession(repoId: string, sessionId: string): JobRecord | null {
+    return this.findJobBySession("ask", repoId, sessionId);
+  }
+
+  private findJobBySession(commandType: "rescue" | "ask", repoId: string, sessionId: string): JobRecord | null {
     const row = this.db.get<DbRow>(
       `
         SELECT *
         FROM jobs
         WHERE repo_id = ?
-          AND command_type = 'ask'
+          AND command_type = ?
           AND kimi_session_id = ?
         ORDER BY updated_at DESC
         LIMIT 1
       `,
       repoId,
+      commandType,
       sessionId,
     );
 
@@ -518,8 +463,26 @@ export class JobStore {
     return this.getMcpTask(taskId);
   }
 
+  /** Terminal states are permanent: every update is guarded by status = 'running'. */
   updateRunningJob(jobId: string, patch: Partial<JobRecord>): JobRecord | null {
-    return this.updateWhere(jobId, patch, "status = 'running'");
+    const updates: string[] = ["updated_at = @updated_at"];
+    const params: Record<string, unknown> = {
+      job_id: jobId,
+      updated_at: new Date().toISOString(),
+    };
+
+    for (const [key, value] of Object.entries(serializePatch(patch))) {
+      if (value === undefined || !UPDATABLE_JOB_COLUMNS.has(key)) continue;
+      updates.push(`${key} = @${key}`);
+      params[key] = value;
+    }
+
+    this.db.run(`
+      UPDATE jobs
+      SET ${updates.join(", ")}
+      WHERE job_id = @job_id AND status = 'running'
+    `, params);
+    return this.getJob(jobId);
   }
 
   /** Recheck uniqueness atomically: another worker can claim an ID during the
@@ -570,59 +533,64 @@ export class JobStore {
     jobId: string,
     patch: Pick<JobRecord, "summary" | "final_output_path" | "error"> & Partial<JobRecord>,
   ): JobRecord | null {
-    return this.updateWhere(jobId, { ...patch, status: "completed", pid: null, kimi_pid: null }, "status = 'running'");
+    return this.updateRunningJob(jobId, { ...patch, status: "completed", pid: null, kimi_pid: null });
   }
 
   markFailed(
     jobId: string,
     patch: Pick<JobRecord, "summary" | "error"> & Partial<JobRecord>,
   ): JobRecord | null {
-    return this.updateWhere(jobId, { ...patch, status: "failed", pid: null, kimi_pid: null }, "status = 'running'");
+    return this.updateRunningJob(jobId, { ...patch, status: "failed", pid: null, kimi_pid: null });
   }
 
   markCancelled(
     jobId: string,
     patch: Pick<JobRecord, "summary" | "error"> & Partial<JobRecord>,
   ): JobRecord | null {
-    return this.updateWhere(jobId, { ...patch, status: "cancelled", pid: null, kimi_pid: null }, "status = 'running'");
-  }
-
-  private static readonly JOBS_COLUMNS = new Set([
-    "status", "summary", "phase", "budget_ms", "budget_source", "kimi_session_id_source", "pid", "kimi_pid",
-    "final_output_path", "stream_log_path", "kimi_session_id",
-    "error", "command_type", "prompt_digest", "repo_id",
-    "cwd", "model", "thinking", "thinking_effort", "hook_escapes", "background", "agent_profile",
-    "operation_kind", "intended_engine", "observed_engine", "kimi_version",
-    "system_version", "kimi_command", "kimi_prefix_args", "plan_certification",
-    "resumed_from_job_id", "safety_profile",
-  ]);
-
-  private updateWhere(jobId: string, patch: Partial<JobRecord>, whereClause?: string): JobRecord | null {
-    const updates: string[] = ["updated_at = @updated_at"];
-    const params: Record<string, unknown> = {
-      job_id: jobId,
-      updated_at: new Date().toISOString(),
-    };
-
-    for (const [key, value] of Object.entries(serializePatch(patch))) {
-      if (key === "job_id" || key === "created_at" || key === "updated_at" || value === undefined) {
-        continue;
-      }
-      if (!JobStore.JOBS_COLUMNS.has(key)) continue;
-      updates.push(`${key} = @${key}`);
-      params[key] = value;
-    }
-
-    const statement = `
-      UPDATE jobs
-      SET ${updates.join(", ")}
-      WHERE job_id = @job_id${whereClause ? ` AND ${whereClause}` : ""}
-    `;
-
-    this.db.run(statement, params);
-    return this.getJob(jobId);
+    return this.updateRunningJob(jobId, { ...patch, status: "cancelled", pid: null, kimi_pid: null });
   }
 }
+
+/** Columns added after the first schema, in the order older stores receive them. */
+const ADDED_JOB_COLUMNS = [
+  ["phase", "TEXT"],
+  ["budget_ms", "INTEGER"],
+  ["kimi_session_id_source", "TEXT"],
+  ["budget_source", "TEXT"],
+  ["thinking_effort", "TEXT"],
+  ["hook_escapes", "TEXT"],
+  // Additive provenance migration. Existing rows deliberately remain NULL:
+  // v1.9.5 plus kimi-code 0.33/0.34 could have routed to native v2 before the
+  // legacy pin landed, so a blanket historical v1 backfill would invent fact.
+  ["operation_kind", "TEXT"],
+  ["intended_engine", "TEXT"],
+  ["observed_engine", "TEXT"],
+  ["kimi_version", "TEXT"],
+  ["system_version", "TEXT"],
+  ["kimi_command", "TEXT"],
+  ["kimi_prefix_args", "TEXT"],
+  ["plan_certification", "TEXT"],
+  ["resumed_from_job_id", "TEXT"],
+  ["safety_profile", "TEXT"],
+] as const;
+
+/** Columns createJob writes, in INSERT order. hook_escapes is written only by updates. */
+const INSERT_JOB_COLUMNS = [
+  "job_id", "repo_id", "command_type", "created_at", "updated_at", "cwd", "model", "thinking", "thinking_effort",
+  "background", "pid", "kimi_pid", "status", "kimi_session_id", "kimi_session_id_source", "budget_source",
+  "operation_kind", "intended_engine", "observed_engine", "kimi_version", "system_version",
+  "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile",
+  "agent_profile", "prompt_digest", "summary", "phase", "budget_ms", "final_output_path", "stream_log_path", "error",
+] as const;
+
+const INSERT_JOB_SQL = `INSERT INTO jobs (${INSERT_JOB_COLUMNS.join(", ")}) VALUES (${INSERT_JOB_COLUMNS.map((column) => `@${column}`).join(", ")})`;
+
+/** Columns an update may set; identity and timestamps are store-owned. */
+const UPDATABLE_JOB_COLUMNS = new Set<string>([
+  ...INSERT_JOB_COLUMNS.filter((column) => column !== "job_id" && column !== "created_at" && column !== "updated_at"),
+  "hook_escapes",
+]);
+
 
 interface SqliteAdapter {
   pragma(statement: string): void;
@@ -680,24 +648,12 @@ function hydrateRow(row: DbRow): JobRecord {
   };
 }
 
+// Spreads the whole input so node:sqlite still rejects keys that are not INSERT parameters.
 function serializeRecord(record: CreateJobInput): Record<string, unknown> {
+  const row: Record<string, unknown> = { ...record };
+  for (const column of INSERT_JOB_COLUMNS) row[column] ??= null;
   return {
-    ...record,
-    thinking_effort: record.thinking_effort ?? null,
-    phase: record.phase ?? null,
-    budget_ms: record.budget_ms ?? null,
-    budget_source: record.budget_source ?? null,
-    kimi_session_id_source: record.kimi_session_id_source ?? null,
-    operation_kind: record.operation_kind ?? null,
-    intended_engine: record.intended_engine ?? null,
-    observed_engine: record.observed_engine ?? null,
-    kimi_version: record.kimi_version ?? null,
-    system_version: record.system_version ?? null,
-    kimi_command: record.kimi_command ?? null,
-    kimi_prefix_args: record.kimi_prefix_args ?? null,
-    plan_certification: record.plan_certification ?? null,
-    resumed_from_job_id: record.resumed_from_job_id ?? null,
-    safety_profile: record.safety_profile ?? null,
+    ...row,
     thinking: record.thinking === null ? null : Number(record.thinking),
     background: Number(record.background),
     error: record.error ? JSON.stringify(record.error) : null,
@@ -894,13 +850,8 @@ function rewriteNamedBindingsForBun(bindings: Record<string, unknown>): Record<s
   return Object.fromEntries(Object.entries(bindings).map(([key, value]) => [`$${key}`, value]));
 }
 
-function tableHasColumn(db: SqliteAdapter, columnName: string): boolean {
-  const columns = db.all<{ name: string }>(`PRAGMA table_info(jobs)`);
-  return columns.some((column) => column.name === columnName);
-}
-
-function mcpTableHasColumn(db: SqliteAdapter, columnName: string): boolean {
-  return db.all<{ name: string }>("PRAGMA table_info(mcp_tasks)").some((column) => column.name === columnName);
+function existingColumns(db: SqliteAdapter, table: "jobs" | "mcp_tasks"): Set<string> {
+  return new Set(db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((column) => column.name));
 }
 
 function isSqliteConstraintError(error: unknown): boolean {
