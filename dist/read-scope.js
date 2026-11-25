@@ -294,13 +294,25 @@ function isWithin(root, candidate) {
 }
 // ---------------------------------------------------------------------------
 // FetchURL targets under --network: http(s) without credentials, and never a
-// local, private or numerically encoded host. The WHATWG parser canonicalizes
-// the hostname; the raw authority is compared so that integer, hex, octal or
-// percent-encoded IPv4 spellings are refused rather than decoded.
+// local name or an IP literal that is not global unicast. The WHATWG parser
+// canonicalizes the hostname; the raw authority is compared so that integer,
+// hex, octal or percent-encoded IPv4 spellings are refused rather than decoded.
 // ---------------------------------------------------------------------------
-const PRIVATE_IPV4 = [
-    [0x00000000, 8], [0x0a000000, 8], [0x64400000, 10], [0x7f000000, 8],
-    [0xa9fe0000, 16], [0xac100000, 12], [0xc0a80000, 16],
+const NON_GLOBAL_IPV4 = [
+    [0x00000000, 8], // this network
+    [0x0a000000, 8], // private
+    [0x64400000, 10], // shared address space
+    [0x7f000000, 8], // loopback
+    [0xa9fe0000, 16], // link-local
+    [0xac100000, 12], // private
+    [0xc0000000, 24], // IETF protocol assignments
+    [0xc0000200, 24], // documentation
+    [0xc0a80000, 16], // private
+    [0xc6120000, 15], // benchmarking
+    [0xc6336400, 24], // documentation
+    [0xcb007100, 24], // documentation
+    [0xe0000000, 4], // multicast
+    [0xf0000000, 4], // reserved, including broadcast
 ];
 /** True when `url` is an allowed FetchURL target. */
 export function isAllowedFetchUrl(url) {
@@ -320,14 +332,14 @@ export function isAllowedFetchUrl(url) {
     const host = parsed.hostname;
     if (host.startsWith("[")) {
         const hextets = ipv6Hextets(host.slice(1, -1));
-        return hextets !== undefined && !isPrivateIpv6(hextets);
+        return hextets !== undefined && isGlobalIpv6(hextets);
     }
     const ipv4 = ipv4Value(host);
     if (ipv4 !== undefined) {
         // The parser accepts many IPv4 spellings; only the canonical one is allowed.
         if (rawHost(url) !== host)
             return false;
-        return !PRIVATE_IPV4.some(([base, bits]) => inRange(ipv4, base, bits));
+        return isGlobalIpv4(ipv4);
     }
     const name = host.replace(/\.+$/, "");
     if (name.length === 0 || /^[0-9]+$/.test(name))
@@ -385,19 +397,21 @@ function ipv6Hextets(text) {
         return undefined;
     return [...head, ...new Array(halves.length === 2 ? fill : 0).fill(0), ...tail];
 }
-function isPrivateIpv6(h) {
-    if (h.every((part) => part === 0))
-        return true; // unspecified
-    if (h.slice(0, 7).every((part) => part === 0) && h[7] === 1)
-        return true; // loopback
-    if ((h[0] & 0xffc0) === 0xfe80)
-        return true; // link-local
-    if ((h[0] & 0xfe00) === 0xfc00)
-        return true; // unique-local
-    // IPv4-mapped (::ffff:a.b.c.d) and the deprecated IPv4-compatible form.
-    if (h.slice(0, 5).every((part) => part === 0) && (h[5] === 0xffff || h[5] === 0)) {
-        const v4 = ((h[6] << 16) >>> 0) + h[7];
-        return PRIVATE_IPV4.some(([base, bits]) => inRange(v4, base, bits));
+function isGlobalIpv4(value) {
+    return !NON_GLOBAL_IPV4.some(([base, bits]) => inRange(value, base, bits));
+}
+/** Only global unicast 2000::/3, less its special-purpose blocks; NAT64 by its IPv4. */
+function isGlobalIpv6(h) {
+    if (h[0] === 0x64 && h[1] === 0xff9b && h.slice(2, 6).every((part) => part === 0)) {
+        return isGlobalIpv4(((h[6] << 16) >>> 0) + h[7]);
     }
-    return false;
+    if ((h[0] & 0xe000) !== 0x2000)
+        return false;
+    if (h[0] === 0x2001 && h[1] < 0x0200)
+        return false; // 2001::/23 IETF assignments, Teredo 2001::/32
+    if (h[0] === 0x2001 && h[1] === 0x0db8)
+        return false; // documentation
+    if (h[0] === 0x2002)
+        return false; // 6to4 embeds an IPv4 address
+    return true;
 }

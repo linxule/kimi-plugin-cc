@@ -243,8 +243,8 @@ function webToolDecision(label, toolName, toolInput, scope) {
     return {
         decision: "deny",
         reason: "kimi-plugin-cc safety hook: FetchURL accepts only http:// and https:// URLs without embedded credentials " +
-            "whose host is a public name or a canonical public IP address; localhost, .local, .internal, private, " +
-            "loopback, link-local and numerically encoded hosts are denied.",
+            "whose host is a public name or a canonical global unicast IP address; localhost, .local and .internal names, " +
+            "numerically encoded hosts, and private, loopback, link-local, documentation, multicast, reserved, 6to4 and Teredo addresses are denied.",
     };
 }
 function denyReadOnlyMessage(label, toolName) {
