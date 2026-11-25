@@ -27,6 +27,7 @@
 // `/bin/sh -c` does not depend on its working directory or PATH.
 
 import { decideHookOutcome, type HookInput } from "./approval-policy.js";
+import { NETWORK_ENV, READ_ROOTS_ENV } from "../read-scope.js";
 import { evaluateRescueHookRequest } from "../rescue-approval.js";
 import { SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV } from "../swarm-policy.js";
 
@@ -56,6 +57,9 @@ async function main(): Promise<void> {
     // Trusted root for rescue/pursue/swarm-write. Set by the plugin spawn; the
     // model inside kimi cannot forge it and hook payload cwd is not trusted.
     trustedWorkspaceRoot: process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT,
+    // Per-call read scope, set or deleted by the plugin on every spawn.
+    readRoots: process.env[READ_ROOTS_ENV],
+    network: process.env[NETWORK_ENV],
   });
 
   if (decision.decision === "deny") {

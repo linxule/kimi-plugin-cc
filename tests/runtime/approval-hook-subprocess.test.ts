@@ -17,6 +17,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 
 const hookScriptPath = path.join(process.cwd(), "runtime/hooks/approval-hook.ts");
@@ -300,5 +301,22 @@ describe("pursue metadata hook environment", () => {
     });
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain(tool_name);
+  });
+
+  test("confined read scope: a workspace read exits 0 and a read outside the roots exits 2", async () => {
+    const root = await realpath(process.cwd());
+    const env = { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", KIMI_PLUGIN_CC_READ_ROOTS: JSON.stringify([root]) };
+    const inside = await invokeHook({ tool_name: "Read", tool_input: { path: "package.json" } }, env);
+    expect(inside.exitCode).toBe(0);
+    const outside = await invokeHook({ tool_name: "Read", tool_input: { path: "/etc/hosts" } }, env);
+    expect(outside.exitCode).toBe(2);
+    expect(outside.stderr).toContain("reads are confined");
+  });
+
+  test("ambient KIMI_PLUGIN_CC_NETWORK=1 without read roots keeps web tools denied (exit 2)", async () => {
+    const result = await invokeHook({ tool_name: "WebSearch", tool_input: { query: "x" } },
+      { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", KIMI_PLUGIN_CC_NETWORK: "1" });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("--network");
   });
 });

@@ -1,13 +1,14 @@
+import { evaluateScopedRead, parseScopeEnvironment, SCOPED_READ_TOOLS } from "../read-scope.js";
 import { BOUNDED_SWARM_POLICY, evaluateSwarmWaveInput } from "../swarm-policy.js";
 /**
  * Tools considered read-only across review/challenge/review_gate/rescue.
  *
  * Includes kimi-code's own local-read defaults (`Read`, `Grep`, `Glob`)
  * plus a few additional read-safe tools the runtime auto-allows
- * (`ReadMediaFile`, `TaskList`, `TaskOutput`). Excludes network
- * operations (`WebSearch`, `FetchURL`) since review-style commands
- * should stay on the local repo — adding them would silently broaden
- * the safety contract for what is documented as a local-only review.
+ * (`ReadMediaFile`, `TaskList`, `TaskOutput`). Network tools
+ * (`WebSearch`, `FetchURL`) are excluded; read-only labels allow them only
+ * for a call started with --network, which also confines these reads to the
+ * plugin-exported read roots (runtime/read-scope.ts).
  */
 export const READ_ONLY_TOOLS = new Set([
     "Read",
@@ -17,6 +18,8 @@ export const READ_ONLY_TOOLS = new Set([
     "TaskList",
     "TaskOutput",
 ]);
+/** Web tools: denied unless the plugin exported KIMI_PLUGIN_CC_NETWORK=1 with read roots. */
+const WEB_TOOLS = new Set(["WebSearch", "FetchURL"]);
 /**
  * Exact tool name for kimi-code's parallel fan-out. Every spawned subagent
  * inherits KIMI_PLUGIN_CC_CMD. On native v2, each agent has its own eager
@@ -55,6 +58,9 @@ export async function decideHookOutcome(input, ctx) {
     if (!("evaluator" in result))
         return result;
     const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
+    if (result.evaluator === "read-scope") {
+        return await evaluateScopedRead(toolName, input.tool_input, result.roots);
+    }
     if (ctx.rescueEvaluator !== undefined) {
         return await ctx.rescueEvaluator(result.workspaceRoot, toolName, input.tool_input);
     }
@@ -134,8 +140,10 @@ export function decideHookOutcomePure(input, ctx) {
             // non-interactive subprocesses, so interactive tool prompts cannot
             // substitute for this allowlist.
             if (READ_ONLY_TOOLS.has(toolName)) {
-                return { decision: "allow" };
+                return readToolDecision(toolName, scopeOf(ctx));
             }
+            if (WEB_TOOLS.has(toolName))
+                return webToolDecision(label, toolName, input.tool_input, scopeOf(ctx));
             return {
                 decision: "deny",
                 reason: denyReadOnlyMessage(label, toolName),
@@ -149,9 +157,12 @@ export function decideHookOutcomePure(input, ctx) {
             // configuration and can execute configured helpers. Bounded-swarm waves
             // pass the admission guard above; fresh children cannot activate swarm
             // mode. Older paths retain their inherited scheduler limitations.
-            if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
+            if (toolName === AGENT_SWARM_TOOL)
                 return { decision: "allow" };
-            }
+            if (READ_ONLY_TOOLS.has(toolName))
+                return readToolDecision(toolName, scopeOf(ctx));
+            if (WEB_TOOLS.has(toolName))
+                return webToolDecision(label, toolName, input.tool_input, scopeOf(ctx));
             return {
                 decision: "deny",
                 reason: denySwarmMessage(toolName, ctx.swarmPolicy === BOUNDED_SWARM_POLICY && ctx.swarmWaveSize === "1"),
@@ -198,13 +209,50 @@ export function decideHookOutcomePure(input, ctx) {
             }
             // Unknown label: fail closed to READ_ONLY_TOOLS only.
             if (READ_ONLY_TOOLS.has(toolName)) {
-                return { decision: "allow" };
+                return readToolDecision(toolName, scopeOf(ctx));
             }
             return {
                 decision: "deny",
                 reason: `kimi-plugin-cc safety hook: unrecognized command label "${label}"; tool "${toolName}" denied as a safety default.`,
             };
     }
+}
+function scopeOf(ctx) {
+    return parseScopeEnvironment(ctx.readRoots, ctx.network);
+}
+function readToolDecision(toolName, scope) {
+    if (scope.confined && SCOPED_READ_TOOLS.has(toolName))
+        return { evaluator: "read-scope", roots: scope.roots };
+    return { decision: "allow" };
+}
+function webToolDecision(label, toolName, toolInput, scope) {
+    if (!scope.network) {
+        return {
+            decision: "deny",
+            reason: `kimi-plugin-cc safety hook: ${label} has no network access; tool "${toolName}" is denied. ` +
+                "The caller can allow WebSearch and FetchURL for one call with --network, which also confines reads to the workspace and any --read-root.",
+        };
+    }
+    if (toolName === "WebSearch")
+        return { decision: "allow" };
+    const url = typeof toolInput === "object" && toolInput !== null && !Array.isArray(toolInput)
+        ? toolInput.url
+        : undefined;
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) {
+        try {
+            const parsed = new URL(url);
+            if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.username === "" && parsed.password === "") {
+                return { decision: "allow" };
+            }
+        }
+        catch {
+            // Unparseable URLs fall through to the denial.
+        }
+    }
+    return {
+        decision: "deny",
+        reason: "kimi-plugin-cc safety hook: FetchURL accepts only http:// and https:// URLs without embedded credentials.",
+    };
 }
 function denyReadOnlyMessage(label, toolName) {
     const tool = toolName.length > 0 ? toolName : "<unspecified>";

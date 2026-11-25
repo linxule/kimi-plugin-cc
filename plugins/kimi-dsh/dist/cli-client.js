@@ -16,6 +16,7 @@ import { resolveKimiHome } from "./kimi-home.js";
 import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
+import { NETWORK_ENV, READ_ROOTS_ENV, READ_SCOPE_LABELS, readScopeEnvironment, SCOPE_FLAGS_WRITE_MESSAGE, } from "./read-scope.js";
 import { sleep } from "./util.js";
 import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
 import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
@@ -131,7 +132,8 @@ export async function runCliPrompt(opts) {
     let announcedSystemVersion;
     const hookMonitor = createHookEscapeMonitor({ commandLabel: opts.commandLabel,
         operationKind: opts.executionPlan.operationKind, trustedWorkspaceRoot: opts.trustedWorkspaceRoot, cwd: opts.cwd,
-        swarmPolicy: env[SWARM_POLICY_ENV], swarmWaveSize: env[SWARM_WAVE_SIZE_ENV] });
+        swarmPolicy: env[SWARM_POLICY_ENV], swarmWaveSize: env[SWARM_WAVE_SIZE_ENV],
+        readRoots: env[READ_ROOTS_ENV], network: env[NETWORK_ENV] });
     const hookEscapes = [];
     const noteHookEscape = (escape) => {
         hookEscapes.push(escape);
@@ -1039,6 +1041,16 @@ export function buildKimiCliEnvironment(opts) {
         // Trusted allowlist root for write-capable PreToolUse cases. Forge-proof
         // (env on the spawned process; the model cannot alter it). See field doc.
         env.KIMI_PLUGIN_CC_WORKSPACE_ROOT = opts.trustedWorkspaceRoot;
+    }
+    // Scope comes only from this call: an ambient value must never widen it.
+    delete env[READ_ROOTS_ENV];
+    delete env[NETWORK_ENV];
+    const scopeEnv = readScopeEnvironment(opts.readScope, opts.cwd);
+    if (Object.keys(scopeEnv).length > 0) {
+        if (opts.commandLabel === undefined || !READ_SCOPE_LABELS.has(opts.commandLabel)) {
+            throw new RuntimeError("READ_SCOPE_INVALID", SCOPE_FLAGS_WRITE_MESSAGE, "cli-client.environment");
+        }
+        Object.assign(env, scopeEnv);
     }
     return env;
 }
