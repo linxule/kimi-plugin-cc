@@ -149,6 +149,56 @@ describe("evaluateRescueHookRequest", () => {
     });
   });
 
+  describe(".git aliases on native writes and Bash.cwd", () => {
+    async function withPointerFixture(run: (root: string) => Promise<void>) {
+      const fixture = await mkdtemp(path.join(os.tmpdir(), "rescue-git-alias-"));
+      const root = path.join(fixture, "worktree");
+      try {
+        await mkdir(path.join(root, "sub"), { recursive: true });
+        // A linked worktree or submodule keeps .git as a pointer FILE.
+        await writeFile(path.join(root, ".git"), "gitdir: /elsewhere/.git/worktrees/w\n");
+        await mkdir(path.join(root, ".Git."), { recursive: true });
+        await run(root);
+      } finally {
+        await cleanupTestPath(fixture);
+      }
+    }
+
+    const denied: { tool: string; input: Record<string, string> }[] = [
+      { tool: "Write", input: { path: "<root>/.GIT" } },
+      { tool: "Write", input: { path: ".GIT" } },
+      { tool: "Edit", input: { path: "<root>/.git./config" } },
+      { tool: "Write", input: { path: ".GIT/hooks/x" } },
+      { tool: "MultiEdit", input: { path: "sub/.Git/x" } },
+      { tool: "Write", input: { path: "sub/.git /x" } },
+      { tool: "Bash", input: { command: "ls", cwd: ".Git." } },
+      { tool: "Bash", input: { command: "ls", cwd: "<root>/.Git." } },
+    ];
+
+    test.each(denied)("denies $tool $input", async ({ tool, input }) => {
+      await withPointerFixture(async (root) => {
+        const filled = Object.fromEntries(Object.entries(input).map(([key, value]) => [key, value.replace("<root>", root)]));
+        expect(await evaluateRescueHookRequest(root, tool, filled)).toEqual({
+          decision: "deny",
+          reason: expect.stringContaining(".git"),
+        });
+      });
+    });
+
+    const allowed: { tool: string; input: Record<string, string> }[] = [
+      { tool: "Write", input: { path: ".gitignore" } },
+      { tool: "Write", input: { path: ".github/workflows/ci.yml" } },
+      { tool: "Write", input: { path: "sub/.git-keep" } },
+      { tool: "Bash", input: { command: "ls", cwd: "sub" } },
+    ];
+
+    test.each(allowed)("allows $tool $input", async ({ tool, input }) => {
+      await withPointerFixture(async (root) => {
+        expect(await evaluateRescueHookRequest(root, tool, input)).toEqual({ decision: "allow" });
+      });
+    });
+  });
+
   describe("path spellings kimi-code can resolve differently", () => {
     const spellingDenied: { tool: string; input: Record<string, unknown> }[] = [
       { tool: "Write", input: { path: "~/.zshrc-probe" } },

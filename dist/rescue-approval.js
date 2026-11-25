@@ -225,7 +225,15 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
                 reason: `rescue cannot evaluate ${toolName} input with no path field`,
             };
         }
-        return pathDecision(await checkApprovedPath(root, filePath), filePath);
+        try {
+            return pathDecision(await checkApprovedPath(root, filePath), filePath);
+        }
+        catch (err) {
+            return {
+                decision: "deny",
+                reason: `rescue cannot inspect ${filePath} (outside the workspace, inside .git or unreadable): ${err.message}`,
+            };
+        }
     }
     return {
         decision: "deny",
@@ -302,10 +310,18 @@ export async function checkApprovedPath(workspaceRoot, rawTargetPath) {
     if (targetStats?.isSymbolicLink()) {
         return "symlink";
     }
-    const nearestExistingAncestor = await findNearestExistingAncestor(path.dirname(absoluteTarget));
-    const ancestorRealPath = await realpath(nearestExistingAncestor);
-    const candidatePath = path.resolve(ancestorRealPath, path.relative(nearestExistingAncestor, absoluteTarget));
-    if (!isWithinWorkspaceOutsideGit(workspaceRoot, candidatePath))
+    // An existing leaf is canonicalised too, so a case or short-name alias of
+    // `.git` is compared under its on-disk name.
+    let candidatePath;
+    if (targetStats !== null) {
+        candidatePath = await realpath(absoluteTarget);
+    }
+    else {
+        const nearestExistingAncestor = await findNearestExistingAncestor(path.dirname(absoluteTarget));
+        const ancestorRealPath = await realpath(nearestExistingAncestor);
+        candidatePath = path.resolve(ancestorRealPath, path.relative(nearestExistingAncestor, absoluteTarget));
+    }
+    if (!isWithinWorkspaceOutsideAnyGit(workspaceRoot, candidatePath))
         return "reject";
     return isHardLinkedFile(targetStats) ? "hardlink" : "allow";
 }
@@ -326,7 +342,7 @@ async function checkApprovedDirectory(workspaceRoot, rawCwd) {
     if (!stats?.isDirectory())
         return "missing";
     const resolved = await realpath(candidate);
-    return isWithinWorkspaceOutsideGit(workspaceRoot, resolved) ? "allow" : "reject";
+    return isWithinWorkspaceOutsideAnyGit(workspaceRoot, resolved) ? "allow" : "reject";
 }
 async function statIfExists(targetPath) {
     try {
@@ -1081,9 +1097,6 @@ export function validatePackageManagerCommand(command, args) {
 }
 function isWithin(root, target) {
     return target === root || target.startsWith(`${root}${path.sep}`);
-}
-function isWithinWorkspaceOutsideGit(root, target) {
-    return isWithin(root, target) && !path.relative(root, target).split(path.sep).includes(".git");
 }
 // Case-insensitive, trailing-dot/space tolerant: case-insensitive and Windows
 // filesystems open `.GIT` or `.git.` as the repository's `.git`.

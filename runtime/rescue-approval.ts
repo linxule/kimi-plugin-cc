@@ -237,7 +237,14 @@ export async function evaluateRescueHookRequest(
         reason: `rescue cannot evaluate ${toolName} input with no path field`,
       };
     }
-    return pathDecision(await checkApprovedPath(root, filePath), filePath);
+    try {
+      return pathDecision(await checkApprovedPath(root, filePath), filePath);
+    } catch (err) {
+      return {
+        decision: "deny",
+        reason: `rescue cannot inspect ${filePath} (outside the workspace, inside .git or unreadable): ${(err as Error).message}`,
+      };
+    }
   }
 
   return {
@@ -329,13 +336,17 @@ export async function checkApprovedPath(
     return "symlink";
   }
 
-  const nearestExistingAncestor = await findNearestExistingAncestor(path.dirname(absoluteTarget));
-  const ancestorRealPath = await realpath(nearestExistingAncestor);
-  const candidatePath = path.resolve(
-    ancestorRealPath,
-    path.relative(nearestExistingAncestor, absoluteTarget),
-  );
-  if (!isWithinWorkspaceOutsideGit(workspaceRoot, candidatePath)) return "reject";
+  // An existing leaf is canonicalised too, so a case or short-name alias of
+  // `.git` is compared under its on-disk name.
+  let candidatePath: string;
+  if (targetStats !== null) {
+    candidatePath = await realpath(absoluteTarget);
+  } else {
+    const nearestExistingAncestor = await findNearestExistingAncestor(path.dirname(absoluteTarget));
+    const ancestorRealPath = await realpath(nearestExistingAncestor);
+    candidatePath = path.resolve(ancestorRealPath, path.relative(nearestExistingAncestor, absoluteTarget));
+  }
+  if (!isWithinWorkspaceOutsideAnyGit(workspaceRoot, candidatePath)) return "reject";
   return isHardLinkedFile(targetStats) ? "hardlink" : "allow";
 }
 
@@ -360,7 +371,7 @@ async function checkApprovedDirectory(
   if (!stats?.isDirectory()) return "missing";
 
   const resolved = await realpath(candidate);
-  return isWithinWorkspaceOutsideGit(workspaceRoot, resolved) ? "allow" : "reject";
+  return isWithinWorkspaceOutsideAnyGit(workspaceRoot, resolved) ? "allow" : "reject";
 }
 
 async function statIfExists(targetPath: string) {
@@ -1183,10 +1194,6 @@ export function validatePackageManagerCommand(
 
 function isWithin(root: string, target: string): boolean {
   return target === root || target.startsWith(`${root}${path.sep}`);
-}
-
-function isWithinWorkspaceOutsideGit(root: string, target: string): boolean {
-  return isWithin(root, target) && !path.relative(root, target).split(path.sep).includes(".git");
 }
 
 // Case-insensitive, trailing-dot/space tolerant: case-insensitive and Windows
