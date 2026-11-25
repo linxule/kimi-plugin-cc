@@ -89,6 +89,15 @@ function commandArguments(rawInput) {
     const trimmed = rawInput.trim();
     return trimmed.length === 0 ? [] : trimmed.split(/\s+/);
 }
+export const DSH_SETUP_HINT = "[--check|--uninstall|--models [--json]|--install-kimi [--json]]";
+/** Setup arguments DSH forwards; `--uninstall --all` and combined modes stay unavailable here. */
+export function dshSetupArguments(rawInput) {
+    const args = commandArguments(rawInput);
+    const valid = args.length === 0
+        || (args.length === 1 && ["--check", "--uninstall", "--models", "--install-kimi"].includes(args[0]))
+        || (args.length === 2 && ["--models", "--install-kimi"].includes(args[0]) && args[1] === "--json");
+    return valid ? args : undefined;
+}
 function commandText(result) {
     return [result.stdout.trimEnd(), result.stderr.trimEnd()]
         .filter((text) => text.length > 0)
@@ -133,16 +142,13 @@ export function apply(ctx, config) {
         commandCtx.commands.register({
             definitionId: CommandDefinitionId("kimi-plugin-cc/dsh/setup"),
             name: "kimi-setup",
-            description: "Install, check, or remove the DSH-owned Kimi PreToolUse hook; list configured models",
-            input: { hint: "[--check|--uninstall|--models [--json]]" },
+            description: "Install, check, or remove the DSH-owned Kimi PreToolUse hook; list configured models; install a certified Kimi Code CLI on request",
+            input: { hint: DSH_SETUP_HINT },
             recordInput: false,
             handler: (invocation) => {
-                const args = commandArguments(invocation.rawInput);
-                const valid = args.length === 0
-                    || (args.length === 1 && ["--check", "--uninstall", "--models"].includes(args[0]))
-                    || (args.length === 2 && args[0] === "--models" && args[1] === "--json");
-                if (!valid) {
-                    return { kind: "error", text: "Usage: /kimi-setup [--check|--uninstall|--models [--json]]" };
+                const args = dshSetupArguments(invocation.rawInput);
+                if (args === undefined) {
+                    return { kind: "error", text: `Usage: /kimi-setup ${DSH_SETUP_HINT}` };
                 }
                 return execute(invocation, ["setup", ...args]);
             },

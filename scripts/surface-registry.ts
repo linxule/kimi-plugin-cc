@@ -236,7 +236,7 @@ Job controls are \`/kimi-status [job-id]\`, \`/kimi-result [job-id]\`, and \`/ki
 
 - Node.js 24.9.0 or later.
 - DeepSeek Harness ${DSH_VERSION_RANGE}; this package is developed and composed against 0.2.1-rc.5.
-- Kimi Code CLI on \`PATH\`, authenticated and configured through Kimi. The companion's exact-version certification table remains authoritative.
+- Kimi Code CLI on \`PATH\` or installed with \`/kimi-setup --install-kimi\`, authenticated and configured through Kimi. The companion's exact-version certification table remains authoritative.
 - A patched DSH host and profiles with zod >=4.6.6 and undici >=8.12.2; see [host installation and audit instructions](../../docs/registry-releases.md#patched-dsh-host-and-profiles). The plugin does not patch your host automatically.
 
 ## Install
@@ -259,10 +259,11 @@ Useful setup commands:
 /kimi-setup --check
 /kimi-setup --models
 /kimi-setup --models --json
+/kimi-setup --install-kimi
 /kimi-setup --uninstall
 \`\`\`
 
-Model inventory is local and credential-safe; it is not a connection test. Uninstall removes only the DSH managed block. The all-host \`--uninstall --all\` action is deliberately not exposed through the DSH command.
+Model inventory is local and credential-safe; it is not a connection test. \`--install-kimi\` (optionally with \`--json\`) downloads and installs the highest certified Kimi Code CLI under the companion data directory; it runs only when you invoke it. Uninstall removes only the DSH managed block. The all-host \`--uninstall --all\` action is deliberately not exposed through the DSH command.
 
 ## Use
 

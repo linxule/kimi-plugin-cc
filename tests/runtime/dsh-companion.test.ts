@@ -15,7 +15,7 @@ import {
   startCompanionRun,
   type DshCompanionSpec,
 } from "../../runtime/dsh/companion.js";
-import { apply, defaultDshDataRoot } from "../../runtime/dsh/index.js";
+import { apply, defaultDshDataRoot, DSH_SETUP_HINT, dshSetupArguments } from "../../runtime/dsh/index.js";
 import { preferStableNodePath } from "../../runtime/hooks/install-paths.js";
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..");
@@ -265,6 +265,17 @@ describe("DSH companion lifecycle", () => {
 });
 
 describe("DSH human commands", () => {
+  test("/kimi-setup forwards single modes, including --install-kimi, and refuses combinations", () => {
+    expect(DSH_SETUP_HINT).toBe("[--check|--uninstall|--models [--json]|--install-kimi [--json]]");
+    for (const input of ["", "  ", "--check", "--uninstall", "--models", "--models --json", "--install-kimi", " --install-kimi   --json "]) {
+      expect(dshSetupArguments(input), input).toEqual(input.trim() === "" ? [] : input.trim().split(/\s+/));
+    }
+    for (const input of ["--install-kimi --check", "--check --install-kimi", "--install-kimi --models", "--uninstall --all", "--json", "--check --json", "--install-kimi --json --json", "--all"]) {
+      expect(dshSetupArguments(input), input).toBeUndefined();
+    }
+  });
+
+
   test("companion commands retain bounded stdout, stderr, and terminal facts", async () => {
     const { handle } = fakeHandle({
       outcome: { exitCode: 2, signal: null },
