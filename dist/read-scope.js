@@ -52,18 +52,26 @@ export function assertScopeSupported(scope, certification, code, stage) {
         throw new RuntimeError(code, "--network is refused on an uncertified kimi-code release: read confinement is verified only against certified releases. Run without --network, or install a certified kimi-code release.", stage);
     }
 }
-/** Child-environment values for one spawn; both absent for the default scope. */
-export function readScopeEnvironment(scope, cwd) {
-    if (scope === undefined || (scope.readRoots.length === 0 && !scope.network))
-        return {};
+/** The roots the hook confines reads to: the run directory first, then the read roots. */
+export function effectiveReadRoots(scope, cwd) {
     // Root 1 is the directory kimi runs in, so relative and defaulted tool
     // paths resolve inside it exactly as upstream resolves them.
     const roots = [realpathSync.native(cwd)];
     for (const root of scope.readRoots)
         if (!roots.includes(root))
             roots.push(root);
+    return roots;
+}
+/** True when every root in `inner` lies within some root in `outer`. */
+export function rootsWithin(inner, outer) {
+    return inner.every((root) => outer.some((candidate) => isWithin(candidate, root)));
+}
+/** Child-environment values for one spawn; both absent for the default scope. */
+export function readScopeEnvironment(scope, cwd) {
+    if (scope === undefined || (scope.readRoots.length === 0 && !scope.network))
+        return {};
     return {
-        [READ_ROOTS_ENV]: JSON.stringify(roots),
+        [READ_ROOTS_ENV]: JSON.stringify(effectiveReadRoots(scope, cwd)),
         ...(scope.network ? { [NETWORK_ENV]: "1" } : {}),
     };
 }

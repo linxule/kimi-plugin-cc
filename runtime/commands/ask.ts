@@ -20,7 +20,7 @@ import { KIMI_ASK_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseAskArgs } from "../parsing.js";
-import { assertScopeSupported, parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
+import { assertScopeSupported, effectiveReadRoots, parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { CommandContext } from "../types.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
@@ -72,7 +72,9 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
 
     const jobId = allocateJobId(context);
     const sessionResolution = await resolveResumeSession(store, "ask", repoIdentity.repoId, parsed);
-    assertNetworkResumeConfined(store, "ask", readScope?.network === true, sessionResolution);
+    if (readScope?.network === true) {
+      assertNetworkResumeConfined(store, "ask", sessionResolution, effectiveReadRoots(readScope, context.cwd));
+    }
     const askPrompt = buildAskPrompt(parsed.prompt, sessionResolution.reusedSession);
     const executionPlan = await prepareKimiExecutionPlan({
       operationKind: "ask",

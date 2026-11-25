@@ -75,18 +75,28 @@ export function assertScopeSupported(
   }
 }
 
+/** The roots the hook confines reads to: the run directory first, then the read roots. */
+export function effectiveReadRoots(scope: ReadScope, cwd: string): string[] {
+  // Root 1 is the directory kimi runs in, so relative and defaulted tool
+  // paths resolve inside it exactly as upstream resolves them.
+  const roots = [realpathSync.native(cwd)];
+  for (const root of scope.readRoots) if (!roots.includes(root)) roots.push(root);
+  return roots;
+}
+
+/** True when every root in `inner` lies within some root in `outer`. */
+export function rootsWithin(inner: readonly string[], outer: readonly string[]): boolean {
+  return inner.every((root) => outer.some((candidate) => isWithin(candidate, root)));
+}
+
 /** Child-environment values for one spawn; both absent for the default scope. */
 export function readScopeEnvironment(
   scope: ReadScope | undefined,
   cwd: string,
 ): { [READ_ROOTS_ENV]?: string; [NETWORK_ENV]?: "1" } {
   if (scope === undefined || (scope.readRoots.length === 0 && !scope.network)) return {};
-  // Root 1 is the directory kimi runs in, so relative and defaulted tool
-  // paths resolve inside it exactly as upstream resolves them.
-  const roots = [realpathSync.native(cwd)];
-  for (const root of scope.readRoots) if (!roots.includes(root)) roots.push(root);
   return {
-    [READ_ROOTS_ENV]: JSON.stringify(roots),
+    [READ_ROOTS_ENV]: JSON.stringify(effectiveReadRoots(scope, cwd)),
     ...(scope.network ? { [NETWORK_ENV]: "1" as const } : {}),
   };
 }

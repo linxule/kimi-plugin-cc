@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -297,31 +297,41 @@ describe("S4 --network on a resumed session", () => {
     try {
       await runAsk(["--read-root", pluginDataRoot, "first"], makeContext(repoRoot, env));
       const first = await latestAsk(env, repoRoot);
-      expect(await runAsk(["-r", "--network", "next"], makeContext(repoRoot, env))).toContain("network on");
-      expect(await runAsk(["--network", "--resume", first.kimi_session_id!], makeContext(repoRoot, env))).toContain("network on");
+      // The earlier --read-root must also be inside this call's roots.
+      await expect(runAsk(["-r", "--network", "next"], makeContext(repoRoot, env))).rejects.toMatchObject({
+        code: "INVALID_ARGS", stage: "ask.resume", message: expect.stringContaining("ask --fresh --network"),
+      });
+      expect(await runAsk(["-r", "--network", "--read-root", pluginDataRoot, "next"], makeContext(repoRoot, env))).toContain("network on");
+      expect(await runAsk(["--network", "--read-root", pluginDataRoot, "--resume", first.kimi_session_id!], makeContext(repoRoot, env)))
+        .toContain("network on");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
     }
   }, 60_000);
 
-  test("unknown or broken history refuses; no network or a fresh session never checks", () => {
+  test("unknown or broken history refuses; a fresh session never checks", () => {
     const resolution = (sourceJob: object | null, kimiSessionId: string | null) =>
       ({ reusedSession: true, kimiSessionId, resumedFromJobId: null, sourceJob }) as never;
-    const store = (jobs: Array<{ job_id: string; read_scope?: string; resumed_from_job_id?: string | null }>) => ({
+    const store = (jobs: Array<{ job_id: string; cwd: string; read_scope?: string; resumed_from_job_id?: string | null }>) => ({
       listJobsBySessionId: () => jobs,
       getJob: (id: string) => jobs.find((job) => job.job_id === id) ?? null,
     }) as never;
-    const scope = serializeReadScope({ readRoots: ["/x"], network: false })!;
-    expect(() => assertNetworkResumeConfined(store([]), "ask", true, resolution({ job_id: "a" }, "s")))
+    const cwd = realpathSync(process.cwd());
+    const roots = [cwd];
+    const scope = serializeReadScope({ readRoots: [cwd], network: false })!;
+    expect(() => assertNetworkResumeConfined(store([]), "ask", resolution({ job_id: "a" }, "s"), roots))
       .toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
-    expect(() => assertNetworkResumeConfined(store([{ job_id: "b", read_scope: scope, resumed_from_job_id: "gone" }]), "ask", true,
-      resolution({ job_id: "b" }, "s"))).toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
-    expect(() => assertNetworkResumeConfined(store([{ job_id: "a", read_scope: scope }]), "ask", true,
-      resolution({ job_id: "a" }, "s"))).not.toThrow();
-    expect(() => assertNetworkResumeConfined(store([]), "ask", false, resolution({ job_id: "a" }, "s"))).not.toThrow();
-    expect(() => assertNetworkResumeConfined(store([]), "ask", true,
-      { reusedSession: false, kimiSessionId: null, resumedFromJobId: null, sourceJob: null })).not.toThrow();
+    expect(() => assertNetworkResumeConfined(store([{ job_id: "b", cwd, read_scope: scope, resumed_from_job_id: "gone" }]), "ask",
+      resolution({ job_id: "b" }, "s"), roots)).toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+    expect(() => assertNetworkResumeConfined(store([{ job_id: "a", cwd, read_scope: "{not json" }]), "ask",
+      resolution({ job_id: "a" }, "s"), roots)).toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+    expect(() => assertNetworkResumeConfined(store([{ job_id: "a", cwd: path.join(cwd, "missing-dir"), read_scope: scope }]), "ask",
+      resolution({ job_id: "a" }, "s"), roots)).toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+    expect(() => assertNetworkResumeConfined(store([{ job_id: "a", cwd, read_scope: scope }]), "ask",
+      resolution({ job_id: "a" }, "s"), roots)).not.toThrow();
+    expect(() => assertNetworkResumeConfined(store([]), "ask",
+      { reusedSession: false, kimiSessionId: null, resumedFromJobId: null, sourceJob: null }, roots)).not.toThrow();
   });
 });
 

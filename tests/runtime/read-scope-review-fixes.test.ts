@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { assertNetworkResumeConfined } from "../../runtime/commands/cli-helpers.js";
 import { decideHookOutcome } from "../../runtime/hooks/approval-policy.js";
+import { serializeReadScope } from "../../runtime/read-scope.js";
 
 let base: string;
 let workspace: string;
@@ -51,5 +53,41 @@ describe("S-1 path spellings the hook and kimi-code could resolve differently ar
       expect(await decideHookOutcome({ tool_name, tool_input }, { commandLabel: "ask", ...scope() }))
         .toEqual({ decision: "allow" });
     }
+  });
+});
+
+describe("S-2 networked resume requires earlier roots inside the current roots", () => {
+  const job = (id: string, cwd: string, readRoots: string[], resumedFrom: string | null = null) => ({
+    job_id: id, cwd, resumed_from_job_id: resumedFrom,
+    read_scope: serializeReadScope({ readRoots, network: false }) ?? serializeReadScope({ readRoots: [], network: true }),
+  });
+  const store = (jobs: ReturnType<typeof job>[]) => ({
+    listJobsBySessionId: () => jobs,
+    getJob: (id: string) => jobs.find((entry) => entry.job_id === id) ?? null,
+  }) as never;
+  const resolution = (sourceId: string) =>
+    ({ reusedSession: true, kimiSessionId: "s", resumedFromJobId: sourceId, sourceJob: { job_id: sourceId } }) as never;
+
+  test("an earlier --read-root / or a wider earlier root refuses", () => {
+    for (const history of [[job("a", workspace, ["/"])], [job("a", workspace, [wide])]]) {
+      expect(() => assertNetworkResumeConfined(store(history), "ask", resolution("a"), [workspace, narrow]))
+        .toThrow(expect.objectContaining({ code: "INVALID_ARGS", message: expect.stringContaining("ask --fresh --network") }));
+    }
+  });
+
+  test("an earlier workspace outside the current roots refuses, including on the resume chain", () => {
+    expect(() => assertNetworkResumeConfined(store([job("a", base, [])]), "ask", resolution("a"), [workspace]))
+      .toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+    const chain = [job("b", workspace, [], "a"), job("a", workspace, [wide])];
+    const sessionOnly = { listJobsBySessionId: () => [chain[0]], getJob: (id: string) => chain.find((entry) => entry.job_id === id) ?? null } as never;
+    expect(() => assertNetworkResumeConfined(sessionOnly, "ask", resolution("b"), [workspace, narrow]))
+      .toThrow(expect.objectContaining({ code: "INVALID_ARGS" }));
+  });
+
+  test("earlier roots equal to or inside the current roots are allowed", () => {
+    expect(() => assertNetworkResumeConfined(store([job("a", workspace, [narrow])]), "ask", resolution("a"), [workspace, wide]))
+      .not.toThrow();
+    expect(() => assertNetworkResumeConfined(store([job("a", path.join(workspace), [])]), "ask", resolution("a"), [workspace]))
+      .not.toThrow();
   });
 });

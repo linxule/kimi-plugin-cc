@@ -4,6 +4,7 @@ import { observedExecutionFields, reconcileHistoricalJobProvenance } from "../ki
 import { capitalize } from "../render.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { recoverSessionIdFromStore } from "../session-recovery.js";
+import { effectiveReadRoots, parseJobReadScope, rootsWithin } from "../read-scope.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { formatBudgetDuration } from "../render.js";
 /**
@@ -241,28 +242,42 @@ export async function resolveResumeSession(store, kind, repoId, options) {
     };
 }
 /**
- * --network on a resumed session must not send out what an earlier,
- * unconfined turn read. Every job recorded for the session, and every job on
- * the source's resume chain, must have run confined (non-null read_scope).
- * No recorded history, or a broken chain, counts as unconfined.
+ * --network on a resumed session must not send out what an earlier turn
+ * read. Every job recorded for the session, and every job on the source's
+ * resume chain, must have run confined to roots inside `currentRoots`.
+ * No recorded history, a broken chain or an unreadable scope counts as
+ * unconfined.
  */
-export function assertNetworkResumeConfined(store, kind, network, resolution) {
-    if (!network || !resolution.reusedSession)
+export function assertNetworkResumeConfined(store, kind, resolution, currentRoots) {
+    if (!resolution.reusedSession)
         return;
     const sessionId = resolution.kimiSessionId;
+    // Each earlier turn's reads stay in the conversation, so each earlier
+    // turn's roots must lie inside this call's roots.
+    const confinedWithin = (job) => {
+        if (job === null || job.read_scope == null)
+            return false;
+        try {
+            const scope = parseJobReadScope(job.read_scope);
+            return scope !== undefined && rootsWithin(effectiveReadRoots(scope, job.cwd), currentRoots);
+        }
+        catch {
+            return false;
+        }
+    };
     const history = sessionId ? store.listJobsBySessionId(sessionId) : [];
-    let confined = history.length > 0 && history.every((job) => job.read_scope != null);
+    let confined = history.length > 0 && history.every(confinedWithin);
     const seen = new Set();
     for (let jobId = resolution.sourceJob?.job_id; confined && jobId;) {
         if (seen.has(jobId))
             break;
         seen.add(jobId);
         const job = store.getJob(jobId);
-        confined = job !== null && job.read_scope != null;
+        confined = confinedWithin(job);
         jobId = job?.resumed_from_job_id;
     }
     if (!confined) {
-        throw new RuntimeError("INVALID_ARGS", `${kind} --network cannot resume session ${sessionId ?? "<unknown>"}: an earlier turn in it ran without confined reads (or its history is not recorded), so its reads could be sent out. ` +
+        throw new RuntimeError("INVALID_ARGS", `${kind} --network cannot resume session ${sessionId ?? "<unknown>"}: an earlier turn in it ran without confined reads, or could read outside this call's workspace and --read-root directories (or its history is not recorded), so those reads could be sent out. ` +
             `Start a fresh session instead: ${kind} --fresh --network [--read-root <dir>] <prompt>.`, `${kind}.resume`);
     }
 }
