@@ -769,6 +769,16 @@ describe("swarm web lifecycle", () => {
     });
   });
 
+  test("G-misc: enabled experimental config does not refuse a planned activation; the child env forces it off", async () => {
+    await withFixture("success", async (fixture) => {
+      await writeFile(path.join(fixture.home, "config.toml"), "[experimental]\ntower = true\nsubagent_fork = true\n", "utf8");
+      const options = makeOptions(fixture);
+      const identity = await preactivateSwarmSession(options);
+      expect(spawns(await readLog(fixture))).toHaveLength(1);
+      await deactivateSwarmSession({ ...options, ...identity });
+    });
+  });
+
   test("deactivation fails loudly when the exit journal is absent", async () => {
     await withFixture("success", async (fixture) => {
       const options = makeOptions(fixture);

@@ -564,7 +564,7 @@ export async function assertNativeV2Preflight(options) {
     // Certified and test-bypass children run with tower and subagent fork forced
     // off by per-flag env, which outranks config and the master flag on every
     // reviewed release. An uncertified release's flag names are unreviewed.
-    const experimental = options.release?.certification === "uncertified"
+    const experimental = options.release === undefined || options.release.certification === "uncertified"
         ? await inspectExperimentalSelectors(options.kimiHome, options.env)
         : { kind: "ok" };
     if (experimental.kind === "refuse") {

@@ -591,11 +591,13 @@ describe("assertNativeV2Preflight", () => {
     });
   });
 
-  test("G3: enabled experimental selectors no longer refuse a certified or unlabeled launch", async () => {
+  test("G3: enabled experimental selectors no longer refuse a certified launch; an unlabeled one stays strict", async () => {
     await withHome("assert-experimental-relaxed", async (home) => {
       await writeConfig(home, "[experimental]\ntower = true\nsubagent_fork = true\n");
       const env = { KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "true" };
-      await expect(assertNativeV2Preflight({ kimiHome: home, env })).resolves.toEqual({ warnings: [] });
+      await expect(assertNativeV2Preflight({ kimiHome: home, env })).rejects.toMatchObject({
+        code: "CLI_V2_EXPERIMENTAL_UNSAFE",
+      });
       for (const certification of ["certified", "test-bypass"] as const) {
         await expect(assertNativeV2Preflight({
           kimiHome: home, env, release: { operationKind: "ask", kimiVersion: "2.7.3", certification },

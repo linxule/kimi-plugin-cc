@@ -279,6 +279,7 @@ async function prepareWebSpawn(
       env: options.env,
       expectedExecutionRoot: options.cwd,
       stage: "swarm-activation.pre-spawn",
+      release: options.executionPlan,
     });
   }
   throwIfAborted(options.signal, failureCode, "swarm-activation.pre-spawn");
