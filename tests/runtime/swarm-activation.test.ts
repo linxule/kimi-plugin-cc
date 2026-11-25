@@ -470,6 +470,70 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
+  test("text ready parsing skips lines without the server prefix", async () => {
+    await withFixture("success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_READY_PRELUDE = "starting up\n\n{\"origin\":\"noise\"}\n";
+      const options = makeOptions(fixture);
+      const identity = await preactivateSwarmSession(options);
+      expect(identity.sessionId).toBe("session_mock");
+      expect(requests(await readLog(fixture))[0]?.path).toBe("/api/v1/meta");
+      await deactivateSwarmSession({ ...options, ...identity });
+    });
+  }, 15_000);
+
+  test.each([
+    "text-origin-host-ready",
+    "text-origin-port-ready",
+    "text-origin-credentials-ready",
+    "text-origin-scheme-ready",
+    "text-origin-path-ready",
+    "text-origin-query-ready",
+  ])("rejects a non-loopback-root text ready URL before any REST call: %s", async (scenario) => {
+    await withFixture(scenario, async (fixture) => {
+      let caught: unknown;
+      try {
+        await preactivateSwarmSession(makeOptions(fixture));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(RuntimeError);
+      expect((caught as RuntimeError).code).toBe("SWARM_ACTIVATION_FAILED");
+      expect((caught as RuntimeError).stage).toBe("swarm-activation.ready");
+      expect((caught as RuntimeError).message)
+        .toBe("The Kimi web ready line was not an authenticated loopback URL in the expected format.");
+      expect(requests(await readLog(fixture))).toEqual([]);
+    });
+  }, 15_000);
+
+  test("exact 2.7.2 JSON ready parsing skips blank lines", async () => {
+    await withFixture("ws-success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      fixture.env.MOCK_KIMI_WEB_READY_PRELUDE = "\n   \n";
+      const options = makeOptions(fixture, { expectedVersion: "2.7.2", model: "chosen-model" });
+      const identity = await preactivateSwarmSession(options);
+      expect(identity.sessionId).toBe("session_mock");
+      await deactivateSwarmSession({ ...options, ...identity });
+    });
+  }, 15_000);
+
+  test("exact 2.7.2 JSON ready parsing rejects the first non-blank non-JSON line", async () => {
+    await withFixture("ws-success", async (fixture) => {
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      fixture.env.MOCK_KIMI_WEB_READY_PRELUDE = "starting up\n";
+      let caught: unknown;
+      try {
+        await preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }));
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(RuntimeError);
+      expect((caught as RuntimeError).stage).toBe("swarm-activation.ready");
+      expect((caught as RuntimeError).message)
+        .toBe("The Kimi web JSON ready line did not confirm the authenticated KAP loopback contract.");
+      expect(requests(await readLog(fixture))).toEqual([]);
+    });
+  }, 15_000);
+
   test("exact 2.7.2 rejects a token-less JSON ready line before any REST call", async () => {
     await withFixture("json-tokenless-ready", async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";

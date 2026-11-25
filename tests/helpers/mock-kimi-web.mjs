@@ -25,6 +25,7 @@ const deactivateStatusDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_DEACTI
 const createSessionDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_CREATE_SESSION_DELAY_MS ?? "0", 10);
 const printDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_PRINT_DELAY_MS ?? "0", 10);
 const shutdownDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_SHUTDOWN_DELAY_MS ?? "10", 10);
+const readyPrelude = process.env.MOCK_KIMI_WEB_READY_PRELUDE ?? "";
 const logPath = process.env.MOCK_KIMI_WEB_LOG;
 const sessionId = "session_mock";
 const workspaceId = "wd_mock";
@@ -576,6 +577,7 @@ server.listen(0, "127.0.0.1", async () => {
     process.stderr.write(`diagnostic ${token} ${configCanary}\n`);
   }
   const tokenless = scenario === "tokenless-ready" || scenario === "json-tokenless-ready" || scenario === "late-fork-after-parent-exit";
+  if (readyPrelude) process.stdout.write(readyPrelude);
   if (jsonReady) {
     if (scenario === "json-malformed-ready") {
       process.stdout.write("{not-json\n");
@@ -604,7 +606,15 @@ server.listen(0, "127.0.0.1", async () => {
       process.stdout.write(`${JSON.stringify(ready)}\n`);
     }
   } else {
-    process.stdout.write(`Kimi server: http://127.0.0.1:${address.port}/${tokenless ? "" : `#token=${token}`}\n`);
+    const textOrigins = {
+      "text-origin-host-ready": `http://localhost:${address.port}`,
+      "text-origin-port-ready": "http://127.0.0.1",
+      "text-origin-credentials-ready": `http://user:pass@127.0.0.1:${address.port}`,
+      "text-origin-scheme-ready": `https://127.0.0.1:${address.port}`,
+    };
+    const base = textOrigins[scenario] ?? `http://127.0.0.1:${address.port}`;
+    const pathPart = scenario === "text-origin-path-ready" ? "/nested" : scenario === "text-origin-query-ready" ? "/?ready=1" : "/";
+    process.stdout.write(`Kimi server: ${base}${pathPart}${tokenless ? "" : `#token=${token}`}\n`);
   }
   if (scenario === "late-fork-after-parent-exit") {
     setTimeout(() => process.exit(1), 200);
