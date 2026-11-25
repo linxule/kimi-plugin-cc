@@ -24,8 +24,10 @@ import { spawn } from "node:child_process";
 import {
   access,
   mkdir,
+  lstat,
   mkdtemp,
   open,
+  readdir,
   readFile,
   readlink,
   realpath,
@@ -1229,6 +1231,10 @@ const KIMI_INSTALL_KILL_GRACE_MS = 2_000;
 // 5s job-time probe.
 const KIMI_INSTALL_PROBE_TIMEOUT_MS = 30_000;
 const STDERR_TAIL_BYTES = 2_000;
+const STAGING_PREFIX = ".staging-";
+// A staging directory younger than this may belong to a concurrent install
+// still inside its npm timeout and probe window, so it is not stale yet.
+const STALE_STAGING_AGE_MS = 2 * (KIMI_INSTALL_TIMEOUT_MS + KIMI_INSTALL_PROBE_TIMEOUT_MS);
 
 /** Numeric, not lexical: "2.10.0" is above "2.9.0". */
 export function highestCertifiedKimiVersion(
@@ -1366,6 +1372,7 @@ async function installPluginOwnedKimi(version: string, env: NodeJS.ProcessEnv): 
   }
   const binDir = resolveKimiBinDir(env);
   await mkdir(binDir, { recursive: true });
+  await removeStaleStaging(binDir);
   const versionDir = path.join(binDir, version);
   const binRelative = path.join(version, "node_modules", ".bin", "kimi");
   const binPath = path.join(binDir, binRelative);
@@ -1377,7 +1384,7 @@ async function installPluginOwnedKimi(version: string, env: NodeJS.ProcessEnv): 
     return { version, downloaded: false, binary: await realpath(binPath), current: currentPath };
   }
 
-  const staging = await mkdtemp(path.join(binDir, `.staging-${version}-`));
+  const staging = await mkdtemp(path.join(binDir, `${STAGING_PREFIX}${version}-`));
   let trash: string | undefined;
   try {
     await writeFile(
@@ -1414,6 +1421,27 @@ async function installPluginOwnedKimi(version: string, env: NodeJS.ProcessEnv): 
   } finally {
     await rm(staging, { recursive: true, force: true });
     if (trash) await rm(trash, { recursive: true, force: true });
+  }
+}
+
+/** Remove staging directories an interrupted install left directly in kimi-bin/. */
+async function removeStaleStaging(binDir: string, now = Date.now()): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(binDir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    if (!name.startsWith(STAGING_PREFIX)) continue;
+    const entry = path.join(binDir, name);
+    try {
+      const info = await lstat(entry);
+      if (!info.isDirectory() || now - info.mtimeMs < STALE_STAGING_AGE_MS) continue;
+      await rm(entry, { recursive: true, force: true });
+    } catch {
+      // Best effort: a leftover never affects binary resolution.
+    }
   }
 }
 

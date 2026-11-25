@@ -20,7 +20,7 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // Managed-block splicing is line-based and preserves user bytes outside owned
 // edits; whole-file validation and inline-hook normalization use the TOML parser.
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, open, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile, } from "node:fs/promises";
+import { access, mkdir, lstat, mkdtemp, open, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile, } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
@@ -883,6 +883,10 @@ const KIMI_INSTALL_KILL_GRACE_MS = 2_000;
 // 5s job-time probe.
 const KIMI_INSTALL_PROBE_TIMEOUT_MS = 30_000;
 const STDERR_TAIL_BYTES = 2_000;
+const STAGING_PREFIX = ".staging-";
+// A staging directory younger than this may belong to a concurrent install
+// still inside its npm timeout and probe window, so it is not stale yet.
+const STALE_STAGING_AGE_MS = 2 * (KIMI_INSTALL_TIMEOUT_MS + KIMI_INSTALL_PROBE_TIMEOUT_MS);
 /** Numeric, not lexical: "2.10.0" is above "2.9.0". */
 export function highestCertifiedKimiVersion(versions = NATIVE_V2_CERTIFIED_VERSIONS) {
     const parse = (v) => v.split(".").map(Number);
@@ -998,6 +1002,7 @@ async function installPluginOwnedKimi(version, env) {
     }
     const binDir = resolveKimiBinDir(env);
     await mkdir(binDir, { recursive: true });
+    await removeStaleStaging(binDir);
     const versionDir = path.join(binDir, version);
     const binRelative = path.join(version, "node_modules", ".bin", "kimi");
     const binPath = path.join(binDir, binRelative);
@@ -1007,7 +1012,7 @@ async function installPluginOwnedKimi(version, env) {
         await pointCurrentAt(binDir, binRelative, currentPath, env);
         return { version, downloaded: false, binary: await realpath(binPath), current: currentPath };
     }
-    const staging = await mkdtemp(path.join(binDir, `.staging-${version}-`));
+    const staging = await mkdtemp(path.join(binDir, `${STAGING_PREFIX}${version}-`));
     let trash;
     try {
         await writeFile(path.join(staging, "package.json"), `${JSON.stringify({ name: "kimi-plugin-cc-kimi-bin", private: true })}\n`, "utf8");
@@ -1038,6 +1043,30 @@ async function installPluginOwnedKimi(version, env) {
         await rm(staging, { recursive: true, force: true });
         if (trash)
             await rm(trash, { recursive: true, force: true });
+    }
+}
+/** Remove staging directories an interrupted install left directly in kimi-bin/. */
+async function removeStaleStaging(binDir, now = Date.now()) {
+    let entries;
+    try {
+        entries = await readdir(binDir);
+    }
+    catch {
+        return;
+    }
+    for (const name of entries) {
+        if (!name.startsWith(STAGING_PREFIX))
+            continue;
+        const entry = path.join(binDir, name);
+        try {
+            const info = await lstat(entry);
+            if (!info.isDirectory() || now - info.mtimeMs < STALE_STAGING_AGE_MS)
+                continue;
+            await rm(entry, { recursive: true, force: true });
+        }
+        catch {
+            // Best effort: a leftover never affects binary resolution.
+        }
     }
 }
 async function verifyKimiBinary(binary, version, env) {

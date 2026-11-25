@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lutimes, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -172,6 +172,33 @@ describe.skipIf(process.platform === "win32")("setup --install-kimi", () => {
     expect(await readlink(path.join(c.binDir, "current"))).toBe(path.join(HIGHEST, "node_modules", ".bin", "kimi"));
     expect(existsSync(path.join(c.binDir, "2.6.2", "node_modules", ".bin", "kimi"))).toBe(true);
     expect(await leftovers(c)).toEqual([]);
+  });
+
+  test("removes stale staging directories in kimi-bin and nothing else", async () => {
+    const c = await makeCase();
+    const old = new Date(Date.now() - 60 * 60 * 1000);
+    const stale = path.join(c.binDir, `.staging-${HIGHEST}-stale1`);
+    const young = path.join(c.binDir, `.staging-${HIGHEST}-young1`);
+    const trash = path.join(c.binDir, ".trash-2.6.2-keep");
+    const outsideTarget = path.join(c.root, "outside-dir");
+    const linked = path.join(c.binDir, ".staging-linked");
+    const besideData = path.join(c.dataRoot, ".staging-not-ours");
+    for (const dir of [stale, young, trash, outsideTarget, besideData]) {
+      await mkdir(path.join(dir, "node_modules"), { recursive: true });
+      await writeFile(path.join(dir, "marker"), "x", "utf8");
+    }
+    await symlink(outsideTarget, linked);
+    for (const dir of [stale, trash, outsideTarget, besideData]) await utimes(dir, old, old);
+    await lutimes(linked, old, old);
+
+    const result = await runSetup(["--install-kimi"], c.context);
+    expect(result.kimiInstall).toMatchObject({ ok: true });
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(young)).toBe(true);
+    expect(existsSync(trash)).toBe(true);
+    expect(existsSync(path.join(outsideTarget, "marker"))).toBe(true);
+    expect(existsSync(linked)).toBe(true);
+    expect(existsSync(besideData)).toBe(true);
   });
 
   test("with KIMI_PLUGIN_CC_KIMI_BIN set, install says jobs keep using the override", async () => {
