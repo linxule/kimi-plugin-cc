@@ -34,8 +34,8 @@
     "websiteURL": "https://github.com/linxule/kimi-plugin-cc",
     "defaultPrompt": [
       "Use $kimi-review to review my current diff.",
-      "Use $kimi-ask to explain this repository flow.",
-      "Use $kimi-rescue to delegate a bounded fix."
+      "Use $kimi-task to explain this repository flow.",
+      "Use $kimi-task with --write to delegate a bounded fix."
     ],
     "brandColor": "#0F766E"
   }

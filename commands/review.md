@@ -1,6 +1,6 @@
 ---
-description: Run a read-only Kimi review over the current working tree changes or a base ref diff.
-argument-hint: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [extra prose]"
+description: Run a read-only Kimi review over the current working tree changes or a base ref diff; --challenge questions the approach instead.
+argument-hint: "[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [extra prose]"
 disable-model-invocation: true
 ---
 
@@ -8,15 +8,20 @@ Run the companion with any user-supplied flags appended after `review`:
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh review <args>`
 
+Without a flag this is a defect review (the `review` operation). A leading `--challenge` selects the adversarial `challenge` operation, exactly as `companion.sh task challenge <args>` would: it questions assumptions, design choices and tradeoffs rather than hunting defects. Both are read-only.
+
 Supported flags:
 
+- `--challenge` — challenge the approach instead of reviewing for defects. Must appear among the leading flags; after focus text or `--` it is prose.
 - `--thinking <off|low|medium|high>` (also `--thinking=<effort>`) — request effort for this process; other model-supported effort tokens pass through. `--no-thinking` is rejected; use `--thinking off`.
 
 - `--budget <dur>` — wall-clock ceiling (default 30m; `30m`, `1h`, `90s`, or bare minutes; maximum 24h)
 
 - `--base <ref>` — review against a branch/commit diff instead of the working tree. Working-tree reviews also include untracked files listed by `git status`; `--base` remains branch/commit-diff only.
 - `-m`, `--model <name>`
-- trailing text — optional focus hint for the review
+- `--read-root <absolute-dir>` (repeatable) — let Kimi read these directories in addition to the workspace
+- `--network` — enable web search and URL fetch; file reads are then confined to the workspace plus any `--read-root` directories
+- trailing text — optional focus hint, or adversarial framing with `--challenge`
 
 Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). The default budget is 30m; use `--budget` to change it. Review runs foreground-synchronously; it does not support `--background` or `--wait`.
 

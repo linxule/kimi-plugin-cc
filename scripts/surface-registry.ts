@@ -37,28 +37,23 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "5df035c107409780cbff49d3698e2204497689fba426ab5249002e22306a4ecc" },
+  { path: ".claude-plugin/plugin.json", sha256: "0b4fb751fb7613cde93b51419f0f40638ac44834df7f15eba7bb89d57e16fe8a" },
   { path: ".claude-plugin/marketplace.json", sha256: "fb06f1e4f1b7b3881f39c021f2e93c911833e76c373d16ff274e3bc479691fdc" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
-  { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
-  { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
+  { path: "commands/README.md", sha256: "c12b80e663683aabfd6d77f3879897b9d202aa2f201d50cfe4dc88dfa1a3f819" },
   { path: "commands/cancel.md", sha256: "4d1c1e9d0534fac113fea18e2c8993d99f3ada1335186f66cd995a45f1057db4" },
-  { path: "commands/challenge.md", sha256: "38682e8ee73af6838ff01dabe589e4a1c70cf3df467e25d8b846a06f8d2fd1b3" },
-  { path: "commands/pursue.md", sha256: "5708ee0e8767de36f0d65abd1871e09c7de97a0d3da41173a735c3be2079dafc" },
+  { path: "commands/pursue.md", sha256: "adc273adb271da5cdfb2d32f948f73c513162c45295533afa472cb0dc8f621ee" },
   { path: "commands/replay.md", sha256: "84e46faa17b032f43dccb37190e461d1da3f807226f3814a9e5cd302afcf12e3" },
-  { path: "commands/rescue.md", sha256: "6f4599c1999bd9d5ad3be7781abb634cbb9e7622901f37e8e844659a8f878800" },
   { path: "commands/result.md", sha256: "d5ae361ea6c95f139e4bf1d2f23cb69e14c23c9e0e2b6e8084274e8245016db5" },
-  { path: "commands/review.md", sha256: "a528a763c643f26ff9a1674c8a6c11dcea59121320d43dd4306ef9f168280604" },
-  { path: "commands/setup.md", sha256: "ede6fb64d0a8b9876a2405b3685483d4db5ce9505dd724ad903cdf1b048abc44" },
+  { path: "commands/review.md", sha256: "30ce1dfadc291029ec4bb54293f6d9f7ccaf07172ea6b3bc24a975e90703e316" },
+  { path: "commands/setup.md", sha256: "4a23d779fa1adc54c3c3846c43b954634a662f7088a1749e6b34e4c5bbbe9dd0" },
   { path: "commands/status.md", sha256: "0171276cd08b9fe62893f62523c164f35b1a4df98cb7b04f14f62fc33fbc8cbc" },
-  { path: "commands/swarm.md", sha256: "da89f4fa49cbe2d7bb9500b40eb91117aaef73eebb44c281919fcaf192759ade" },
-  { path: "agents/kimi-ask.md", sha256: "0d913d25f62cb98dce35022ada3215982828eba180b9f1e9780b2ca78116d595" },
-  { path: "agents/kimi-challenge.md", sha256: "1bcd0807f770c2f6b0fa0aad4166a6cec9036e6f1c3fb792223e8db8231c3b1b" },
-  { path: "agents/kimi-pursue.md", sha256: "cae3b3ca39f53770d005ce5821558179692926f9fe93088c4febded7efcd5bcb" },
-  { path: "agents/kimi-rescue.md", sha256: "4fe17d6522cc7891310679e25a319ab14adf1d69442a447d333232864d05db2d" },
-  { path: "agents/kimi-review.md", sha256: "7134c66158f16e65e82f2d1a9ca1a755cd1d792c297171c60946f0170edbc1f1" },
-  { path: "agents/kimi-swarm-write.md", sha256: "030a68503ee55c0a4a9151d133602e42e9ea16ec965ed9ee41331d9b25ba6e5f" },
-  { path: "agents/kimi-swarm.md", sha256: "b59c82cabcc299643b64e452ff9c096fffe033df0307b5538bfc75c8b048a3d2" },
+  { path: "commands/swarm.md", sha256: "a9b0e2bf0ee58760c8d63cf713dee1ecbe7a4ffa656b849fef7e44b7afd1303f" },
+  { path: "commands/task.md", sha256: "79aaf195861317d55f08f7a4d81208601310459d671bccebeb00f9d4e0b12f04" },
+  { path: "agents/kimi-pursue.md", sha256: "99b6e620f075aee98ec9e9a8b36e6ea596ffccc21435ca2b75f1f748c4d1d52a" },
+  { path: "agents/kimi-review.md", sha256: "e3ca74e3d392af28868d107d8112c3b287f3b9251fd7c964e8719d4442bc6d65" },
+  { path: "agents/kimi-swarm.md", sha256: "41caf5f10f875564e7087ed7489e310e9fd53eb2031ed12791fbb95ab6094f66" },
+  { path: "agents/kimi-task.md", sha256: "80dc687b46aa1fbafe5989c33f4d6ed1930fe26c2c3625374cb940ff8c0961a2" },
 ];
 
 export const CODEX_MCP_CONFIG = {
@@ -113,8 +108,8 @@ export const CODEX_PLUGIN_MANIFEST = {
     websiteURL: "https://github.com/linxule/kimi-plugin-cc",
     defaultPrompt: [
       "Use $kimi-review to review my current diff.",
-      "Use $kimi-ask to explain this repository flow.",
-      "Use $kimi-rescue to delegate a bounded fix.",
+      "Use $kimi-task to explain this repository flow.",
+      "Use $kimi-task with --write to delegate a bounded fix.",
     ],
     brandColor: "#0F766E",
   },
@@ -369,7 +364,7 @@ const MODEL_SELECTION_GUIDANCE = [
 ] as const;
 
 const BUDGET_GUIDANCE =
-  "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).";
+  "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for read-only task, review and challenge, 45m for `task --write`. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Task resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).";
 
 const BACKGROUND_COMPLETION_GUIDANCE =
   "A background job finishes silently: its completion is observable only through `companion.sh status` / `result <jobId>`, never through a notification. Re-check on your own schedule and never read silence as still running; a budget timeout leaves partial output in the artifact.";
@@ -379,80 +374,45 @@ const SWARM_SETUP_REMEDY =
 
 export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
-    name: "kimi-ask",
-    title: "Kimi Ask",
-    shortDescription: "Ask Kimi a read-only repo question",
-    defaultPrompt: "Use $kimi-ask to explain the current repository flow.",
-    implicit: true,
+    name: "kimi-task",
+    title: "Kimi Task",
+    shortDescription: "Ask Kimi, or delegate a fix with --write",
+    defaultPrompt: "Use $kimi-task to explain the current repository flow.",
+    implicit: false,
     command: "ask",
-    argumentSummary: "[--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] <prompt>",
+    argumentSummary: "[--write] [--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] <prompt>",
     description:
-      "Ask Kimi a read-only free-form question about the current repository. Use for prose explanations, flow tracing, module comparisons, or conceptual reasoning when the user wants an independent Kimi answer rather than implementation.",
+      "Hand Kimi a repository question (read-only) or, with --write, a bounded investigation or fix that edits the workspace. Use for prose explanations and flow tracing, or when the user explicitly asks to hand off edits to Kimi.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
       BUDGET_GUIDANCE,
-      "Preserve the user's question and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested.",
-      "Choose `--background` for broad or long-running questions and return the job id that the companion prints.",
+      "Without `--write` the run is read-only. Put `--write` first only when the user explicitly asked for edits; never promote a question or investigation into edits. With `--write`, Kimi may edit, create, move and delete files in the workspace but cannot mutate git state.",
+      "`--read-root <absolute-dir>` (repeatable) and `--network` apply only without `--write`; `--network` enables web search and URL fetch and confines file reads to the workspace plus the read roots.",
+      "Preserve the user's text and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested. Sessions are kind-scoped: `-r` with `--write` resumes the latest write session, without it the latest read-only session.",
+      "Choose `--background` for broad or long-running work and return the job id that the companion prints.",
       BACKGROUND_COMPLETION_GUIDANCE,
-      "If the companion reports ASK_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
-      "Return companion stdout verbatim; do not summarize or re-voice Kimi's prose.",
+      "If the companion reports ASK_HOOK_NOT_INSTALLED or RESCUE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
+      "Return companion stdout verbatim; do not summarize or re-voice Kimi's prose, and do not inspect or edit the repository yourself.",
     ],
   },
   {
     name: "kimi-review",
     title: "Kimi Review",
-    shortDescription: "Run Kimi read-only code review",
+    shortDescription: "Run Kimi read-only review or challenge",
     defaultPrompt: "Use $kimi-review to review the current working tree.",
     implicit: true,
     command: "review",
-    argumentSummary: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [extra prose]",
+    argumentSummary: "[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [extra prose]",
     description:
-      "Run an independent read-only Kimi review over the current working tree, including untracked files, or a branch diff. Use when the user wants a second reviewer for defects, regressions, or implementation risks, not edits.",
+      "Run an independent read-only Kimi review over the current working tree, including untracked files, or a branch diff. With --challenge, Kimi questions assumptions, design choices, and tradeoffs instead of hunting defects. Use when the user wants a second reviewer, not edits.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
       BUDGET_GUIDANCE,
-      "Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, and any trailing focus text only.",
-      "Do not invent file/path flags; working-tree review supplies Git status and diff context, with untracked files read from the workspace, plus optional focus text. `--base` keeps the branch diff as its scope.",
-      "If the companion reports REVIEW_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
-      "Return companion stdout verbatim and leave any fixes to a separate user request.",
-    ],
-  },
-  {
-    name: "kimi-challenge",
-    title: "Kimi Challenge",
-    shortDescription: "Challenge a design or approach",
-    defaultPrompt: "Use $kimi-challenge to stress-test this approach.",
-    implicit: true,
-    command: "task challenge",
-    argumentSummary: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [extra prose]",
-    description:
-      "Run a read-only adversarial Kimi challenge review that questions assumptions, design choices, and tradeoffs. Use when the user wants pushback on whether the approach is right, not a defect-only review.",
-    guidance: [
-      ...MODEL_SELECTION_GUIDANCE,
-      BUDGET_GUIDANCE,
-      "Preserve the user's adversarial framing as trailing focus text.",
-      "Do not pass background/wait flags; the runtime rejects them for challenge.",
-      "If the companion reports CHALLENGE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
-      "Return companion stdout verbatim without softening the challenge framing.",
-    ],
-  },
-  {
-    name: "kimi-rescue",
-    title: "Kimi Rescue",
-    shortDescription: "Delegate a bounded Kimi fix",
-    defaultPrompt: "Use $kimi-rescue to delegate this bounded implementation task.",
-    implicit: false,
-    command: "task rescue",
-    argumentSummary: "[--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] <prompt>",
-    description:
-      "Delegate a bounded write-capable investigation or implementation task to Kimi through the companion runtime. Use only when explicitly invoked or when the user clearly asks to hand off a substantial fix to Kimi.",
-    guidance: [
-      ...MODEL_SELECTION_GUIDANCE,
-      BUDGET_GUIDANCE,
-      "Preserve the task text and constraints with minimal reframing.",
-      "Use background mode for long-running investigations and report the job id for status/result/cancel.",
-      BACKGROUND_COMPLETION_GUIDANCE,
-      "Do not inspect or edit the repository yourself as part of the skill; the companion result is the source of truth.",
+      "Put `--challenge` first when the user wants pushback on whether the approach is right; otherwise run a defect review. Preserve adversarial framing as trailing focus text.",
+      "Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, `--read-root <absolute-dir>`, `--network`, and any trailing focus text only. `--network` enables web search and URL fetch and confines file reads to the workspace plus the read roots.",
+      "Do not invent file/path flags; working-tree review supplies Git status and diff context, with untracked files read from the workspace, plus optional focus text. `--base` keeps the branch diff as its scope. Do not pass background/wait flags; the runtime rejects them.",
+      "If the companion reports REVIEW_HOOK_NOT_INSTALLED or CHALLENGE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
+      "Return companion stdout verbatim without softening a challenge, and leave any fixes to a separate user request.",
     ],
   },
   {
@@ -467,7 +427,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
       "Run Kimi's autonomous goal mode for an explicitly requested hands-off multi-turn objective. This is write-capable and budget-bounded; use only when the user explicitly asks Kimi to pursue an objective autonomously.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
-      "Require explicit hands-off autonomy intent; single bounded fixes belong to `kimi-rescue`.",
+      "Require explicit hands-off autonomy intent; single bounded fixes belong to `kimi-task` with `--write`.",
       "Always keep a finite `--budget` — it is the sole hard bound on the loop. The runtime rejects `--background`, but detaching your own shell call is expected: a goal loop routinely outlives a foreground timeout, and the hook, allowlist, and budget do not depend on a human watching. Cancel with `companion.sh cancel` (no id — it targets the latest running job for the repo); note that a cancel stops further work but does not roll back edits already made to the real tree.",
       "Surface terminal goal statuses exactly as the companion reports them.",
     ],
@@ -475,42 +435,23 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
   {
     name: "kimi-swarm",
     title: "Kimi Swarm",
-    shortDescription: "Fan out Kimi read-only review",
+    shortDescription: "Fan out Kimi review, or patch-only edits",
     defaultPrompt: "Use $kimi-swarm to fan out a read-only review across these targets.",
     implicit: false,
     command: "task swarm",
-    argumentSummary: "[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] [--thinking <effort>] <objective>",
+    argumentSummary: "[--write] [--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] <objective>",
     description:
-      "Run a read-only parallel Kimi review fan-out across many independent targets. Use only for explicit broad fan-out requests where one subagent per target is the point.",
+      "Run a parallel Kimi fan-out across many independent targets: a read-only review by default, or with --write, edits to many disjoint targets in a throwaway worktree returned as a reviewable patch that the plugin never applies or commits. Use only for explicit fan-out requests.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
-      "Require many independent review targets plus explicit fan-out intent.",
-      "Pass finite budget and concurrency bounds; default to foreground unless the user explicitly asks to detach.",
+      "Require many independent targets plus explicit fan-out intent. Put `--write` first only when the user explicitly asked for edits across many disjoint targets; never promote a review into a write fan-out.",
+      "Pass finite budget and concurrency bounds. Read-only runs default to foreground unless the user explicitly asks to detach; `--read-root` and `--network` apply only to read-only runs.",
       `On exact Kimi Code ${BOUNDED_SWARM_RELEASES}, concurrency 1 runs one direct worker; larger values use bounded sequential waves. Older certified versions retain their normal-launch limit and recovery limitation.`,
       "The bound counts simultaneous Kimi child-agent turns, not OS subprocesses. Fresh-only waves need at least two entries; group odd target counts into disjoint worker assignments.",
+      "With `--write`, keep `--max-concurrency` conservative, normally 1, unless the user explicitly asks to widen it. The worktree is based on HEAD, so uncommitted changes are excluded. Parallel Kimi workers cannot background shell commands; native foreground Bash has a 60-second default and 300-second maximum timeout, so choose concurrency 1 for longer tests. Owned process cleanup must finish before patch capture; failed verification retains the worktree instead.",
+      "The runtime rejects `--background`, but detaching your own shell call is expected for `--write`: a fan-out routinely outlives a foreground timeout, and the run is patch-only and worktree-confined. To stop a run, use `companion.sh cancel` with NO id — it targets the latest running job for the repo. Prefer that over an interrupt: an interrupt gives the companion only ~1.35s before SIGKILL, less than its teardown plus `git diff --binary` patch capture, so interrupting can lose the patch.",
       SWARM_SETUP_REMEDY,
-      "Return the consolidated companion report verbatim.",
-    ],
-  },
-  {
-    name: "kimi-swarm-write",
-    title: "Kimi Swarm Write",
-    shortDescription: "Fan out patch-only Kimi edits",
-    defaultPrompt: "Use $kimi-swarm-write to fan out these disjoint edits into a patch.",
-    implicit: false,
-    command: "task swarm --write",
-    argumentSummary: "[--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] [--thinking <effort>] <objective>",
-    description:
-      "Run a write-capable Kimi swarm that edits many disjoint targets in a throwaway worktree and returns a reviewable patch. Use only for explicit parallel edit fan-out requests; the plugin never applies or commits the patch.",
-    guidance: [
-      ...MODEL_SELECTION_GUIDANCE,
-      "Require both many disjoint write targets and explicit parallel fan-out intent.",
-      "Keep `--max-concurrency` conservative, normally 1, unless the user explicitly asks to widen it.",
-      `On exact Kimi Code ${BOUNDED_SWARM_RELEASES}, the default concurrency 1 runs a single worker in the throwaway worktree. Explicit concurrency 2 or higher uses bounded waves; every mode returns a patch for review.`,
-      "Parallel Kimi workers cannot background shell commands; native foreground Bash has a 60-second default and 300-second maximum timeout. Choose concurrency 1 for longer tests. Owned process cleanup must finish before patch capture; failed verification retains the worktree instead.",
-      "The runtime rejects `--background`, but detaching your own shell call is expected: a fan-out routinely outlives a foreground timeout, and the run is patch-only and worktree-confined. Keep `--budget` and `--max-concurrency` finite. To stop a run, use `companion.sh cancel` with NO id — it targets the latest running job for the repo, and no UUID crosses you or the user (a detached run prints nothing at launch; the id first arrives with the final report). Prefer that over an interrupt: an interrupt gives the companion only ~1.35s before SIGKILL, less than its teardown plus `git diff --binary` patch capture, so interrupting can lose the patch.",
-      SWARM_SETUP_REMEDY,
-      "Return the patch path and companion output verbatim; do not apply the patch unless the user separately asks.",
+      "Return the consolidated companion report verbatim. For `--write`, return the patch path and do not apply the patch unless the user separately asks.",
     ],
   },
   {
@@ -521,13 +462,14 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     implicit: false,
     command: "setup",
     argumentSummary:
-      "[--models [--json] | --check | --uninstall [--all] | --enable-review-gate | --disable-review-gate]",
+      "[--models [--json] | --install-kimi [--json] | --check | --uninstall [--all] | --enable-review-gate | --disable-review-gate]",
     description:
       "List configured models, guide provider setup, verify local Kimi companion readiness, and manage the PreToolUse hook plus optional review gate. Use when asked about available models, subscription/API-key setup, default selection, or explicitly requested to install, check, enable, disable, or uninstall the integration. Codex and Claude Code share one ~/.kimi-code/config.toml but each own a host-scoped block, so $kimi-setup here does not disturb Claude Code's /kimi:setup (and vice-versa).",
     guidance: [
       "Run setup from the user's workspace so the companion records the intended workspace cwd.",
       "For model/provider questions, run `setup --models` (or `--models --json` for structured output). Do not append the question text or combine this mode with other setup flags; bare setup installs hooks. Listing is offline and does not change configuration or validate credentials.",
       ...MODEL_SELECTION_GUIDANCE,
+      "Use `--install-kimi [--json]` only when the user asks to install Kimi Code: it installs the highest certified release under the plugin data root, cannot be combined with other setup flags, and never runs implicitly.",
       "Use `--check` for read-only verification and `--uninstall` only when explicitly requested. `--uninstall` removes only this host's block; `--uninstall --all` removes every host's block from the shared config.",
       "Setup validates the complete shared TOML and every configured hook under a serialized lock. If it reports invalid foreign config, surface that failure; do not bypass it or claim the managed block is safe in isolation.",
       "Report setup stdout verbatim because it contains hook and probe status.",

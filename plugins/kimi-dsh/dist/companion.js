@@ -13,7 +13,9 @@ import { resolveKimiHome } from "./kimi-home.js";
 import { runModelCommand } from "./model-command.js";
 import { runMcpChild } from "./mcp/supervised-child.js";
 import { runMcpServer } from "./mcp/server.js";
-async function main(argv) {
+import { routeSurfaceAliases } from "./surface-routing.js";
+async function main(rawArgv) {
+    const argv = routeSurfaceAliases(rawArgv);
     const help = companionHelp(argv);
     if (help !== undefined) {
         process.stdout.write(`${help}\n`);

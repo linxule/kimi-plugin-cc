@@ -8,7 +8,7 @@ Run the companion with any user-supplied flags appended after `task pursue`:
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh task pursue <args>`
 
-`/kimi:pursue` is **autonomous goal mode**: Kimi keeps working toward the objective across continuation turns until it completes, blocks itself, or the budget expires. It is write-capable and runs under the **same PreToolUse hook + workspace allowlist as `/kimi:rescue`** (the hook gates every tool call in every turn), and like rescue it **cannot mutate git state** — the main thread owns branch/commit.
+`/kimi:pursue` is **autonomous goal mode**: Kimi keeps working toward the objective across continuation turns until it completes, blocks itself, or the budget expires. It is write-capable and runs under the **same PreToolUse hook + workspace allowlist as `/kimi:task --write`** (the hook gates every tool call in every turn), and like rescue it **cannot mutate git state** — the main thread owns branch/commit.
 
 Supported flags:
 

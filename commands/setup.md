@@ -1,10 +1,12 @@
 ---
-description: List configured models, guide subscription/API-key provider setup, and verify local Kimi companion readiness and manage review-gate state. Writes a managed PreToolUse hook block to ~/.kimi-code/config.toml so kimi-code enforces this plugin's safety contract. Claude Code and Codex each own a host-scoped block in the shared config.
-argument-hint: "[--models [--json] | --check | --uninstall [--all] | --enable-review-gate | --disable-review-gate]"
+description: List configured models, guide subscription/API-key provider setup, install the highest certified Kimi Code CLI on request, and verify local Kimi companion readiness and manage review-gate state. Writes a managed PreToolUse hook block to ~/.kimi-code/config.toml so kimi-code enforces this plugin's safety contract. Claude Code and Codex each own a host-scoped block in the shared config.
+argument-hint: "[--models [--json] | --install-kimi [--json] | --check | --uninstall [--all] | --enable-review-gate | --disable-review-gate]"
 disable-model-invocation: true
 ---
 
 For model/provider questions, use `--models` (or `--models --json` for structured output); do not forward question text as arguments. This mode is offline, read-only, and cannot be combined with other setup flags. Bare `setup` installs hooks.
+
+Use `--install-kimi` (or `--install-kimi --json`) only when the user asks to install Kimi Code: it installs the highest certified kimi-code release under the plugin data root and cannot be combined with other setup flags. Nothing runs it implicitly; `--check` reports the selected binary on its `Kimi binary:` line.
 
 Run the companion with the selected flags appended after `setup`:
 

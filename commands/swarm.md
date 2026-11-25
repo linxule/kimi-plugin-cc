@@ -1,6 +1,6 @@
 ---
 description: Fan out a parallel review across the workspace using Kimi's AgentSwarm tool, bounded by a hard wall-clock budget. Read-only by default (enforced by the same PreToolUse hook as review, applied to every subagent); --write fans out edits in a throwaway worktree and returns a patch.
-argument-hint: "[--write] [--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] [--thinking <effort>] <objective>"
+argument-hint: "[--write] [--budget <30m|1h>] [--cap <N>] [--max-concurrency <N>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] <objective>"
 disable-model-invocation: true
 ---
 
@@ -16,11 +16,12 @@ Supported flags:
 
 - `--thinking <off|low|medium|high>` (also `--thinking=<effort>`) — request effort for this process; other model-supported effort tokens pass through. `--no-thinking` is rejected; use `--thinking off`.
 
-- `--write` — fan out EDITS (not just review). Requires kimi-code **>= 0.18.0**, a git repo with a committed HEAD, and the PreToolUse hook. Bases the worktree on HEAD: **uncommitted changes are NOT included** (you'll get a warning) — commit or stash first if the swarm needs them. `--write` is also reachable via the model-invocable `kimi-swarm-write` subagent, with strict triggering (many disjoint write targets AND explicit fan-out intent); auto-dispatch widens no write surface and keeps every bound, and the slash command itself stays human-only.
+- `--write` — fan out EDITS (not just review). Requires kimi-code **>= 0.18.0**, a git repo with a committed HEAD, and the PreToolUse hook. Bases the worktree on HEAD: **uncommitted changes are NOT included** (you'll get a warning) — commit or stash first if the swarm needs them. `--write` is also reachable via the model-invocable `kimi-swarm` subagent, with strict triggering (many disjoint write targets AND explicit fan-out intent); auto-dispatch widens no write surface and keeps every bound, and the slash command itself stays human-only.
 - `--budget <duration>` — HARD wall-clock ceiling (e.g. `30m`, `1h`, `90s`; bare number = minutes). Default 30m. The always-on bound on cost/runaway.
 - `--cap <N>` — SOFT cap on TOTAL subagent count: injected into the prompt as a model instruction. Advisory, not hook-enforced (the hook does not maintain a lifetime-total count), so the model may exceed it. Bounds lifetime total, not peak parallelism.
 - `--max-concurrency <N>` — defaults to **4 for read, 1 for `--write`**. On exact CLI 2.6.2/2.6.3/2.7.2/2.7.3, 1 selects a direct worker with delegation denied; 2 or more bounds simultaneous Kimi child-agent turns, counting fresh plus resumed entries per wave. Fresh-only waves need at least two entries: group multiple targets into disjoint entries or resume an own-session child for an odd remainder. OS subprocesses started by allowed tests are outside this count. Older certified versions use normal-launch limits on CLI 0.18.0+ and retain their rate-limit-recovery overrun. Distinct from `--cap`: simultaneous concurrency is not a lifetime-total count.
 - `-m`, `--model <name>`
+- `--read-root <absolute-dir>` (repeatable) and `--network` — read-only swarm only; `--write` rejects them. `--network` enables web search and URL fetch and confines file reads to the workspace plus any `--read-root` directories.
 
 Prototype limitations:
 

@@ -436,6 +436,33 @@ export function hasHelpFlag(argv: string[]): boolean {
   return false;
 }
 
+/**
+ * Remove every occurrence of a boolean selector flag from the same leading
+ * flag region `hasHelpFlag` scans; undefined when the region lacks it, so a
+ * selector inside prose or after `--` never changes the operation.
+ */
+export function withoutLeadingFlag(argv: readonly string[], flag: string): string[] | undefined {
+  const kept: string[] = [];
+  let found = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--" || !token.startsWith("-")) {
+      kept.push(...argv.slice(index));
+      break;
+    }
+    if (token === flag) {
+      found = true;
+      continue;
+    }
+    kept.push(token);
+    if (VALUE_TAKING_FLAGS.has(token) && index + 1 < argv.length) {
+      kept.push(argv[index + 1]);
+      index += 1;
+    }
+  }
+  return found ? kept : undefined;
+}
+
 export function parseAskArgs(argv: string[]): AskArgs {
   return parsePromptArgs(argv, "ask");
 }
