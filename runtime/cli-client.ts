@@ -20,6 +20,7 @@ import {
 } from "./kimi-engine.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
+import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
 import {
@@ -91,8 +92,8 @@ export interface CliClientOptions {
   /**
    * Normal-launch cap on how many AgentSwarm subagents kimi-code runs
    * CONCURRENTLY, exported to the spawn as KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY
-   * (kimi-code 0.18.0+). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3/2.7.2/2.7.3 sources can exceed it during
-   * rate-limit recovery. Exact 2.6.2/2.6.3/2.7.2/2.7.3 additionally uses this as the trusted wave
+   * (kimi-code 0.18.0+). Reviewed sources since 2.5.3 can exceed it during
+   * rate-limit recovery. A bounded-swarm release additionally uses this as the trusted wave
    * admission limit (or a direct worker at 1), with native child timeouts moved
    * beyond the whole-job budget. Older binaries ignore the unknown env var, so
    * on < 0.18 the soft --cap prompt-count hint is the only count bound. Only
@@ -1261,7 +1262,7 @@ function buildArgs(opts: CliClientOptions): string[] {
     : undefined;
   if (
     opts.resumeSessionId === undefined &&
-    ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")
+    kimiReleaseHas(opts.executionPlan.kimiVersion ?? smokeCandidate, "local-environment")
   ) {
     args.push("--environment", "local");
   }

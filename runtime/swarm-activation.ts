@@ -16,6 +16,7 @@ import {
   assertNoUnsafeExperimentalSelector,
 } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
+import { kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
 import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
@@ -29,8 +30,8 @@ import {
 } from "./process-tree.js";
 
 // These exact activation entries support candidate integration; production scope is per operation.
-const PREACTIVATION_VERSIONS: readonly string[] = ["2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"];
-const JSON_READY_VERSIONS: readonly string[] = ["2.7.2", "2.7.3"];
+const PREACTIVATION_VERSIONS = kimiVersionsWith("web-preactivation");
+const JSON_READY_VERSIONS = kimiVersionsWith("web-json-ready");
 const KIMI_AGENT_PROTOCOL_VERSION = "1.0.0";
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
@@ -635,7 +636,7 @@ async function createSession(
   failureCode: FailureCode,
 ): Promise<SwarmSessionIdentity> {
   const request: Record<string, unknown> = { metadata: { cwd: options.cwd } };
-  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion)) {
+  if (kimiReleaseHas(expectedVersion, "local-environment")) {
     request.environment_id = "local";
     request.environment_cwd = options.cwd;
   }
@@ -661,7 +662,7 @@ async function verifyLocalEnvironment(
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<void> {
-  if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion)) return;
+  if (!kimiReleaseHas(expectedVersion, "local-environment")) return;
   const data = await restData(
     web,
     "GET",
@@ -714,7 +715,8 @@ async function verifySwarmStatus(
   signal: AbortSignal | undefined,
   failureCode: FailureCode,
 ): Promise<void> {
-  const data = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion)
+  const agentState = kimiReleaseHas(expectedVersion, "agent-state");
+  const data = agentState
     ? await readWebSocketAgentState(web, identity.sessionId, expectedVersion, signal, failureCode)
     : await restData(
         web,
@@ -724,7 +726,7 @@ async function verifySwarmStatus(
         signal,
         failureCode,
       );
-  const source = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion) ? "agent state" : "/status";
+  const source = agentState ? "agent state" : "/status";
   if (!isRecord(data)) {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} returned an invalid payload.`);
   }
@@ -739,10 +741,10 @@ async function verifySwarmStatus(
   if (data.plan_mode !== false) {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm plan mode is off.`);
   }
-  if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion) && data.tower_mode !== false) {
+  if (agentState && data.tower_mode !== false) {
     throw failure(failureCode, "swarm-activation.status", "Kimi web agent state did not confirm tower mode is off.");
   }
-  const permission = ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion) ? data.permission_mode : data.permission;
+  const permission = agentState ? data.permission_mode : data.permission;
   if (permission !== "auto") {
     throw failure(failureCode, "swarm-activation.status", `Kimi web ${source} did not confirm auto permission mode.`);
   }
@@ -765,7 +767,7 @@ async function readWebSocketAgentState(
     return await new Promise((resolve, reject) => {
       let socket: WebSocket;
       const bearerProtocol = `kimi-code.bearer.${web.token}`;
-      const legacyControl = !["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(expectedVersion);
+      const legacyControl = !kimiReleaseHas(expectedVersion, "modern-ws-control");
       const helloId = `swarm-activation-hello-${randomUUID()}`;
       const subscribeId = `swarm-activation-subscribe-${randomUUID()}`;
       try {

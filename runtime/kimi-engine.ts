@@ -5,6 +5,7 @@ import path from "node:path";
 import { RuntimeError } from "./errors.js";
 import { resolveKimiCliCommand } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
+import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import {
   isInTestedRange,
@@ -97,35 +98,12 @@ const LEGACY_V1_MINIMUMS: Readonly<Record<KimiOperationKind, { major: number; mi
  * Exact kimi-code releases certified for native v2 under
  * NATIVE_V2_SAFETY_PROFILE. Exact, not minor-ranged: upstream ships
  * behavioural changes in patch releases, and the no-plan construction must be
- * re-proven (mechanized tag scan + real-binary smoke) per tag before a version
- * is appended. Each entry has its own row in tests/audit/v2-tag-scan.test.ts
- * and a dated entry in ROADMAP-TO-GA.md § Post-GA audit log.
+ * re-proven (mechanized tag scan + real-binary smoke) per tag before a row is
+ * added to KIMI_V2_RELEASES in kimi-releases.ts with scope "all". Each entry
+ * has its own row in tests/audit/v2-tag-scan.test.ts and a dated entry in
+ * ROADMAP-TO-GA.md § Post-GA audit log.
  */
-export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
-  "0.42.0",
-  "0.43.0",
-  "0.43.1",
-  "2.0.0",
-  "2.0.1",
-  "2.0.2",
-  "2.1.0",
-  "2.1.1",
-  "2.2.0",
-  "2.3.0",
-  "2.3.1",
-  "2.3.2",
-  "2.3.3",
-  "2.4.0",
-  "2.4.1",
-  "2.5.0",
-  "2.5.1",
-  "2.5.2",
-  "2.5.3",
-  "2.6.2",
-  "2.6.3",
-  "2.7.2",
-  "2.7.3",
-]);
+export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([...kimiVersionsInScope("all")]);
 
 /**
  * Exact releases certified only for review, challenge, ask, rescue, review_gate
@@ -133,7 +111,7 @@ export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([
  * configured maximum, and these releases lack a certified plugin admission
  * construction, so both swarm operations refuse before model spawn.
  */
-export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze(["2.6.0"]);
+export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze([...kimiVersionsInScope("non-swarm")]);
 
 /**
  * Any-operation union used by setup and engine selection. The older
@@ -830,7 +808,7 @@ function nativeV2NotCertified(
   ) {
     return new RuntimeError(
       "KIMI_CAPABILITY_NOT_CERTIFIED",
-      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code 2.6.2, 2.6.3, 2.7.2 or 2.7.3 for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
+      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code ${formatVersionChoice(kimiVersionsWith("bounded-swarm"))} for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
       "kimi-engine.capability",
       {
         details: {

@@ -4,6 +4,7 @@ import { link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { RuntimeError } from "../errors.js";
+import { kimiReleaseHas } from "../kimi-releases.js";
 import { probeKimiVersion } from "../kimi-version-probe.js";
 import { extractValue } from "../vendor/smol-toml/extract.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
@@ -779,54 +780,14 @@ function validateVersionSensitiveEvents(
       first.line,
     );
   }
-  // Exact schemas reviewed at 2.0.0 (1b89e4b0), 2.0.1 (caf7d4e2),
-  // 2.0.2 (9d07f634), 2.1.0 (52437299), 2.1.1 (f67e6398), 2.2.0 (472192c3),
-  // 2.3.0 (b5e28fd6), 2.3.1 (684bae9e), 2.3.2 (b8dd3a13), 2.3.3 (ec495f0c),
-  // 2.4.0 (f26e4d91), 2.4.1 (2c73f3f5), 2.5.0 (41c34143), 2.5.1 (1b02030d),
-  // 2.5.2 (1c142a00), 2.5.3 (5af9942e), 2.6.0 (740d6c0b), 2.6.2
-  // (6a8493df), 2.6.3 (b0de2fbd), 2.7.2 (56145f84), and 2.7.3 (a8f643ad):
-  // the additive events and HookDefSchema are unchanged. Schema acceptance does not certify operations.
+  // The additive events and HookDefSchema are unchanged at every release whose
+  // row in kimi-releases.ts carries "hook-schema" (each row names the reviewed
+  // commit). Schema acceptance does not certify operations.
   // Require the full version string AND matching components; no inferred 2.x compatibility.
   if (
-    version.major === 2 && (
-      (version.minor === 0 && (
-        (version.version === "2.0.0" && version.patch === 0) ||
-        (version.version === "2.0.1" && version.patch === 1) ||
-        (version.version === "2.0.2" && version.patch === 2)
-      )) ||
-      (version.minor === 1 && (
-        (version.version === "2.1.0" && version.patch === 0) ||
-        (version.version === "2.1.1" && version.patch === 1)
-      )) ||
-      (version.minor === 2 && (
-        (version.version === "2.2.0" && version.patch === 0)
-      )) ||
-      (version.minor === 3 && (
-        (version.version === "2.3.0" && version.patch === 0) ||
-        (version.version === "2.3.1" && version.patch === 1) ||
-        (version.version === "2.3.2" && version.patch === 2) ||
-        (version.version === "2.3.3" && version.patch === 3)
-      )) ||
-      (version.minor === 4 && (
-        (version.version === "2.4.0" && version.patch === 0) ||
-        (version.version === "2.4.1" && version.patch === 1)
-      )) ||
-      (version.minor === 5 && (
-        (version.version === "2.5.0" && version.patch === 0) ||
-        (version.version === "2.5.1" && version.patch === 1) ||
-        (version.version === "2.5.2" && version.patch === 2) ||
-        (version.version === "2.5.3" && version.patch === 3)
-      )) ||
-      (version.minor === 6 && (
-        (version.version === "2.6.0" && version.patch === 0) ||
-        (version.version === "2.6.2" && version.patch === 2) ||
-        (version.version === "2.6.3" && version.patch === 3)
-      )) ||
-      (version.minor === 7 && (
-        (version.version === "2.7.2" && version.patch === 2) ||
-        (version.version === "2.7.3" && version.patch === 3)
-      ))
-    )
+    version.major === 2 &&
+    version.version === `${version.major}.${version.minor}.${version.patch}` &&
+    kimiReleaseHas(version.version, "hook-schema")
   ) {
     return { valid: true };
   }

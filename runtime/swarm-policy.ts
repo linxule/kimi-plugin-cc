@@ -1,4 +1,5 @@
 import type { KimiExecutionPlan } from "./kimi-engine.js";
+import { kimiReleaseHas } from "./kimi-releases.js";
 import type { HookDecision } from "./hooks/approval-policy.js";
 
 export const SWARM_POLICY_ENV = "KIMI_PLUGIN_CC_SWARM_POLICY";
@@ -14,7 +15,7 @@ export function usesBoundedSwarmPolicy(
   plan: Pick<KimiExecutionPlan, "intendedEngine" | "kimiVersion" | "operationKind">,
 ): boolean {
   return plan.intendedEngine === "native-v2" &&
-    (plan.kimiVersion === "2.6.2" || plan.kimiVersion === "2.6.3" || plan.kimiVersion === "2.7.2" || plan.kimiVersion === "2.7.3") &&
+    kimiReleaseHas(plan.kimiVersion, "bounded-swarm") &&
     (plan.operationKind === "swarm" || plan.operationKind === "swarm-write");
 }
 

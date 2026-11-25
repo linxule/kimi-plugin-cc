@@ -13,6 +13,7 @@ import { RuntimeError, formatError } from "./errors.js";
 import { assertNoUnsafeExperimentalSelector, assertExecutionPlanMatchesSpawn, } from "./kimi-engine.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
+import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
 import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
@@ -966,7 +967,7 @@ function buildArgs(opts) {
         ? opts.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE
         : undefined;
     if (opts.resumeSessionId === undefined &&
-        ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(opts.executionPlan.kimiVersion ?? smokeCandidate ?? "")) {
+        kimiReleaseHas(opts.executionPlan.kimiVersion ?? smokeCandidate, "local-environment")) {
         args.push("--environment", "local");
     }
     if (opts.resumeSessionId !== undefined) {

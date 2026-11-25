@@ -1,3 +1,4 @@
+import { kimiReleaseHas } from "./kimi-releases.js";
 export const SWARM_POLICY_ENV = "KIMI_PLUGIN_CC_SWARM_POLICY";
 export const SWARM_WAVE_SIZE_ENV = "KIMI_PLUGIN_CC_SWARM_WAVE_SIZE";
 export const BOUNDED_SWARM_POLICY = "bounded-waves/1";
@@ -7,7 +8,7 @@ export const BOUNDED_SWARM_POLICY = "bounded-waves/1";
 export const SWARM_CHILD_TIMEOUT_MS = 2_147_483_647;
 export function usesBoundedSwarmPolicy(plan) {
     return plan.intendedEngine === "native-v2" &&
-        (plan.kimiVersion === "2.6.2" || plan.kimiVersion === "2.6.3" || plan.kimiVersion === "2.7.2" || plan.kimiVersion === "2.7.3") &&
+        kimiReleaseHas(plan.kimiVersion, "bounded-swarm") &&
         (plan.operationKind === "swarm" || plan.operationKind === "swarm-write");
 }
 function plainObject(value) {

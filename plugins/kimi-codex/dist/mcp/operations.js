@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors.js";
+import { kimiVersionsWith } from "../kimi-releases.js";
 import { parseDurationMs, validateThinkingEffort } from "../parsing.js";
 const WORKSPACE_PROPERTY = {
     type: "string",
@@ -65,7 +66,7 @@ const CAP_PROPERTY = {
 const MAX_CONCURRENCY_PROPERTY = {
     type: "integer",
     minimum: 1,
-    description: "Concurrent worker limit on exact Kimi Code 2.6.2/2.6.3/2.7.2/2.7.3: one runs directly; larger values bound each native swarm wave. Older certified versions limit normal launches only and recovery can exceed it. Distinct from the soft total cap.",
+    description: `Concurrent worker limit on exact Kimi Code ${kimiVersionsWith("bounded-swarm").join("/")}: one runs directly; larger values bound each native swarm wave. Older certified versions limit normal launches only and recovery can exceed it. Distinct from the soft total cap.`,
 };
 const START_RESULT_GUIDANCE = "Task-capable clients receive an MCP task. Other clients receive a job ID immediately after launch; use kimi_job_status and kimi_job_result until terminal, and kimi_job_cancel to stop. Do not present a launch handle as the finished answer.";
 function schema(properties, required = []) {
