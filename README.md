@@ -161,6 +161,8 @@ By default a task can read any file on your computer and cannot use the web.
 
 Tasks that write do not accept these flags. The limits apply to one run. To add `--network` to a session you started without it, start a new one: `/kimi:task --fresh --network`.
 
+The limits apply to files Kimi reads with its tools. A review's diff covers the whole repository, and Kimi's own instruction files, such as `AGENTS.md`, still reach the model.
+
 ## When Kimi updates before the plugin does
 
 The plugin checks each Kimi release before it certifies it. If your Kimi is newer than the plugin knows:
@@ -177,7 +179,7 @@ Tasks use the first of these that exists: the `KIMI_PLUGIN_CC_KIMI_BIN` path, th
 
 Update the plugin in every host you use, and run setup in each.
 
-Each host adds its own hook to the shared Kimi configuration. From 3.0, a hook only checks tasks its own host started. A hook from an older version checks every task, so it can still block web access and file operations that 3.0 allows. A task warns you when this can happen.
+Each host adds its own hook to the shared Kimi configuration, and Kimi runs every hook for every task. If one host has an older version of the plugin, its hook applies its older rules to every task, and can block things the newer version allows. A task warns you when this can happen.
 
 ## View sessions in Kimi
 
@@ -402,6 +404,8 @@ claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 
 写入任务不接受这些标志。这些限制仅对单次运行生效。要为启动时未带 `--network` 的会话添加该标志，请启动新会话：`/kimi:task --fresh --network`。
 
+这些限制适用于 Kimi 使用其工具读取的文件。审查的 diff 覆盖整个仓库，而 Kimi 自身的指令文件（例如 `AGENTS.md`）仍会送达模型。
+
 ## 当 Kimi 先于插件更新时
 
 插件会先检查每个 Kimi 发布版本，然后再予以认证。如果你的 Kimi 比插件已知的版本更新：
@@ -418,7 +422,7 @@ claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 
 请在你使用的每个宿主中更新插件，并分别运行设置命令。
 
-每个宿主都会向共享的 Kimi 配置中添加各自的钩子。从 3.0 开始，钩子只检查所属宿主启动的任务。旧版本的钩子会检查所有任务，因此仍可能拦截 3.0 已允许的网络访问和文件操作。可能发生这种情况时，任务会向你发出警告。
+每个宿主都会将自己的 hook 添加到共享的 Kimi 配置中，而 Kimi 会为每个任务运行每个 hook。如果某个宿主的插件版本较旧，它的 hook 会将其旧规则应用到每个任务，并可能阻止新版本允许的操作。可能发生这种情况时，任务会向你发出警告。
 
 ## 在 Kimi 中查看会话
 
@@ -643,6 +647,8 @@ Par défaut, une tâche peut lire n'importe quel fichier sur votre ordinateur et
 
 Les tâches en écriture n'acceptent pas ces options. Ces limites s'appliquent à une seule exécution. Pour ajouter `--network` à une session démarrée sans cette option, démarrez-en une nouvelle : `/kimi:task --fresh --network`.
 
+Les limites s'appliquent aux fichiers que Kimi lit avec ses outils. Le diff d'une revue couvre tout le dépôt, et les fichiers d'instructions propres à Kimi, comme `AGENTS.md`, atteignent toujours le modèle.
+
 ## Quand Kimi est mis à jour avant le plugin
 
 Le plugin vérifie chaque version de Kimi avant de la certifier. Si votre version de Kimi est plus récente que celles connues du plugin :
@@ -659,7 +665,7 @@ Les tâches utilisent le premier élément existant dans cet ordre : le chemin `
 
 Mettez à jour le plugin dans chaque hôte que vous utilisez, et exécutez la configuration dans chacun d'eux.
 
-Chaque hôte ajoute son propre hook à la configuration partagée de Kimi. À partir de la version 3.0, un hook ne vérifie que les tâches démarrées par son propre hôte. Un hook issu d'une version antérieure vérifie chaque tâche, et peut donc encore bloquer l'accès web et les opérations sur les fichiers qu'autorise la version 3.0. Une tâche vous avertit lorsque cela peut se produire.
+Chaque hôte ajoute son propre hook à la configuration Kimi partagée, et Kimi exécute chaque hook pour chaque tâche. Si un hôte a une version plus ancienne du plugin, son hook applique ses règles plus anciennes à chaque tâche, et peut bloquer ce que la version plus récente autorise. Une tâche vous avertit lorsque cela peut se produire.
 
 ## Afficher les sessions dans Kimi
 
@@ -884,6 +890,8 @@ Codexでは、`$kimi-task`や`$kimi-review`などの9つのスキルを使用し
 
 書き込みを行うタスクは、これらのフラグを受け付けません。制限は1回の実行にのみ適用されます。`--network`なしで開始したセッションに`--network`を追加するには、`/kimi:task --fresh --network`で新しいセッションを開始してください。
 
+制限は、Kimiが自身のツールで読み取るファイルに適用されます。レビューの差分はリポジトリ全体をカバーし、`AGENTS.md`などのKimi自身の指示ファイルも引き続きモデルに届きます。
+
 ## プラグインより先にKimiが更新された場合
 
 このプラグインは、Kimiの各リリースを検証したうえで認定します。お使いのKimiがプラグインの認識しているバージョンより新しい場合、次の動作になります。
@@ -900,7 +908,7 @@ Codexでは、`$kimi-task`や`$kimi-review`などの9つのスキルを使用し
 
 使用しているすべてのホストでプラグインを更新し、それぞれでセットアップを実行してください。
 
-各ホストは、共有のKimi設定にそれぞれのフックを追加します。3.0以降では、フックは自身のホストが開始したタスクだけを検査します。古いバージョンのフックはすべてのタスクを検査するため、3.0で許可されているウェブアクセスやファイル操作をブロックしてしまうことがあります。この問題が起こりうる場合、タスクは警告を表示します。
+各ホストは共有のKimi設定に独自のフックを追加し、Kimiはタスクごとにすべてのフックを実行します。いずれかのホストに古いバージョンのプラグインがある場合、そのフックはすべてのタスクに古いルールを適用し、新しいバージョンで許可されているものをブロックすることがあります。このようなことが起こり得る場合、タスクは警告を出します。
 
 ## Kimiでセッションを表示する
 
