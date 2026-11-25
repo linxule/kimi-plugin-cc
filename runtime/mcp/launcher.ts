@@ -17,6 +17,7 @@ import {
   type ProcessIdentity,
   type ProcessIdentityReader,
 } from "../process-tree.js";
+import { sleep } from "../util.js";
 import { assertMcpJobBinding, mcpCompanionIdentity } from "./binding.js";
 import type { McpOperationInvocation } from "./operations.js";
 import { resolveMcpWorkspace } from "./workspace.js";
@@ -325,8 +326,4 @@ async function readTail(filePath: string, maximum = 8_000): Promise<string> {
   } catch {
     return "";
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

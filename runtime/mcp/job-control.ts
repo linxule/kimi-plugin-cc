@@ -16,6 +16,7 @@ import {
 } from "../process-tree.js";
 import { readArtifact, renderTerminalJobArtifact } from "../render.js";
 import { runCancel } from "../commands/cancel.js";
+import { sleep } from "../util.js";
 import { assertMcpJobBinding, mcpCompanionIdentity, mcpKimiIdentity } from "./binding.js";
 import { readJobControlArguments } from "./operations.js";
 import { textResult, type McpToolResult } from "./tool-result.js";
@@ -431,8 +432,4 @@ export function taskView(
     pollIntervalMs: 2_000,
     ...(result ? { result: { resultType: "complete", ...result } } : {}),
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

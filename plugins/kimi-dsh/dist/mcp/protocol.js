@@ -1,4 +1,5 @@
 import { formatError, RuntimeError } from "../errors.js";
+import { isRecord } from "../util.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { cancelMcpJob, getMcpJobResult, getMcpJobStatus, getMcpTaskView, taskView } from "./job-control.js";
 import { launchMcpOperation } from "./launcher.js";
@@ -262,7 +263,4 @@ class McpJsonRpcError extends Error {
 }
 function isRpcError(error) {
     return error instanceof McpJsonRpcError || (error instanceof Error && "code" in error && typeof error.code === "number");
-}
-function isRecord(value) {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

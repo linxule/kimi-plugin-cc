@@ -1,4 +1,5 @@
 import { formatError, RuntimeError } from "../errors.js";
+import { isRecord } from "../util.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 import { cancelMcpJob, getMcpJobResult, getMcpJobStatus, getMcpTaskView, taskView } from "./job-control.js";
 import { launchMcpOperation, type McpLaunchResult } from "./launcher.js";
@@ -278,8 +279,4 @@ class McpJsonRpcError extends Error implements JsonRpcError {
 
 function isRpcError(error: unknown): error is JsonRpcError {
   return error instanceof McpJsonRpcError || (error instanceof Error && "code" in error && typeof (error as { code?: unknown }).code === "number");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

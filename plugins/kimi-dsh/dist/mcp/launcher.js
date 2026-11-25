@@ -11,6 +11,7 @@ import { markJobFailed } from "../jobs.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { readProcessIdentity, revalidateProcessIdentities, } from "../process-tree.js";
+import { sleep } from "../util.js";
 import { assertMcpJobBinding, mcpCompanionIdentity } from "./binding.js";
 import { resolveMcpWorkspace } from "./workspace.js";
 const compiled = import.meta.url.endsWith(".js");
@@ -251,7 +252,4 @@ async function readTail(filePath, maximum = 8_000) {
     catch {
         return "";
     }
-}
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }

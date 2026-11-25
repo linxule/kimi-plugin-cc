@@ -5,6 +5,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { readProcessIdentity, revalidateProcessIdentities, revalidateProcessIdentity, } from "../process-tree.js";
 import { readArtifact, renderTerminalJobArtifact } from "../render.js";
 import { runCancel } from "../commands/cancel.js";
+import { sleep } from "../util.js";
 import { assertMcpJobBinding, mcpCompanionIdentity, mcpKimiIdentity } from "./binding.js";
 import { readJobControlArguments } from "./operations.js";
 import { textResult } from "./tool-result.js";
@@ -338,7 +339,4 @@ export function taskView(task, job, status, result, statusMessage) {
         pollIntervalMs: 2_000,
         ...(result ? { result: { resultType: "complete", ...result } } : {}),
     };
-}
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
