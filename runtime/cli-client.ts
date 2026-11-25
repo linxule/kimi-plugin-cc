@@ -652,9 +652,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     const trySignalPid = (pid: number, signal: NodeJS.Signals) => {
       try {
         process.kill(pid, signal);
-      } catch (err) {
-        const ignored = isErrnoException(err, "ESRCH") || isErrnoException(err, "EPERM");
-        void ignored;
+      } catch {
+        // ESRCH/EPERM and every other failure: best-effort signaling.
       }
     };
 
@@ -909,16 +908,10 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       });
     };
 
-    const stopForPolicyFailure = (error: RuntimeError) => {
-      engineMismatchDetected = true; // Stops all further consumer output.
-      beginTeardown();
-      settle("reject", error);
-    };
-    let engineMismatchError: RuntimeError | undefined;
     handleEngineMismatch = (mismatch: EngineMismatch) => {
-      if (engineMismatchError !== undefined) return;
-      engineMismatchDetected = true;
-      engineMismatchError = new RuntimeError(
+      if (engineMismatchDetected) return;
+      engineMismatchDetected = true; // Stops all further consumer output.
+      const engineMismatchError = new RuntimeError(
         "CLI_ENGINE_PROVENANCE_MISMATCH",
         `Refusing kimi output: execution plan required ${plannedEngine}, but ${mismatch.reason}`,
         "cli-client.engine-provenance",
@@ -939,7 +932,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         system_version: mismatch.systemVersion ?? null,
         reason: mismatch.reason,
       });
-      stopForPolicyFailure(engineMismatchError);
+      beginTeardown();
+      settle("reject", engineMismatchError);
     };
 
     const onAbort = () => {
@@ -978,20 +972,14 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       }
     }
 
+    const processError = (prefix: string, stage: string, err: unknown) => {
+      const details = { ...errorDetails(), ...spawnErrorDetails(err) };
+      return new RuntimeError("CLI_PROCESS_ERROR", `${prefix}: ${formatError(err)}`, stage, err instanceof Error ? { cause: err, details } : { details });
+    };
     earlyErrorHandled = true;
     child.on("error", (err) => {
       appendLogLine({ event: "process_error", message: formatError(err) });
-      settle(
-        "reject",
-        new RuntimeError(
-          "CLI_PROCESS_ERROR",
-          `kimi subprocess error: ${formatError(err)}`,
-          "cli-client.process",
-          err instanceof Error
-            ? { cause: err, details: { ...errorDetails(), ...spawnErrorDetails(err) } }
-            : { details: { ...errorDetails(), ...spawnErrorDetails(err) } },
-        ),
-      );
+      settle("reject", processError("kimi subprocess error", "cli-client.process", err));
     });
     if (earlyErrors.length > 0) {
       const captured = earlyErrors[0]!;
@@ -1002,15 +990,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
           early: true,
           additional_count: earlyErrors.length - 1,
         });
-        settle(
-          "reject",
-          new RuntimeError(
-            "CLI_PROCESS_ERROR",
-            `kimi subprocess error: ${formatError(captured)}`,
-            "cli-client.process",
-            { cause: captured, details: { ...errorDetails(), ...spawnErrorDetails(captured) } },
-          ),
-        );
+        settle("reject", processError("kimi subprocess error", "cli-client.process", captured));
       });
     }
 
@@ -1095,17 +1075,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
       });
       child.stdin.end();
     } catch (err) {
-      settle(
-        "reject",
-        new RuntimeError(
-          "CLI_PROCESS_ERROR",
-          `kimi subprocess stream setup failed: ${formatError(err)}`,
-          "cli-client.streams",
-          err instanceof Error
-            ? { cause: err, details: { ...errorDetails(), ...spawnErrorDetails(err) } }
-            : { details: { ...errorDetails(), ...spawnErrorDetails(err) } },
-        ),
-      );
+      settle("reject", processError("kimi subprocess stream setup failed", "cli-client.streams", err));
     }
   });
 }
@@ -1353,10 +1323,6 @@ function appendToTail(tail: string, chunk: string, maxBytes: number): string {
 
 function truncateChars(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : value.slice(0, maxChars);
-}
-
-function isErrnoException(err: unknown, code: string): boolean {
-  return typeof err === "object" && err !== null && "code" in err && err.code === code;
 }
 
 function raceWithTimeout(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
