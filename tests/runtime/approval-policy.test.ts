@@ -383,3 +383,31 @@ test("pure policy plus evaluator matches async policy across the fixture matrix"
     }
   }
 });
+
+describe("write labels refuse a trusted root containing a backslash", () => {
+  test.each([
+    ["rescue", "Write"], ["rescue", "Read"], ["rescue", "Bash"],
+    ["swarm-write", "Write"], ["swarm-write", "Read"], ["swarm-write", "AgentSwarm"],
+  ])("%s denies %s", async (commandLabel, tool) => {
+    const decision = await decideHookOutcome(
+      { tool_name: tool, tool_input: { path: "x", command: "ls" } },
+      {
+        commandLabel,
+        trustedWorkspaceRoot: "/work/a\\b",
+        rescueEvaluator: async () => ({ decision: "allow" }),
+      },
+    );
+    expect(decision).toEqual({
+      decision: "deny",
+      reason: expect.stringContaining("contains a backslash, which kimi-code reads as a path separator"),
+    });
+  });
+
+  test("a plain root still reaches the evaluator", async () => {
+    const decision = await decideHookOutcome(
+      { tool_name: "Write", tool_input: { path: "x" } },
+      { commandLabel: "rescue", trustedWorkspaceRoot: "/work/ab", rescueEvaluator: async () => ({ decision: "allow" }) },
+    );
+    expect(decision).toEqual({ decision: "allow" });
+  });
+});

@@ -1704,6 +1704,35 @@ describe("native-v2 provenance", () => {
     }
   });
 
+  const posixOnly = process.platform === "win32" ? test.skip : test;
+  posixOnly.each(["rescue", "swarm-write"])("refuses a %s launch whose cwd or trusted root contains a backslash", async (commandLabel) => {
+    const root = await createTestPluginDataRoot("cli-backslash-root");
+    try {
+      const slashed = path.join(root, "a\\b");
+      await mkdir(slashed);
+      await mkdir(path.join(root, "plain"));
+      await writeFile(path.join(root, "plain", "marker"), "x");
+      const spawnSpy = spyOn(childProcess, "spawn");
+      const before = spawnSpy.mock.calls.length;
+      try {
+        for (const [cwd, trustedWorkspaceRoot] of [[slashed, slashed], [path.join(root, "plain"), slashed], [slashed, path.join(root, "plain")]]) {
+          const opts = mockOptions({ cwd: cwd!, records: [], commandLabel });
+          await expect(runCliPrompt({ ...opts, trustedWorkspaceRoot })).rejects.toMatchObject({
+            code: "CLI_TRUSTED_WORKSPACE_ROOT_INVALID",
+            message: expect.stringContaining("contains a backslash, which kimi-code reads as a path separator"),
+          });
+        }
+        expect(spawnSpy.mock.calls.length).toBe(before);
+      } finally {
+        spawnSpy.mockRestore();
+      }
+      const ask = mockOptions({ cwd: slashed, records: [], commandLabel: "ask" });
+      await expect(runCliPrompt(ask)).resolves.toBeDefined();
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test.each(["ask", "review", "challenge", "rescue", "swarm", "swarm-write", "review_gate"])("never inherits KIMI_CODE_TRUST_WORKSPACE for %s", async (commandLabel) => {
     const root = await createTestPluginDataRoot("cli-no-ambient-trust");
     try {

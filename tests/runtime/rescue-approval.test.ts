@@ -149,6 +149,30 @@ describe("evaluateRescueHookRequest", () => {
     });
   });
 
+  describe("a trusted root whose realpath contains a backslash", () => {
+    const posixOnly = process.platform === "win32" ? test.skip : test;
+    posixOnly("denies every write-capable tool and keeps a plain root working", async () => {
+      const fixture = await mkdtemp(path.join(os.tmpdir(), "rescue-backslash-root-"));
+      try {
+        const slashed = path.join(fixture, "a\\b");
+        await mkdir(slashed);
+        await symlink(slashed, path.join(fixture, "plain-link"));
+        await mkdir(path.join(fixture, "plain"));
+        for (const root of [slashed, path.join(fixture, "plain-link")]) {
+          for (const [tool, input] of [["Write", { path: "x.txt" }], ["Bash", { command: "ls" }]] as const) {
+            expect(await evaluateRescueHookRequest(root, tool, input)).toEqual({
+              decision: "deny",
+              reason: expect.stringContaining("contains a backslash, which kimi-code reads as a path separator"),
+            });
+          }
+        }
+        expect(await evaluateRescueHookRequest(path.join(fixture, "plain"), "Write", { path: "x.txt" })).toEqual({ decision: "allow" });
+      } finally {
+        await cleanupTestPath(fixture);
+      }
+    });
+  });
+
   describe(".git aliases on native writes and Bash.cwd", () => {
     async function withPointerFixture(run: (root: string) => Promise<void>) {
       const fixture = await mkdtemp(path.join(os.tmpdir(), "rescue-git-alias-"));

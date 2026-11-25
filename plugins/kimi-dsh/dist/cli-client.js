@@ -13,6 +13,7 @@ import { RuntimeError, formatError } from "./errors.js";
 import { assertNoUnsafeExperimentalSelector, assertExecutionPlanMatchesSpawn, } from "./kimi-engine.js";
 import { HOOK_TEST_DELAY_ENV } from "./hooks/hook-timing.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
+import { backslashWorkspacePath } from "./rescue-approval.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
@@ -54,6 +55,9 @@ export async function runCliPrompt(opts) {
     if ((opts.commandLabel === "rescue" || opts.commandLabel === "swarm-write") &&
         !opts.trustedWorkspaceRoot) {
         throw new RuntimeError("CLI_TRUSTED_WORKSPACE_ROOT_MISSING", `Refusing ${opts.commandLabel}: write-capable plugin launches require a plugin-owned trusted workspace root.`, "cli-client.pre-spawn", { details: { command_label: opts.commandLabel } });
+    }
+    if (opts.commandLabel === "rescue" || opts.commandLabel === "swarm-write") {
+        assertWorkspaceSpellable(opts.commandLabel, [opts.cwd, opts.trustedWorkspaceRoot], "cli-client.pre-spawn");
     }
     // The master experimental flag enables v2-only features (tower, subagent
     // fork) outside the certified no-plan profile. Legacy-v1 and uncertified
@@ -848,6 +852,17 @@ export async function runCliPrompt(opts) {
  * runCliPrompt — some callers (setup probes, smoke tests) are fine with
  * an undefined sessionId.
  */
+/**
+ * Write confinement compares Node paths with kimi-code's `pathe` paths; a
+ * literal backslash in the run directory or trusted root is a separator to
+ * pathe only, so the two would name different directories.
+ */
+export function assertWorkspaceSpellable(commandLabel, paths, stage) {
+    const slashed = backslashWorkspacePath(paths);
+    if (slashed === undefined)
+        return;
+    throw new RuntimeError("CLI_TRUSTED_WORKSPACE_ROOT_INVALID", `Refusing ${commandLabel}: write confinement cannot use ${slashed}: it contains a backslash, which kimi-code reads as a path separator. Run from a directory whose path has no backslash.`, stage, { details: { command_label: commandLabel, path: slashed } });
+}
 export function requireSessionId(result, context) {
     if (result.sessionId !== undefined && result.sessionId.length > 0) {
         return result.sessionId;

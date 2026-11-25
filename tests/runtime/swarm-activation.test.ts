@@ -331,6 +331,22 @@ describe("requiresSwarmPreactivation", () => {
   });
 });
 
+describe("swarm-write activation refuses a backslash workspace", () => {
+  const posixOnly = process.platform === "win32" ? test.skip : test;
+  posixOnly("refuses before starting the web process", async () => {
+    await withFixture("success", async (fixture) => {
+      const slashed = path.join(fixture.cwd, "a\\b");
+      await mkdir(slashed);
+      const options = makeOptions(fixture, { commandLabel: "swarm-write", trustedWorkspaceRoot: slashed });
+      await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
+        code: "CLI_TRUSTED_WORKSPACE_ROOT_INVALID",
+        message: expect.stringContaining("contains a backslash, which kimi-code reads as a path separator"),
+      });
+      expect(requests(await readLog(fixture))).toEqual([]);
+    });
+  });
+});
+
 describe("swarm web lifecycle", () => {
   test("activates and deactivates through two real web processes with identical CLI environment", async () => {
     await withFixture("success", async (fixture) => {

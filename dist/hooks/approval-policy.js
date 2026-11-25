@@ -174,6 +174,9 @@ export function decideHookOutcomePure(input, ctx) {
             // KIMI_PLUGIN_CC_WORKSPACE_ROOT, never the payload cwd, so an in-process
             // subagent cannot move the trust boundary or forge its root. A missing
             // root fails closed for writes.
+            const slashed = backslashRootDenial(ctx.trustedWorkspaceRoot, toolName);
+            if (slashed !== undefined)
+                return slashed;
             if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
                 return { decision: "allow" };
             }
@@ -188,6 +191,9 @@ export function decideHookOutcomePure(input, ctx) {
             return { evaluator: "rescue", workspaceRoot };
         }
         case "rescue": {
+            const slashed = backslashRootDenial(ctx.trustedWorkspaceRoot, toolName);
+            if (slashed !== undefined)
+                return slashed;
             const workspaceRoot = typeof ctx.trustedWorkspaceRoot === "string" ? ctx.trustedWorkspaceRoot : "";
             if (workspaceRoot.length === 0) {
                 if (READ_ONLY_TOOLS.has(toolName))
@@ -216,6 +222,21 @@ export function decideHookOutcomePure(input, ctx) {
                 reason: `kimi-plugin-cc safety hook: unrecognized command label "${label}"; tool "${toolName}" denied as a safety default.`,
             };
     }
+}
+/**
+ * kimi-code resolves its work dir with `pathe`, which reads a literal `\` as a
+ * separator, so a write-label root holding one names a different directory to
+ * kimi than to this hook. Every tool is denied; the launcher refuses such a
+ * root before spawn, so reaching here means the environment was altered.
+ */
+function backslashRootDenial(root, toolName) {
+    if (process.platform === "win32" || typeof root !== "string" || !root.includes("\\"))
+        return undefined;
+    return {
+        decision: "deny",
+        reason: `kimi-plugin-cc safety hook: writes cannot be confined to ${root}: it contains a backslash, ` +
+            `which kimi-code reads as a path separator; tool "${toolName}" denied.`,
+    };
 }
 function scopeOf(ctx) {
     return parseScopeEnvironment(ctx.readRoots, ctx.network);

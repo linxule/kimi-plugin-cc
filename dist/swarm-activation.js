@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { open } from "node:fs/promises";
 import path from "node:path";
-import { buildKimiCliEnvironment, } from "./cli-client.js";
+import { assertWorkspaceSpellable, buildKimiCliEnvironment, } from "./cli-client.js";
 import { RuntimeError } from "./errors.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } from "./kimi-engine.js";
@@ -124,6 +124,9 @@ async function prepareWebSpawn(options, failureCode) {
     assertExecutionPlanMatchesSpawn(options.executionPlan, options.command, prefixArgs, options.env);
     if (options.commandLabel === "swarm-write" && !options.trustedWorkspaceRoot) {
         throw new RuntimeError("CLI_TRUSTED_WORKSPACE_ROOT_MISSING", "Refusing swarm-write: write-capable plugin launches require a plugin-owned trusted workspace root.", "swarm-activation.pre-spawn", { details: { command_label: options.commandLabel } });
+    }
+    if (options.commandLabel === "swarm-write") {
+        assertWorkspaceSpellable(options.commandLabel, [options.cwd, options.trustedWorkspaceRoot], "swarm-activation.pre-spawn");
     }
     assertNoUnsafeExperimentalSelector(options.env, "swarm-activation.pre-spawn", options.executionPlan);
     assertPrefixArgsSafe(prefixArgs);

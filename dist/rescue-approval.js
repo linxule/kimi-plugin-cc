@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { access, lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "./vendor/shell-quote/index.js";
@@ -175,6 +176,9 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
             reason: `rescue cannot resolve workspace root: ${err.message}`,
         };
     }
+    if (process.platform !== "win32" && root.includes("\\")) {
+        return { decision: "deny", reason: backslashRootReason(root, toolName) };
+    }
     if (toolName === "Bash") {
         const command = extractBashCommand(toolInput);
         if (command === null) {
@@ -239,6 +243,34 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
         decision: "deny",
         reason: `rescue does not allow tool "${toolName}" — only Bash, Write, Edit, MultiEdit (with allowlist checks) and read-only tools are permitted.`,
     };
+}
+/**
+ * The first of `paths` (or its realpath) that holds a literal backslash on a
+ * POSIX host. kimi-code resolves its work dir with `pathe`, which reads `\` as
+ * a separator, so even a relative file name would land elsewhere.
+ */
+export function backslashWorkspacePath(paths) {
+    if (process.platform === "win32")
+        return undefined;
+    for (const candidate of paths) {
+        if (candidate === undefined)
+            continue;
+        if (candidate.includes("\\"))
+            return candidate;
+        try {
+            const real = realpathSync.native(candidate);
+            if (real.includes("\\"))
+                return real;
+        }
+        catch {
+            // A missing directory fails later at spawn; only spelling is judged here.
+        }
+    }
+    return undefined;
+}
+export function backslashRootReason(root, toolName) {
+    return (`kimi-plugin-cc safety hook: writes cannot be confined to ${root}: it contains a backslash, ` +
+        `which kimi-code reads as a path separator; tool "${toolName}" denied.`);
 }
 /**
  * kimi-code resolves tool paths with `pathe` after home expansion: `~/x` is
