@@ -156,6 +156,8 @@ describe.skipIf(process.platform === "win32")("execution plan over the plugin-ow
       KIMI_CODE_EXPERIMENTAL_FLAG: "",
       KIMI_CODE_EXPERIMENTAL_TOWER: "",
       KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "",
+      // Plan mechanics only; the job-time hook check would otherwise refuse.
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
     });
 
   test("a job plan records the plugin-owned realpath and its probed exact version", async () => {

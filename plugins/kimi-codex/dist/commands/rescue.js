@@ -16,7 +16,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { startBackgroundJob } from "../background-spawn.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget, hookRefusal, WRITE_HOOK_REPAIR } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 // "Continue working on the bug" verbs that auto-attach to the latest
@@ -136,7 +136,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
     // an early return doesn't leak SIGTERM/SIGINT listeners. Tests /
     // setup probes / intentional bypass: KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1.
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
-        const classified = await hookRefusal(context, "rescue", "RESCUE_HOOK_NOT_INSTALLED", "rescue.hook-check", "rescue refuses to run without the kimi-plugin-cc PreToolUse hook.", WRITE_HOOK_REPAIR);
+        const classified = await hookRefusal(context, "rescue");
         if (classified) {
             try {
                 return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });

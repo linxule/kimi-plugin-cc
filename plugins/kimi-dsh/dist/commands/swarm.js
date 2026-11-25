@@ -19,7 +19,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseSwarmArgs } from "../parsing.js";
 import { parseJobReadScope, resolveReadScope, serializeReadScope } from "../read-scope.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
-import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
+import { hookGateRefusal, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { usesBoundedSwarmPolicy } from "../swarm-policy.js";
@@ -451,14 +451,7 @@ writeMode, executionCwd) {
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
         const installStatus = await verifyHookInstalled(context.env);
         if (!installStatus.installed) {
-            maybeWarnHookMissing(installStatus, "swarm", context.stderr);
-            const classified = new RuntimeError("SWARM_HOOK_NOT_INSTALLED", [
-                "/kimi:swarm refuses to run without the kimi-plugin-cc PreToolUse hook.",
-                "The hook enforces each worker's tool permissions, write confinement, and delegation limits.",
-                `Hook check failed: ${installStatus.reason ?? "unknown"}.`,
-                "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
-                hookRefusalRetryProtocol(context.env),
-            ].join(" "), "swarm.hook-check", { details: hookRefusalDetails(installStatus) });
+            const classified = hookGateRefusal("swarm", installStatus, context.env, context.stderr);
             try {
                 return await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
             }

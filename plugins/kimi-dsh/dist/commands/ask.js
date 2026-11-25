@@ -17,7 +17,7 @@ import { assertScopeSupported, effectiveReadRoots, parseJobReadScope, resolveRea
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, assertNetworkResumeConfined, resumeBudget, hookRefusal, READ_ONLY_HOOK_REPAIR } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, assertNetworkResumeConfined, resumeBudget, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 const ASK_SUMMARY_MAX = 120;
@@ -249,7 +249,7 @@ async function requireAskHookInstalled(context) {
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
         return;
     }
-    const refusal = await hookRefusal(context, "ask", "ASK_HOOK_NOT_INSTALLED", "ask.hook-check", "ask refuses to run without the canonical kimi-plugin-cc PreToolUse hook.", READ_ONLY_HOOK_REPAIR);
+    const refusal = await hookRefusal(context, "ask");
     if (refusal)
         throw refusal;
 }

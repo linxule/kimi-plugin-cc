@@ -5,7 +5,7 @@ import { RuntimeError } from "./errors.js";
 import { resolveKimiCliCommand } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith, resolveKimiRelease } from "./kimi-releases.js";
-import { verifyHookInstalled } from "./hooks/install.js";
+import { hookGateRefusal, verifyHookInstalled } from "./hooks/install.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { isInTestedRange, parseVersionLine, probeKimiVersion, } from "./kimi-version-probe.js";
 import { isRecord } from "./util.js";
@@ -191,7 +191,7 @@ export async function prepareKimiExecutionPlan(options) {
         const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
         assertNoUnsafeExperimentalSelector(options.env, "kimi-engine.plan", { intendedEngine, certification: "test-bypass" });
         await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
-        warnings.push(...await planHookCheck(options.env));
+        warnings.push(...await planHookCheck(options.operationKind, options.env, options.stderr));
         return finishPlan({
             schemaVersion: 1,
             operationKind: options.operationKind,
@@ -229,7 +229,7 @@ export async function prepareKimiExecutionPlan(options) {
         warnings.push(`kimi-code ${probe.version} is not certified by this plugin release; running ${options.operationKind} read-only with ${borrowed} mechanics.`);
     }
     await runPreflight(intendedEngine, { kimiVersion: probe.version, certification });
-    warnings.push(...await planHookCheck(options.env, probe));
+    warnings.push(...await planHookCheck(options.operationKind, options.env, options.stderr, probe));
     return finishPlan({
         schemaVersion: 1,
         operationKind: options.operationKind,
@@ -252,11 +252,14 @@ function withoutExperimentalMasterFlag(env) {
  * only on the test-bypass path). It refuses when the configured hooks array is
  * invalid for that release, because kimi-code would then load no hook at all;
  * the command gate's earlier check may have probed a different release.
- * Otherwise it returns warnings: marker repair (G6) and other hosts' older
- * hooks that still apply their own rules to this job (H2). Any other
- * uninstalled or unverifiable result was the command gate's to refuse.
+ * Any other definite negative (`installed === false`) refuses with the
+ * operation's command-gate error: the hook may have gone between that gate and
+ * this plan. KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 makes verifyHookInstalled report
+ * installed, exactly as at the gates. Otherwise it returns warnings: marker
+ * repair (G6) and other hosts' older hooks that still apply their own rules to
+ * this job (H2). A thrown, unverifiable result adds nothing and never refuses.
  */
-async function planHookCheck(env, probe) {
+async function planHookCheck(operation, env, stderr, probe) {
     let status;
     try {
         status = await verifyHookInstalled(env, { kimiVersion: probe });
@@ -273,7 +276,9 @@ async function planHookCheck(env, probe) {
             },
         });
     }
-    return status.installed ? status.warnings ?? [] : [];
+    if (status.installed)
+        return status.warnings ?? [];
+    throw hookGateRefusal(operation, status, env, stderr);
 }
 /** Freeze the plan; a nonempty warning list is attached and announced once on stderr. */
 function finishPlan(plan, warnings, stderr = process.stderr) {

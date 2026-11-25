@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -18,6 +18,8 @@ import {
   reconcileHistoricalJobProvenance,
 } from "../../runtime/kimi-engine.js";
 import { JobStore } from "../../runtime/job-store.js";
+import { RuntimeError } from "../../runtime/errors.js";
+import * as hookInstall from "../../runtime/hooks/install.js";
 import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
 import { WORKSPACE_TRUST_DISABLED_WARNING } from "../../runtime/native-v2-preflight.js";
 import { maxTestedMinor } from "../../runtime/kimi-version-probe.js";
@@ -50,6 +52,7 @@ describe("kimi execution plan", () => {
         env: {
           ...process.env,
           KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
           KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
           KIMI_PLUGIN_CC_MOCK_VERSION: "0.39.0",
         },
@@ -104,6 +107,7 @@ describe("kimi execution plan", () => {
     const env = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_CODE_HOME: kimiHome,
       KIMI_CODE_EXPERIMENTAL_FLAG: "",
@@ -242,6 +246,7 @@ describe("kimi execution plan", () => {
           env: {
             ...process.env,
             KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+            KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
             KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
             KIMI_PLUGIN_CC_MOCK_VERSION: "0.42.0",
             KIMI_CODE_HOME: kimiHome,
@@ -266,6 +271,7 @@ describe("kimi execution plan", () => {
     const env = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
@@ -300,6 +306,7 @@ describe("kimi execution plan", () => {
         env: {
           ...process.env,
           KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+          KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
           KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
           KIMI_CODE_HOME: kimiHome,
           KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
@@ -357,6 +364,7 @@ describe("kimi execution plan", () => {
     const env = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_CODE_HOME: kimiHome,
     };
@@ -393,6 +401,7 @@ describe("kimi execution plan", () => {
     const env = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_CODE_HOME: path.join(cwd, "kimi-home"),
       KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
@@ -495,6 +504,7 @@ describe("kimi execution plan", () => {
     const env = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
       KIMI_CODE_HOME: kimiHome,
@@ -588,6 +598,7 @@ describe("kimi execution plan", () => {
     const base = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_CODE_HOME: path.join(cwd, "kimi-home"),
       KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
@@ -618,6 +629,7 @@ describe("kimi execution plan", () => {
     const baseEnv = {
       ...process.env,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     };
     try {
@@ -651,6 +663,7 @@ describe("kimi execution plan", () => {
       env: {
         ...process.env,
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+        KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
         KIMI_PLUGIN_CC_MOCK_VERSION: "0.39.0",
       },
@@ -896,6 +909,89 @@ describe("historical engine provenance", () => {
     } finally {
       store.close();
       await cleanupTestPath(pluginDataRoot);
+    }
+  });
+});
+
+describe("H-4: the job-time hook check refuses on a definite negative", () => {
+  const mockEnv = (kimiHome: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+    ...process.env,
+    KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+    KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+    KIMI_CODE_HOME: kimiHome,
+    KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
+    ...extra,
+  });
+  const quiet = { write: () => true } as unknown as NodeJS.WritableStream;
+
+  test.each([
+    ["ask", "ASK_HOOK_NOT_INSTALLED", "ask.hook-check", "ask refuses to run without the canonical kimi-plugin-cc PreToolUse hook."],
+    ["review", "REVIEW_HOOK_NOT_INSTALLED", "review.hook-check", "review refuses to run without the canonical kimi-plugin-cc PreToolUse hook."],
+    ["rescue", "RESCUE_HOOK_NOT_INSTALLED", "rescue.hook-check", "rescue refuses to run without the kimi-plugin-cc PreToolUse hook."],
+    ["pursue", "PURSUE_HOOK_NOT_INSTALLED", "pursue.hook-check", "/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook."],
+    ["swarm-write", "SWARM_HOOK_NOT_INSTALLED", "swarm.hook-check", "/kimi:swarm refuses to run without the kimi-plugin-cc PreToolUse hook."],
+  ] as const)("%s refuses with its command gate's error", async (operationKind, code, stage, intro) => {
+    const cwd = await createTestPluginDataRoot(`kimi-engine-h4-${operationKind}`);
+    const kimiHome = path.join(cwd, "kimi-home");
+    await mkdir(kimiHome, { recursive: true });
+    try {
+      const error = await prepareKimiExecutionPlan({ operationKind, cwd, env: mockEnv(kimiHome), stderr: quiet })
+        .then(() => undefined, (err: unknown) => err as RuntimeError);
+      expect(error).toBeInstanceOf(RuntimeError);
+      expect(error!.code).toBe(code);
+      expect(error!.stage).toBe(stage);
+      expect(error!.message.startsWith(intro)).toBe(true);
+      expect(error!.message).toContain("Hook check failed: kimi-code config file does not exist.");
+      expect(error!.details).toMatchObject({ config_path: path.join(kimiHome, "config.toml") });
+    } finally {
+      await cleanupTestPath(cwd);
+    }
+  });
+
+  test("the test-bypass plan refuses too unless the hook check is skipped", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-h4-bypass");
+    const kimiHome = path.join(cwd, "kimi-home");
+    await mkdir(kimiHome, { recursive: true });
+    try {
+      const env = mockEnv(kimiHome, { KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" });
+      await expect(prepareKimiExecutionPlan({ operationKind: "ask", cwd, env, stderr: quiet }))
+        .rejects.toMatchObject({ code: "ASK_HOOK_NOT_INSTALLED" });
+      const plan = await prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1" }, stderr: quiet,
+      });
+      expect(plan.certification).toBe("test-bypass");
+    } finally {
+      await cleanupTestPath(cwd);
+    }
+  });
+
+  test("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 skips the job-time check like the command gates", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-h4-skip");
+    const kimiHome = path.join(cwd, "kimi-home");
+    await mkdir(kimiHome, { recursive: true });
+    try {
+      const plan = await prepareKimiExecutionPlan({
+        operationKind: "rescue", cwd, env: mockEnv(kimiHome, { KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1" }), stderr: quiet,
+      });
+      expect(plan.operationKind).toBe("rescue");
+    } finally {
+      await cleanupTestPath(cwd);
+    }
+  });
+
+  test("an unverifiable (thrown) check keeps launching without warnings", async () => {
+    const cwd = await createTestPluginDataRoot("kimi-engine-h4-throw");
+    const kimiHome = path.join(cwd, "kimi-home");
+    await mkdir(kimiHome, { recursive: true });
+    const spy = spyOn(hookInstall, "verifyHookInstalled").mockImplementation(async () => {
+      throw new Error("unexpected verifier failure");
+    });
+    try {
+      const plan = await prepareKimiExecutionPlan({ operationKind: "ask", cwd, env: mockEnv(kimiHome), stderr: quiet });
+      expect("warnings" in plan).toBe(false);
+    } finally {
+      spy.mockRestore();
+      await cleanupTestPath(cwd);
     }
   });
 });

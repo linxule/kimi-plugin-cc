@@ -15,6 +15,7 @@ describe("spawn-time PID callback", () => {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+        KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",
         KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCli]),
         KIMI_PLUGIN_CC_MOCK_SCENARIO: "ask-success",
@@ -46,6 +47,7 @@ describe("spawn-time PID callback", () => {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+        KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",
         KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCli]),
         KIMI_PLUGIN_CC_MOCK_DELAY_MS: "30000",

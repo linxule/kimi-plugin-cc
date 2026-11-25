@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
 import { prepareKimiExecutionPlan } from "../../runtime/kimi-engine.js";
 
 // A cwd-selecting version shim (mise/asdf style) reports a different release
@@ -23,9 +24,20 @@ async function makeCase(planRelease: string, otherRelease: string, hooks: string
   const kimiHome = path.join(root, "kimi-home");
   const shimLog = path.join(root, "shim.log");
   const shim = path.join(root, "kimi-shim");
+  const hookScript = path.join(root, "dist", "hooks", "approval-hook.js");
   await mkdir(project, { recursive: true });
   await mkdir(kimiHome, { recursive: true });
-  await writeFile(path.join(kimiHome, "config.toml"), hooks, "utf8");
+  await mkdir(path.dirname(hookScript), { recursive: true });
+  await writeFile(hookScript, "// hook\n", "utf8");
+  // This checkout's managed block, so the job-time check sees an installed hook
+  // and only the hook-set validation under test can refuse.
+  const hookEnv = { KIMI_PLUGIN_CC_HOOK_SCRIPT: hookScript, KIMI_PLUGIN_CC_NODE_BIN: process.execPath };
+  const managed = [
+    "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===", "[[hooks]]", 'event = "PreToolUse"',
+    `command = ${JSON.stringify(buildHookShellCommand(hookScript, hookEnv))}`, "timeout = 15",
+    "# === END kimi-plugin-cc-managed ===", "",
+  ].join("\n");
+  await writeFile(path.join(kimiHome, "config.toml"), `${managed}${hooks}`, "utf8");
   await writeFile(
     shim,
     [
@@ -44,6 +56,7 @@ async function makeCase(planRelease: string, otherRelease: string, hooks: string
     KIMI_PLUGIN_CC_DATA: path.join(root, "plugin-data"),
     KIMI_CODE_HOME: kimiHome,
     KIMI_PLUGIN_CC_KIMI_BIN: shim,
+    ...hookEnv,
   };
   const calls = async () => (existsSync(shimLog) ? (await readFile(shimLog, "utf8")).split("\n").filter(Boolean) : []);
   return { project, env, calls };

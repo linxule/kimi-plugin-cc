@@ -4,6 +4,7 @@ import path from "node:path";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import { countCleanEntriesInFile, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, parseManagedBlock, } from "./managed-block.js";
 import { hostIdFromHookCommand, parseHookShellCommand, resolveHostId, tryBuildExpectedHookCommand, } from "./install-paths.js";
+import { RuntimeError } from "../errors.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 export async function verifyHookInstalled(env, options = {}) {
@@ -282,6 +283,76 @@ export function hookRefusalDetails(status) {
             }
             : {}),
     };
+}
+/** Repair sentences of the read-only (ask, review, challenge, review gate) hook refusal. */
+export const READ_ONLY_HOOK_REPAIR = [
+    "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
+    "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
+];
+/** Repair sentences of the write-capable (rescue, pursue) hook refusal. */
+export const WRITE_HOOK_REPAIR = [
+    "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+    "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
+];
+function readOnlyGate(name, code) {
+    return {
+        code,
+        stage: `${name}.hook-check`,
+        warnLabel: name,
+        intro: [`${name} refuses to run without the canonical kimi-plugin-cc PreToolUse hook.`],
+        repair: READ_ONLY_HOOK_REPAIR,
+    };
+}
+const SWARM_GATE = {
+    code: "SWARM_HOOK_NOT_INSTALLED",
+    stage: "swarm.hook-check",
+    warnLabel: "swarm",
+    intro: [
+        "/kimi:swarm refuses to run without the kimi-plugin-cc PreToolUse hook.",
+        "The hook enforces each worker's tool permissions, write confinement, and delegation limits.",
+    ],
+    repair: ["Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry."],
+};
+/**
+ * The refusal each operation's hook gate raises. The command gates and the
+ * job-time check in prepareKimiExecutionPlan share it, so a definite negative
+ * reads the same whichever check sees it.
+ */
+const HOOK_GATES = {
+    ask: readOnlyGate("ask", "ASK_HOOK_NOT_INSTALLED"),
+    review: readOnlyGate("review", "REVIEW_HOOK_NOT_INSTALLED"),
+    challenge: readOnlyGate("challenge", "CHALLENGE_HOOK_NOT_INSTALLED"),
+    review_gate: readOnlyGate("review_gate", "REVIEW_GATE_HOOK_NOT_INSTALLED"),
+    rescue: {
+        code: "RESCUE_HOOK_NOT_INSTALLED",
+        stage: "rescue.hook-check",
+        warnLabel: "rescue",
+        intro: ["rescue refuses to run without the kimi-plugin-cc PreToolUse hook."],
+        repair: WRITE_HOOK_REPAIR,
+    },
+    pursue: {
+        code: "PURSUE_HOOK_NOT_INSTALLED",
+        stage: "pursue.hook-check",
+        warnLabel: "rescue",
+        intro: ["/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook."],
+        repair: WRITE_HOOK_REPAIR,
+    },
+    swarm: SWARM_GATE,
+    "swarm-write": SWARM_GATE,
+};
+/**
+ * Warn once on stderr and build `operation`'s hook refusal for a status whose
+ * `installed` is false.
+ */
+export function hookGateRefusal(operation, status, env, stderr = process.stderr) {
+    const gate = HOOK_GATES[operation];
+    maybeWarnHookMissing(status, gate.warnLabel, stderr);
+    return new RuntimeError(gate.code, [
+        ...gate.intro,
+        `Hook check failed: ${status.reason ?? "unknown"}.`,
+        ...gate.repair,
+        hookRefusalRetryProtocol(env),
+    ].join(" "), gate.stage, { details: hookRefusalDetails(status) });
 }
 export function formatHookMissingWarning(status, commandLabel) {
     return [

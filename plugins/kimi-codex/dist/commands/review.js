@@ -17,7 +17,7 @@ import { assertScopeSupported, resolveReadScope, serializeReadScope } from "../r
 import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, hookRefusal, READ_ONLY_HOOK_REPAIR } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 const REVIEW_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 export async function runReview(argv, context, commandType) {
@@ -158,7 +158,7 @@ async function requireReadOnlyHookInstalled(context, commandType) {
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") {
         return;
     }
-    const refusal = await hookRefusal(context, commandType, `${commandType.toUpperCase()}_HOOK_NOT_INSTALLED`, `${commandType}.hook-check`, `${commandType} refuses to run without the canonical kimi-plugin-cc PreToolUse hook.`, READ_ONLY_HOOK_REPAIR);
+    const refusal = await hookRefusal(context, commandType);
     if (refusal)
         throw refusal;
 }

@@ -201,7 +201,9 @@ describe("runSwarm hook gate", () => {
       // This fixture must reach that hook gate even on hosts without kimi.
       const kimiBin = path.join(workspace, "kimi-stub");
       await writeFile(kimiBin, "#!/bin/sh\nexit 91\n", { mode: 0o755 });
-      const output = await runSwarm(
+      // The job-time check in the execution plan refuses before any job row
+      // exists, with the swarm gate's own error.
+      const error = await runSwarm(
         ["review", "two", "targets"],
         makeContext(workspace, {
           ...process.env,
@@ -210,12 +212,12 @@ describe("runSwarm hook gate", () => {
           KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         }),
-      );
+      ).then(() => undefined, (caught: unknown) => caught as RuntimeError);
 
-      expect(output).toContain("SWARM_HOOK_NOT_INSTALLED");
-      expect(output).toContain("Claude Code /kimi:setup");
-      expect(output).toContain("Codex $kimi-setup");
-      expect(output).not.toContain("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK");
+      expect(error?.code).toBe("SWARM_HOOK_NOT_INSTALLED");
+      expect(error?.message).toContain("Claude Code /kimi:setup");
+      expect(error?.message).toContain("Codex $kimi-setup");
+      expect(error?.message).not.toContain("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK");
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(workspace);

@@ -23,7 +23,7 @@ import { parsePursueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import type { GoalSummaryRecord } from "../stream-json.js";
 import type { CommandContext } from "../types.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, hookRefusal, WRITE_HOOK_REPAIR } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 
@@ -248,8 +248,7 @@ async function executePursueJob(
   // exactly like rescue. The hook gates every tool call in every goal
   // continuation turn; without it, kimi -p auto-approves destructive ops.
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
-    const classified = await hookRefusal(context, "rescue", "PURSUE_HOOK_NOT_INSTALLED", "pursue.hook-check",
-      "/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook.", WRITE_HOOK_REPAIR);
+    const classified = await hookRefusal(context, "pursue");
     if (classified) {
       try {
         return await markJobFailed(store, paths, job, classified, "Pursue failed.", { phase: "failed" });

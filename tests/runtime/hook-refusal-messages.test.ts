@@ -37,7 +37,9 @@ type Case = {
   stage: string;
   intro: string;
   tail: string[];
-  // Read-only commands throw; write commands persist the refusal on the job row.
+  // The job-time check in prepareKimiExecutionPlan runs before any job row
+  // exists and throws the same gate error; a write command's own gate persists
+  // it on the row only when the hook disappears after the plan.
   run: (context: CommandContext) => Promise<unknown>;
   persisted: boolean;
 };
@@ -61,12 +63,12 @@ const CASES: Case[] = [
   {
     name: "rescue", warnLabel: "rescue", code: "RESCUE_HOOK_NOT_INSTALLED", stage: "rescue.hook-check",
     intro: "rescue refuses to run without the kimi-plugin-cc PreToolUse hook.", tail: WRITE_TAIL,
-    run: (context) => runRescue(["Fix", "it"], context), persisted: true,
+    run: (context) => runRescue(["Fix", "it"], context), persisted: false,
   },
   {
     name: "pursue", warnLabel: "rescue", code: "PURSUE_HOOK_NOT_INSTALLED", stage: "pursue.hook-check",
     intro: "/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook.", tail: WRITE_TAIL,
-    run: (context) => runPursue(["Fix", "it"], context), persisted: true,
+    run: (context) => runPursue(["Fix", "it"], context), persisted: false,
   },
 ];
 
