@@ -10,7 +10,6 @@ import {
   observedExecutionFields,
   persistedExecutionPlanFields,
   prepareKimiExecutionPlan,
-  reconcileHistoricalJobProvenance,
 } from "../kimi-engine.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
@@ -31,7 +30,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 import { shorten } from "../util.js";
 
@@ -58,15 +57,6 @@ const ASK_RESUME_PROMPT = [
   ASK_CONTINUE_TASK,
 ].join("\n");
 
-interface AskSessionResolution {
-  /** Prior kimi session id to resume; null means start a fresh session. */
-  kimiSessionId: string | null;
-  reusedSession: boolean;
-  resumedFromJobId: string | null;
-  /** Reconciled source job of a resume; its lineage is checked against the selected engine. */
-  sourceJob: JobRecord | null;
-}
-
 export async function runAsk(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseAskArgs(argv);
   if (parsed.help) return companionHelp(["ask", ...argv])!;
@@ -83,13 +73,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
     await sweepStaleJobs(store, paths);
 
     const jobId = allocateJobId(context);
-    const sessionResolution = await resolveAskSession(
-      store,
-      repoIdentity.repoId,
-      parsed.fresh,
-      parsed.resume,
-      parsed.resumeTarget,
-    );
+    const sessionResolution = await resolveResumeSession(store, "ask", repoIdentity.repoId, parsed);
     const askPrompt = buildAskPrompt(parsed.prompt, sessionResolution.reusedSession);
     const executionPlan = await prepareKimiExecutionPlan({
       operationKind: "ask",
@@ -109,9 +93,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       thinking: null,
       thinking_effort: parsed.thinkingEffort ?? null,
       background: parsed.background,
-      budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "ask" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
-      budget_source: parsed.budgetMs !== undefined ? "explicit"
-        : sessionResolution.sourceJob?.operation_kind === "ask" && sessionResolution.sourceJob.budget_ms !== null ? "inherited" : "default",
+      ...resumeBudget("ask", parsed.budgetMs, sessionResolution.sourceJob),
       pid: parsed.background ? null : process.pid,
       kimi_pid: null,
       status: "running",
@@ -343,89 +325,6 @@ async function requireAskHookInstalled(context: CommandContext): Promise<void> {
     "ask.hook-check",
     { details: hookRefusalDetails(installStatus) },
   );
-}
-
-async function resolveAskSession(
-  store: JobStore,
-  repoId: string,
-  fresh: boolean,
-  resume: boolean,
-  resumeTarget: string | undefined,
-): Promise<AskSessionResolution> {
-  if (fresh) {
-    return { kimiSessionId: null, reusedSession: false, resumedFromJobId: null, sourceJob: null };
-  }
-
-  if (resumeTarget) {
-    const byJob = store.getJob(resumeTarget);
-    const scoped = byJob?.repo_id === repoId && byJob.command_type === "ask" ? byJob : null;
-    const exact = scoped ?? store.findAskJobBySession(repoId, resumeTarget);
-    if (!exact) {
-      throw new RuntimeError(
-        "ASK_RESUME_NOT_FOUND",
-        `No ask job or session matched ${resumeTarget}.`,
-        "ask.resume",
-      );
-    }
-    // Order matters: surface ASK_ALREADY_RUNNING before complaining that
-    // the session id is missing. In v1.0 a running ask row carries
-    // kimi_session_id=NULL (kimi-code assigns the id post-call), so the
-    // legacy "no session id → not found" check would mask the more
-    // accurate "already running" error.
-    const source = await reconcileHistoricalJobProvenance(store, exact);
-    ensureAskSessionIsNotRunning(source);
-    if (!source.kimi_session_id) {
-      throw new RuntimeError(
-        "ASK_RESUME_NOT_FOUND",
-        `No ask job or session matched ${resumeTarget}.`,
-        "ask.resume",
-      );
-    }
-    return {
-      kimiSessionId: source.kimi_session_id,
-      reusedSession: true,
-      resumedFromJobId: source.job_id,
-      sourceJob: source,
-    };
-  }
-
-  if (resume) {
-    const latest = store.findLatestJob({ repoId, commandType: "ask" });
-    if (!latest) {
-      throw new RuntimeError(
-        "ASK_RESUME_NOT_FOUND",
-        "No prior ask session exists for this repository.",
-        "ask.resume",
-      );
-    }
-    const source = await reconcileHistoricalJobProvenance(store, latest);
-    ensureAskSessionIsNotRunning(source);
-    if (!source.kimi_session_id) {
-      throw new RuntimeError(
-        "ASK_RESUME_NOT_FOUND",
-        "No prior ask session exists for this repository.",
-        "ask.resume",
-      );
-    }
-    return {
-      kimiSessionId: source.kimi_session_id,
-      reusedSession: true,
-      resumedFromJobId: source.job_id,
-      sourceJob: source,
-    };
-  }
-
-  return { kimiSessionId: null, reusedSession: false, resumedFromJobId: null, sourceJob: null };
-}
-
-function ensureAskSessionIsNotRunning(job: JobRecord): void {
-  if (job.status === "running") {
-    throw new RuntimeError(
-      "ASK_ALREADY_RUNNING",
-      `Ask session ${job.kimi_session_id ?? "<unknown>"} is already active under job ${job.job_id}.`,
-      "ask.resume",
-    );
-  }
 }
 
 function buildAskPrompt(question: string | undefined, reusedSession: boolean): string {

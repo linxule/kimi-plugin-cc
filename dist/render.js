@@ -162,7 +162,7 @@ export function renderTerminalJobArtifact(job, partialOutput) {
     }
     return lines.join("\n");
 }
-function capitalize(value) {
+export function capitalize(value) {
     return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 function assertNever(value) {

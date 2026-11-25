@@ -1,8 +1,8 @@
 import { RuntimeError } from "../errors.js";
 import { ResponseTimeoutError, type CliClientResult } from "../cli-client.js";
-import { observedExecutionFields } from "../kimi-engine.js";
-import type { JobRecord, JobStore } from "../job-store.js";
-import type { PartialJobOutput } from "../render.js";
+import { observedExecutionFields, reconcileHistoricalJobProvenance } from "../kimi-engine.js";
+import type { CreateJobInput, JobRecord, JobStore } from "../job-store.js";
+import { capitalize, type PartialJobOutput } from "../render.js";
 import type { StreamJsonRecord } from "../stream-json.js";
 import { resolveKimiHome } from "../kimi-home.js";
 import { recoverSessionIdFromStore } from "../session-recovery.js";
@@ -220,4 +220,75 @@ export function warnInheritedBudget(job: JobRecord, stderr: NodeJS.WriteStream):
   if (job.budget_source === "inherited" && job.budget_ms !== null) {
     stderr.write(`[${job.command_type}] budget ${formatBudgetDuration(job.budget_ms)} inherited from job ${job.resumed_from_job_id}; pass --budget to override\n`);
   }
+}
+
+export interface SessionResolution {
+  /** Prior kimi session id to resume; null means start a fresh session. */
+  kimiSessionId: string | null;
+  reusedSession: boolean;
+  resumedFromJobId: string | null;
+  /** Reconciled source job of a resume; its lineage is checked against the selected engine. */
+  sourceJob: JobRecord | null;
+}
+
+/** Resolve `--resume <job-or-session>` or `-r` for ask and rescue; fresh otherwise. */
+export async function resolveResumeSession(
+  store: JobStore,
+  kind: "ask" | "rescue",
+  repoId: string,
+  options: { fresh: boolean; resume: boolean; resumeTarget?: string },
+): Promise<SessionResolution> {
+  if (options.fresh || (!options.resumeTarget && !options.resume)) {
+    return { kimiSessionId: null, reusedSession: false, resumedFromJobId: null, sourceJob: null };
+  }
+
+  const stem = kind.toUpperCase();
+  let candidate: JobRecord | null;
+  let notFoundMessage: string;
+  if (options.resumeTarget) {
+    const byJob = store.getJob(options.resumeTarget);
+    const scoped = byJob?.repo_id === repoId && byJob.command_type === kind ? byJob : null;
+    candidate = scoped ?? (kind === "ask"
+      ? store.findAskJobBySession(repoId, options.resumeTarget)
+      : store.findRescueJobBySession(repoId, options.resumeTarget));
+    notFoundMessage = `No ${kind} job or session matched ${options.resumeTarget}.`;
+  } else {
+    candidate = store.findLatestJob({ repoId, commandType: kind });
+    notFoundMessage = `No prior ${kind} session exists for this repository.`;
+  }
+  if (!candidate) {
+    throw new RuntimeError(`${stem}_RESUME_NOT_FOUND`, notFoundMessage, `${kind}.resume`);
+  }
+  // Report ALREADY_RUNNING before a missing session id: a running row can
+  // still have kimi_session_id = NULL because kimi-code assigns it later.
+  const source = await reconcileHistoricalJobProvenance(store, candidate);
+  if (source.status === "running") {
+    throw new RuntimeError(
+      `${stem}_ALREADY_RUNNING`,
+      `${capitalize(kind)} session ${source.kimi_session_id ?? "<unknown>"} is already active under job ${source.job_id}.`,
+      `${kind}.resume`,
+    );
+  }
+  if (!source.kimi_session_id) {
+    throw new RuntimeError(`${stem}_RESUME_NOT_FOUND`, notFoundMessage, `${kind}.resume`);
+  }
+  return {
+    kimiSessionId: source.kimi_session_id,
+    reusedSession: true,
+    resumedFromJobId: source.job_id,
+    sourceJob: source,
+  };
+}
+
+/** An explicit budget wins; otherwise a resume inherits its same-operation source's budget. */
+export function resumeBudget(
+  kind: "ask" | "rescue",
+  explicitMs: number | undefined,
+  source: JobRecord | null,
+): Pick<CreateJobInput, "budget_ms" | "budget_source"> {
+  const inherited = source?.operation_kind === kind ? source.budget_ms : null;
+  return {
+    budget_ms: explicitMs ?? inherited ?? null,
+    budget_source: explicitMs !== undefined ? "explicit" : inherited !== null ? "inherited" : "default",
+  };
 }

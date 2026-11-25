@@ -213,7 +213,7 @@ export function renderTerminalJobArtifact(job: JobRecord, partialOutput?: Partia
   return lines.join("\n");
 }
 
-function capitalize(value: string): string {
+export function capitalize(value: string): string {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 
