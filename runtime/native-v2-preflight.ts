@@ -657,13 +657,16 @@ export async function assertNativeV2Preflight(
   const stage = options.stage ?? "native-v2.preflight";
   const configPath = kimiCodeConfigPath(options.kimiHome);
 
-  // A fresh print on a print-cancels-plan row cancels the create-time enter
-  // before any turn (run-v2-print.ts), so the setting no longer refuses there.
-  // An unreadable config still refuses.
+  // On a print-cancels-plan row the setting is read only inside
+  // sessionLifecycleService.create(): a fresh print cancels that enter before
+  // any turn (run-v2-print.ts), and `-r` on an existing session goes through
+  // doResume, which never consults it (a missing id fails, never creates).
+  // So the setting no longer refuses there; for a resume the journal scan
+  // below remains the gate. An unreadable config still refuses.
   const planMode = await inspectPlanModeConfig(options.kimiHome);
   const printCancelsPlan = planMode.kind === "refuse" &&
     planMode.refusalKind === "v2-plan-mode-configured" &&
-    freshCertifiedLaunchHas(options, "print-cancels-plan");
+    certifiedPrintLaunchHas(options, "print-cancels-plan");
   if (planMode.kind === "refuse" && !printCancelsPlan) {
     const code =
       planMode.refusalKind === "v2-plan-mode-configured"

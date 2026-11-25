@@ -792,11 +792,40 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       ]) {
         await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release })).rejects.toMatchObject(refused);
       }
-      // Resume keeps the config refusal (fresh-only relaxation).
-      await writeJournal(home, "ws1", "session-1", "main", [ENTER, CANCEL, TURN]);
-      await expect(assertNativeV2Preflight({
-        kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", release: certified("ask"),
-      })).rejects.toMatchObject(refused);
+    });
+  });
+
+  test("G2b: resume with the setting on is gated by the journal scan alone on cancelling rows", async () => {
+    await withHome("g2b-resume", async (home) => {
+      await writeConfig(home, "default_plan_mode = true\n");
+      const resume = (sessionId: string, release?: Parameters<typeof assertNativeV2Preflight>[0]["release"]) =>
+        assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: sessionId, expectedExecutionRoot: home, release });
+      await writeJournal(home, "ws1", "folded", "main", [ENTER, CANCEL, TURN]);
+      await writeJournal(home, "ws1", "clean", "main", [TURN]);
+      await writeJournal(home, "ws1", "active", "main", [ENTER, TURN]);
+      await writeJournal(home, "ws1", "apart", "main", [ENTER, TURN, CANCEL]);
+      for (const operationKind of ["ask", "rescue", "pursue", "review_gate"]) {
+        for (const version of ["2.4.0", "2.7.3"]) {
+          await expect(resume("folded", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
+          await expect(resume("clean", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
+        }
+      }
+      for (const sessionId of ["active", "apart"]) {
+        await expect(resume(sessionId, certified("ask"))).rejects.toMatchObject({
+          code: "KIMI_SESSION_PLAN_TAINTED", details: { refusal_kind: "session-plan-tainted" },
+        });
+      }
+      const refused = { code: "CLI_V2_PLAN_MODE_CONFIGURED", details: { refusal_kind: "v2-plan-mode-configured" } };
+      for (const release of [
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.3.3"),
+        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
+        undefined,
+      ]) {
+        await expect(resume("clean", release)).rejects.toMatchObject(refused);
+      }
+      await writeConfig(home, "default_plan_mode = \n");
+      await expect(resume("clean", certified("ask"))).rejects.toMatchObject({ code: "CLI_V2_CONFIG_UNREADABLE" });
     });
   });
 
