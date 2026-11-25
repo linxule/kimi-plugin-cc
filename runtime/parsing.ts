@@ -17,8 +17,7 @@ function looksLikeFlag(token: string): boolean {
 
 export const ASK_SUPPORTED_FLAGS =
   "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
-export const RESCUE_SUPPORTED_FLAGS =
-  "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+export const RESCUE_SUPPORTED_FLAGS = ASK_SUPPORTED_FLAGS;
 
 export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>";
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
@@ -61,16 +60,7 @@ export interface ReviewArgs extends KimiFlagState {
   focus?: string;
 }
 
-export interface RescueArgs extends KimiFlagState {
-  help?: boolean;
-  budgetMs?: number;
-  background: boolean;
-  wait: boolean;
-  fresh: boolean;
-  resume: boolean;
-  resumeTarget?: string;
-  prompt?: string;
-}
+export type RescueArgs = AskArgs;
 
 export interface PursueArgs extends KimiFlagState {
   /**
@@ -404,6 +394,15 @@ export function hasHelpFlag(argv: string[]): boolean {
 }
 
 export function parseAskArgs(argv: string[]): AskArgs {
+  return parsePromptArgs(argv, "ask");
+}
+
+export function parseRescueArgs(argv: string[]): RescueArgs {
+  return parsePromptArgs(argv, "rescue");
+}
+
+/** ask and rescue accept the same flags; only the command word in messages and stages differs. */
+function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
   if (hasHelpFlag(argv)) return { help: true, background: false, wait: false, fresh: false, resume: false };
   let budgetMs: number | undefined;
   let model: string | undefined;
@@ -436,7 +435,7 @@ export function parseAskArgs(argv: string[]): AskArgs {
 
     switch (token) {
       case "--budget":
-        budgetMs = readBudget(argv[++index], "ask.parse", "response");
+        budgetMs = readBudget(argv[++index], `${kind}.parse`, "response");
         break;
       case "-m":
       case "--model":
@@ -459,8 +458,8 @@ export function parseAskArgs(argv: string[]): AskArgs {
         if (!value || value.startsWith("-")) {
           throw new RuntimeError(
             "INVALID_ARGS",
-            "--resume requires a job-id or session-id. Use -r to resume the latest ask session for this repo.",
-            "ask.parse",
+            `--resume requires a job-id or session-id. Use -r to resume the latest ${kind} session for this repo.`,
+            `${kind}.parse`,
           );
         }
         resume = true;
@@ -473,7 +472,7 @@ export function parseAskArgs(argv: string[]): AskArgs {
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
-            `Unknown flag ${token} for ask. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`,
+            `Unknown flag ${token} for ${kind}. Supported flags: ${ASK_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`,
             "args.parse",
           );
         }
@@ -486,16 +485,16 @@ export function parseAskArgs(argv: string[]): AskArgs {
   if (fresh && resume) {
     throw new RuntimeError(
       "INVALID_ARGS",
-      "ask does not allow --fresh and --resume together.",
-      "ask.parse",
+      `${kind} does not allow --fresh and --resume together.`,
+      `${kind}.parse`,
     );
   }
 
   if (explicitResumeTarget && trailingTokens?.length) {
     throw new RuntimeError(
       "INVALID_ARGS",
-      "--resume only accepts a job-id or session-id. Use -r to resume the latest ask session with a prompt.",
-      "ask.parse",
+      `--resume only accepts a job-id or session-id. Use -r to resume the latest ${kind} session with a prompt.`,
+      `${kind}.parse`,
     );
   }
 
@@ -527,115 +526,6 @@ export function parseReviewArgs(argv: string[], commandName: string = "review"):
     model: parsed.model,
     thinkingEffort: parsed.thinkingEffort,
     focus: parsed.trailingText,
-  };
-}
-
-export function parseRescueArgs(argv: string[]): RescueArgs {
-  if (hasHelpFlag(argv)) return { help: true, background: false, wait: false, fresh: false, resume: false };
-  let budgetMs: number | undefined;
-  let model: string | undefined;
-  let thinkingEffort: string | undefined;
-  let background = false;
-  let wait = false;
-  let fresh = false;
-  let resume = false;
-  let resumeTarget: string | undefined;
-  let explicitResumeTarget = false;
-  let trailingTokens: string[] | undefined;
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
-    const thinking = readThinkingFlag(argv, index);
-    if (thinking) {
-      [thinkingEffort, index] = thinking;
-      continue;
-    }
-
-    if (token === "--") {
-      trailingTokens = argv.slice(index + 1);
-      break;
-    }
-
-    if (!token.startsWith("-")) {
-      trailingTokens = argv.slice(index);
-      break;
-    }
-
-    switch (token) {
-      case "--budget":
-        budgetMs = readBudget(argv[++index], "rescue.parse", "response");
-        break;
-      case "-m":
-      case "--model":
-        model = readModel(token, argv[++index], "args.parse");
-        break;
-      case "--background":
-        background = true;
-        break;
-      case "--wait":
-        wait = true;
-        break;
-      case "--fresh":
-        fresh = true;
-        break;
-      case "-r":
-        resume = true;
-        break;
-      case "--resume": {
-        const value = argv[index + 1];
-        if (!value || value.startsWith("-")) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            "--resume requires a job-id or session-id. Use -r to resume the latest rescue session for this repo.",
-            "rescue.parse",
-          );
-        }
-        resume = true;
-        resumeTarget = value;
-        explicitResumeTarget = true;
-        index += 1;
-        break;
-      }
-      default:
-        if (looksLikeFlag(token)) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            `Unknown flag ${token} for rescue. Supported flags: ${RESCUE_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped prompt text to pass it through.`,
-            "args.parse",
-          );
-        }
-        trailingTokens = argv.slice(index);
-        index = argv.length;
-        break;
-    }
-  }
-
-  if (fresh && resume) {
-    throw new RuntimeError(
-      "INVALID_ARGS",
-      "rescue does not allow --fresh and --resume together.",
-      "rescue.parse",
-    );
-  }
-
-  if (explicitResumeTarget && trailingTokens?.length) {
-    throw new RuntimeError(
-      "INVALID_ARGS",
-      "--resume only accepts a job-id or session-id. Use -r to resume the latest rescue session with a prompt.",
-      "rescue.parse",
-    );
-  }
-
-  return {
-    budgetMs,
-    background,
-    wait,
-    fresh,
-    resume,
-    resumeTarget,
-    model,
-    thinkingEffort,
-    prompt: trailingTokens?.join(" "),
   };
 }
 
