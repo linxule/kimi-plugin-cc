@@ -8,7 +8,7 @@ The plugin makes promises about the sessions it launches and no longer polices t
 
 ### Security
 
-An adversarial review by GPT Astra and Kimi found the first four items before release.
+Each item was found by an adversarial review (GPT Astra and Kimi) before release.
 
 - In 2.7.3 and earlier, a rescue, pursue or write-swarm job could write outside the workspace when a Write or Edit path began with `~/` or used backslashes, because the hook resolved the path differently from kimi-code. This was reproduced against real kimi-code with the released plugin: a rescue job wrote a file in the home directory. Write/Edit/MultiEdit paths (`path` and `file_path`) and `Bash.cwd` now refuse any backslash, NUL, leading `~`, drive-letter prefix or URL scheme.
 - Write/Edit/MultiEdit now refuse an existing regular file with more than one hard link. Writing it in place also changed every other name for the file, which could lie outside the workspace.
