@@ -551,7 +551,7 @@ export function describeHookTimeout(timeout: unknown): string {
 }
 
 export function hookTimeoutReason(timeout: unknown): string {
-  return `this host's hook entry has ${describeHookTimeout(timeout)}; kimi-code reads a hook that runs past its timeout as allow, so the entry needs a timeout of at least ${HOOK_TIMEOUT_S} seconds. Run /kimi:setup to rewrite it.`;
+  return `this host's hook entry has ${describeHookTimeout(timeout)}; kimi-code reads a hook that runs past its timeout as allow, so the entry needs a timeout of at least ${HOOK_TIMEOUT_S} seconds. Run /kimi:setup to rewrite it; setup leaves the config unchanged and names any copy it cannot rewrite.`;
 }
 
 /**

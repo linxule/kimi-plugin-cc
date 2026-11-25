@@ -1683,4 +1683,19 @@ describe("H2-1: setup checks and repairs the hook's upstream timeout", () => {
     await expect(runSetup([], makeContext(env))).rejects.toMatchObject({ code: "SETUP_INVALID_HOOKS_CONFIG" });
     expect(await readFile(configPath, "utf8")).toBe(shadowed);
   });
+
+  test("a short timeout after the END marker fails --check and install refuses it unchanged", async () => {
+    const { env, configPath, healthy } = await installed("timeout-short-after-end");
+    const trailing = healthy
+      .replace(/^timeout = 15\n/m, "")
+      .replace(/^(# === END [^\n]*\n)/m, "$1timeout = 1\n");
+    expect(trailing).not.toBe(healthy);
+    await writeFile(configPath, trailing, "utf8");
+
+    const check = await runSetup(["--check"], makeContext(env));
+    expect(check.probe).toBe("failed");
+    expect(check.probeError).toContain("timeout = 1");
+    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({ code: "SETUP_INVALID_HOOKS_CONFIG" });
+    expect(await readFile(configPath, "utf8")).toBe(trailing);
+  });
 });
