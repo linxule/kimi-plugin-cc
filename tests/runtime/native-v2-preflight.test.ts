@@ -105,6 +105,19 @@ describe("inspectPlanModeConfig", () => {
     });
   });
 
+  test("a parse failure reports the location without quoting config lines", async () => {
+    await withHome("plan-malformed-secret", async (home) => {
+      const secret = "sk-FAKE-NOT-A-REAL-KEY-12345";
+      await writeConfig(home, `[providers.demo]\napi_key = "${secret}"\nbase_url = oops not quoted\n`);
+      const result = await inspectPlanModeConfig(home);
+      expect(result.kind).toBe("refuse");
+      const reason = (result as { reason: string }).reason;
+      expect(reason).not.toContain(secret);
+      expect(reason).not.toContain("api_key");
+      expect(reason).toEndWith("could not be parsed as TOML: syntax error at line 3, column 12");
+    });
+  });
+
   test("symlinked config → refuse v2-config-unreadable", async () => {
     await withHome("plan-symlink", async (home) => {
       const real = await createTestPluginDataRoot("plan-symlink-target");

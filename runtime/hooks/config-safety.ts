@@ -6,7 +6,7 @@ import path from "node:path";
 import { RuntimeError } from "../errors.js";
 import { kimiReleaseHas } from "../kimi-releases.js";
 import { probeKimiVersion } from "../kimi-version-probe.js";
-import { sleep } from "../util.js";
+import { sleep, tomlErrorLocation } from "../util.js";
 import { extractValue } from "../vendor/smol-toml/extract.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 import { parseKey } from "../vendor/smol-toml/struct.js";
@@ -668,7 +668,7 @@ function inspectKimiHookSet(contents: string): HookSetInspection {
     const line = tomlErrorLine(error);
     return {
       validation: invalidHookSet(
-        `TOML parse failed: ${error instanceof Error ? error.message : String(error)}`,
+        `TOML parse failed: ${tomlErrorLocation(error)}`,
         0,
         line,
         "parse",

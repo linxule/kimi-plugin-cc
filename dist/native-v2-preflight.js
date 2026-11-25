@@ -32,6 +32,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { RuntimeError } from "./errors.js";
 import { kimiCodeConfigPath } from "./kimi-home.js";
+import { tomlErrorLocation } from "./util.js";
 import { parse as parseToml } from "./vendor/smol-toml/parse.js";
 /** `<kimiHome>/config.toml` is small hand-edited config, never a data file. */
 const CONFIG_MAX_BYTES = 1 * 1024 * 1024;
@@ -105,7 +106,7 @@ async function readParsedConfig(kimiHome) {
     catch (error) {
         return {
             kind: "unreadable",
-            reason: `${configPath} could not be parsed as TOML: ${error.message}`,
+            reason: `${configPath} could not be parsed as TOML: ${tomlErrorLocation(error)}`,
         };
     }
 }
