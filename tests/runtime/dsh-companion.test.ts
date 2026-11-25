@@ -173,6 +173,11 @@ describe("DSH companion argument and environment boundaries", () => {
     }
   });
 
+  test("the strict-versions opt-out is neither provider-owned nor cleared", () => {
+    expect(companionEnvironment("/d", "/w", { KIMI_PLUGIN_CC_STRICT_VERSIONS: "1" }, "/node").KIMI_PLUGIN_CC_STRICT_VERSIONS).toBe("1");
+    expect(Object.hasOwn(companionEnvironment("/d", "/w", {}, "/node"), "KIMI_PLUGIN_CC_STRICT_VERSIONS")).toBe(false);
+  });
+
   test("data root derives from DSH_HOME and honors only an absolute explicit override", () => {
     expect(defaultDshDataRoot({ DSH_HOME: "/isolated/dsh" })).toBe(
       path.join("/isolated/dsh", "plugin-data", "kimi-plugin-cc"),

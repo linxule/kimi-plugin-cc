@@ -96,6 +96,7 @@ describe("Codex sidecar surfaces", () => {
       "KIMI_PLUGIN_CC_NODE_BIN",
       "KIMI_PLUGIN_CC_HOOK_SCRIPT",
       "KIMI_PLUGIN_CC_HOST_ID",
+      "KIMI_PLUGIN_CC_STRICT_VERSIONS",
       "KIMI_MODEL_NAME",
       "KIMI_MODEL_API_KEY",
       "KIMI_MODEL_PROVIDER_TYPE",
@@ -143,6 +144,8 @@ describe("Codex sidecar surfaces", () => {
       "KIMI_CODE_EXPERIMENTAL_TOWER",
       "KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK",
       "KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND",
+      "KIMI_PLUGIN_CC_READ_ROOTS",
+      "KIMI_PLUGIN_CC_NETWORK",
     ]) {
       expect(mcp.mcpServers.kimi.env_vars).not.toContain(name);
     }
