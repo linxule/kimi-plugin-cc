@@ -50,6 +50,9 @@ export async function resolveReadScope(
     } catch {
       throw new RuntimeError("INVALID_ARGS", `--read-root ${root} is not an existing directory.`, stage);
     }
+    if (real.includes("\\")) {
+      throw new RuntimeError("INVALID_ARGS", `--read-root ${root} contains a backslash, which kimi-code reads as a path separator.`, stage);
+    }
     if (!resolved.includes(real)) resolved.push(real);
   }
   return Object.freeze({ readRoots: Object.freeze(resolved), network: network === true });
@@ -81,6 +84,12 @@ export function effectiveReadRoots(scope: ReadScope, cwd: string): string[] {
   // paths resolve inside it exactly as upstream resolves them.
   const roots = [realpathSync.native(cwd)];
   for (const root of scope.readRoots) if (!roots.includes(root)) roots.push(root);
+  // kimi-code resolves with pathe, which reads "\\" as a separator, so such a
+  // root would name a different directory to kimi than to the hook.
+  const slashed = roots.find((root) => root.includes("\\"));
+  if (slashed !== undefined) {
+    throw new RuntimeError("READ_SCOPE_INVALID", `Read confinement cannot use ${slashed}: it contains a backslash, which kimi-code reads as a path separator.`, "read-scope.roots");
+  }
   return roots;
 }
 
@@ -125,7 +134,7 @@ export function parseScopeEnvironment(rawRoots: string | undefined, rawNetwork: 
   }
   if (!Array.isArray(parsed) || parsed.length === 0) return FAIL_CLOSED;
   for (const entry of parsed) {
-    if (typeof entry !== "string" || entry.includes("\0") || !path.isAbsolute(entry) || path.resolve(entry) !== entry) {
+    if (typeof entry !== "string" || entry.includes("\0") || entry.includes("\\") || !path.isAbsolute(entry) || path.resolve(entry) !== entry) {
       return FAIL_CLOSED;
     }
   }

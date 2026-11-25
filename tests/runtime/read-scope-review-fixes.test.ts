@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { assertNetworkResumeConfined } from "../../runtime/commands/cli-helpers.js";
 import { decideHookOutcome } from "../../runtime/hooks/approval-policy.js";
-import { isAllowedFetchUrl, serializeReadScope } from "../../runtime/read-scope.js";
+import { isAllowedFetchUrl, parseScopeEnvironment, readScopeEnvironment, resolveReadScope, serializeReadScope } from "../../runtime/read-scope.js";
 
 let base: string;
 let workspace: string;
@@ -53,6 +53,24 @@ describe("S-1 path spellings the hook and kimi-code could resolve differently ar
       expect(await decideHookOutcome({ tool_name, tool_input }, { commandLabel: "ask", ...scope() }))
         .toEqual({ decision: "allow" });
     }
+  });
+});
+
+describe("S-1 roots whose spelling kimi-code would resolve differently are refused", () => {
+  let slashed: string;
+  beforeAll(async () => {
+    slashed = path.join(base, "a\\b");
+    await mkdir(slashed, { recursive: true });
+  });
+
+  test("a --read-root or workspace with a backslash refuses before spawn", async () => {
+    await expect(resolveReadScope([slashed], undefined, "ask.parse")).rejects.toMatchObject({ code: "INVALID_ARGS" });
+    expect(() => readScopeEnvironment({ readRoots: [], network: true }, slashed))
+      .toThrow(expect.objectContaining({ code: "READ_SCOPE_INVALID" }));
+  });
+
+  test("the hook fails closed on a backslash root", () => {
+    expect(parseScopeEnvironment(JSON.stringify([slashed]), undefined)).toEqual({ confined: true, roots: [], network: false });
   });
 });
 
