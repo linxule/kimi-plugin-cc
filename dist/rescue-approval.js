@@ -1,6 +1,7 @@
 import { access, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "./vendor/shell-quote/index.js";
+import { READ_ONLY_TOOLS } from "./hooks/approval-policy.js";
 // Tool-owned output flags write without shell redirection and therefore bypass
 // path checks unless treated as mutating. The `-o` short form is not banned
 // globally because tools such as rg and grep use it for read-only behavior;
@@ -18,16 +19,9 @@ const MUTATING_FLAGS_EXACT = new Set([
     "--output-directory",
     "--output-dir",
 ]);
-const MUTATING_FLAG_PREFIXES = [
-    "--fix=",
-    "--write=",
-    "--apply=",
-    "--in-place=",
-    "--output=",
-    "--output-file=",
-    "--output-directory=",
-    "--output-dir=",
-];
+const MUTATING_FLAG_PREFIXES = [...MUTATING_FLAGS_EXACT]
+    .filter((flag) => flag.startsWith("--"))
+    .map((flag) => `${flag}=`);
 // Flags whose VALUE is executed as a command or external tool are rejected for
 // every tool: Git pager overrides and Go -vettool/-exec/-toolexec are direct
 // command-execution escapes. Git's -O short form is handled in its own branch
@@ -46,16 +40,10 @@ const EXEC_DELEGATING_FLAGS_EXACT = new Set([
     "--hostname-bin",
     "--compress-program",
 ]);
-const EXEC_DELEGATING_FLAG_PREFIXES = [
-    "--open-files-in-pager=",
-    "-vettool=",
-    "--vettool=",
-    "-toolexec=",
-    "--toolexec=",
-    "--pre=",
-    "--hostname-bin=",
-    "--compress-program=",
-];
+// -exec and -execdir are matched exactly only; they get no `=` prefix form.
+const EXEC_DELEGATING_FLAG_PREFIXES = [...EXEC_DELEGATING_FLAGS_EXACT]
+    .filter((flag) => flag !== "-exec" && flag !== "-execdir")
+    .map((flag) => `${flag}=`);
 // Pytest report flags write to arbitrary paths. Test runners execute repo code
 // by design, so these checks block known runner-owned report outputs rather
 // than every possible write. Match argparse allow_abbrev prefixes as well.
@@ -141,11 +129,12 @@ const MYPY_WRITE_FLAGS_ABBREV = [
  * Handles both `--flag value` (arg === "--flag") and `--flag=value`.
  */
 function hasFlagFromSet(args, flags) {
-    return args.some((arg) => {
-        const eq = arg.indexOf("=");
-        const name = eq === -1 ? arg : arg.slice(0, eq);
-        return flags.has(name);
-    });
+    return args.some((arg) => flags.has(flagName(arg)));
+}
+/** The part of `arg` before its first `=`, or all of it. */
+function flagName(arg) {
+    const eq = arg.indexOf("=");
+    return eq === -1 ? arg : arg.slice(0, eq);
 }
 /**
  * True if `arg` matches any flag in `flags` accounting for argparse-style prefix
@@ -159,25 +148,12 @@ function hasFlagFromSet(args, flags) {
  */
 function matchesAbbreviatedFlag(args, flags) {
     return args.some((arg) => {
-        const eq = arg.indexOf("=");
-        const name = eq === -1 ? arg : arg.slice(0, eq);
+        const name = flagName(arg);
         if (name.length < 3)
             return false;
         return flags.some((flag) => flag.startsWith(name) || name.startsWith(flag));
     });
 }
-/**
- * Direct-read bypass for rescue. Keep this set identical to READ_ONLY_TOOLS in
- * approval-policy.ts; the deliberate duplication must be updated in both places.
- */
-const RESCUE_READ_ONLY_TOOLS = new Set([
-    "Read",
-    "Grep",
-    "Glob",
-    "ReadMediaFile",
-    "TaskList",
-    "TaskOutput",
-]);
 /**
  * Evaluate a PreToolUse hook request under the rescue policy.
  *
@@ -186,7 +162,7 @@ const RESCUE_READ_ONLY_TOOLS = new Set([
  * environment value. `toolName` and `toolInput` are the raw upstream tool call.
  */
 export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInput) {
-    if (RESCUE_READ_ONLY_TOOLS.has(toolName)) {
+    if (READ_ONLY_TOOLS.has(toolName)) {
         return { decision: "allow" };
     }
     let root;
@@ -233,22 +209,12 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
             ? { decision: "allow" }
             : { decision: "deny", reason: result.feedback ?? "rescue rejected the shell command" };
     }
-    if (toolName === "Write" || toolName === "Edit") {
+    if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit") {
         const filePath = extractFilePath(toolInput);
         if (filePath === null) {
             return {
                 decision: "deny",
                 reason: `rescue cannot evaluate ${toolName} input with no path field`,
-            };
-        }
-        return pathDecision(await checkApprovedPath(root, filePath), filePath);
-    }
-    if (toolName === "MultiEdit") {
-        const filePath = extractFilePath(toolInput);
-        if (filePath === null) {
-            return {
-                decision: "deny",
-                reason: "rescue cannot evaluate MultiEdit input with no path field",
             };
         }
         return pathDecision(await checkApprovedPath(root, filePath), filePath);
@@ -308,11 +274,7 @@ export async function checkApprovedPath(workspaceRoot, rawTargetPath) {
     const nearestExistingAncestor = await findNearestExistingAncestor(path.dirname(absoluteTarget));
     const ancestorRealPath = await realpath(nearestExistingAncestor);
     const candidatePath = path.resolve(ancestorRealPath, path.relative(nearestExistingAncestor, absoluteTarget));
-    const relativeToRoot = path.relative(workspaceRoot, candidatePath);
-    return (isWithin(workspaceRoot, candidatePath) &&
-        !relativeToRoot.split(path.sep).includes(".git"))
-        ? "allow"
-        : "reject";
+    return isWithinWorkspaceOutsideGit(workspaceRoot, candidatePath) ? "allow" : "reject";
 }
 async function checkApprovedDirectory(workspaceRoot, rawCwd) {
     const candidate = path.resolve(workspaceRoot, rawCwd);
@@ -322,10 +284,7 @@ async function checkApprovedDirectory(workspaceRoot, rawCwd) {
     if (!stats?.isDirectory())
         return "missing";
     const resolved = await realpath(candidate);
-    return isWithin(workspaceRoot, resolved) &&
-        !path.relative(workspaceRoot, resolved).split(path.sep).includes(".git")
-        ? "allow"
-        : "reject";
+    return isWithinWorkspaceOutsideGit(workspaceRoot, resolved) ? "allow" : "reject";
 }
 async function statIfExists(targetPath) {
     try {
@@ -443,10 +402,7 @@ export function validateShellStage(tokens, pipelineMode) {
         // tsc option names are case-INSENSITIVE (compiler lowercases them), so match
         // lowercased. `--noemit`/`--noEmit` both suppress JS emit; `--outdir` is the
         // same write flag as `--outDir`.
-        const tscLowerNames = args.map((arg) => {
-            const eq = arg.indexOf("=");
-            return (eq === -1 ? arg : arg.slice(0, eq)).toLowerCase();
-        });
+        const tscLowerNames = args.map((arg) => flagName(arg).toLowerCase());
         if (!tscLowerNames.includes("--noemit")) {
             return { ok: false, reason: "Rescue allows tsc only with --noEmit." };
         }
@@ -545,10 +501,7 @@ export function validateShellStage(tokens, pipelineMode) {
             return { ok: false, reason: `Rescue rejects ${command} shell command: ${tokens.join(" ")}` };
         }
         if (hasPytestReportFlag(args.slice(2))) {
-            return {
-                ok: false,
-                reason: `Rescue rejects pytest report-writing flags (--junitxml, --result-log, --report-log): ${tokens.join(" ")}.`,
-            };
+            return pytestReportFlagRejection(tokens);
         }
         return { ok: true };
     }
@@ -561,7 +514,7 @@ export function validateShellStage(tokens, pipelineMode) {
         // the long --output-file form is already caught globally. These checks do
         // not make linting read-only: project config and linter code still execute
         // within rescue's repository trust boundary.
-        if (args.some((arg) => arg === "-o" || /^-o./.test(arg))) {
+        if (hasWriteShortFlag(args)) {
             return {
                 ok: false,
                 reason: `Rescue rejects eslint -o (writes report to a file): ${tokens.join(" ")}. Drop the flag or use a path-checked Write tool call.`,
@@ -601,10 +554,7 @@ export function validateShellStage(tokens, pipelineMode) {
         // pytest executes repo code by design. Block its known runner-owned report
         // flags, not every write that test code itself can perform.
         if (hasPytestReportFlag(args)) {
-            return {
-                ok: false,
-                reason: `Rescue rejects pytest report-writing flags (--junitxml, --result-log, --report-log): ${tokens.join(" ")}.`,
-            };
+            return pytestReportFlagRejection(tokens);
         }
         return { ok: true };
     }
@@ -842,6 +792,12 @@ function sortShortClusterWrites(token) {
 function hasPytestReportFlag(args) {
     return matchesAbbreviatedFlag(args, PYTEST_REPORT_FLAGS);
 }
+function pytestReportFlagRejection(tokens) {
+    return {
+        ok: false,
+        reason: `Rescue rejects pytest report-writing flags (--junitxml, --result-log, --report-log): ${tokens.join(" ")}.`,
+    };
+}
 export function validatePackageManagerCommand(command, args) {
     // Direct <pm> test executes the repository's test script by design, like
     // pytest/go test/cargo test, and remains inside the documented test-runner
@@ -859,6 +815,9 @@ export function validatePackageManagerCommand(command, args) {
 }
 function isWithin(root, target) {
     return target === root || target.startsWith(`${root}${path.sep}`);
+}
+function isWithinWorkspaceOutsideGit(root, target) {
+    return isWithin(root, target) && !path.relative(root, target).split(path.sep).includes(".git");
 }
 function rejectShell(feedback) {
     return { response: "reject", feedback };
