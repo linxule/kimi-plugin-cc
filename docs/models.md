@@ -26,7 +26,7 @@ Say “review this with my configured fast model” or pass its exact alias:
 
 ```text
 /kimi:review -m 'my-provider/my-model' review this diff
-/kimi:ask -m 'my-provider/my-model' explain the cache
+/kimi:task -m 'my-provider/my-model' explain the cache
 ```
 
 The Claude agents and Codex skills list models when you request a model in

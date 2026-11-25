@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The runtime certifies exact CLI releases per operation. Plugin 2.6.2 adds bounded swarm on exact stock CLI 2.6.2; see the [certification receipt](upstream-2.6.2-certification.md) for validation status. Plugin 2.6.3 additionally certifies exact CLI 2.6.3 with a separate [release receipt](upstream-2.6.3-certification.md); the immutable GitHub/npm release and fresh registry verification are complete. Plugin 2.7.2 certifies exact CLI 2.7.2 with separate [certification evidence](upstream-2.7.2-certification.md). Plugin 2.7.3 adds exact CLI 2.7.3 under the same construction with a separate [certification record](upstream-2.7.3-certification.md); publication does not change the compatibility matrix. Exact 2.6.0 remains non-swarm-only. Older full-operation rows through 2.5.3 keep their inherited recovery limitation. `NATIVE_V2_CERTIFIED_VERSIONS` is the all-operation export, and `NATIVE_V2_ANY_OPERATION_VERSIONS` is the scoped union. Other versions, including 2.6.1, 2.6.4, 2.7.0, 2.7.1 and 2.7.4, are not accepted automatically. The npm channel does not change the compatibility matrix.
+The runtime certifies exact CLI releases per operation. Plugin 2.6.2 adds bounded swarm on exact stock CLI 2.6.2; see the [certification receipt](upstream-2.6.2-certification.md) for validation status. Plugin 2.6.3 additionally certifies exact CLI 2.6.3 with a separate [release receipt](upstream-2.6.3-certification.md); the immutable GitHub/npm release and fresh registry verification are complete. Plugin 2.7.2 certifies exact CLI 2.7.2 with separate [certification evidence](upstream-2.7.2-certification.md). Plugin 2.7.3 adds exact CLI 2.7.3 under the same construction with a separate [certification record](upstream-2.7.3-certification.md); publication does not change the compatibility matrix. Exact 2.6.0 remains non-swarm-only. Older full-operation rows through 2.5.3 keep their inherited recovery limitation. `NATIVE_V2_CERTIFIED_VERSIONS` is the all-operation export, and `NATIVE_V2_ANY_OPERATION_VERSIONS` is the scoped union. Since plugin 3.0.0, another plain 2.x release above 2.0.0, including 2.6.1, 2.7.0 and 2.7.4, runs only the read-only operations (ask, review, challenge and the review gate) with a warning; rescue, pursue and both swarm modes refuse, and `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` refuses every operation. The npm channel does not change the compatibility matrix.
 
 Plugin 2.5.1 also adds DeepSeek Harness as a third host with all seven operations and a DSH-specific bundle, data root, and managed hook id. Existing Claude Code and Codex certification, job stores, and host-scoped hooks are unchanged; no migration is required for those hosts. New DSH installations follow the [README DSH section](../README.md#install-in-deepseek-harness), including `/kimi-setup` on that host.
 
@@ -11,6 +11,26 @@ Use the [README installation and update steps](../README.md) for Claude Code or 
 ## Plugin versions and upgrades
 
 Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Nearby version numbers do not imply compatibility or operation scope; the exact per-operation matrix is authoritative. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
+
+## Upgrading to 3.0
+
+Plugin 3.0.0 replaces seven model commands with four. The operations behind them do not change, so existing jobs, sessions, hook labels and session-title prefixes carry over. Run setup on each host after updating, as for every release.
+
+| Before 3.0.0 | From 3.0.0 |
+|---|---|
+| `/kimi:ask`, agent `kimi-ask`, Codex `$kimi-ask` | `/kimi:task`, agent `kimi-task`, Codex `$kimi-task` |
+| `/kimi:rescue`, agent `kimi-rescue`, Codex `$kimi-rescue` | `/kimi:task --write`, agent `kimi-task` with `--write`, Codex `$kimi-task` with `--write` |
+| `/kimi:challenge`, agent `kimi-challenge`, Codex `$kimi-challenge` | `/kimi:review --challenge`, agent `kimi-review` with `--challenge`, Codex `$kimi-review` with `--challenge` |
+| agent `kimi-swarm-write`, Codex `$kimi-swarm-write` | agent `kimi-swarm` with `--write`, Codex `$kimi-swarm` with `--write`; `/kimi:swarm --write` is unchanged |
+| MCP tool `kimi_challenge` | MCP tool `kimi_review` with `mode: "challenge"` |
+
+- `--write` and `--challenge` select the operation only as leading flags, before the first word of the prompt. The same text inside the prompt, or after `--`, keeps the read-only operation.
+- Scripts that call `companion.sh` directly keep working: `ask`, `task rescue`, `review`, `task challenge`, `task pursue`, `task swarm` and `task swarm --write` are unchanged.
+- Codex lists nine skills instead of twelve. `$kimi-task` is not implicitly invocable, so Codex no longer starts the read-only question skill on its own; name it when you want it. `$kimi-review` stays implicitly invocable.
+- The MCP server lists six model tools and the three job tools. A client that called `kimi_challenge` must call `kimi_review` with `mode: "challenge"`. `kimi_ask`, `kimi_review` and `kimi_swarm` also accept `read_roots` and `network`.
+- DeepSeek Harness keeps all seven providers, including `kimi_challenge` and `kimi_swarm_write`.
+
+The same release stops refusing several Kimi settings it can neutralize, runs read-only operations on uncertified 2.x releases, adds `setup --install-kimi` and per-call read scope, and reports non-fatal conditions as warnings. See the [changelog](../CHANGELOG.md) and [safety guide](./safety.md).
 
 ## Plugin 2.6.2 swarm behavior on exact CLI 2.6.2
 
@@ -32,7 +52,7 @@ Activation is inside the job's finite budget. Graceful process close has a bound
 
 After updating the plugin, run Claude Code `/kimi:setup` or Codex `$kimi-setup`
 from that host's active install to re-pin its version-stamped hook path, then
-run setup with `--check`. This fixes path drift, not policy omissions in an older installed plugin. Older coexisting hooks still veto pursue goal-status tools; update each host only when authorized. Keep `default_plan_mode` absent or false. Upgrades
+run setup with `--check`. This fixes path drift, not policy omissions in an older installed plugin. Older coexisting hooks still veto pursue goal-status tools; update each host only when authorized. Keep `default_plan_mode` absent or false if you use swarm or a CLI older than 2.4.0. Upgrades
 from pre-1.10 releases must also follow the historical native-v2 migration section below.
 
 ## Historical migration instructions
