@@ -201,6 +201,7 @@ export async function evaluateRescueHookRequest(
       if (typeof cwd !== "string" || cwd.length === 0) {
         return { decision: "deny", reason: "rescue requires Bash cwd to be a non-empty string" };
       }
+      if (hasAmbiguousPathSpelling(cwd)) return ambiguousPathDenial(cwd, root);
       try {
         const outcome = await checkApprovedDirectory(root, cwd);
         if (outcome === "symlink") {
@@ -223,6 +224,12 @@ export async function evaluateRescueHookRequest(
   }
 
   if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit") {
+    for (const key of ["path", "file_path"]) {
+      const candidate = isObject(toolInput) ? toolInput[key] : undefined;
+      if (typeof candidate === "string" && hasAmbiguousPathSpelling(candidate)) {
+        return ambiguousPathDenial(candidate, root);
+      }
+    }
     const filePath = extractFilePath(toolInput);
     if (filePath === null) {
       return {
@@ -236,6 +243,32 @@ export async function evaluateRescueHookRequest(
   return {
     decision: "deny",
     reason: `rescue does not allow tool "${toolName}" — only Bash, Write, Edit, MultiEdit (with allowlist checks) and read-only tools are permitted.`,
+  };
+}
+
+/**
+ * kimi-code resolves tool paths with `pathe` after home expansion: `~/x` is
+ * `<home>/x`, backslashes become `/`, and `\x`, `\\host\share` and `C:/x`
+ * count as absolute. Node's `path` reads all of these as relative names inside
+ * the workspace, so the two resolvers can disagree about which file is
+ * written. Refuse every such spelling instead of reimplementing `pathe`.
+ */
+function hasAmbiguousPathSpelling(candidate: string): boolean {
+  return (
+    candidate.includes("\\") ||
+    candidate.includes("\0") ||
+    candidate.startsWith("~") ||
+    /^[A-Za-z]:/.test(candidate) ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(candidate)
+  );
+}
+
+function ambiguousPathDenial(candidate: string, root: string): HookDecision {
+  return {
+    decision: "deny",
+    reason:
+      `rescue rejects the path ${JSON.stringify(candidate)}: a backslash, leading ~, drive letter, NUL or URL ` +
+      `scheme can resolve differently in kimi-code; use a plain POSIX path under ${root}`,
   };
 }
 

@@ -147,6 +147,61 @@ describe("evaluateRescueHookRequest", () => {
     });
   });
 
+  describe("path spellings kimi-code can resolve differently", () => {
+    const spellingDenied: { tool: string; input: Record<string, unknown> }[] = [
+      { tool: "Write", input: { path: "~/.zshrc-probe" } },
+      { tool: "Write", input: { path: "~" } },
+      { tool: "Write", input: { path: "~other/x" } },
+      { tool: "Write", input: { path: "\\tmp\\probe.txt" } },
+      { tool: "Write", input: { path: "\\\\host\\share\\x" } },
+      { tool: "Edit", input: { path: "notes\\x.txt" } },
+      { tool: "Write", input: { path: "C:/x" } },
+      { tool: "Write", input: { path: "c:x" } },
+      { tool: "MultiEdit", input: { path: "kimi-file:///tmp/x" } },
+      { tool: "Write", input: { path: "file:///tmp/x" } },
+      { tool: "Write", input: { path: "a\0b" } },
+      { tool: "Write", input: { file_path: "~/.zshrc-probe" } },
+      { tool: "Write", input: { path: "notes/ok.txt", file_path: "~/.zshrc-probe" } },
+      { tool: "Bash", input: { command: "ls", cwd: "~" } },
+      { tool: "Bash", input: { command: "ls", cwd: "\\tmp" } },
+      { tool: "Bash", input: { command: "ls", cwd: "C:/" } },
+      { tool: "Bash", input: { command: "ls", cwd: "sub\0" } },
+    ];
+
+    test.each(spellingDenied)("denies $tool $input", async ({ tool, input }) => {
+      const root = await createGitRepoFixture("rescue-spelling");
+      try {
+        await mkdir(path.join(root, "sub"), { recursive: true });
+        expect(await evaluateRescueHookRequest(root, tool, input)).toEqual({
+          decision: "deny",
+          reason: expect.stringContaining("use a plain POSIX path under"),
+        });
+      } finally {
+        await cleanupTestPath(root);
+      }
+    });
+
+    const spellingAllowed: { tool: string; input: Record<string, unknown> }[] = [
+      { tool: "Write", input: { path: "notes/a~b.txt" } },
+      { tool: "Write", input: { path: "ab:c.txt" } },
+      { tool: "Write", input: { path: "<root>/notes/x.txt" } },
+      { tool: "Bash", input: { command: "ls", cwd: "sub" } },
+    ];
+
+    test.each(spellingAllowed)("allows $tool $input", async ({ tool, input }) => {
+      const root = await createGitRepoFixture("rescue-spelling");
+      try {
+        await mkdir(path.join(root, "sub"), { recursive: true });
+        const filled = Object.fromEntries(
+          Object.entries(input).map(([key, value]) => [key, String(value).replace("<root>", root)]),
+        );
+        expect(await evaluateRescueHookRequest(root, tool, filled)).toEqual({ decision: "allow" });
+      } finally {
+        await cleanupTestPath(root);
+      }
+    });
+  });
+
   describe("Bash cwd confinement", () => {
     const cases: { name: string; input: { command: string; cwd?: unknown }; reason?: string }[] = [
       { name: "absent cwd", input: { command: "bun test" } },
@@ -169,7 +224,8 @@ describe("evaluateRescueHookRequest", () => {
       { name: "numeric cwd", input: { command: "bun test", cwd: 42 }, reason: "Bash cwd" },
       { name: "null cwd", input: { command: "bun test", cwd: null }, reason: "Bash cwd" },
       { name: "empty cwd", input: { command: "bun test", cwd: "" }, reason: "non-empty string" },
-      { name: "filesystem error", input: { command: "bun test", cwd: "sub\0" }, reason: "cannot inspect Bash cwd" },
+      { name: "filesystem error", input: { command: "bun test", cwd: "file.txt/x" }, reason: "cannot inspect Bash cwd" },
+      { name: "NUL spelling", input: { command: "bun test", cwd: "sub\0" }, reason: "use a plain POSIX path under" },
       { name: "command rejection after valid cwd", input: { command: "chmod 777 x", cwd: "sub" }, reason: "chmod" },
       { name: "cwd rejection before command policy", input: { command: "rm -rf x", cwd: "../escape" }, reason: "Bash cwd" },
     ];
