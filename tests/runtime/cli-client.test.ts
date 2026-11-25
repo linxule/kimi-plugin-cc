@@ -1286,6 +1286,14 @@ describe("runCliPrompt", () => {
           ...mockOptions({ cwd: root, records: [] }),
           onSpawn: timing === "early" ? () => new Promise<void>((resolve) => setImmediate(resolve)) : undefined,
         }).catch((error: unknown) => error);
+        if (timing !== "sync") {
+          expect(error).toBeInstanceOf(RuntimeError);
+          const processError = error as RuntimeError;
+          expect(processError.code).toBe("CLI_PROCESS_ERROR");
+          expect(processError.message).toBe(`${timing === "streams" ? "kimi subprocess stream setup failed" : "kimi subprocess error"}: system launch failure`);
+          expect(processError.stage).toBe(timing === "streams" ? "cli-client.streams" : "cli-client.process");
+          expect(processError.cause).toBe(cause);
+        }
         const classification = classifySetupFailure(error);
         expect(classification?.kind).toBe("startup_failed");
         expect(classification?.nextStep).toBe("Check the underlying process error; shorten the prompt or environment if an argument-size limit was exceeded, then retry.");
