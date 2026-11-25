@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -250,45 +250,45 @@ describe("evaluateRescueHookRequest", () => {
     }
 
     const allowed: FileOpCase[] = [
-      { command: "rm a.txt" },
-      { command: "rm -f a.txt" },
-      { command: "rm -f missing.txt" },
-      { command: "rm -r dir" },
-      { command: "rm -R dir" },
-      { command: "rm -rf dir" },
-      { command: "rm -rf deep" },
-      // the walk does not follow symlinks, so a link to a repository is not a reason to refuse
-      { command: "rm -rf via-link" },
-      // rm without -r never descends
-      { command: "rm -f two" },
-      { command: "rm -fr dir/" },
-      { command: "rm -- a.txt" },
-      { command: "rm a.txt dir/b.txt" },
       { command: "rm <root>/a.txt" },
-      { command: "rm b.txt", cwd: "dir" },
+      { command: "rm -f <root>/a.txt" },
+      { command: "rm -f <root>/missing.txt" },
+      { command: "rm -r <root>/dir" },
+      { command: "rm -R <root>/dir" },
+      { command: "rm -rf <root>/dir" },
+      { command: "rm -rf <root>/deep" },
+      // the walk does not follow symlinks, so a link to a repository is not a reason to refuse
+      { command: "rm -rf <root>/via-link" },
+      // rm without -r never descends
+      { command: "rm -f <root>/two" },
+      { command: "rm -fr <root>/dir/" },
+      { command: "rm -- <root>/a.txt" },
+      { command: "rm <root>/a.txt <root>/dir/b.txt" },
+      { command: "rm <root>/dir/b.txt", cwd: "dir" },
       { command: "rm -rf '<root>/dir'" },
-      { command: "rm 'name with spaces.txt'" },
-      { command: "mkdir new" },
-      { command: "mkdir -p new/deep/path" },
-      { command: "mkdir -p dir" },
-      { command: "mkdir -- new" },
-      { command: "mkdir -p link-in/new" },
-      { command: "mv a.txt renamed.txt" },
-      { command: "mv -f a.txt dir/" },
-      { command: "mv -n a.txt dir/c.txt" },
-      { command: "mv dir moved" },
-      { command: "mv a.txt dir/b.txt existing" },
-      { command: "mv -- a.txt a2.txt" },
-      { command: "mv b.txt <root>", cwd: "dir" },
-      { command: "cp a.txt copy.txt" },
-      { command: "cp -p a.txt dir" },
-      { command: "cp -f a.txt dir/b.txt" },
-      { command: "cp -n a.txt existing" },
-      { command: "cp -R dir new-dir" },
-      { command: "cp -r dir new-dir" },
-      { command: "cp a.txt link-in/new.txt" },
-      { command: "cp a.txt ." },
-      { command: "rg needle . | rm -f a.txt" },
+      { command: "rm '<root>/name with spaces.txt'" },
+      { command: "rm <root>/./a.txt" },
+      { command: "mkdir <root>/new" },
+      { command: "mkdir -p <root>/new/deep/path" },
+      { command: "mkdir -p <root>/dir" },
+      { command: "mkdir -- <root>/new" },
+      { command: "mkdir -p <root>/link-in/new" },
+      { command: "mv <root>/a.txt <root>/renamed.txt" },
+      { command: "mv -f <root>/a.txt <root>/dir/" },
+      { command: "mv -n <root>/a.txt <root>/dir/c.txt" },
+      { command: "mv <root>/dir <root>/moved" },
+      { command: "mv <root>/a.txt <root>/dir/b.txt <root>/existing" },
+      { command: "mv -- <root>/a.txt <root>/a2.txt" },
+      { command: "mv <root>/dir/b.txt <root>", cwd: "dir" },
+      { command: "cp <root>/a.txt <root>/copy.txt" },
+      { command: "cp -p <root>/a.txt <root>/dir" },
+      { command: "cp -f <root>/a.txt <root>/dir/b.txt" },
+      { command: "cp -n <root>/a.txt <root>/existing" },
+      { command: "cp -R <root>/dir <root>/new-dir" },
+      { command: "cp -r <root>/dir <root>/new-dir" },
+      { command: "cp <root>/a.txt <root>/link-in/new.txt" },
+      { command: "cp <root>/a.txt <root>" },
+      { command: "rg needle . | rm -f <root>/a.txt" },
     ];
 
     test.each(allowed)("allows $command", async (testCase) => {
@@ -298,95 +298,104 @@ describe("evaluateRescueHookRequest", () => {
     });
 
     const refused: FileOpCase[] = [
+      // relative operands, whatever the working directory
+      { command: "rm a.txt", reason: "Rescue requires absolute paths for rm; use paths under " },
+      { command: "rm ./a.txt", reason: "absolute paths" },
+      { command: "rm -rf dir", reason: "absolute paths" },
+      { command: "rm b.txt", cwd: "dir", reason: "absolute paths" },
+      { command: "mkdir new", reason: "Rescue requires absolute paths for mkdir" },
+      { command: "mv <root>/a.txt renamed.txt", reason: "Rescue requires absolute paths for mv" },
+      { command: "cp a.txt <root>/copy.txt", reason: "Rescue requires absolute paths for cp" },
+      { command: "rm <root>/a.txt dir/b.txt", reason: "absolute paths" },
+      { command: "rm -rf .", reason: "absolute paths" },
       // outside the root
       { command: "rm -rf <out>/victim.txt", reason: "outside the workspace" },
       { command: "rm -rf /", reason: "outside the workspace" },
       { command: "mkdir <out>/new", reason: "outside the workspace" },
-      { command: "mv a.txt <out>/a.txt", reason: "outside the workspace" },
-      { command: "cp <out>/victim.txt a.txt", reason: "outside the workspace" },
+      { command: "mv <root>/a.txt <out>/a.txt", reason: "outside the workspace" },
+      { command: "cp <out>/victim.txt <root>/a.txt", reason: "outside the workspace" },
       // `..` anywhere, even when it would stay inside the root
-      { command: "rm ../escape/victim.txt", reason: '".."' },
-      { command: "rm dir/../a.txt", reason: '".."' },
-      { command: "rm -rf ..", cwd: "dir", reason: '".."' },
-      { command: "mv a.txt ../a.txt", reason: '".."' },
+      { command: "rm <root>/../escape/victim.txt", reason: '".."' },
+      { command: "rm <root>/dir/../a.txt", reason: '".."' },
+      { command: "rm -rf <root>/dir/..", cwd: "dir", reason: '".."' },
+      { command: "mv <root>/a.txt <root>/../a.txt", reason: '".."' },
       // symlinks
-      { command: "rm link-out", reason: "symlink" },
-      { command: "rm -rf link-out/", reason: "symlink" },
-      { command: "rm link-out/victim.txt", reason: "outside the workspace" },
-      { command: "cp a.txt link-out/new.txt", reason: "outside the workspace" },
-      { command: "mkdir -p link-out/new", reason: "outside the workspace" },
-      { command: "mkdir -p dangling/new", reason: "outside the workspace" },
-      { command: "mv a.txt link-in", reason: "symlink" },
-      { command: "cp a.txt trap", reason: "symlink" },
-      { command: "mv a.txt trap/", reason: "symlink" },
+      { command: "rm <root>/link-out", reason: "symlink" },
+      { command: "rm -rf <root>/link-out/", reason: "symlink" },
+      { command: "rm <root>/link-out/victim.txt", reason: "outside the workspace" },
+      { command: "cp <root>/a.txt <root>/link-out/new.txt", reason: "outside the workspace" },
+      { command: "mkdir -p <root>/link-out/new", reason: "outside the workspace" },
+      { command: "mkdir -p <root>/dangling/new", reason: "outside the workspace" },
+      { command: "mv <root>/a.txt <root>/link-in", reason: "symlink" },
+      { command: "cp <root>/a.txt <root>/trap", reason: "symlink" },
+      { command: "mv <root>/a.txt <root>/trap/", reason: "symlink" },
       // .git
-      { command: "rm -rf .git", reason: ".git" },
-      { command: "rm .git/config", reason: ".git" },
       { command: "rm -rf <root>/.git", reason: ".git" },
-      { command: "mkdir .git/x", reason: ".git" },
-      { command: "mv a.txt .git/x", reason: ".git" },
-      { command: "cp .git/config x", reason: ".git" },
-      { command: "rm -rf .GIT", reason: ".git" },
-      { command: "mkdir .Git.", reason: ".git" },
-      { command: "mkdir -p sub/.git/hooks", reason: ".git" },
-      { command: "rm -rf nested-repo", reason: ".git entry" },
-      { command: "rm -rf two", reason: ".git entry at any depth" },
-      { command: "rm -r three", reason: ".git entry at any depth" },
-      { command: "rm -R submodule-file", reason: ".git entry at any depth" },
-      { command: "rm -rf odd-case", reason: ".git entry at any depth" },
-      { command: "rm -rf deep three", reason: ".git entry at any depth" },
+      { command: "rm <root>/.git/config", reason: ".git" },
+      { command: "mkdir <root>/.git/x", reason: ".git" },
+      { command: "mv <root>/a.txt <root>/.git/x", reason: ".git" },
+      { command: "cp <root>/.git/config <root>/x", reason: ".git" },
+      { command: "rm -rf <root>/.GIT", reason: ".git" },
+      { command: "mkdir <root>/.Git.", reason: ".git" },
+      { command: "mkdir -p <root>/sub/.git/hooks", reason: ".git" },
+      { command: "rm -rf <root>/nested-repo", reason: ".git entry" },
+      { command: "rm -rf <root>/two", reason: ".git entry at any depth" },
+      { command: "rm -r <root>/three", reason: ".git entry at any depth" },
+      { command: "rm -R <root>/submodule-file", reason: ".git entry at any depth" },
+      { command: "rm -rf <root>/odd-case", reason: ".git entry at any depth" },
+      { command: "rm -rf <root>/deep <root>/three", reason: ".git entry at any depth" },
       // the root itself
-      { command: "rm -rf .", reason: "workspace root" },
       { command: "rm -rf <root>", reason: "workspace root" },
       { command: "rm -rf <root>/", reason: "workspace root" },
-      { command: "mv . moved", cwd: "<root>", reason: "workspace root" },
-      { command: "cp -R . copy", reason: "workspace root" },
+      { command: "rm -rf <root>/.", reason: "workspace root" },
+      { command: "mv <root>/. <root>/moved", reason: "workspace root" },
+      { command: "cp -R <root> <root>/copy", reason: "workspace root" },
       // globs and expansions
-      { command: "rm *.txt", reason: "shell syntax" },
-      { command: "rm '*.txt'", reason: "special characters" },
-      { command: "rm 'a?.txt'", reason: "special characters" },
-      { command: "rm '[ab].txt'", reason: "special characters" },
+      { command: "rm <root>/*.txt", reason: "shell syntax" },
+      { command: "rm '<root>/*.txt'", reason: "special characters" },
+      { command: "rm '<root>/a?.txt'", reason: "special characters" },
+      { command: "rm '<root>/[ab].txt'", reason: "special characters" },
       { command: "rm ~/a.txt", reason: "special characters" },
-      { command: "rm '$HOME'", reason: "special characters" },
-      { command: "rm 'a=b'", reason: "special characters" },
+      { command: "rm '<root>/$HOME'", reason: "special characters" },
+      { command: "rm '<root>/a=b'", reason: "special characters" },
       { command: "rm ''", reason: "special characters" },
-      { command: "rm {a,b}.txt", reason: "command substitution" },
+      { command: "rm <root>/{a,b}.txt", reason: "command substitution" },
       // flags
-      { command: "cp -t dir a.txt", reason: "only with" },
-      { command: "mv -t dir a.txt", reason: "only with" },
-      { command: "cp --target-directory=dir a.txt", reason: "only with" },
-      { command: "mv -T a.txt b.txt", reason: "only with" },
-      { command: "cp --parents a.txt dir", reason: "only with" },
-      { command: "mv -b a.txt dir/b.txt", reason: "only with" },
-      { command: "cp --suffix=.bak a.txt dir/b.txt", reason: "only with" },
-      { command: "mkdir -m 777 x", reason: "only with" },
-      { command: "rm -v a.txt", reason: "only with" },
-      { command: "rm -Rf dir", reason: "only with" },
-      { command: "cp -Rp dir new-dir", reason: "only with" },
-      { command: "mv -rf a.txt b.txt", reason: "only with" },
-      { command: "rm a.txt -v", reason: "only with" },
+      { command: "cp -t <root>/dir <root>/a.txt", reason: "only with" },
+      { command: "mv -t <root>/dir <root>/a.txt", reason: "only with" },
+      { command: "cp --target-directory=<root>/dir <root>/a.txt", reason: "only with" },
+      { command: "mv -T <root>/a.txt <root>/b.txt", reason: "only with" },
+      { command: "cp --parents <root>/a.txt <root>/dir", reason: "only with" },
+      { command: "mv -b <root>/a.txt <root>/dir/b.txt", reason: "only with" },
+      { command: "cp --suffix=.bak <root>/a.txt <root>/dir/b.txt", reason: "only with" },
+      { command: "mkdir -m 777 <root>/x", reason: "only with" },
+      { command: "rm -v <root>/a.txt", reason: "only with" },
+      { command: "rm -Rf <root>/dir", reason: "only with" },
+      { command: "cp -Rp <root>/dir <root>/new-dir", reason: "only with" },
+      { command: "mv -rf <root>/a.txt <root>/b.txt", reason: "only with" },
+      { command: "rm <root>/a.txt -v", reason: "only with" },
       // zero or too few operands
       { command: "rm", reason: "at least 1" },
       { command: "rm -rf", reason: "at least 1" },
       { command: "rm --", reason: "at least 1" },
       { command: "mkdir -p", reason: "at least 1" },
-      { command: "mv a.txt", reason: "at least 2" },
-      { command: "cp a.txt", reason: "at least 2" },
+      { command: "mv <root>/a.txt", reason: "at least 2" },
+      { command: "cp <root>/a.txt", reason: "at least 2" },
       // mixed good and bad operands
-      { command: "rm a.txt <out>/victim.txt", reason: "outside the workspace" },
-      { command: "rm a.txt .git", reason: ".git" },
-      { command: "mv a.txt dir <out>", reason: "outside the workspace" },
-      { command: "cp a.txt dir/b.txt .git", reason: ".git" },
-      { command: "mkdir ok link-out/x", reason: "outside the workspace" },
+      { command: "rm <root>/a.txt <out>/victim.txt", reason: "outside the workspace" },
+      { command: "rm <root>/a.txt <root>/.git", reason: ".git" },
+      { command: "mv <root>/a.txt <root>/dir <out>", reason: "outside the workspace" },
+      { command: "cp <root>/a.txt <root>/dir/b.txt <root>/.git", reason: ".git" },
+      { command: "mkdir <root>/ok <root>/link-out/x", reason: "outside the workspace" },
       // recursive copy into an existing tree
-      { command: "cp -R dir existing", reason: "does not exist yet" },
-      { command: "cp -r dir/ existing", reason: "does not exist yet" },
+      { command: "cp -R <root>/dir <root>/existing", reason: "does not exist yet" },
+      { command: "cp -r <root>/dir/ <root>/existing", reason: "does not exist yet" },
       // compound shell syntax stays refused
-      { command: "rm a.txt && rm dir/b.txt", reason: "shell syntax" },
-      { command: "rm a.txt ; rm dir/b.txt", reason: "shell syntax" },
-      { command: "rm a.txt > out.txt", reason: "shell syntax" },
+      { command: "rm <root>/a.txt && rm <root>/dir/b.txt", reason: "shell syntax" },
+      { command: "rm <root>/a.txt ; rm <root>/dir/b.txt", reason: "shell syntax" },
+      { command: "rm <root>/a.txt > <root>/out.txt", reason: "shell syntax" },
       // cwd validation still runs first
-      { command: "rm a.txt", cwd: "link-out", reason: "Bash cwd symlinks" },
+      { command: "rm <root>/a.txt", cwd: "link-out", reason: "Bash cwd symlinks" },
     ];
 
     test.each(refused)("refuses $command", async (testCase) => {
@@ -403,7 +412,7 @@ describe("evaluateRescueHookRequest", () => {
       Object.defineProperty(process, "platform", { ...original, value: "win32" });
       try {
         await withFileOpFixture(async (root, outside) => {
-          for (const command of ["rm a.txt", "mkdir new", "mv a.txt b.txt", "cp a.txt b.txt"]) {
+          for (const command of ["rm <root>/a.txt", "mkdir <root>/new", "mv <root>/a.txt <root>/b.txt", "cp <root>/a.txt <root>/b.txt"]) {
             expect(await decide(root, outside, { command })).toEqual({
               decision: "deny",
               reason: expect.stringContaining("on Windows"),
@@ -424,12 +433,12 @@ describe("evaluateRescueHookRequest", () => {
         for (let start = 0; start < names.length; start += 2000) {
           await Promise.all(names.slice(start, start + 2000).map((name) => writeFile(path.join(big, name), "")));
         }
-        expect(await decide(root, outside, { command: "rm -rf big" })).toEqual({
+        expect(await decide(root, outside, { command: "rm -rf <root>/big" })).toEqual({
           decision: "deny",
           reason: expect.stringContaining("smaller pieces"),
         });
         await rm(path.join(big, "f0"));
-        expect(await decide(root, outside, { command: "rm -rf big" })).toEqual({ decision: "allow" });
+        expect(await decide(root, outside, { command: "rm -rf <root>/big" })).toEqual({ decision: "allow" });
       });
     }, 60_000);
 
@@ -440,13 +449,22 @@ describe("evaluateRescueHookRequest", () => {
         await mkdir(locked);
         await chmod(locked, 0o000);
         try {
-          expect(await decide(root, outside, { command: "rm -rf deep" })).toEqual({
+          expect(await decide(root, outside, { command: "rm -rf <root>/deep" })).toEqual({
             decision: "deny",
             reason: expect.stringContaining("smaller pieces"),
           });
         } finally {
           await chmod(locked, 0o700);
         }
+      });
+    });
+
+    test("the relative-operand refusal names the realpath of the workspace root", async () => {
+      await withFileOpFixture(async (root, outside) => {
+        expect(await decide(root, outside, { command: "rm a.txt" })).toEqual({
+          decision: "deny",
+          reason: `Rescue requires absolute paths for rm; use paths under ${await realpath(root)}: rm a.txt`,
+        });
       });
     });
 

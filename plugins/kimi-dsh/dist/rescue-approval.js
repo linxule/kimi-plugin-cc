@@ -184,9 +184,6 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
             };
         }
         const cwd = isObject(toolInput) ? toolInput.cwd : undefined;
-        // Without Bash.cwd the shell runs in the session work dir, which every
-        // write-capable launch sets to the trusted root.
-        let shellCwd = root;
         if (cwd !== undefined) {
             if (typeof cwd !== "string" || cwd.length === 0) {
                 return { decision: "deny", reason: "rescue requires Bash cwd to be a non-empty string" };
@@ -202,13 +199,12 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
                 if (outcome === "reject") {
                     return { decision: "deny", reason: `rescue rejects Bash cwd outside the workspace or inside .git: ${cwd}` };
                 }
-                shellCwd = await realpath(path.resolve(root, cwd));
             }
             catch (err) {
                 return { decision: "deny", reason: `rescue cannot inspect Bash cwd ${cwd}: ${err.message}` };
             }
         }
-        const result = await validateWorkspaceShellCommand(command, root, shellCwd);
+        const result = await validateWorkspaceShellCommand(command, root);
         return result.response === "approve"
             ? { decision: "allow" }
             : { decision: "deny", reason: result.feedback ?? "rescue rejected the shell command" };
@@ -335,18 +331,18 @@ export function validateShellCommand(command) {
     return { response: "approve" };
 }
 /**
- * Shell policy with workspace context. `workspaceRoot` and `cwd` must both be
- * realpaths; `cwd` is the validated Bash.cwd or the root. Every rm/mv/cp/mkdir
- * operand passes the write containment rules before the command is approved.
+ * Shell policy with workspace context. `workspaceRoot` must be a realpath.
+ * Every rm/mv/cp/mkdir operand passes the write containment rules before the
+ * command is approved.
  */
-export async function validateWorkspaceShellCommand(command, workspaceRoot, cwd) {
+export async function validateWorkspaceShellCommand(command, workspaceRoot) {
     const parsed = parseShellPipeline(command);
     if ("response" in parsed)
         return parsed;
     for (let index = 0; index < parsed.stages.length; index += 1) {
         const stage = parsed.stages[index];
         const allowed = FILE_OPERATION_FLAGS.has(stage[0])
-            ? await validateFileOperationStage(stage, workspaceRoot, cwd)
+            ? await validateFileOperationStage(stage, workspaceRoot)
             : validateShellStage(stage, parsed.stages.length > 1);
         if (!allowed.ok) {
             return rejectShell(allowed.reason);
@@ -395,12 +391,14 @@ const FILE_OPERATION_FLAGS = new Map([
 // removed quoting, so a token cannot tell whether bash would expand it.
 const FILE_OPERAND = /^[\p{L}\p{N}._+@%,:/ -]+$/u;
 /**
- * rm/mv/cp/mkdir inside the trusted root. Operands get the write containment
- * (inside the root after symlink resolution, never `.git` in any letter case,
- * never a symlink as the final component); `..` segments are refused because
- * the kernel resolves them physically where `path.resolve` would not.
+ * rm/mv/cp/mkdir inside the trusted root. Operands must be absolute, so the
+ * check never depends on the shell's working directory, and get the write
+ * containment (inside the root after symlink resolution, never `.git` in any
+ * letter case, never a symlink as the final component); `..` segments are
+ * refused because the kernel resolves them physically where `path.resolve`
+ * would not.
  */
-async function validateFileOperationStage(tokens, workspaceRoot, cwd) {
+async function validateFileOperationStage(tokens, workspaceRoot) {
     const [command, ...args] = tokens;
     const allowedFlags = FILE_OPERATION_FLAGS.get(command);
     const shown = tokens.join(" ");
@@ -434,6 +432,12 @@ async function validateFileOperationStage(tokens, workspaceRoot, cwd) {
                 reason: `Rescue rejects ${command} operands with glob, expansion or other special characters: ${shown}`,
             };
         }
+        if (!path.isAbsolute(arg)) {
+            return {
+                ok: false,
+                reason: `Rescue requires absolute paths for ${command}; use paths under ${workspaceRoot}: ${shown}`,
+            };
+        }
         if (arg.split("/").includes("..")) {
             return { ok: false, reason: `Rescue rejects ${command} operands containing "..": ${shown}` };
         }
@@ -446,7 +450,7 @@ async function validateFileOperationStage(tokens, workspaceRoot, cwd) {
     try {
         const resolved = [];
         for (const operand of operands) {
-            const outcome = await resolveFileOperand(workspaceRoot, cwd, operand);
+            const outcome = await resolveFileOperand(workspaceRoot, operand);
             if (outcome === "symlink") {
                 return { ok: false, reason: `Rescue rejects ${command} on a symlink operand: ${operand}` };
             }
@@ -514,8 +518,8 @@ async function validateFileOperationStage(tokens, workspaceRoot, cwd) {
  * directory entry; a missing one is placed under its nearest existing
  * ancestor's realpath, and a dangling symlink on the way is refused.
  */
-async function resolveFileOperand(workspaceRoot, cwd, operand) {
-    const absolute = path.resolve(cwd, operand);
+async function resolveFileOperand(workspaceRoot, operand) {
+    const absolute = path.resolve(operand);
     const stats = await statIfExists(absolute);
     if (stats?.isSymbolicLink())
         return "symlink";
