@@ -924,4 +924,40 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       })).rejects.toMatchObject({ code: "KIMI_SESSION_PLAN_TAINTED" });
     });
   });
+
+  test("G-fix-1: journal framing matches kimi replay; nothing after a corrupt line folds a pair", async () => {
+    await withHome("g2-framing", async (home) => {
+      const scan = async (sessionId: string, raw: string) => {
+        const journal = await writeJournal(home, "ws1", sessionId, "main", []);
+        await writeFile(journal, raw, "utf8");
+        return scanSessionJournalsForPlan(home, sessionId, undefined, { tolerateCancelledDefaultEnter: true });
+      };
+      const tainted = { kind: "tainted", recordType: "plan_mode.enter" };
+      // Replay stops at a whitespace-only or lone-CR-joined line, leaving only the enter.
+      expect(await scan("ws-line", `${ENTER}\n   \n${CANCEL}\n${TURN}\n`)).toMatchObject(tainted);
+      expect(await scan("tab-line", `${ENTER}\n\t\r\n${CANCEL}\n`)).toMatchObject(tainted);
+      expect(await scan("lone-cr", `${ENTER}\n${CANCEL}\r${TURN}\n`)).toMatchObject(tainted);
+      expect(await scan("double-cr", `${ENTER}\n\r\r\n${CANCEL}\n`)).toMatchObject(tainted);
+      // A corrupt line before the enter means no later pair may fold.
+      expect(await scan("corrupt-first", `   \n${ENTER}\n${CANCEL}\n`)).toMatchObject(tainted);
+      expect(await scan("garbage-first", `{oops\n${ENTER}\n${CANCEL}\n${TURN}\n`)).toMatchObject(tainted);
+      // Still refused when a later plan record follows a completed pair and a corrupt line.
+      expect(await scan("pair-corrupt-enter", `${ENTER}\n${CANCEL}\n  \n${ENTER}\n`)).toMatchObject({ kind: "tainted" });
+
+      // Kimi framing that still folds: CRLF, zero-length lines, padded JSON,
+      // a pair completed before a corrupt line, and an unterminated last line.
+      for (const [sessionId, raw] of [
+        ["crlf", `${ENTER}\r\n${CANCEL}\r\n${TURN}\r\n`],
+        ["empty-lines", `\n${ENTER}\n\n\r\n${CANCEL}\n${TURN}\n`],
+        ["padded", `  ${ENTER} \n\t${CANCEL}\n${TURN}\n`],
+        ["pair-then-corrupt", `${ENTER}\n${CANCEL}\n   \n${TURN}\n`],
+        ["unterminated-tail", `${ENTER}\n${CANCEL}\n${TURN}\n{"type":"turn.en`],
+        ["unterminated-cancel", `${ENTER}\n${CANCEL}`],
+      ] as const) {
+        expect(await scan(sessionId, raw)).toMatchObject({ kind: "clean" });
+      }
+      // An enter followed only by an unterminated, unparseable tail is never cancelled.
+      expect(await scan("enter-tail", `${ENTER}\n{"type":"plan_mode.canc`)).toMatchObject(tainted);
+    });
+  });
 });

@@ -32,7 +32,6 @@
 import { constants as fsConstants } from "node:fs";
 import { open, readdir } from "node:fs/promises";
 import path from "node:path";
-import { createInterface } from "node:readline";
 
 import { RuntimeError } from "./errors.js";
 import { kimiCodeConfigPath } from "./kimi-home.js";
@@ -371,81 +370,116 @@ const ACTIVITY_RECORD = /^(turn\.|prompt\.|tool\.|llm\.|shell\.|subagent\.|task\
 /** Records that make replay non-linear (branch switch or undo), so a fold could differ. */
 const REWIND_RECORD = /^(agent\.switched$|context\.undo$|context\.undone$)/;
 
+const UNPARSEABLE: unique symbol = Symbol("unparseable");
+
+/**
+ * kimi-code's append-log framing (appendLogStore.read/parseLine, identical at
+ * 2.4.0 and 2.7.3): split on "\n" only, strip ONE trailing "\r", skip only a
+ * zero-length line, else JSON.parse. A terminated line that fails to parse is
+ * corruption and wire replay stops there; an unparseable unterminated last
+ * line is dropped as truncated. An unparseable line yields `UNPARSEABLE`.
+ */
+async function* journalRecords(
+  handle: import("node:fs/promises").FileHandle,
+): AsyncGenerator<{ readonly line: string; readonly parsed: unknown; readonly terminated: boolean }> {
+  const decoder = new TextDecoder();
+  let pending = "";
+  const frame = (raw: string, terminated: boolean) => {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (line.length === 0) return undefined;
+    try {
+      return { line, parsed: JSON.parse(line) as unknown, terminated };
+    } catch {
+      return { line, parsed: UNPARSEABLE, terminated };
+    }
+  };
+  for await (const chunk of handle.createReadStream()) {
+    pending += decoder.decode(chunk as Buffer, { stream: true });
+    let newline = pending.indexOf("\n");
+    while (newline !== -1) {
+      const framed = frame(pending.slice(0, newline), true);
+      pending = pending.slice(newline + 1);
+      if (framed !== undefined) yield framed;
+      newline = pending.indexOf("\n");
+    }
+  }
+  pending += decoder.decode();
+  if (pending.length > 0) {
+    const framed = frame(pending, false);
+    if (framed !== undefined) yield framed;
+  }
+}
+
 async function scanJournalLines(
   handle: import("node:fs/promises").FileHandle,
   expectedExecutionRoot: string | undefined,
   tolerateCancelledDefaultEnter = false,
 ): Promise<JournalScanFinding | null> {
-  const rl = createInterface({ input: handle.createReadStream() });
   // G2: a print-created session's main journal holds the create-time
   // `default_plan_mode` enter immediately followed by print's id-less cancel,
   // before any work. On a linear journal that pair folds to inactive, so it
   // alone is tolerated; every other plan record, or that pair anywhere else,
   // still taints.
+  // Replay stops at the first corrupt line, so records after it may add
+  // taints (seeing more is conservative) but never start or complete a fold.
   let sawActivity = false;
   let sawRewind = false;
+  let sawCorrupt = false;
   let pendingEnter: { readonly id: unknown } | null = null;
   let toleratedPair = false;
   const taintEnter = { kind: "tainted", recordType: "plan_mode.enter" } as const;
-  try {
-    for await (const rawLine of rl) {
-      const line = rawLine.trim();
-      if (line.length === 0) continue;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        if (pendingEnter !== null) return taintEnter;
-        if (line.includes('"plan_mode.') || line.includes('"plan.')) {
-          return { kind: "tainted", recordType: "<unparseable>" };
-        }
-        if (line.includes('"environment.set_binding')) {
-          return { kind: "environment", recordType: "<unparseable-environment-binding>" };
-        }
+  for await (const framed of journalRecords(handle)) {
+    const { line, parsed } = framed;
+    if (parsed === UNPARSEABLE) {
+      if (framed.terminated) sawCorrupt = true;
+      if (pendingEnter !== null) return taintEnter;
+      if (line.includes('"plan_mode.') || line.includes('"plan.')) {
+        return { kind: "tainted", recordType: "<unparseable>" };
+      }
+      if (line.includes('"environment.set_binding')) {
+        return { kind: "environment", recordType: "<unparseable-environment-binding>" };
+      }
+      continue;
+    }
+    const record = parsed as Record<string, unknown> | null;
+    const type = record?.["type"];
+    if (pendingEnter !== null) {
+      const cancelId = record?.["id"];
+      const cancels = type === "plan_mode.cancel" && record?.["agentId"] === "main" &&
+        (cancelId === undefined || cancelId === pendingEnter.id);
+      if (!cancels) return taintEnter;
+      pendingEnter = null;
+      toleratedPair = true;
+      continue;
+    }
+    if (typeof type === "string" && REWIND_RECORD.test(type)) {
+      if (toleratedPair) return taintEnter;
+      sawRewind = true;
+    }
+    if (typeof type === "string" && ACTIVITY_RECORD.test(type)) sawActivity = true;
+    if (typeof type === "string" && (type.startsWith("plan_mode.") || type.startsWith("plan."))) {
+      if (
+        tolerateCancelledDefaultEnter && type === "plan_mode.enter" && !toleratedPair &&
+        !sawActivity && !sawRewind && !sawCorrupt && record?.["agentId"] === "main" && typeof record?.["id"] === "string"
+      ) {
+        pendingEnter = { id: record["id"] };
         continue;
       }
-      const record = parsed as Record<string, unknown> | null;
-      const type = record?.["type"];
-      if (pendingEnter !== null) {
-        const cancelId = record?.["id"];
-        const cancels = type === "plan_mode.cancel" && record?.["agentId"] === "main" &&
-          (cancelId === undefined || cancelId === pendingEnter.id);
-        if (!cancels) return taintEnter;
-        pendingEnter = null;
-        toleratedPair = true;
-        continue;
+      return { kind: "tainted", recordType: type };
+    }
+    if (type === "environment.set_binding") {
+      if (record?.["environmentId"] !== "local") {
+        return { kind: "environment", recordType: type };
       }
-      if (typeof type === "string" && REWIND_RECORD.test(type)) {
-        if (toleratedPair) return taintEnter;
-        sawRewind = true;
-      }
-      if (typeof type === "string" && ACTIVITY_RECORD.test(type)) sawActivity = true;
-      if (typeof type === "string" && (type.startsWith("plan_mode.") || type.startsWith("plan."))) {
-        if (
-          tolerateCancelledDefaultEnter && type === "plan_mode.enter" && !toleratedPair &&
-          !sawActivity && !sawRewind && record?.["agentId"] === "main" && typeof record?.["id"] === "string"
-        ) {
-          pendingEnter = { id: record["id"] };
-          continue;
-        }
-        return { kind: "tainted", recordType: type };
-      }
-      if (type === "environment.set_binding") {
-        if (record?.["environmentId"] !== "local") {
-          return { kind: "environment", recordType: type };
-        }
-        const cwd = record?.["cwd"];
-        if (expectedExecutionRoot !== undefined && cwd !== undefined && cwd !== expectedExecutionRoot) {
-          return { kind: "environment", recordType: "environment.set_binding.cwd" };
-        }
+      const cwd = record?.["cwd"];
+      if (expectedExecutionRoot !== undefined && cwd !== undefined && cwd !== expectedExecutionRoot) {
+        return { kind: "environment", recordType: "environment.set_binding.cwd" };
       }
     }
-    // An enter as the last record was never cancelled.
-    if (pendingEnter !== null) return taintEnter;
-    return null;
-  } finally {
-    rl.close();
   }
+  // An enter as the last record was never cancelled.
+  if (pendingEnter !== null) return taintEnter;
+  return null;
 }
 
 export type SessionJournalPlanScan =
