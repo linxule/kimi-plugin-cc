@@ -647,6 +647,3 @@ export async function assertNativeV2Preflight(
     }
   }
 }
-
-// Re-exported for callers that want to type-narrow refusals without importing errors.ts.
-export type NativeV2PreflightError = RuntimeError;
