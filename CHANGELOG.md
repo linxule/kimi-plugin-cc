@@ -28,9 +28,10 @@ The plugin makes promises about the sessions it launches and no longer polices t
 
 - On exact 2.4.0 through 2.7.3, a configured `default_plan_mode` no longer refuses non-swarm launches, fresh or resumed, because print mode cancels the create-time plan entry before any turn. Swarm launches at any concurrency, older versions and uncertified releases still refuse.
 - Every child runs with `KIMI_CODE_EXPERIMENTAL_TOWER=0` and `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0`, and native-v2 children no longer receive `KIMI_CODE_EXPERIMENTAL_FLAG`. Enabled selectors no longer refuse certified releases.
-- On exact 2.5.0 through 2.7.3, a configured `[environments] default` no longer refuses a fresh non-swarm launch, because the plugin passes `--environment local`. Resumed and swarm launches still refuse.
+- On exact 2.5.0 through 2.7.3, a configured `[environments] default` no longer refuses a fresh or resumed non-swarm launch: a fresh print passes `--environment local`, and a resume applies the session's stored binding, which must still be local and inside the trusted root (`KIMI_SESSION_ENVIRONMENT_UNSAFE`). Swarm, uncertified and unlabeled launches still refuse.
 - `[workspace] require_trust = false` produces a warning instead of a refusal. A non-boolean value still refuses.
 - The runtime chooses the operation: `ask` with a leading `--write` runs rescue and `review` with a leading `--challenge` runs challenge (`runtime/surface-routing.ts`). Only flags before the first prompt word count, and MCP prompts always follow `--`. The companion spellings `task rescue`, `task challenge` and `task swarm --write` still work. DSH keeps its seven providers, including `kimi_challenge` and `kimi_swarm_write`.
+- Only the launching host's hook decides for a plugin job. Kimi still runs every host's block, but from 3.0.0 a hook abstains for jobs another host launched while that host's verified hook script exists, and enforces again if it disappears mid-job. The runtime sets or deletes `KIMI_PLUGIN_CC_JOB_HOST` and `KIMI_PLUGIN_CC_JOB_HOOK` on every spawn and derives the host from the hook script path. Under `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` every hook enforces.
 - At job time, duplicate or orphaned managed hook markers produce a warning instead of a refusal when the real TOML parser proves a clean, byte-exact managed entry. `setup` and `setup --check` still fail on them.
 - `repair-sessions` replaces a preview that is blank or one of the session's own verified plugin prompts, and reports `would-replace-preview` or `preview-replaced`.
 - Release facts live in one table, `runtime/kimi-releases.ts`. Background ask and rescue no longer set `KIMI_PLUGIN_CC_ASK_REUSED_SESSION` or `KIMI_PLUGIN_CC_RESCUE_REUSED_SESSION`. The `setup --check` direct probe uses the Node path parsed from the installed hook command. `classifySetupFailure` no longer returns `runtimeProbe` or `authProbe`, and the `CODEX_SKILLS[].displayName` field and the `TimeoutKind` export are removed.
@@ -48,7 +49,8 @@ The plugin makes promises about the sessions it launches and no longer polices t
 
 - Reads stay unconfined unless the caller passes `--read-root` or `--network`.
 - The `FetchURL` host check sees only the URL as written, not DNS resolution or HTTP redirects. `--read-root /` removes read confinement.
-- Another host's older hook block still denies web tools until that host runs setup with this version.
+- A hook from a release before 3.0.0 cannot abstain. Until that host updates and runs setup, it still checks every plugin job by its old rules and can deny web access and `rm`, `mv`, `cp` and `mkdir`; each job launch and setup carries a warning that names the host and its hook version.
+- If the launching host's block is removed from the config while its script remains, kimi-code only notices when it reloads hooks; that case is not covered.
 - A Desktop turn that finishes after a plugin run and before its preview sync has its preview overwritten.
 - The review gate's `systemMessage` does not carry warnings, and `recover-swarm` still writes its notices to stderr.
 - `go test -exec=<bin>` and `--exec` are still approved under rescue while `-exec <bin>` is rejected; `rg -i`, `rg -w` and `grep -w` are still rejected.

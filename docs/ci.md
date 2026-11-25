@@ -23,7 +23,7 @@ The full check covers:
 
 `bun run check:package` additionally packs the release tarball and runs modern MCP discovery plus legacy initialization on all three extracted compiled distributions. These checks use mock-backed or protocol-only fixtures and make no provider calls.
 
-The real-binary smoke suite skips unless explicitly enabled. A successful base CI run does not certify a new CLI version.
+The real-binary smoke suite skips unless explicitly enabled. Before any model turn it removes every other kimi-plugin-cc hook block from its isolated copy of the config, so its allows and denials come from this checkout's hook alone. A successful base CI run does not certify a new CLI version.
 
 ## Live smoke coverage
 
