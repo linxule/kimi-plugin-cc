@@ -44,6 +44,25 @@ describe("MCP attachment identity races", () => {
     }
   }, 30_000);
 
+  test("attachment accepts a companion that settled its job before the identity probe", async () => {
+    const fixture = await createMcpFixture("mcp-attach-settled");
+    let companionPid: number | undefined;
+    try {
+      const result = await runSyntheticScenario(fixture, "attach-settled");
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      const output = JSON.parse(result.stdout.trim());
+      companionPid = output.companionPid;
+      expect(output.status).toBe("completed");
+      expect(output.launchState).toBe("attached");
+      expect(output.launchError).toBeNull();
+    } finally {
+      companionPid ??= await recordedCompanionPid(fixture);
+      await terminateCompanion(companionPid!);
+      await fixture.cleanup();
+    }
+  }, 30_000);
+
   test("an inconclusive post-signal probe preserves a live starting job", async () => {
     const fixture = await createMcpFixture("mcp-post-signal-probe");
     let companionPid: number | undefined;
@@ -77,7 +96,7 @@ describe("MCP attachment identity races", () => {
 
 async function runSyntheticScenario(
   fixture: McpFixture,
-  scenario: "attach-mismatch" | "post-signal-probe",
+  scenario: "attach-mismatch" | "attach-settled" | "post-signal-probe",
 ) {
   const launcherUrl = pathToFileURL(path.join(process.cwd(), "dist/mcp/launcher.js")).href;
   const operationsUrl = pathToFileURL(path.join(process.cwd(), "dist/mcp/operations.js")).href;
@@ -92,6 +111,7 @@ async function runSyntheticScenario(
     const scenario = ${JSON.stringify(scenario)};
     let companionPid;
     let expected;
+    let jobId;
     let calls = 0;
     try {
       const launched = await launchMcpOperation(
@@ -119,6 +139,7 @@ async function runSyntheticScenario(
                 "SELECT task_id, operation_kind, repo_id, workspace_cwd FROM mcp_tasks",
               ).get();
               db.close();
+              jobId = task.task_id;
               const store = new JobStore(paths);
               try {
                 store.createJob({
@@ -137,7 +158,7 @@ async function runSyntheticScenario(
                   agent_profile: "<cli-client>",
                   prompt_digest: "mcp-attachment-identity",
                   summary: "MCP attachment identity scenario",
-                  phase: scenario === "attach-mismatch" ? "turn-running" : "starting",
+                  phase: scenario === "post-signal-probe" ? "starting" : "turn-running",
                   final_output_path: null,
                   stream_log_path: task.workspace_cwd + "/mcp-attachment-identity.jsonl",
                   error: null,
@@ -149,6 +170,16 @@ async function runSyntheticScenario(
             }
             if (scenario === "attach-mismatch") {
               return { ...expected, startToken: "reused-start" };
+            }
+            if (scenario === "attach-settled") {
+              // The companion finished its job and exited before the probe.
+              const store = new JobStore(resolvePluginPaths(process.env));
+              try {
+                store.markCompleted(jobId, { summary: "settled before the probe", final_output_path: null, error: null });
+              } finally {
+                store.close();
+              }
+              return undefined;
             }
             if (calls === 2) return expected;
             throw new Error("injected inconclusive identity probe");

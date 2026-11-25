@@ -72,7 +72,7 @@ export async function launchMcpOperation(invocation, env, options) {
         for (;;) {
             if (spawnError)
                 throw await markLaunchFailure(store, task, spawnError);
-            const job = store.getJob(taskId);
+            let job = store.getJob(taskId);
             if (job && (job.status !== "running" || job.phase === "turn-running" || job.phase === "worker-running")) {
                 const currentTask = store.getMcpTask(taskId) ?? task;
                 await assertMcpJobBinding(currentTask, job);
@@ -87,11 +87,19 @@ export async function launchMcpOperation(invocation, env, options) {
                             preserveStartingTask = true;
                             throw new RuntimeError("MCP_PROCESS_IDENTITY_UNAVAILABLE", "The attachment identity probe was inconclusive; the launch record was preserved.", "mcp.launch", { details: { job_id: taskId, operation_kind: invocation.operationKind } });
                         }
-                        if (validation.identities.length === 0) {
+                        // A companion that finished between the job read and the probe
+                        // has no process left; its terminal row explains the absence.
+                        const settled = validation.identities.length === 0 ? store.getJob(taskId) : null;
+                        if (settled && settled.status !== "running") {
+                            job = settled;
+                        }
+                        else if (validation.identities.length === 0) {
                             preserveStartingTask = true;
                             throw new RuntimeError("MCP_PROCESS_IDENTITY_MISMATCH", "The recorded companion process identity changed before attachment; no process was adopted and the launch record was preserved.", "mcp.launch", { details: { job_id: taskId, operation_kind: invocation.operationKind } });
                         }
-                        identity = validation.identities[0];
+                        else {
+                            identity = validation.identities[0];
+                        }
                     }
                     else if (child.pid !== undefined) {
                         identity = await readIdentity(child.pid);
