@@ -275,13 +275,12 @@ function validateBlockBody(rawBody: string[]): {
       foundEvent = true;
       continue;
     }
-    const basic = COMMAND_LINE_RE.exec(line);
-    const literal = COMMAND_LITERAL_LINE_RE.exec(line);
-    if (basic !== null || literal !== null) {
-      // Decode TOML basic-string escapes before comparing with the canonical JS
-      // string; literal strings have no escapes. Otherwise shell quoting and
-      // TOML escaping can make an equivalent command compare unequal.
-      commandPath = basic !== null ? decodeTomlBasicString(basic[1]!) : literal![1]!;
+    // Decode TOML basic-string escapes before comparing with the canonical JS
+    // string; literal strings have no escapes. Otherwise shell quoting and
+    // TOML escaping can make an equivalent command compare unequal.
+    const decoded = decodeManagedCommandLine(line);
+    if (decoded !== null) {
+      commandPath = decoded;
       continue;
     }
     // Other TOML lines are ignored only by this local grammar. Whole-file schema
@@ -498,8 +497,16 @@ function countCleanEntries(hooks: unknown, expectedCommand: string): number {
   return count;
 }
 
-function hooksArrayHasCleanEntry(hooks: unknown, expectedCommand: string): boolean {
-  return countCleanEntries(hooks, expectedCommand) > 0;
+/** Clean entries in the whole file's parsed `hooks[]`; 0 when it does not parse. */
+function countCleanEntriesInFile(contents: string, expectedCommand: string): number {
+  let parsed: unknown;
+  try {
+    parsed = parseToml(contents);
+  } catch {
+    return 0;
+  }
+  if (parsed === null || typeof parsed !== "object") return 0;
+  return countCleanEntries((parsed as Record<string, unknown>).hooks, expectedCommand);
 }
 
 /**
@@ -517,18 +524,11 @@ export function hasCleanEnforcingHookEntry(
   contents: string,
   expectedCommand: string,
 ): boolean {
-  let parsed: unknown;
-  try {
-    parsed = parseToml(contents);
-  } catch {
-    return false;
-  }
-  if (parsed === null || typeof parsed !== "object") return false;
   const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
   const managedWithCommand = pairBlocks(lines).blocks.filter(
     (block) => block.commandPath === expectedCommand,
   ).length;
-  return countCleanEntries((parsed as Record<string, unknown>).hooks, expectedCommand) > managedWithCommand;
+  return countCleanEntriesInFile(contents, expectedCommand) > managedWithCommand;
 }
 
 /**
@@ -542,14 +542,7 @@ export function hasCleanEnforcingHookEntry(
  * and rejects it. Fail-closed on any parse error.
  */
 function foundHookEntryIsClean(contents: string, expectedCommand: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = parseToml(contents);
-  } catch {
-    return false;
-  }
-  if (parsed === null || typeof parsed !== "object") return false;
-  return hooksArrayHasCleanEntry((parsed as Record<string, unknown>).hooks, expectedCommand);
+  return countCleanEntriesInFile(contents, expectedCommand) > 0;
 }
 
 export function evaluateInstalled(
