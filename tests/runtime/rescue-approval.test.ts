@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { evaluateRescueHookRequest, hasUnsafeShellSyntax, validateShellCommand } from "../../runtime/rescue-approval.js";
+import {
+  RM_RECURSIVE_SCAN_ENTRY_CAP,
+  evaluateRescueHookRequest,
+  hasUnsafeShellSyntax,
+  validateShellCommand,
+} from "../../runtime/rescue-approval.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 // v1.0 cutover note (PR 3):
@@ -219,6 +224,17 @@ describe("evaluateRescueHookRequest", () => {
         await symlink(outside, path.join(root, "link-out"));
         await symlink(path.join(root, "dir"), path.join(root, "link-in"));
         await symlink(path.join(root, "missing"), path.join(root, "dangling"));
+        await mkdir(path.join(root, "deep", "a", "b", "c"), { recursive: true });
+        await writeFile(path.join(root, "deep", "a", "b", "c", "file.txt"), "plain");
+        await writeFile(path.join(root, "deep", "a", ".gitignore"), "x\n");
+        await mkdir(path.join(root, "two", "a", ".git"), { recursive: true });
+        await mkdir(path.join(root, "three", "a", "b", ".git"), { recursive: true });
+        await mkdir(path.join(root, "submodule-file", "a", "b", "mod"), { recursive: true });
+        await writeFile(path.join(root, "submodule-file", "a", "b", "mod", ".git"), "gitdir: ../../.git/modules/mod\n");
+        await mkdir(path.join(root, "odd-case", "a"), { recursive: true });
+        await writeFile(path.join(root, "odd-case", "a", ".GIT."), "x");
+        await mkdir(path.join(root, "via-link"), { recursive: true });
+        await symlink(path.join(root, "two"), path.join(root, "via-link", "to-two"));
         await run(root, outside);
       } finally {
         await cleanupTestPath(fixture);
@@ -240,6 +256,11 @@ describe("evaluateRescueHookRequest", () => {
       { command: "rm -r dir" },
       { command: "rm -R dir" },
       { command: "rm -rf dir" },
+      { command: "rm -rf deep" },
+      // the walk does not follow symlinks, so a link to a repository is not a reason to refuse
+      { command: "rm -rf via-link" },
+      // rm without -r never descends
+      { command: "rm -f two" },
       { command: "rm -fr dir/" },
       { command: "rm -- a.txt" },
       { command: "rm a.txt dir/b.txt" },
@@ -309,6 +330,11 @@ describe("evaluateRescueHookRequest", () => {
       { command: "mkdir .Git.", reason: ".git" },
       { command: "mkdir -p sub/.git/hooks", reason: ".git" },
       { command: "rm -rf nested-repo", reason: ".git entry" },
+      { command: "rm -rf two", reason: ".git entry at any depth" },
+      { command: "rm -r three", reason: ".git entry at any depth" },
+      { command: "rm -R submodule-file", reason: ".git entry at any depth" },
+      { command: "rm -rf odd-case", reason: ".git entry at any depth" },
+      { command: "rm -rf deep three", reason: ".git entry at any depth" },
       // the root itself
       { command: "rm -rf .", reason: "workspace root" },
       { command: "rm -rf <root>", reason: "workspace root" },
@@ -388,6 +414,40 @@ describe("evaluateRescueHookRequest", () => {
       } finally {
         Object.defineProperty(process, "platform", original);
       }
+    });
+
+    test(`refuses rm -r when the tree exceeds ${RM_RECURSIVE_SCAN_ENTRY_CAP} entries`, async () => {
+      await withFileOpFixture(async (root, outside) => {
+        const big = path.join(root, "big");
+        await mkdir(big);
+        const names = Array.from({ length: RM_RECURSIVE_SCAN_ENTRY_CAP + 1 }, (_, index) => `f${index}`);
+        for (let start = 0; start < names.length; start += 2000) {
+          await Promise.all(names.slice(start, start + 2000).map((name) => writeFile(path.join(big, name), "")));
+        }
+        expect(await decide(root, outside, { command: "rm -rf big" })).toEqual({
+          decision: "deny",
+          reason: expect.stringContaining("smaller pieces"),
+        });
+        await rm(path.join(big, "f0"));
+        expect(await decide(root, outside, { command: "rm -rf big" })).toEqual({ decision: "allow" });
+      });
+    }, 60_000);
+
+    const unreadableTest = process.getuid?.() === 0 ? test.skip : test;
+    unreadableTest("refuses rm -r when a subdirectory cannot be read", async () => {
+      await withFileOpFixture(async (root, outside) => {
+        const locked = path.join(root, "deep", "a", "locked");
+        await mkdir(locked);
+        await chmod(locked, 0o000);
+        try {
+          expect(await decide(root, outside, { command: "rm -rf deep" })).toEqual({
+            decision: "deny",
+            reason: expect.stringContaining("smaller pieces"),
+          });
+        } finally {
+          await chmod(locked, 0o700);
+        }
+      });
     });
 
     test("the path-free validator never approves file operations", () => {

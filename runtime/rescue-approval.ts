@@ -1,5 +1,5 @@
-import type { Stats } from "node:fs";
-import { access, lstat, realpath } from "node:fs/promises";
+import type { Dirent, Stats } from "node:fs";
+import { access, lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { parse } from "./vendor/shell-quote/index.js";
@@ -529,10 +529,19 @@ async function validateFileOperationStage(
 
     const recursive = flags.has("-r") || flags.has("-R") || flags.has("-rf") || flags.has("-fr");
     if (command === "rm" && recursive) {
-      for (const operand of resolved) {
-        if (operand.stats?.isDirectory() && (await statIfExists(path.join(operand.path, ".git")))) {
-          return { ok: false, reason: `Rescue rejects rm -r of a directory that holds a .git entry: ${shown}` };
-        }
+      const scan = await scanTreesForGit(
+        resolved.filter((operand) => operand.stats?.isDirectory()).map((operand) => operand.path),
+      );
+      if (scan === "git") {
+        return { ok: false, reason: `Rescue rejects rm -r of a tree that holds a .git entry at any depth: ${shown}` };
+      }
+      if (scan !== "clean") {
+        return {
+          ok: false,
+          reason:
+            `Rescue could not prove rm -r leaves every .git intact (${scan}); ` +
+            `delete in smaller pieces: ${shown}`,
+        };
       }
     }
 
@@ -1116,14 +1125,44 @@ function isWithinWorkspaceOutsideGit(root: string, target: string): boolean {
 
 // Case-insensitive, trailing-dot/space tolerant: case-insensitive and Windows
 // filesystems open `.GIT` or `.git.` as the repository's `.git`.
+function isGitName(segment: string): boolean {
+  return segment.replace(/[. ]+$/, "").toLowerCase() === ".git";
+}
+
 function isWithinWorkspaceOutsideAnyGit(root: string, target: string): boolean {
-  return (
-    isWithin(root, target) &&
-    !path
-      .relative(root, target)
-      .split(path.sep)
-      .some((segment) => segment.replace(/[. ]+$/, "").toLowerCase() === ".git")
-  );
+  return isWithin(root, target) && !path.relative(root, target).split(path.sep).some(isGitName);
+}
+
+/** Total directory entries one rm -r may inspect before the hook gives up. */
+export const RM_RECURSIVE_SCAN_ENTRY_CAP = 20_000;
+
+/**
+ * Walk the trees rm -r would delete, without following symlinks, looking for
+ * a `.git` file or directory at any depth (a nested repository or submodule).
+ * One entry budget covers all trees so the hook cannot stall.
+ */
+async function scanTreesForGit(
+  roots: string[],
+  cap = RM_RECURSIVE_SCAN_ENTRY_CAP,
+): Promise<"clean" | "git" | string> {
+  const pending = [...roots];
+  let seen = 0;
+  while (pending.length > 0) {
+    const directory = pending.pop()!;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (err) {
+      return `cannot read ${directory}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`;
+    }
+    for (const entry of entries) {
+      seen += 1;
+      if (seen > cap) return `more than ${cap} entries`;
+      if (isGitName(entry.name)) return "git";
+      if (entry.isDirectory()) pending.push(path.join(directory, entry.name));
+    }
+  }
+  return "clean";
 }
 
 function rejectShell(feedback: string): { response: "reject"; feedback: string } {
