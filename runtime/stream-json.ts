@@ -28,6 +28,8 @@
 //   - assistant messages are only emitted when content OR tool_calls are
 //     non-empty; we still defend against the empty case for resilience.
 
+import { isRecord } from "./util.js";
+
 export interface ToolCall {
   readonly type: "function";
   readonly id: string;
@@ -462,10 +464,6 @@ function validateToolResult(parsed: Record<string, unknown>, line: string): Stre
     content,
   };
   return { record };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

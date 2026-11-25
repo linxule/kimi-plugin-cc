@@ -16,6 +16,7 @@ import { resolveKimiHome } from "./kimi-home.js";
 import { kimiReleaseHas } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { parseVersionLine } from "./kimi-version-probe.js";
+import { sleep } from "./util.js";
 import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
 import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
 import { collectDescendantIdentities, collectDescendantIdentitiesForRoots, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
@@ -558,7 +559,7 @@ export async function runCliPrompt(opts) {
                     return true;
                 if (Date.now() >= deadline)
                     return false;
-                await new Promise((resolve) => setTimeout(resolve, Math.min(BOUNDED_DESCENDANT_POLL_MS, deadline - Date.now())));
+                await sleep(Math.min(BOUNDED_DESCENDANT_POLL_MS, deadline - Date.now()));
             }
         };
         const teardownBoundedTree = async () => {

@@ -27,6 +27,7 @@
 //     entering stream-json.
 //   - assistant messages are only emitted when content OR tool_calls are
 //     non-empty; we still defend against the empty case for resilience.
+import { isRecord } from "./util.js";
 export const MAX_STREAM_JSON_LINE_BYTES = 1_048_576;
 /**
  * Stateful line-buffer parser. Hold partial-line bytes across chunk boundaries.
@@ -313,9 +314,6 @@ function validateToolResult(parsed, line) {
         content,
     };
     return { record };
-}
-function isRecord(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 /**
  * Match kimi-code's stderr session announce line. In stream-json mode this

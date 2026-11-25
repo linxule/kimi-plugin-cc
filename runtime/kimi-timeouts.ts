@@ -46,14 +46,6 @@ export const KIMI_SWARM_DEFAULT_BUDGET_MS = 1_800_000; // 30 minutes
  */
 export const KIMI_REVIEW_GATE_TIMEOUT_MS = 8_000;
 
-/**
- * Discriminates which lifecycle phase a timeout fired during. The
- * `startup` / `initialize` cases survive for backward-compat with the
- * v0.4 error classifier in `kimi-errors.ts`; the v1.0 cli-client only
- * ever emits `response`.
- */
-export type TimeoutKind = "startup" | "initialize" | "response";
-
 export function isTimeoutCode(code: string): boolean {
   return (
     code === "TIMEOUT" ||
