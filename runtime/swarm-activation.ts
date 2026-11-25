@@ -249,7 +249,7 @@ async function prepareWebSpawn(
       { details: { command_label: options.commandLabel } },
     );
   }
-  assertNoUnsafeExperimentalSelector(options.env, "swarm-activation.pre-spawn");
+  assertNoUnsafeExperimentalSelector(options.env, "swarm-activation.pre-spawn", options.executionPlan);
   assertPrefixArgsSafe(prefixArgs);
 
   if (

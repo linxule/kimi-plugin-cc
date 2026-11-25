@@ -124,7 +124,7 @@ async function prepareWebSpawn(options, failureCode) {
     if (options.commandLabel === "swarm-write" && !options.trustedWorkspaceRoot) {
         throw new RuntimeError("CLI_TRUSTED_WORKSPACE_ROOT_MISSING", "Refusing swarm-write: write-capable plugin launches require a plugin-owned trusted workspace root.", "swarm-activation.pre-spawn", { details: { command_label: options.commandLabel } });
     }
-    assertNoUnsafeExperimentalSelector(options.env, "swarm-activation.pre-spawn");
+    assertNoUnsafeExperimentalSelector(options.env, "swarm-activation.pre-spawn", options.executionPlan);
     assertPrefixArgsSafe(prefixArgs);
     if (options.expectedVersion !== undefined &&
         options.executionPlan.kimiVersion !== null &&

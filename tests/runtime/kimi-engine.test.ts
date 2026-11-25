@@ -11,6 +11,7 @@ import {
   NATIVE_V2_ANY_OPERATION_VERSIONS,
   NATIVE_V2_SAFETY_PROFILE,
   assertResumeEngineCompatible,
+  assertNoUnsafeExperimentalSelector,
   isNativeV2CertifiedVersion,
   selectIntendedEngine,
   prepareKimiExecutionPlan,
@@ -567,6 +568,49 @@ describe("kimi execution plan", () => {
       stage: "kimi-engine.plan",
       details: { refusal_kind: "v2-hook-order-unsafe", retryable_after_setup: false },
     });
+  });
+
+  test("G3b: the master flag refuses only legacy-v1, uncertified and plan-less launches", async () => {
+    const env = { KIMI_CODE_EXPERIMENTAL_FLAG: "on" };
+    const refused = { code: "CLI_V2_HOOK_ORDER_UNSAFE", details: { refusal_kind: "v2-hook-order-unsafe" } };
+    expect(() => assertNoUnsafeExperimentalSelector(env, "t", { intendedEngine: "native-v2", certification: "certified" })).not.toThrow();
+    expect(() => assertNoUnsafeExperimentalSelector(env, "t", { intendedEngine: "native-v2", certification: "test-bypass" })).not.toThrow();
+    for (const plan of [
+      { intendedEngine: "native-v2" as const, certification: "uncertified" as const },
+      { intendedEngine: "legacy-v1" as const, certification: "certified" as const },
+      { intendedEngine: "legacy-v1" as const, certification: "test-bypass" as const },
+      undefined,
+    ]) {
+      expect(() => assertNoUnsafeExperimentalSelector(env, "t", plan)).toThrowError(expect.objectContaining({ code: refused.code }));
+    }
+
+    const cwd = await createTestPluginDataRoot("kimi-engine-g3b");
+    const base = {
+      ...process.env,
+      KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+      KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+      KIMI_CODE_HOME: path.join(cwd, "kimi-home"),
+      KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
+      KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
+      KIMI_CODE_EXPERIMENTAL_FLAG: "1",
+    };
+    const stderr = { write: () => true } as unknown as NodeJS.WritableStream;
+    try {
+      await expect(prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3" }, stderr,
+      })).resolves.toMatchObject({ intendedEngine: "native-v2", certification: "certified" });
+      await expect(prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" }, intendedEngine: "native-v2", stderr,
+      })).resolves.toMatchObject({ intendedEngine: "native-v2", certification: "test-bypass" });
+      await expect(prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0" }, stderr,
+      })).rejects.toMatchObject({ ...refused, stage: "kimi-engine.plan" });
+      await expect(prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" }, stderr,
+      })).rejects.toMatchObject(refused);
+    } finally {
+      await cleanupTestPath(cwd);
+    }
   });
 
   test("refuses an untested exact version and an operation below its minimum", async () => {

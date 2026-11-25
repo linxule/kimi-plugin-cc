@@ -748,11 +748,11 @@ describe("scanSessionJournalsForPlan — enumeration errors are classified", () 
 });
 
 describe("G3: child environment forces uncertified experimental features off", () => {
-  test("per-flag env overrides ambient selectors for print and web children; master flag is untouched", () => {
+  test("per-flag env overrides ambient selectors for print and web children; the master flag is dropped", () => {
     for (const operationKind of ["ask", "rescue", "swarm"] as const) {
       const env = buildKimiCliEnvironment({
         cwd: "/isolated/workspace",
-        env: { KIMI_CODE_HOME: "/isolated/kimi", KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "yes" },
+        env: { KIMI_CODE_HOME: "/isolated/kimi", KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "yes", KIMI_CODE_EXPERIMENTAL_FLAG: "1" },
         executionPlan: {
           schemaVersion: 1, operationKind, intendedEngine: "native-v2", command: "kimi", prefixArgs: [],
           kimiVersion: "2.7.3", certification: "certified", resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1",

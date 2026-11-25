@@ -247,9 +247,9 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
   }
 
   // The master experimental flag enables v2-only features (tower, subagent
-  // fork) outside the certified no-plan profile. Refuse it at the final
-  // boundary too, in case the environment changed after plan creation.
-  assertNoUnsafeExperimentalSelector(opts.env, "cli-client.pre-spawn");
+  // fork) outside the certified no-plan profile. Legacy-v1 and uncertified
+  // plans refuse it at the final boundary too; native-v2 children never get it.
+  assertNoUnsafeExperimentalSelector(opts.env, "cli-client.pre-spawn", opts.executionPlan);
 
   // Validate the ACTUAL prefix argv used for this spawn — not only the
   // env-resolved value — so a forged/corrupt persisted plan cannot smuggle a
@@ -1303,6 +1303,9 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
   // "0" parses as false there, so these force both off for print and web.
   env.KIMI_CODE_EXPERIMENTAL_TOWER = "0";
   env.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK = "0";
+  // The master flag is read only from the child's own environment, so a
+  // native-v2 child simply never receives it.
+  if (opts.executionPlan.intendedEngine === "native-v2") delete env.KIMI_CODE_EXPERIMENTAL_FLAG;
   // Rescue and pursue share the write label. Only the immutable execution
   // plan can grant pursue's narrow goal-metadata access; never trust ambient
   // state inherited from another plugin job.

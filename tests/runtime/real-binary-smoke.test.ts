@@ -1137,17 +1137,14 @@ suite("real-binary smoke: rescue writes only inside the workspace and confines B
   }, PER_RUN_BUDGET_MS + 30_000);
 });
 
-// Experimental-selector lane (v1.9.4, extended for 0.34.0; re-scoped for the
-// 0.42.0 native-v2 migration): the master KIMI_CODE_EXPERIMENTAL_FLAG enables
+// Experimental-selector lane: the master KIMI_CODE_EXPERIMENTAL_FLAG enables
 // v2-only features (tower, subagent fork) outside the certified no-plan
-// profile, so every plan — v2 or a pinned v1 — refuses it BEFORE the exact
-// binary can start. (Before 0.42 this same refusal also kept the then-unsafe v2
-// engine unreachable while buildEnv pinned accepted children to legacy-v1; the
-// pin is now v1-only and the plan-mode hazard is closed by the preflight, see
-// the next suite.)
-suite("real-binary smoke: agent-core-v2 is refused before spawn", () => {
+// profile. Upstream reads it only from the child's own environment, so a
+// native-v2 plan drops it from the child env and runs hook-denied as usual; a
+// pinned legacy-v1 plan still refuses it BEFORE the exact binary can start.
+suite("real-binary smoke: the master experimental flag never reaches a model child", () => {
   test(
-    "[review/v2] the unsafe engine is refused before any file can land",
+    "[review] the flag is dropped (v2, hook-denied) or refused before spawn (v1)",
     async () => {
       const kimiHome = await createTestPluginDataRoot("smoke-home-v2-review");
       const workspace = await createTestPluginDataRoot("smoke-ws-v2-review");
@@ -1167,32 +1164,41 @@ suite("real-binary smoke: agent-core-v2 is refused before spawn", () => {
         ).toBe("ok");
 
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
-        await expect(
-          runCliPrompt({
-            cwd: workspace,
-            env: {
-              ...process.env,
-              KIMI_CODE_HOME: kimiHome,
-              KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
-              KIMI_CODE_EXPERIMENTAL_FLAG: "1",
-            },
-            command,
-            prefixArgs,
-            executionPlan: smokePlan(command, prefixArgs, "review"),
-            commandLabel: "review",
-            prompt: WRITE_PROMPT,
-          }),
-        ).rejects.toMatchObject({
-          code: "CLI_V2_HOOK_ORDER_UNSAFE",
-          details: { refusal_kind: "v2-hook-order-unsafe" },
+        const run = () => runCliPrompt({
+          cwd: workspace,
+          env: {
+            ...process.env,
+            KIMI_CODE_HOME: kimiHome,
+            KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+            KIMI_CODE_EXPERIMENTAL_FLAG: "1",
+          },
+          command,
+          prefixArgs,
+          executionPlan: smokePlan(command, prefixArgs, "review"),
+          commandLabel: "review",
+          prompt: WRITE_PROMPT,
+          signal: AbortSignal.timeout(PER_RUN_BUDGET_MS),
         });
+        if (BINARY_IS_V2) {
+          const result = await run();
+          const denial = streamManagedDenial(result.records, TARGET_FILENAME);
+          expect(
+            denial,
+            `expected a Write/Edit call for ${TARGET_FILENAME} with a same-call managed denial ` +
+              `(exit=${result.exitCode}, aborted=${result.aborted})`,
+          ).toBeDefined();
+          expect(result.systemVersion).toBe(BINARY_VERSION);
+        } else {
+          await expect(run()).rejects.toMatchObject({
+            code: "CLI_V2_HOOK_ORDER_UNSAFE",
+            details: { refusal_kind: "v2-hook-order-unsafe" },
+          });
+        }
 
-        // Pre-spawn refusal is the invariant: neither the requested workspace
-        // write nor an engine-owned plan/search-index side effect can occur.
         const wrote = await fileExists(path.join(workspace, TARGET_FILENAME));
         expect(
           wrote,
-          `refused agent-core-v2 must NOT create ${TARGET_FILENAME}`,
+          `review with the master flag set must NOT create ${TARGET_FILENAME}`,
         ).toBe(false);
       } finally {
         await cleanupTestPath(kimiHome);

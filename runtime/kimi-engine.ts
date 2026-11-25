@@ -219,18 +219,24 @@ export function selectIntendedEngine(
 const UNSAFE_EXPERIMENTAL_VALUES = new Set(["1", "true", "yes", "on"]);
 
 /**
- * Refuse the ambient experimental-feature selector before any model or version
- * subprocess. cli-client repeats this at the final spawn boundary in case the
- * environment changes after plan creation.
+ * Refuse the ambient experimental-feature selector for legacy-v1, uncertified
+ * and plan-less launches. A certified or test-bypass native-v2 plan is exempt:
+ * upstream reads the master flag only from the child's own environment
+ * (flagService via bootstrap.getEnv, 0.42.0-2.7.3), and buildKimiCliEnvironment
+ * deletes it from every native-v2 child. cli-client and swarm activation repeat
+ * this at the final spawn boundary in case the environment changed after plan
+ * creation.
  */
 export function assertNoUnsafeExperimentalSelector(
   env: Readonly<NodeJS.ProcessEnv>,
   stage = "kimi-engine.plan",
+  plan?: Pick<KimiExecutionPlan, "intendedEngine" | "certification">,
 ): void {
   const enabled = UNSAFE_EXPERIMENTAL_VALUES.has(
     (env.KIMI_CODE_EXPERIMENTAL_FLAG ?? "").trim().toLowerCase(),
   );
   if (!enabled) return;
+  if (plan?.intendedEngine === "native-v2" && plan.certification !== "uncertified") return;
   throw new RuntimeError(
     "CLI_V2_HOOK_ORDER_UNSAFE",
     "Refusing kimi-code experimental features: the master KIMI_CODE_EXPERIMENTAL_FLAG enables unreviewed agent-core-v2 features (tower, subagent fork) that kimi-plugin-cc has not certified under its no-plan safety profile. Unset KIMI_CODE_EXPERIMENTAL_FLAG and retry.",
@@ -254,7 +260,9 @@ export function assertNoUnsafeExperimentalSelector(
 export async function prepareKimiExecutionPlan(
   options: PrepareKimiExecutionPlanOptions,
 ): Promise<KimiExecutionPlan> {
-  assertNoUnsafeExperimentalSelector(options.env);
+  // An explicit legacy-v1 plan refuses before any subprocess; otherwise the
+  // engine and certification decide below, after the master-flag-free probe.
+  if (options.intendedEngine === "legacy-v1") assertNoUnsafeExperimentalSelector(options.env);
 
   if (
     options.intendedEngine === "native-v2" &&
@@ -295,6 +303,7 @@ export async function prepareKimiExecutionPlan(
   if (options.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1") {
     const intendedEngine = options.intendedEngine ?? "legacy-v1";
     const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
+    assertNoUnsafeExperimentalSelector(options.env, "kimi-engine.plan", { intendedEngine, certification: "test-bypass" });
     await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
     warnings.push(...await hookMarkerWarnings(options.env));
     return finishPlan({
@@ -314,7 +323,7 @@ export async function prepareKimiExecutionPlan(
     kimiBin: exactCommand,
     prefixArgs: kimi.prefixArgs,
     cwd: options.cwd,
-    env: options.env,
+    env: withoutExperimentalMasterFlag(options.env),
   });
   if (probe.kind !== "ok") {
     throw new RuntimeError(
@@ -336,6 +345,7 @@ export async function prepareKimiExecutionPlan(
     options.intendedEngine ?? selectIntendedEngine(options.operationKind, probe);
   const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
   const certification = assertCertifiedCapability(intendedEngine, options.operationKind, probe, options.env);
+  assertNoUnsafeExperimentalSelector(options.env, "kimi-engine.plan", { intendedEngine, certification });
   if (certification === "uncertified") {
     const borrowed = resolveKimiRelease(probe.version)!.release.version;
     warnings.push(
@@ -356,6 +366,12 @@ export async function prepareKimiExecutionPlan(
     resumedFromJobId: options.resumedFromJobId ?? null,
     safetyProfile,
   }, warnings, options.stderr);
+}
+
+function withoutExperimentalMasterFlag(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const copy = { ...env };
+  delete copy.KIMI_CODE_EXPERIMENTAL_FLAG;
+  return copy;
 }
 
 /**

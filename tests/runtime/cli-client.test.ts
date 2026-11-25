@@ -1372,6 +1372,48 @@ describe("native-v2 provenance", () => {
     return { ...base, env, executionPlan: v2Plan(base.prefixArgs) };
   }
 
+  test("G3b: native-v2 children run without the master experimental flag; uncertified plans still refuse", async () => {
+    const root = await createTestPluginDataRoot("cli-v2-master-flag");
+    const originalSpawn = childProcess.spawn;
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(((...args: Parameters<typeof spawn>) => {
+      capturedEnv = (args[2] as { env?: NodeJS.ProcessEnv } | undefined)?.env;
+      return originalSpawn(...args);
+    }) as typeof spawn);
+    try {
+      const certified = v2Options(root, { cwd: root, records: [V2_MARKER, { role: "assistant", content: "ok" }] });
+      const bypass = {
+        ...certified,
+        env: { ...certified.env, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" },
+        executionPlan: { ...certified.executionPlan, kimiVersion: null, certification: "test-bypass" as const },
+      };
+      for (const options of [certified, bypass]) {
+        capturedEnv = undefined;
+        const result = await runCliPrompt({ ...options, env: { ...options.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" } });
+        expect(result.exitCode).toBe(0);
+        expect(capturedEnv).toBeDefined();
+        expect("KIMI_CODE_EXPERIMENTAL_FLAG" in capturedEnv!).toBe(false);
+        expect(capturedEnv!.KIMI_CODE_EXPERIMENTAL_TOWER).toBe("0");
+        expect(capturedEnv!.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK).toBe("0");
+      }
+
+      const uncertified = {
+        ...certified,
+        env: { ...certified.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" },
+        executionPlan: { ...certified.executionPlan, operationKind: "ask" as const, kimiVersion: "2.8.0", certification: "uncertified" as const },
+        commandLabel: "ask",
+      };
+      const spawnCount = spawnSpy.mock.calls.length;
+      await expect(runCliPrompt(uncertified)).rejects.toMatchObject({
+        code: "CLI_V2_HOOK_ORDER_UNSAFE", stage: "cli-client.pre-spawn",
+      });
+      expect(spawnSpy).toHaveBeenCalledTimes(spawnCount);
+    } finally {
+      spawnSpy.mockRestore();
+      await cleanupTestPath(root);
+    }
+  });
+
   test("stdout-only occupied refusal is structured, not prose, and still requires provenance", async () => {
     const root = await createTestPluginDataRoot("cli-v2-occupied");
     const refusal = { type: "error", code: "session.occupied", message: "Session is in use",
