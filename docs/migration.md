@@ -4,7 +4,7 @@ The runtime certifies exact CLI releases per operation. Plugin 2.6.2 adds bounde
 
 Plugin 2.5.1 also adds DeepSeek Harness as a third host with all seven operations and a DSH-specific bundle, data root, and managed hook id. Existing Claude Code and Codex certification, job stores, and host-scoped hooks are unchanged; no migration is required for those hosts. New DSH installations follow the [README DSH section](../README.md#install-in-deepseek-harness), including `/kimi-setup` on that host.
 
-Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS`, through 0.41.x, subject to each operation's minimum version. The [runtime table](../runtime/kimi-engine.ts) is the authority.
+Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS` (`runtime/kimi-version-probe.ts`), through 0.41.x, subject to each operation's minimum version. The [native-v2 release table](../runtime/kimi-releases.ts) is the authority for native-v2 versions.
 
 Use the [README installation and update steps](../README.md) for Claude Code or Codex. Model and provider choices are covered in the [model setup guide](./models.md). Do not change your host application's authentication to configure Kimi.
 

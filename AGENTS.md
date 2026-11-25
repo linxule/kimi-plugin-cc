@@ -13,7 +13,7 @@ The **contract sheet** for coding agents: standing rules in present tense; mecha
 - **Workflow**: edit `runtime/**/*.ts`, then `bun run check` (see Commands).
 - **Installed-state verification**: resolve the host's active version-stamped install cache and run its bundled `scripts/companion.sh setup --check`. A checkout, package metadata or another host's cache proves nothing about it.
 - **Kimi binary** (§5): jobs use `KIMI_PLUGIN_CC_KIMI_BIN`, then plugin-owned `kimi-bin/current` (an executable inside `kimi-bin/<x.y.z>/`), then PATH `kimi`. Only `setup --install-kimi` installs or uses the network, per host.
-- **Credential-bearing config** (§3): never routinely read, print, copy, or retain `~/.kimi-code/config.toml` or `~/.kimi-code/credentials/`; use sanitized `setup --check` or `setup --models [--json]`. Explicit config diagnosis covers only the managed hook block, with credentials redacted, never read or copied.
+- **Credential-bearing config** (§3): never routinely read, print, copy, or retain `~/.kimi-code/config.toml` or `~/.kimi-code/credentials/`; use sanitized `setup --check` or `setup --models [--json]`. Explicit config diagnosis covers only the managed hook block, credentials redacted; credentials are never read or copied.
 
 ## Directory layout
 
@@ -97,9 +97,9 @@ See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md) for history and the audit log; GA shi
 - `check:surfaces` verifies Claude byte hashes, current Codex/DSH generated text, byte-exact runtime mirrors, and no orphaned generated files. Re-pin Claude bytes in `CLAUDE_SURFACE_HASHES` with `shasum -a 256 <file>` whenever they change.
 - `dist/` and both `plugins/` trees are committed for zero-build installs; the drift gate catches stale output.
 - Agent definitions register at session start; until the host reloads, use slash commands or `companion.sh` directly.
-- `.claude/` is gitignored; local notes and worktrees stay uncommitted.
+- `.claude/` is gitignored; its notes and worktrees stay uncommitted.
 - **Tests never inherit host plugin env.** `bunfig.toml` preloads `tests/helpers/preload.ts` to delete host root/data and per-spawn overlays. Tests requiring those paths set their own explicitly; dependency directories stay out of test discovery and the preload is never removed.
-- Comments state current, non-obvious constraints and change with behavior; history belongs in the changelog/audit log.
+- Comments state current, non-obvious constraints and change with behavior; history goes in the changelog/audit log.
 - **Changing a contract** requires the full statement in `docs/invariants.md` and its short summary here. Rationale and archaeology belong in owning docs or logs.
 
 ## Releasing

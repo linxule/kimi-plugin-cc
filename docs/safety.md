@@ -229,7 +229,7 @@ agent-core-v2's `Bash` tool accepts a separate `cwd` argument and executes there
 
 ### Trust boundary: test runners execute workspace code
 
-Rescue intentionally allows test/build runners (`go test`, `cargo test`, `pytest`, `python -m pytest`, `<pm> test`). **Running tests runs the workspace's own code** — test functions, `build.rs`, `conftest.py`, fixtures. The allowlist rejects known output and report-writing flags. It cannot confine arbitrary code executed by a test runner; that code may write outside the workspace or access the network. This is the same trust the developer already extends to their own repo. If you run `/kimi:rescue` in a workspace you do not trust, assume any allowed test runner can execute arbitrary code from that workspace.
+Rescue intentionally allows test/build runners (`go test`, `cargo test`, `pytest`, `python -m pytest`, `<pm> test`). **Running tests runs the workspace's own code** — test functions, `build.rs`, `conftest.py`, fixtures. The allowlist rejects known output and report-writing flags. It cannot confine arbitrary code executed by a test runner; that code may write outside the workspace or access the network. This is the same trust the developer already extends to their own repo. If you run `/kimi:task --write` in a workspace you do not trust, assume any allowed test runner can execute arbitrary code from that workspace.
 
 The full table lives in `runtime/rescue-approval.ts`. Test coverage is in `tests/runtime/rescue-approval.test.ts` — every accept-shape and every reject-shape has at least one regression test.
 
