@@ -672,7 +672,7 @@ function nativeV2NotCertified(operationKind, version, env = {}) {
         : strictVersions(env)
             ? ` ${STRICT_VERSIONS_ENV}=1 is set, so read-only operations on this uncertified release also refuse.`
             : " Read-only operations (ask, review, challenge, review gate) still run on this uncertified release with a warning; write and swarm operations need an exact certified release.";
-    return new RuntimeError("KIMI_CAPABILITY_NOT_CERTIFIED", `Refusing ${operationKind} on native v2: ${observed} is not in this operation's exactly certified set [${certified.join(", ")}].${readOnlyNote} Update kimi-plugin-cc to a release that certifies this kimi-code version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production repair path.`, "kimi-engine.capability", {
+    return new RuntimeError("KIMI_CAPABILITY_NOT_CERTIFIED", `Refusing ${operationKind} on native v2: ${observed} is not in this operation's exactly certified set [${certified.join(", ")}].${readOnlyNote} Run setup --install-kimi to give the plugin its own copy of the newest certified kimi-code, update kimi-plugin-cc to a release that certifies this version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production repair path.`, "kimi-engine.capability", {
         details: {
             refusal_kind: "v2-version-not-certified",
             retryable_after_setup: false,

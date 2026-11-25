@@ -14,6 +14,7 @@
 //   - Not a license to infer historical versions. Old job rows remain unknown
 //     unless their saved logs contain positive evidence.
 import { spawn } from "node:child_process";
+import { resolveKimiRelease } from "./kimi-releases.js";
 const KIMI_VERSION_PROBE_TIMEOUT_MS = 5_000;
 /**
  * Legacy-v1 kimi-code minors tested for plugin use. Membership is by
@@ -166,8 +167,9 @@ function compareVersions(a, b) {
 }
 /**
  * Format a user-facing warning line for an out-of-range version probe.
- * Setup itself may complete, but the execution-plan gate will refuse model
- * spawns until the operator selects a certified binary or updates the plugin.
+ * Setup itself may complete. An uncertified 2.x runs read-only operations
+ * with a warning; everything else refuses at the execution-plan gate until the
+ * operator installs or selects a certified binary or updates the plugin.
  * `nativeV2Certified` is the exact native-v2 table; both engines are named so
  * the newest certified version is not misreported as the legacy-v1 bound.
  */
@@ -189,6 +191,8 @@ export function formatVersionOutOfRangeWarning(probe, pluginVersion, nativeV2Cer
         // Commonly out-of-band auto-upgrade drift past the last certification.
         lines.push(`  This is NEWER than the newest certified version (${newestNative ?? `${max.major}.${max.minor}.x`}) and is not yet certified for model execution.`);
     }
-    lines.push(`  Setup can complete, but model-spawning commands will refuse before Kimi starts rather than run an unreviewed engine/version route.`, `  Update kimi-plugin-cc to a release that certifies this version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified kimi-code binary and retry setup.`, `  KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production compatibility override.`);
+    lines.push(resolveKimiRelease(probeRaw)?.certified === false
+        ? `  Read-only commands (ask, review, challenge, review gate) run on it with a warning; rescue, pursue and swarm refuse until the version is certified.`
+        : `  Setup can complete, but model-spawning commands will refuse before Kimi starts rather than run an unreviewed engine/version route.`, `  Run setup --install-kimi to give the plugin its own copy of the newest certified kimi-code, update kimi-plugin-cc to a release that certifies this version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary.`, `  KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production compatibility override.`);
     return lines.join("\n");
 }

@@ -158,6 +158,28 @@ describe("formatVersionOutOfRangeWarning", () => {
     expect(text).toContain(`${max.major}.${max.minor}.x`);
   });
 
+  test("an uncertified 2.x says read-only commands run and names setup --install-kimi", () => {
+    const text = formatVersionOutOfRangeWarning(
+      { kind: "ok", version: "2.99.0", major: 2, minor: 99, patch: 0, inTestedRange: false },
+      "3.0.0-test",
+      ["2.7.2", "2.7.3"],
+    );
+    expect(text).toContain("Read-only commands (ask, review, challenge, review gate) run on it with a warning");
+    expect(text).toContain("rescue, pursue and swarm refuse");
+    expect(text).toContain("setup --install-kimi");
+    expect(text).not.toContain("model-spawning commands will refuse");
+  });
+
+  test("a pre-2.x version outside the range still says every model command refuses", () => {
+    const text = formatVersionOutOfRangeWarning(
+      { kind: "ok", version: "0.3.5", major: 0, minor: 3, patch: 5, inTestedRange: false },
+      "3.0.0-test",
+      ["2.7.2", "2.7.3"],
+    );
+    expect(text).toContain("model-spawning commands will refuse");
+    expect(text).toContain("setup --install-kimi");
+  });
+
   test("H9: a version BELOW the tested max does not get the above-bound note", () => {
     const text = formatVersionOutOfRangeWarning(
       { kind: "ok", version: "0.0.9", major: 0, minor: 0, patch: 9, inTestedRange: false },
