@@ -7,7 +7,7 @@ import { createMcpFixture, McpClient } from "../helpers/mcp.js";
 const cases = [
   ["kimi_ask", { prompt: "Explain this repository", fresh: true }, "ask", "ask"],
   ["kimi_review", { focus: "Check the current diff" }, "review", "review"],
-  ["kimi_challenge", { focus: "Challenge this design" }, "challenge", "challenge"],
+  ["kimi_review", { mode: "challenge", focus: "Challenge this design" }, "challenge", "challenge"],
   ["kimi_rescue", { prompt: "Apply a bounded fix", fresh: true }, "rescue", "rescue"],
   ["kimi_pursue", { objective: "Complete one bounded objective", turns: 1 }, "pursue", "rescue"],
   ["kimi_swarm", { objective: "Review two independent areas", cap: 2, max_concurrency: 1 }, "swarm", "review"],
@@ -15,7 +15,7 @@ const cases = [
 ] as const;
 
 describe("MCP operation dispatch", () => {
-  test("all seven public operations attach fixed IDs and preserve operation identity", async () => {
+  test("all six public model tools, including review challenge mode, attach fixed IDs and preserve operation identity", async () => {
     const fixture = await createMcpFixture("mcp-all-operations", { scenario: "rescue-success" });
     let client: McpClient | undefined;
     try {

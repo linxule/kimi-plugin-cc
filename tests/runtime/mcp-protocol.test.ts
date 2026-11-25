@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { MCP_TOOL_DEFINITIONS } from "../../runtime/mcp/operations.js";
+import { MCP_SERVER_INSTRUCTIONS } from "../../runtime/mcp/protocol.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../../runtime/version.js";
 import { createMcpFixture, MCP_MODERN_VERSION, McpClient, modernMeta, type McpFixture } from "../helpers/mcp.js";
@@ -12,7 +13,6 @@ import { createMcpFixture, MCP_MODERN_VERSION, McpClient, modernMeta, type McpFi
 const expectedToolNames = [
   "kimi_ask",
   "kimi_review",
-  "kimi_challenge",
   "kimi_rescue",
   "kimi_pursue",
   "kimi_swarm",
@@ -163,7 +163,7 @@ function expectFrameError(frame: any, code: number, message?: string | RegExp): 
 
 function expectToolContract(tools: readonly any[]): void {
   expect(tools.map((tool) => tool.name)).toEqual(expectedToolNames);
-  expect(new Set(tools.map((tool) => tool.name)).size).toBe(10);
+  expect(new Set(tools.map((tool) => tool.name)).size).toBe(9);
   expect(tools).toEqual(MCP_TOOL_DEFINITIONS);
   for (const tool of tools) {
     expect(tool.inputSchema.type).toBe("object");
@@ -188,6 +188,7 @@ describe("MCP protocol discovery and tool schemas", () => {
         resultType: "complete",
         supportedVersions: [MCP_MODERN_VERSION],
         capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/tasks": {} } },
+        instructions: MCP_SERVER_INSTRUCTIONS,
         _meta: {
           "io.modelcontextprotocol/serverInfo": { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
         },
@@ -219,6 +220,7 @@ describe("MCP protocol discovery and tool schemas", () => {
         protocolVersion: "2025-06-18",
         capabilities: { tools: {} },
         serverInfo: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
+        instructions: MCP_SERVER_INSTRUCTIONS,
       });
 
       const listed = await client.request("tools/list", {});
@@ -465,4 +467,36 @@ describe("MCP JSON-RPC validation and stdout discipline", () => {
       await fixture.cleanup();
     }
   }, 30_000);
+});
+
+describe("MCP server instructions", () => {
+  test("every supported legacy version receives the same instructions", async () => {
+    for (const protocolVersion of ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]) {
+      const fixture = await createMcpFixture(`mcp-instructions-${protocolVersion}`);
+      const client = new McpClient(fixture);
+      try {
+        const initialized = await client.request("initialize", { protocolVersion, capabilities: {}, clientInfo: { name: "t", version: "1" } });
+        expect(initialized.instructions, protocolVersion).toBe(MCP_SERVER_INSTRUCTIONS);
+      } finally {
+        await client.close();
+        await fixture.cleanup();
+      }
+    }
+  }, 60_000);
+
+  test("instructions name the write tools, the polling fallback, durability and warnings", () => {
+    for (const phrase of [
+      "detached or long-running",
+      "task notification",
+      "kimi_job_status and kimi_job_result",
+      "keeps running if this connection drops",
+      "kimi_ask, kimi_review and kimi_swarm are read-only",
+      "kimi_rescue and kimi_pursue edit the workspace",
+      "kimi_swarm_write",
+      "warnings",
+    ]) {
+      expect(MCP_SERVER_INSTRUCTIONS).toContain(phrase);
+    }
+    expect(MCP_SERVER_INSTRUCTIONS).not.toContain("kimi_challenge");
+  });
 });

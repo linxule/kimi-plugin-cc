@@ -10,7 +10,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'kimi-package-'));
 const pkg = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
 const expectedMcpTools = [
-  'kimi_ask', 'kimi_review', 'kimi_challenge', 'kimi_rescue', 'kimi_pursue', 'kimi_swarm', 'kimi_swarm_write',
+  'kimi_ask', 'kimi_review', 'kimi_rescue', 'kimi_pursue', 'kimi_swarm', 'kimi_swarm_write',
   'kimi_job_status', 'kimi_job_result', 'kimi_job_cancel',
 ];
 const destination = process.argv[2] ? path.resolve(process.argv[2]) : scratch;
@@ -99,10 +99,11 @@ try {
     assert.equal(discovery?.result?.resultType, 'complete');
     assert.deepEqual(discovery?.result?.supportedVersions, ['2026-07-28']);
     assert.deepEqual(discovery?.result?.capabilities?.extensions?.['io.modelcontextprotocol/tasks'], {});
+    assert.match(discovery?.result?.instructions ?? '', /kimi_job_status/, `${host}: discovery lacks server instructions`);
     assert.equal(modernListing?.result?.resultType, 'complete');
     const modernTools = modernListing?.result?.tools;
     assert(Array.isArray(modernTools), `${host}: modern tools/list returned no tool array`);
-    assert.equal(modernTools.length, 10);
+    assert.equal(modernTools.length, expectedMcpTools.length);
     assert.deepEqual(modernTools.map((tool) => tool.name).sort(), [...expectedMcpTools].sort());
 
     const legacy = runMcpConversation(host, plugin, scratch, env, [
@@ -115,6 +116,7 @@ try {
     const initialization = legacy.get('initialize');
     const legacyListing = legacy.get('tools');
     assert.equal(initialization?.result?.protocolVersion, '2025-06-18');
+    assert.equal(initialization?.result?.instructions, discovery?.result?.instructions, `${host}: initialize lacks server instructions`);
     for (const response of [initialization, legacyListing]) {
       assert(response?.result && typeof response.result === 'object', `${host}: missing ordinary legacy result`);
       assert(!Object.hasOwn(response.result, 'resultType'), `${host}: legacy result must not have resultType`);

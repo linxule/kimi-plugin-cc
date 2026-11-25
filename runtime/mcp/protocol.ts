@@ -18,6 +18,16 @@ const CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities";
 const TASKS_EXTENSION = "io.modelcontextprotocol/tasks";
 const SERVER_INFO_META = "io.modelcontextprotocol/serverInfo";
 
+// Every supported version permits `instructions`: InitializeResult since 2024-11-05, DiscoverResult in 2026-07-28.
+export const MCP_SERVER_INSTRUCTIONS = [
+  "Prefer these tools for detached or long-running Kimi work.",
+  "Each model tool starts a durable job that keeps running if this connection drops; reconnect and look it up by job_id.",
+  "Where the host supports MCP tasks, completion arrives as a task notification; otherwise poll kimi_job_status and kimi_job_result with the returned job_id, and stop a job with kimi_job_cancel.",
+  "kimi_ask, kimi_review and kimi_swarm are read-only. kimi_rescue and kimi_pursue edit the workspace, never git; kimi_swarm_write edits a disposable worktree and returns a patch it never applies.",
+  "Use a write tool only when the user asked for edits, and kimi_pursue only for an explicitly autonomous objective.",
+  "A result may carry warnings, such as an uncertified Kimi release or workspace trust being off; relay them to the user.",
+].join(" ");
+
 type JsonRpcId = string | number | null;
 type ProtocolMode = "modern" | "legacy";
 
@@ -46,6 +56,7 @@ export function createMcpMessageHandler(env: NodeJS.ProcessEnv): (message: unkno
           resultType: "complete",
           supportedVersions: [MODERN_VERSION],
           capabilities: { tools: {}, extensions: { [TASKS_EXTENSION]: {} } },
+          instructions: MCP_SERVER_INSTRUCTIONS,
           _meta: { [SERVER_INFO_META]: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION } },
           ttlMs: 0,
           cacheScope: "private",
@@ -61,6 +72,7 @@ export function createMcpMessageHandler(env: NodeJS.ProcessEnv): (message: unkno
           protocolVersion: requested,
           capabilities: { tools: {} },
           serverInfo: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
+          instructions: MCP_SERVER_INSTRUCTIONS,
         });
       }
       if (method === "notifications/initialized") return undefined;

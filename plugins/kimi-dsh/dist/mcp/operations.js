@@ -45,6 +45,22 @@ const OBJECTIVE_PROPERTY = {
     type: "string",
     description: "The complete objective, preserved verbatim.",
 };
+const SCOPE_PROPERTIES = {
+    read_roots: {
+        type: "array",
+        items: { type: "string" },
+        description: "Absolute directories Kimi may also read. Omit for the default read scope.",
+    },
+    network: {
+        type: "boolean",
+        description: "Enable web search and URL fetch; file reads are then confined to the workspace plus read_roots. Default false.",
+    },
+};
+const REVIEW_MODE_PROPERTY = {
+    type: "string",
+    enum: ["defects", "challenge"],
+    description: "defects (default) reviews for bugs and regressions; challenge questions assumptions, design choices, and tradeoffs instead.",
+};
 const FOCUS_PROPERTY = {
     type: "string",
     description: "Optional review focus or adversarial framing, preserved verbatim.",
@@ -78,21 +94,14 @@ const OPERATION_SPECS = {
         command: ["ask"],
         write: false,
         summary: "Start an independent read-only Kimi repository explanation.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
     },
     kimi_review: {
         kind: "review",
         command: ["review"],
         write: false,
-        summary: "Start an independent read-only Kimi review of working-tree changes, including untracked files, or a committed base diff.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, base: BASE_PROPERTY, focus: FOCUS_PROPERTY }),
-    },
-    kimi_challenge: {
-        kind: "challenge",
-        command: ["task", "challenge"],
-        write: false,
-        summary: "Start a read-only Kimi challenge of assumptions, design choices, and tradeoffs rather than a defect-only review.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, base: BASE_PROPERTY, focus: FOCUS_PROPERTY }),
+        summary: "Start an independent read-only Kimi review of working-tree changes, including untracked files, or a committed base diff. Mode challenge questions the approach instead of hunting defects.",
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, mode: REVIEW_MODE_PROPERTY, base: BASE_PROPERTY, focus: FOCUS_PROPERTY }),
     },
     kimi_rescue: {
         kind: "rescue",
@@ -113,7 +122,7 @@ const OPERATION_SPECS = {
         command: ["task", "swarm"],
         write: false,
         summary: "Start a read-only parallel Kimi fan-out across many independent review targets.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY }, ["objective"]),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY }, ["objective"]),
     },
     kimi_swarm_write: {
         kind: "swarm-write",
@@ -167,9 +176,12 @@ export function buildMcpOperationInvocation(name, input) {
     const properties = spec.inputSchema.properties;
     const args = readArguments(input, Object.keys(properties));
     const workspace = optionalString(args, "workspace");
-    const argv = [...spec.command];
-    appendCommonOptions(argv, args, spec.kind === "pursue" || spec.kind === "swarm" || spec.kind === "swarm-write" ? "safety" : "response");
-    switch (spec.kind) {
+    const challenge = name === "kimi_review" && reviewMode(args) === "challenge";
+    const kind = challenge ? "challenge" : spec.kind;
+    const argv = challenge ? ["task", "challenge"] : [...spec.command];
+    appendCommonOptions(argv, args, kind === "pursue" || kind === "swarm" || kind === "swarm-write" ? "safety" : "response");
+    appendScopeOptions(argv, args);
+    switch (kind) {
         case "ask":
         case "rescue": {
             const prompt = args.prompt === undefined ? undefined : requiredNonEmptyString(args, "prompt");
@@ -186,7 +198,7 @@ export function buildMcpOperationInvocation(name, input) {
                 throw invalidArguments("resume uses the standard continuation instruction and cannot include prompt. Use resume_latest with a new prompt instead.");
             }
             if (prompt === undefined && !resumeLatest && resume === undefined) {
-                throw invalidArguments(`${spec.kind} requires prompt unless resume or resume_latest is selected.`);
+                throw invalidArguments(`${kind} requires prompt unless resume or resume_latest is selected.`);
             }
             if (fresh)
                 argv.push("--fresh");
@@ -223,13 +235,13 @@ export function buildMcpOperationInvocation(name, input) {
                 argv.push("--cap", String(cap));
             if (maxConcurrency !== undefined)
                 argv.push("--max-concurrency", String(maxConcurrency));
-            if (spec.kind === "swarm-write")
+            if (kind === "swarm-write")
                 argv.push("--write");
             argv.push("--", requiredNonEmptyString(args, "objective"));
             break;
         }
     }
-    return { operationKind: spec.kind, ...(workspace !== undefined ? { workspace } : {}), argv };
+    return { operationKind: kind, ...(workspace !== undefined ? { workspace } : {}), argv };
 }
 export function readJobControlArguments(input) {
     const args = readArguments(input, ["workspace", "job_id"]);
@@ -252,6 +264,25 @@ function appendCommonOptions(argv, args, budgetKind) {
         validateThinkingEffort(thinking, "mcp.args");
         argv.push("--thinking", thinking);
     }
+}
+function reviewMode(args) {
+    const mode = optionalString(args, "mode") ?? "defects";
+    if (mode !== "defects" && mode !== "challenge")
+        throw invalidArguments('mode must be "defects" or "challenge".');
+    return mode;
+}
+/** Type checks only: the companion parser and read-scope resolver own every scope rule. */
+function appendScopeOptions(argv, args) {
+    const readRoots = args.read_roots;
+    if (readRoots !== undefined) {
+        if (!Array.isArray(readRoots) || readRoots.some((root) => typeof root !== "string")) {
+            throw invalidArguments("read_roots must be an array of strings.");
+        }
+        for (const root of readRoots)
+            argv.push("--read-root", root);
+    }
+    if (optionalBoolean(args, "network") === true)
+        argv.push("--network");
 }
 function readArguments(input, allowedKeys) {
     if (input === undefined)

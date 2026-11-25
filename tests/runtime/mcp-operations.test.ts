@@ -4,6 +4,7 @@ import { RuntimeError } from "../../runtime/errors.js";
 import { allocateJobId } from "../../runtime/job-id.js";
 import {
   buildMcpOperationInvocation,
+  MCP_TOOL_DEFINITIONS,
   readJobControlArguments,
   type McpModelOperation,
   type McpModelToolName,
@@ -45,8 +46,8 @@ const operationCases: Array<{
     argv: ["review", ...commonArgv, "--base", "main", "--", "Check the changed API"],
   },
   {
-    name: "kimi_challenge",
-    input: { ...common, base: "HEAD~2", focus: "Challenge the design" },
+    name: "kimi_review",
+    input: { ...common, mode: "challenge", base: "HEAD~2", focus: "Challenge the design" },
     operationKind: "challenge",
     argv: ["task", "challenge", ...commonArgv, "--base", "HEAD~2", "--", "Challenge the design"],
   },
@@ -107,7 +108,7 @@ async function expectAsyncRuntimeError(promise: Promise<unknown>, code: string, 
 
 describe("MCP operation invocation construction", () => {
   for (const operation of operationCases) {
-    test(`${operation.name} maps to the exact companion operation and argv`, () => {
+    test(`${operation.name} (${operation.operationKind}) maps to the exact companion operation and argv`, () => {
       expect(buildMcpOperationInvocation(operation.name, operation.input)).toEqual({
         operationKind: operation.operationKind,
         workspace: common.workspace,
@@ -127,7 +128,6 @@ describe("MCP operation invocation construction", () => {
     const cases: Array<[McpModelToolName, string]> = [
       ["kimi_ask", "prompt"],
       ["kimi_review", "focus"],
-      ["kimi_challenge", "focus"],
       ["kimi_rescue", "prompt"],
       ["kimi_pursue", "objective"],
       ["kimi_swarm", "objective"],
@@ -144,7 +144,6 @@ describe("MCP operation invocation construction", () => {
     const minimalInputs: Record<McpModelToolName, Record<string, unknown>> = {
       kimi_ask: { prompt: "question" },
       kimi_review: {},
-      kimi_challenge: {},
       kimi_rescue: { prompt: "fix" },
       kimi_pursue: { objective: "goal" },
       kimi_swarm: { objective: "audit" },
@@ -256,6 +255,73 @@ describe("MCP operation invocation construction", () => {
         );
       }
     }
+  });
+});
+
+describe("MCP review mode and read scope", () => {
+  test("kimi_review defaults to a defect review and selects challenge only by mode", () => {
+    expect(buildMcpOperationInvocation("kimi_review", {})).toEqual({ operationKind: "review", argv: ["review"] });
+    expect(buildMcpOperationInvocation("kimi_review", { mode: "defects" })).toEqual({ operationKind: "review", argv: ["review"] });
+    expect(buildMcpOperationInvocation("kimi_review", { mode: "challenge" })).toEqual({ operationKind: "challenge", argv: ["task", "challenge"] });
+    for (const mode of ["Challenge", "adversarial", "", 1, true]) {
+      expectRuntimeError(() => buildMcpOperationInvocation("kimi_review", { mode }), "MCP_INVALID_ARGUMENTS");
+    }
+    expectRuntimeError(
+      () => buildMcpOperationInvocation("kimi_ask", { prompt: "x", mode: "challenge" }),
+      "MCP_INVALID_ARGUMENTS",
+      "Unknown argument mode",
+    );
+  });
+
+  test("read_roots and network map to repeated --read-root and --network before the text terminator", () => {
+    const scope = { read_roots: ["/opt/docs", "/srv/a dir"], network: true };
+    const flags = ["--read-root", "/opt/docs", "--read-root", "/srv/a dir", "--network"];
+    expect(buildMcpOperationInvocation("kimi_ask", { ...scope, prompt: "q" }).argv).toEqual(["ask", ...flags, "--", "q"]);
+    expect(buildMcpOperationInvocation("kimi_review", { ...scope, focus: "f" }).argv).toEqual(["review", ...flags, "--", "f"]);
+    expect(buildMcpOperationInvocation("kimi_review", { ...scope, mode: "challenge" }).argv).toEqual(["task", "challenge", ...flags]);
+    expect(buildMcpOperationInvocation("kimi_swarm", { ...scope, objective: "o" }).argv).toEqual(["task", "swarm", ...flags, "--", "o"]);
+    expect(buildMcpOperationInvocation("kimi_ask", { prompt: "q", network: false, read_roots: [] }).argv).toEqual(["ask", "--", "q"]);
+  });
+
+  test("write-capable tools do not accept read_roots or network", () => {
+    for (const [name, input] of [
+      ["kimi_rescue", { prompt: "fix" }],
+      ["kimi_pursue", { objective: "goal" }],
+      ["kimi_swarm_write", { objective: "edit" }],
+    ] as const) {
+      for (const [key, value] of [["read_roots", ["/opt"]], ["network", true]] as const) {
+        expectRuntimeError(
+          () => buildMcpOperationInvocation(name, { ...input, [key]: value }),
+          "MCP_INVALID_ARGUMENTS",
+          `Unknown argument ${key}`,
+        );
+      }
+    }
+  });
+
+  test("scope parameters are type-checked only; path rules stay with the runtime", () => {
+    for (const read_roots of ["/opt", [1], [null], {}]) {
+      expectRuntimeError(() => buildMcpOperationInvocation("kimi_ask", { prompt: "q", read_roots }), "MCP_INVALID_ARGUMENTS", "read_roots");
+    }
+    expectRuntimeError(() => buildMcpOperationInvocation("kimi_ask", { prompt: "q", network: "yes" }), "MCP_INVALID_ARGUMENTS", "network must be a boolean");
+    expect(buildMcpOperationInvocation("kimi_ask", { prompt: "q", read_roots: ["relative"] }).argv)
+      .toEqual(["ask", "--read-root", "relative", "--", "q"]);
+  });
+
+  test("tool definitions expose scope only on read-only tools and keep static annotations", () => {
+    const byName = new Map(MCP_TOOL_DEFINITIONS.map((tool) => [tool.name, tool]));
+    expect(byName.has("kimi_challenge" as never)).toBe(false);
+    for (const name of ["kimi_ask", "kimi_review", "kimi_swarm"] as const) {
+      const properties = byName.get(name)!.inputSchema.properties as Record<string, unknown>;
+      expect(Object.keys(properties)).toEqual(expect.arrayContaining(["read_roots", "network"]));
+      expect(byName.get(name)!.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: true });
+    }
+    for (const name of ["kimi_rescue", "kimi_pursue", "kimi_swarm_write"] as const) {
+      const properties = byName.get(name)!.inputSchema.properties as Record<string, unknown>;
+      expect(Object.keys(properties)).not.toContain("read_roots");
+      expect(Object.keys(properties)).not.toContain("network");
+    }
+    expect((byName.get("kimi_review")!.inputSchema.properties as any).mode.enum).toEqual(["defects", "challenge"]);
   });
 });
 
