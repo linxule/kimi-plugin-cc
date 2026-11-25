@@ -986,7 +986,7 @@ function installKimiResult(args) {
     };
 }
 /**
- * Install exactly `version` into `<data root>/kimi-bin/<version>/` and point
+ * Install exactly `version` into `<data root>/kimi-plugin-cc/kimi-bin/<version>/` and point
  * `current` at it. A verified existing install is reused without network
  * access. Downloads stage in a sibling directory that is verified with the
  * exact-version probe before it is renamed into place; any failure removes

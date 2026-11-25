@@ -7,7 +7,7 @@ import { resolveKimiBinDir } from "./paths.js";
 /**
  * Resolve the kimi binary command + prefix args for cli-client calls.
  * Binary order: KIMI_PLUGIN_CC_KIMI_BIN, then the plugin-owned
- * `<data root>/kimi-bin/current` installed by `setup --install-kimi`, then
+ * `<data root>/kimi-plugin-cc/kimi-bin/current` installed by `setup --install-kimi`, then
  * "kimi" on PATH. The engine's exact-version probe gates whichever is chosen.
  * Environment overrides support tests and non-default Node setups:
  *
@@ -31,7 +31,7 @@ export interface ResolvedKimiCommand {
 export type KimiBinarySource = "override" | "plugin-owned" | "path";
 
 export interface PluginOwnedKimiState {
-  /** `<data root>/kimi-bin`, or null when the data root cannot be resolved. */
+  /** `<data root>/kimi-plugin-cc/kimi-bin`, or null when the data root cannot be resolved. */
   binDir: string | null;
   status: "active" | "absent" | "rejected" | "unavailable";
   /** Realpath of the plugin-owned binary when active. */
@@ -64,7 +64,7 @@ export function selectKimiBinary(env: NodeJS.ProcessEnv): KimiBinarySelection {
 
 /**
  * The plugin-owned binary is used only when `current` resolves to an
- * executable regular file inside `<data root>/kimi-bin/<x.y.z>/`. The resolved
+ * executable regular file inside `<data root>/kimi-plugin-cc/kimi-bin/<x.y.z>/`. The resolved
  * realpath is returned so the checked file is the one the plan records.
  * Anything else falls back to PATH, as before this install existed.
  */

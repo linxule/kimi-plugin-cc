@@ -21,7 +21,7 @@ export function resolvePluginPaths(env) {
  * both use this helper so they cannot disagree about the location.
  */
 export function resolveKimiBinDir(env) {
-    return path.join(resolvePluginDataRoot(env), "kimi-bin");
+    return path.join(resolvePluginPaths(env).pluginRoot, "kimi-bin");
 }
 export async function ensurePluginPaths(paths) {
     await mkdir(paths.pluginRoot, { recursive: true });

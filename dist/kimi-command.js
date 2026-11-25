@@ -16,7 +16,7 @@ export function selectKimiBinary(env) {
 }
 /**
  * The plugin-owned binary is used only when `current` resolves to an
- * executable regular file inside `<data root>/kimi-bin/<x.y.z>/`. The resolved
+ * executable regular file inside `<data root>/kimi-plugin-cc/kimi-bin/<x.y.z>/`. The resolved
  * realpath is returned so the checked file is the one the plan records.
  * Anything else falls back to PATH, as before this install existed.
  */

@@ -76,7 +76,7 @@ async function makeCase(extra: NodeJS.ProcessEnv = {}): Promise<Case> {
   return {
     root,
     dataRoot,
-    binDir: path.join(dataRoot, "kimi-bin"),
+    binDir: path.join(dataRoot, "kimi-plugin-cc", "kimi-bin"),
     npmLog,
     env,
     context: { cwd: root, env, stdout: process.stdout, stderr: process.stderr },

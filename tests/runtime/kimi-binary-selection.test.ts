@@ -33,7 +33,7 @@ function envFor(dataRoot: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Process
 }
 
 async function writePin(dataRoot: string, version: string, printed = version): Promise<string> {
-  const binDir = path.join(dataRoot, "kimi-bin");
+  const binDir = path.join(dataRoot, "kimi-plugin-cc", "kimi-bin");
   const binary = path.join(binDir, version, "node_modules", ".bin", "kimi");
   await mkdir(path.dirname(binary), { recursive: true });
   await writeFile(binary, `#!/bin/sh\necho ${printed}\n`, "utf8");
@@ -46,6 +46,17 @@ describe.skipIf(process.platform === "win32")("plugin-owned kimi binary selectio
   test("PATH kimi when no data root resolves (unchanged default)", () => {
     expect(resolveKimiCliCommand({})).toEqual({ command: "kimi", prefixArgs: [] });
     expect(selectKimiBinary({}).pluginOwned.status).toBe("unavailable");
+  });
+
+  test("a link at the data root's top level is not the plugin-owned install", async () => {
+    const dataRoot = await makeDataRoot();
+    const binary = path.join(dataRoot, "kimi-bin", "2.7.3", "node_modules", ".bin", "kimi");
+    await mkdir(path.dirname(binary), { recursive: true });
+    await writeFile(binary, "#!/bin/sh\necho 2.7.3\n", "utf8");
+    await chmod(binary, 0o755);
+    await symlink(path.join("2.7.3", "node_modules", ".bin", "kimi"), path.join(dataRoot, "kimi-bin", "current"));
+    expect(selectKimiBinary(envFor(dataRoot))).toMatchObject({ command: "kimi", source: "path" });
+    expect(inspectPluginOwnedKimi(envFor(dataRoot)).binDir).toBe(path.join(dataRoot, "kimi-plugin-cc", "kimi-bin"));
   });
 
   test("PATH kimi when nothing is installed", async () => {
@@ -82,14 +93,14 @@ describe.skipIf(process.platform === "win32")("plugin-owned kimi binary selectio
     ).toThrow(/reserved kimi flag/);
   });
 
-  test("current escaping the data root's kimi-bin falls back to PATH", async () => {
+  test("current escaping kimi-plugin-cc/kimi-bin falls back to PATH", async () => {
     const dataRoot = await makeDataRoot();
     const outside = path.join(dataRoot, "elsewhere", "kimi");
     await mkdir(path.dirname(outside), { recursive: true });
     await writeFile(outside, "#!/bin/sh\necho 2.7.3\n", "utf8");
     await chmod(outside, 0o755);
-    await mkdir(path.join(dataRoot, "kimi-bin"), { recursive: true });
-    await symlink(outside, path.join(dataRoot, "kimi-bin", "current"));
+    await mkdir(path.join(dataRoot, "kimi-plugin-cc", "kimi-bin"), { recursive: true });
+    await symlink(outside, path.join(dataRoot, "kimi-plugin-cc", "kimi-bin", "current"));
     const selection = selectKimiBinary(envFor(dataRoot));
     expect(selection).toMatchObject({ command: "kimi", source: "path" });
     expect(selection.pluginOwned.status).toBe("rejected");
@@ -102,20 +113,20 @@ describe.skipIf(process.platform === "win32")("plugin-owned kimi binary selectio
     await mkdir(path.join(outside, "bin"), { recursive: true });
     await writeFile(path.join(outside, "bin", "kimi"), "#!/bin/sh\necho 2.7.3\n", "utf8");
     await chmod(path.join(outside, "bin", "kimi"), 0o755);
-    await mkdir(path.join(dataRoot, "kimi-bin"), { recursive: true });
-    await symlink(outside, path.join(dataRoot, "kimi-bin", "2.7.3"));
-    await symlink(path.join("2.7.3", "bin", "kimi"), path.join(dataRoot, "kimi-bin", "current"));
+    await mkdir(path.join(dataRoot, "kimi-plugin-cc", "kimi-bin"), { recursive: true });
+    await symlink(outside, path.join(dataRoot, "kimi-plugin-cc", "kimi-bin", "2.7.3"));
+    await symlink(path.join("2.7.3", "bin", "kimi"), path.join(dataRoot, "kimi-plugin-cc", "kimi-bin", "current"));
     expect(inspectPluginOwnedKimi(envFor(dataRoot)).status).toBe("rejected");
     expect(resolveKimiCliCommand(envFor(dataRoot)).command).toBe("kimi");
   });
 
   test("a target outside an exact-version directory is rejected", async () => {
     const dataRoot = await makeDataRoot();
-    const binary = path.join(dataRoot, "kimi-bin", "latest", "kimi");
+    const binary = path.join(dataRoot, "kimi-plugin-cc", "kimi-bin", "latest", "kimi");
     await mkdir(path.dirname(binary), { recursive: true });
     await writeFile(binary, "#!/bin/sh\necho 2.7.3\n", "utf8");
     await chmod(binary, 0o755);
-    await symlink(path.join("latest", "kimi"), path.join(dataRoot, "kimi-bin", "current"));
+    await symlink(path.join("latest", "kimi"), path.join(dataRoot, "kimi-plugin-cc", "kimi-bin", "current"));
     expect(inspectPluginOwnedKimi(envFor(dataRoot)).status).toBe("rejected");
   });
 
@@ -131,8 +142,8 @@ describe.skipIf(process.platform === "win32")("plugin-owned kimi binary selectio
 
   test("a dangling current falls back to PATH", async () => {
     const dataRoot = await makeDataRoot();
-    await mkdir(path.join(dataRoot, "kimi-bin"), { recursive: true });
-    await symlink(path.join("2.7.3", "node_modules", ".bin", "kimi"), path.join(dataRoot, "kimi-bin", "current"));
+    await mkdir(path.join(dataRoot, "kimi-plugin-cc", "kimi-bin"), { recursive: true });
+    await symlink(path.join("2.7.3", "node_modules", ".bin", "kimi"), path.join(dataRoot, "kimi-plugin-cc", "kimi-bin", "current"));
     expect(selectKimiBinary(envFor(dataRoot))).toMatchObject({ command: "kimi", source: "path" });
     expect(inspectPluginOwnedKimi(envFor(dataRoot)).status).toBe("rejected");
   });
