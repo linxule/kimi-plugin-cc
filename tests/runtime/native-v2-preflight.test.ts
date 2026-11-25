@@ -766,3 +766,91 @@ describe("G3: child environment forces uncertified experimental features off", (
     }
   });
 });
+
+describe("G2: print cancels a create-time default_plan_mode enter", () => {
+  const certified = (operationKind: string, kimiVersion = "2.7.3") =>
+    ({ operationKind, kimiVersion, certification: "certified" as const });
+  const ENTER = JSON.stringify({ type: "plan_mode.enter", agentId: "main", id: "plan-1", time: 1 });
+  const CANCEL = JSON.stringify({ type: "plan_mode.cancel", agentId: "main", time: 2 });
+  const TURN = JSON.stringify({ type: "turn.begin", agentId: "main", time: 3 });
+
+  test("a fresh certified non-swarm launch on a cancelling row no longer refuses the setting", async () => {
+    await withHome("g2-fresh", async (home) => {
+      await writeConfig(home, "default_plan_mode = true\n");
+      for (const operationKind of ["ask", "review", "challenge", "review_gate", "rescue", "pursue"]) {
+        for (const version of ["2.4.0", "2.5.3", "2.6.0", "2.7.3"]) {
+          await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified(operationKind, version) }))
+            .resolves.toEqual({ warnings: [] });
+        }
+      }
+      const refused = { code: "CLI_V2_PLAN_MODE_CONFIGURED", details: { refusal_kind: "v2-plan-mode-configured" } };
+      for (const release of [
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.3.3"), certified("ask", "0.42.0"),
+        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
+        undefined,
+      ]) {
+        await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release })).rejects.toMatchObject(refused);
+      }
+      // Resume keeps the config refusal (fresh-only relaxation).
+      await writeJournal(home, "ws1", "session-1", "main", [ENTER, CANCEL, TURN]);
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", release: certified("ask"),
+      })).rejects.toMatchObject(refused);
+    });
+  });
+
+  test("an unreadable config still refuses a fresh certified launch", async () => {
+    await withHome("g2-unreadable", async (home) => {
+      await writeConfig(home, "default_plan_mode = \n");
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified("ask") }))
+        .rejects.toMatchObject({ code: "CLI_V2_CONFIG_UNREADABLE" });
+    });
+  });
+
+  test("resume tolerates only an adjacent main enter→cancel pair before any work on a linear journal", async () => {
+    await withHome("g2-resume-ok", async (home) => {
+      await writeJournal(home, "ws1", "session-1", "main", [
+        JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: home }),
+        ENTER, CANCEL, TURN, JSON.stringify({ type: "tool.call", agentId: "main" }),
+      ]);
+      await writeJournal(home, "ws1", "session-1", "sub-1", [TURN]);
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", expectedExecutionRoot: home, release: certified("ask"),
+      })).resolves.toEqual({ warnings: [] });
+      // The same journal still taints without a certified cancelling row.
+      for (const release of [undefined, certified("ask", "2.3.3"), certified("swarm"),
+        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const }]) {
+        await expect(assertNativeV2Preflight({
+          kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", expectedExecutionRoot: home, release,
+        })).rejects.toMatchObject({ code: "KIMI_SESSION_PLAN_TAINTED" });
+      }
+    });
+  });
+
+  const tainted: Array<[string, string, string[]]> = [
+    ["enter-last", "main", [ENTER]],
+    ["work-between", "main", [ENTER, TURN, CANCEL]],
+    ["work-before", "main", [TURN, ENTER, CANCEL]],
+    ["other-id", "main", [ENTER, JSON.stringify({ type: "plan_mode.cancel", agentId: "main", id: "plan-2" })]],
+    ["other-agent-cancel", "main", [ENTER, JSON.stringify({ type: "plan_mode.cancel", agentId: "sub-1" })]],
+    ["exit-not-cancel", "main", [ENTER, JSON.stringify({ type: "plan_mode.exit", agentId: "main" })]],
+    ["second-enter", "main", [ENTER, CANCEL, TURN, ENTER, CANCEL]],
+    ["revision-after", "main", [ENTER, CANCEL, JSON.stringify({ type: "plan.revision", agentId: "main", id: "plan-1" })]],
+    ["undo-after", "main", [ENTER, CANCEL, TURN, JSON.stringify({ type: "context.undo", agentId: "main" })]],
+    ["undone-after", "main", [ENTER, CANCEL, JSON.stringify({ type: "context.undone" })]],
+    ["switch-before", "main", [JSON.stringify({ type: "agent.switched" }), ENTER, CANCEL]],
+    ["unparseable-between", "main", [ENTER, "{not json", CANCEL]],
+    ["non-main-journal", "sub-1", [ENTER, CANCEL]],
+    ["enter-without-id", "main", [JSON.stringify({ type: "plan_mode.enter", agentId: "main" }), CANCEL]],
+  ];
+  test.each(tainted)("resume still refuses: %s", async (_name, agent, lines) => {
+    await withHome("g2-resume-tainted", async (home) => {
+      await writeJournal(home, "ws1", "session-1", agent, lines);
+      if (agent !== "main") await writeJournal(home, "ws1", "session-1", "main", [TURN]);
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", release: certified("ask"),
+      })).rejects.toMatchObject({ code: "KIMI_SESSION_PLAN_TAINTED" });
+    });
+  });
+});

@@ -364,11 +364,27 @@ type JournalScanFinding =
   | { readonly kind: "tainted"; readonly recordType: string }
   | { readonly kind: "environment"; readonly recordType: string };
 
+/** Records that mean the session already did work: a turn, prompt, tool, model or delegated task. */
+const ACTIVITY_RECORD = /^(turn\.|prompt\.|tool\.|llm\.|shell\.|subagent\.|task\.|assistant\.|context\.append_message$|context\.append_loop_event$)/;
+/** Records that make replay non-linear (branch switch or undo), so a fold could differ. */
+const REWIND_RECORD = /^(agent\.switched$|context\.undo$|context\.undone$)/;
+
 async function scanJournalLines(
   handle: import("node:fs/promises").FileHandle,
   expectedExecutionRoot: string | undefined,
+  tolerateCancelledDefaultEnter = false,
 ): Promise<JournalScanFinding | null> {
   const rl = createInterface({ input: handle.createReadStream() });
+  // G2: a print-created session's main journal holds the create-time
+  // `default_plan_mode` enter immediately followed by print's id-less cancel,
+  // before any work. On a linear journal that pair folds to inactive, so it
+  // alone is tolerated; every other plan record, or that pair anywhere else,
+  // still taints.
+  let sawActivity = false;
+  let sawRewind = false;
+  let pendingEnter: { readonly id: unknown } | null = null;
+  let toleratedPair = false;
+  const taintEnter = { kind: "tainted", recordType: "plan_mode.enter" } as const;
   try {
     for await (const rawLine of rl) {
       const line = rawLine.trim();
@@ -377,6 +393,7 @@ async function scanJournalLines(
       try {
         parsed = JSON.parse(line);
       } catch {
+        if (pendingEnter !== null) return taintEnter;
         if (line.includes('"plan_mode.') || line.includes('"plan.')) {
           return { kind: "tainted", recordType: "<unparseable>" };
         }
@@ -387,7 +404,28 @@ async function scanJournalLines(
       }
       const record = parsed as Record<string, unknown> | null;
       const type = record?.["type"];
+      if (pendingEnter !== null) {
+        const cancelId = record?.["id"];
+        const cancels = type === "plan_mode.cancel" && record?.["agentId"] === "main" &&
+          (cancelId === undefined || cancelId === pendingEnter.id);
+        if (!cancels) return taintEnter;
+        pendingEnter = null;
+        toleratedPair = true;
+        continue;
+      }
+      if (typeof type === "string" && REWIND_RECORD.test(type)) {
+        if (toleratedPair) return taintEnter;
+        sawRewind = true;
+      }
+      if (typeof type === "string" && ACTIVITY_RECORD.test(type)) sawActivity = true;
       if (typeof type === "string" && (type.startsWith("plan_mode.") || type.startsWith("plan."))) {
+        if (
+          tolerateCancelledDefaultEnter && type === "plan_mode.enter" && !toleratedPair &&
+          !sawActivity && !sawRewind && record?.["agentId"] === "main" && typeof record?.["id"] === "string"
+        ) {
+          pendingEnter = { id: record["id"] };
+          continue;
+        }
         return { kind: "tainted", recordType: type };
       }
       if (type === "environment.set_binding") {
@@ -400,6 +438,8 @@ async function scanJournalLines(
         }
       }
     }
+    // An enter as the last record was never cancelled.
+    if (pendingEnter !== null) return taintEnter;
     return null;
   } finally {
     rl.close();
@@ -461,6 +501,7 @@ export async function scanSessionJournalsForPlan(
   kimiHome: string,
   sessionId: string,
   expectedExecutionRoot?: string,
+  options: { readonly tolerateCancelledDefaultEnter?: boolean } = {},
 ): Promise<SessionJournalPlanScan> {
   const sessionsDir = path.join(kimiHome, "sessions");
   const workspaceEntries = await boundedReaddir(sessionsDir, DIR_ENUM_CAP);
@@ -474,7 +515,7 @@ export async function scanSessionJournalsForPlan(
     return { kind: "unavailable", reason: `could not enumerate the session tree: ${workspaceEntries.reason}` };
   }
 
-  const journalPaths: string[] = [];
+  const journalPaths: { readonly path: string; readonly main: boolean }[] = [];
   for (const workspaceEntry of workspaceEntries.entries) {
     // A symlinked entry in the session tree is refused, not skipped: a
     // symlinked agent (or workspace) directory has isDirectory() === false, so
@@ -510,7 +551,7 @@ export async function scanSessionJournalsForPlan(
         };
       }
       if (!agentEntry.isDirectory()) continue;
-      journalPaths.push(path.join(agentsDir, agentEntry.name, "wire.jsonl"));
+      journalPaths.push({ path: path.join(agentsDir, agentEntry.name, "wire.jsonl"), main: agentEntry.name === "main" });
     }
   }
 
@@ -518,13 +559,17 @@ export async function scanSessionJournalsForPlan(
     return { kind: "unavailable", reason: `no agent wire journals found for session ${sessionId}` };
   }
 
-  for (const journalPath of journalPaths) {
+  for (const { path: journalPath, main } of journalPaths) {
     const opened = await openJournalSafely(journalPath, JOURNAL_MAX_BYTES);
     if (opened.kind === "unavailable") {
       return { kind: "unavailable", reason: `${journalPath}: ${opened.reason}` };
     }
     try {
-      const finding = await scanJournalLines(opened.handle, expectedExecutionRoot);
+      const finding = await scanJournalLines(
+        opened.handle,
+        expectedExecutionRoot,
+        main && options.tolerateCancelledDefaultEnter === true,
+      );
       if (finding?.kind === "tainted") {
         return { kind: "tainted", journal: journalPath, recordType: finding.recordType };
       }
@@ -536,7 +581,7 @@ export async function scanSessionJournalsForPlan(
     }
   }
 
-  return { kind: "clean", journals: journalPaths };
+  return { kind: "clean", journals: journalPaths.map((journal) => journal.path) };
 }
 
 export interface NativeV2PreflightOptions {
@@ -580,6 +625,19 @@ export interface NativeV2PreflightResult {
   readonly warnings: readonly string[];
 }
 
+/** A non-swarm launch of an exactly certified row that has the capability. */
+function certifiedPrintLaunchHas(
+  options: NativeV2PreflightOptions,
+  capability: KimiReleaseCapability,
+): boolean {
+  const release = options.release;
+  return release !== undefined &&
+    release.certification === "certified" &&
+    release.operationKind !== "swarm" &&
+    release.operationKind !== "swarm-write" &&
+    kimiCertifiedReleaseHas(release.kimiVersion, capability);
+}
+
 /**
  * A per-release config relaxation applies only to a fresh, non-swarm launch
  * of an exactly certified row that has the capability. Web-created swarm
@@ -589,13 +647,7 @@ function freshCertifiedLaunchHas(
   options: NativeV2PreflightOptions,
   capability: KimiReleaseCapability,
 ): boolean {
-  const release = options.release;
-  return options.resumeSessionId === undefined &&
-    release !== undefined &&
-    release.certification === "certified" &&
-    release.operationKind !== "swarm" &&
-    release.operationKind !== "swarm-write" &&
-    kimiCertifiedReleaseHas(release.kimiVersion, capability);
+  return options.resumeSessionId === undefined && certifiedPrintLaunchHas(options, capability);
 }
 
 export async function assertNativeV2Preflight(
@@ -605,8 +657,14 @@ export async function assertNativeV2Preflight(
   const stage = options.stage ?? "native-v2.preflight";
   const configPath = kimiCodeConfigPath(options.kimiHome);
 
+  // A fresh print on a print-cancels-plan row cancels the create-time enter
+  // before any turn (run-v2-print.ts), so the setting no longer refuses there.
+  // An unreadable config still refuses.
   const planMode = await inspectPlanModeConfig(options.kimiHome);
-  if (planMode.kind === "refuse") {
+  const printCancelsPlan = planMode.kind === "refuse" &&
+    planMode.refusalKind === "v2-plan-mode-configured" &&
+    freshCertifiedLaunchHas(options, "print-cancels-plan");
+  if (planMode.kind === "refuse" && !printCancelsPlan) {
     const code =
       planMode.refusalKind === "v2-plan-mode-configured"
         ? "CLI_V2_PLAN_MODE_CONFIGURED"
@@ -666,6 +724,7 @@ export async function assertNativeV2Preflight(
       options.kimiHome,
       options.resumeSessionId,
       options.expectedExecutionRoot,
+      { tolerateCancelledDefaultEnter: certifiedPrintLaunchHas(options, "print-cancels-plan") },
     );
     if (journalScan.kind === "environment") {
       throw new RuntimeError(

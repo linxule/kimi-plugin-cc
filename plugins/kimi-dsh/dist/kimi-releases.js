@@ -20,7 +20,8 @@ const preset = (...capabilities) => Object.freeze(capabilities);
 const NONE = preset();
 const HOOK_SCHEMA = preset("hook-schema");
 const WEB = preset(...HOOK_SCHEMA, "web-preactivation");
-const LOCAL = preset(...WEB, "local-environment", "agent-state");
+const WEB_CANCEL = preset(...WEB, "print-cancels-plan");
+const LOCAL = preset(...WEB_CANCEL, "local-environment", "agent-state");
 const MODERN_WS = preset(...LOCAL, "modern-ws-control");
 const BOUNDED = preset(...MODERN_WS, "bounded-swarm");
 const JSON_READY = preset(...BOUNDED, "web-json-ready");
@@ -39,8 +40,8 @@ export const KIMI_V2_RELEASES = Object.freeze([
     { version: "2.3.1", commit: "684bae9e", scope: "all", capabilities: HOOK_SCHEMA },
     { version: "2.3.2", commit: "b8dd3a13", scope: "all", capabilities: WEB },
     { version: "2.3.3", commit: "ec495f0c", scope: "all", capabilities: WEB },
-    { version: "2.4.0", commit: "f26e4d91", scope: "all", capabilities: WEB },
-    { version: "2.4.1", commit: "2c73f3f5", scope: "all", capabilities: WEB },
+    { version: "2.4.0", commit: "f26e4d91", scope: "all", capabilities: WEB_CANCEL },
+    { version: "2.4.1", commit: "2c73f3f5", scope: "all", capabilities: WEB_CANCEL },
     { version: "2.5.0", commit: "41c34143", scope: "all", capabilities: LOCAL },
     { version: "2.5.1", commit: "1b02030d", scope: "all", capabilities: LOCAL },
     { version: "2.5.2", commit: "1c142a00", scope: "all", capabilities: LOCAL },

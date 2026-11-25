@@ -29,6 +29,9 @@ const EXPECTED: Record<KimiReleaseCapability, string[]> = {
   "modern-ws-control": ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"],
   "bounded-swarm": ["2.6.2", "2.6.3", "2.7.2", "2.7.3"],
   "web-json-ready": ["2.7.2", "2.7.3"],
+  "print-cancels-plan": [
+    "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3",
+  ],
 };
 
 describe("kimi-releases table", () => {

@@ -94,6 +94,8 @@ import {
   type KimiOperationKind,
 } from "../../runtime/kimi-engine.js";
 import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
+import { kimiCertifiedReleaseHas } from "../../runtime/kimi-releases.js";
+import { scanSessionJournalsForPlan } from "../../runtime/native-v2-preflight.js";
 import { parseVersionLine } from "../../runtime/kimi-version-probe.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
@@ -1209,9 +1211,11 @@ suite("real-binary smoke: agent-core-v2 is refused before spawn", () => {
 // plan-file Write bypasses the hook when plan mode is armed), so this refusal is
 // not vacuous. On a pinned legacy-v1 binary the same config keeps the fresh and
 // resumed runs on v1 and hook-denies writes (the pre-0.42 contract).
-suite("real-binary smoke: default_plan_mode is refused (v2) or pinned (v1)", () => {
+suite("real-binary smoke: default_plan_mode is cancelled or refused (v2) or pinned (v1)", () => {
   test(
-    BINARY_IS_V2
+    BINARY_IS_V2 && kimiCertifiedReleaseHas(BINARY_VERSION, "print-cancels-plan")
+      ? "native-v2: fresh print cancels default_plan_mode before any turn and stays hook-denied"
+      : BINARY_IS_V2
       ? "native-v2: default_plan_mode=true refuses before spawn and creates no process"
       : "legacy-v1: fresh default-plan and resumed runs remain v1 and hook-deny writes",
     async () => {
@@ -1239,6 +1243,43 @@ suite("real-binary smoke: default_plan_mode is refused (v2) or pinned (v1)", () 
           KIMI_CODE_HOME: kimiHome,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
+
+        if (BINARY_IS_V2 && kimiCertifiedReleaseHas(BINARY_VERSION, "print-cancels-plan")) {
+          // G2: this release's fresh print cancels the create-time enter before
+          // any turn, so the run proceeds, stays hook-denied, and its journal
+          // holds exactly the adjacent enter→cancel pair the resume fold tolerates.
+          expect(
+            await readFile(path.join(kimiHome, "config.toml"), "utf8"),
+            "test setup must have written default_plan_mode = true",
+          ).toContain("default_plan_mode = true");
+          const result = await runCliPrompt({
+            cwd: workspace,
+            env: baseEnv,
+            command,
+            prefixArgs,
+            executionPlan: smokePlan(command, prefixArgs, "review"),
+            commandLabel: "review",
+            prompt: WRITE_PROMPT,
+          });
+          expect(result.systemVersion, "the fresh run must prove native-v2 started").toBe(BINARY_VERSION);
+          expect(
+            await fileExists(path.join(workspace, TARGET_FILENAME)),
+            `a fresh default-plan run must not create ${TARGET_FILENAME}`,
+          ).toBe(false);
+          expect(result.sessionId, "the fresh run must yield a session id").toBeDefined();
+          const journals = await findSessionJournals(kimiHome, result.sessionId!);
+          const mainJournal = journals.find((journal) => path.basename(path.dirname(journal)) === "main");
+          expect(mainJournal, "the main agent journal must exist").toBeDefined();
+          const types = (await readFile(mainJournal!, "utf8")).split("\n").filter(Boolean)
+            .map((line) => (JSON.parse(line) as { type?: string }).type);
+          const enterAt = types.indexOf("plan_mode.enter");
+          expect(enterAt, "default_plan_mode must have armed plan mode at create").toBeGreaterThanOrEqual(0);
+          expect(types[enterAt + 1], "print must cancel immediately after the enter").toBe("plan_mode.cancel");
+          expect(
+            await scanSessionJournalsForPlan(kimiHome, result.sessionId!, workspace, { tolerateCancelledDefaultEnter: true }),
+          ).toMatchObject({ kind: "clean" });
+          return;
+        }
 
         if (BINARY_IS_V2) {
           // PRECONDITION: the config really has default_plan_mode = true.
