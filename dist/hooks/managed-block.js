@@ -23,8 +23,11 @@
 //   - `event = "PreToolUse"` is required.
 //   - Exactly one `[[hooks]]` table appears inside the markers.
 //   - The decoded command must equal the canonical expected command byte-for-byte.
+//   - Every PreToolUse entry with that command needs an effective timeout of at
+//     least HOOK_TIMEOUT_S (checked on the whole-file parse).
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 import { classifyHookCommandDrift, describeHookCommandDrift, hostIdFromHookCommand, isOurApprovalHookCommand, } from "./install-paths.js";
+import { HOOK_TIMEOUT_S, hookTimeoutEnforces } from "./hook-timing.js";
 const MARKER_TAG = "kimi-plugin-cc-managed";
 /**
  * Plain install removes unpaired marker comments for every host and leaves each
@@ -352,9 +355,9 @@ export function decodeManagedCommandLine(trimmedLine) {
  * True if a parsed `hooks[]` array contains a clean enforcing entry for
  * `expectedCommand`: `event="PreToolUse"`, byte-exact `command`, NO `matcher`
  * (any spelling the parser normalized to the `matcher` key can disable/narrow
- * the hook), and no keys beyond {event,command,timeout} (a stray key is fatal to
- * kimi-code's strict schema). Each host's hook path is distinct, so the command
- * uniquely identifies this host's entry.
+ * the hook), no keys beyond {event,command,timeout} (a stray key is fatal to
+ * kimi-code's strict schema), and a timeout kimi-code waits out. Each host's
+ * hook path is distinct, so the command uniquely identifies this host's entry.
  */
 function countCleanEntries(hooks, expectedCommand) {
     if (!Array.isArray(hooks))
@@ -373,6 +376,8 @@ function countCleanEntries(hooks, expectedCommand) {
             continue;
         if (!Object.keys(rec).every((k) => allowedKeys.has(k)))
             continue;
+        if (!hookTimeoutEnforces(rec.timeout))
+            continue;
         count += 1;
     }
     return count;
@@ -389,6 +394,44 @@ export function countCleanEntriesInFile(contents, expectedCommand) {
     if (parsed === null || typeof parsed !== "object")
         return 0;
     return countCleanEntries(parsed.hooks, expectedCommand);
+}
+/**
+ * The first PreToolUse entry with this exact command whose timeout kimi-code
+ * would not wait out, in whole-file parse order (a `timeout` after the END
+ * marker binds to the same table). kimi-code runs only the first entry per
+ * command, after matcher filtering, so a short copy anywhere can be the one
+ * that runs and its timeout is read as allow. `null` when every copy enforces
+ * or the file does not parse; parse failures already fail closed elsewhere.
+ */
+export function findShortHookTimeout(contents, expectedCommand) {
+    let parsed;
+    try {
+        parsed = parseToml(contents);
+    }
+    catch {
+        return null;
+    }
+    const hooks = parsed?.hooks;
+    if (!Array.isArray(hooks))
+        return null;
+    for (const entry of hooks) {
+        if (entry === null || typeof entry !== "object")
+            continue;
+        const rec = entry;
+        if (rec.event !== "PreToolUse" || rec.command !== expectedCommand)
+            continue;
+        if (!hookTimeoutEnforces(rec.timeout))
+            return { timeout: rec.timeout };
+    }
+    return null;
+}
+/** `timeout = <value>` as written, for diagnoses. */
+export function describeHookTimeout(timeout) {
+    const shown = typeof timeout === "number" || typeof timeout === "bigint" ? String(timeout) : JSON.stringify(timeout);
+    return `timeout = ${shown}`;
+}
+export function hookTimeoutReason(timeout) {
+    return `this host's hook entry has ${describeHookTimeout(timeout)}; kimi-code reads a hook that runs past its timeout as allow, so the entry needs a timeout of at least ${HOOK_TIMEOUT_S} seconds. Run /kimi:setup to rewrite it.`;
 }
 /**
  * Parser-based fallback used only in the absent state. Parse the WHOLE file
@@ -421,7 +464,16 @@ function foundHookEntryIsClean(contents, expectedCommand) {
 }
 export function evaluateInstalled(contents, expectedCommand, opts) {
     const { state } = parseManagedBlock(contents, opts.hostId);
+    const shortTimeout = findShortHookTimeout(contents, expectedCommand);
+    const timeoutRefusal = () => ({
+        installed: false,
+        reason: hookTimeoutReason(shortTimeout.timeout),
+        state,
+        timeoutTooShort: true,
+    });
     if (state.kind === "absent") {
+        if (shortTimeout !== null)
+            return timeoutRefusal();
         // kimi-code config rewrites drop comments but leave hook tables intact. In
         // the absent state only, accept a marker-less table that is exactly this
         // host's clean enforcing hook: markers are not the security boundary, the
@@ -484,6 +536,8 @@ export function evaluateInstalled(contents, expectedCommand, opts) {
             drift: classifyHookCommandDrift(state.commandPath, expectedCommand),
         };
     }
+    if (shortTimeout !== null)
+        return timeoutRefusal();
     if (!foundHookEntryIsClean(contents, expectedCommand)) {
         return {
             installed: false,

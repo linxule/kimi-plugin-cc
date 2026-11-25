@@ -30,7 +30,7 @@ import { HOOK_TIMEOUT_S } from "../hooks/hook-timing.js";
 import { olderHostHookWarnings } from "../hooks/install.js";
 import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKimiConfigLock, } from "../hooks/config-safety.js";
 import { buildHookShellCommand, hostIdFromHookCommand, parseHookShellCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
-import { decodeManagedCommandLine, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, ORPHAN_MARKER_REMEDY, pairBlocks, parseManagedBlock, } from "../hooks/managed-block.js";
+import { decodeManagedCommandLine, describeHookTimeout, effectiveHost, evaluateInstalled, findShortHookTimeout, findUnmanagedApprovalHookBlocks, ORPHAN_MARKER_REMEDY, pairBlocks, parseManagedBlock, } from "../hooks/managed-block.js";
 import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
 import { inspectPluginOwnedKimi, selectKimiBinary } from "../kimi-command.js";
 import { isNativeV2CertifiedVersion, NATIVE_V2_ANY_OPERATION_VERSIONS, NATIVE_V2_CERTIFIED_VERSIONS, NATIVE_V2_NON_SWARM_VERSIONS, } from "../kimi-engine.js";
@@ -171,12 +171,15 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         // splice line numbers. Another host's marker-less table may be its live hook
         // after a config rewrite strips comments, so it must remain untouched.
         const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
+        const shortBefore = findShortHookTimeout(inlineHooks.contents, expectedCommand);
         const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, hostId, expectedCommand);
         const existing = pruned;
         if (prunedCount > 0) {
             const readorned = prunedCommands.includes(expectedCommand);
             warnings.push(readorned
-                ? `Re-adorned this host's managed-block markers: kimi-code rewrites its config on login/settings changes and strips all comments (markers included), leaving the hook enforcing but unmarked. Replaced the bare hook table with a freshly marked block (${prunedCount} table(s) refreshed). Enforcement was never interrupted.`
+                ? shortBefore === null
+                    ? `Re-adorned this host's managed-block markers: kimi-code rewrites its config on login/settings changes and strips all comments (markers included), leaving the hook enforcing but unmarked. Replaced the bare hook table with a freshly marked block (${prunedCount} table(s) refreshed). Enforcement was never interrupted.`
+                    : `Re-adorned this host's managed-block markers: replaced the bare hook table with a freshly marked block (${prunedCount} table(s) refreshed).`
                 : `Pruned ${prunedCount} stale marker-less kimi-plugin-cc hook block(s) left by this host's earlier installs. This is a cleanup — your active hook is unaffected.`);
         }
         const { state, blocks } = parseManagedBlock(existing, hostId);
@@ -208,6 +211,15 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
             ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
             : insertBlockNearManagedBlocks(existing, blocks, block, lineEnding);
         await assertKimiHookSetValid(next, configPath, "setup.install", context.env);
+        // Setup rewrites only its own block and prunable tables. Any other copy of
+        // this command (e.g. one with a matcher) can be the entry kimi-code runs.
+        const shortAfter = findShortHookTimeout(next, expectedCommand);
+        if (shortAfter !== null) {
+            throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `kimi-code config at ${configPath} has another [[hooks]] entry with this host's hook command and ${describeHookTimeout(shortAfter.timeout)}; kimi-code runs only one entry per command and reads a hook that runs past its timeout as allow. Remove that entry before rerunning /kimi:setup; the existing config was left unchanged.`, "setup.install", { details: { configPath, timeout: describeHookTimeout(shortAfter.timeout) } });
+        }
+        if (shortBefore !== null) {
+            warnings.push(`Rewrote this host's hook entry from ${describeHookTimeout(shortBefore.timeout)} to timeout = ${HOOK_TIMEOUT_S}: kimi-code reads a hook that runs past its timeout as allow, so the earlier entry did not reliably enforce.`);
+        }
         const blockWritten = next !== original;
         if (blockWritten)
             await writeConfigAtomic(configPath, next);
@@ -330,16 +342,20 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
     }
     if (!installedCheck.installed) {
         return failedCheck({
-            summary: installedCheck.state.kind === "absent"
-                ? `kimi-plugin-cc managed block is NOT installed in ${configPath}.`
-                : `kimi-plugin-cc managed block is present but invalid: ${installedCheck.reason}.`,
+            summary: installedCheck.timeoutTooShort === true
+                ? `kimi-plugin-cc PreToolUse hook in ${configPath} does not enforce: ${installedCheck.reason}`
+                : installedCheck.state.kind === "absent"
+                    ? `kimi-plugin-cc managed block is NOT installed in ${configPath}.`
+                    : `kimi-plugin-cc managed block is present but invalid: ${installedCheck.reason}.`,
             reason: installedCheck.reason ?? "managed block missing or invalid",
             detailReason: installedCheck.reason ?? "block missing/invalid",
-            nextStep: installedCheck.state.kind === "absent"
-                ? "Run /kimi:setup (without --check) to install the managed block."
-                : installedCheck.state.kind === "orphan"
-                    ? ORPHAN_MARKER_REMEDY
-                    : "Run /kimi:setup --uninstall, then /kimi:setup to repair.",
+            nextStep: installedCheck.timeoutTooShort === true
+                ? "Run /kimi:setup (without --check) to rewrite the hook timeout."
+                : installedCheck.state.kind === "absent"
+                    ? "Run /kimi:setup (without --check) to install the managed block."
+                    : installedCheck.state.kind === "orphan"
+                        ? ORPHAN_MARKER_REMEDY
+                        : "Run /kimi:setup --uninstall, then /kimi:setup to repair.",
         });
     }
     collectPermissionRuleWarnings(existing, warnings);

@@ -2,7 +2,7 @@ import { constants as fsConstants, existsSync } from "node:fs";
 import { access, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
-import { countCleanEntriesInFile, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, parseManagedBlock, } from "./managed-block.js";
+import { countCleanEntriesInFile, effectiveHost, evaluateInstalled, findShortHookTimeout, findUnmanagedApprovalHookBlocks, parseManagedBlock, } from "./managed-block.js";
 import { hostIdFromHookCommand, parseHookShellCommand, resolveHostId, tryBuildExpectedHookCommand, } from "./install-paths.js";
 import { RuntimeError } from "../errors.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
@@ -69,7 +69,9 @@ export async function verifyHookInstalled(env, options = {}) {
     const warnings = [];
     if (!check.installed &&
         (check.state.kind === "duplicate" || check.state.kind === "orphan") &&
-        countCleanEntriesInFile(raw, expected.command) >= 1) {
+        countCleanEntriesInFile(raw, expected.command) >= 1 &&
+        // A short-timeout copy of the command can be the one kimi-code runs.
+        findShortHookTimeout(raw, expected.command) === null) {
         warnings.push(`The managed kimi-code PreToolUse hook is installed and enforcing, but its config markers need repair: ${check.reason}`);
     }
     else if (!check.installed) {

@@ -7,6 +7,7 @@ import {
   countCleanEntriesInFile,
   effectiveHost,
   evaluateInstalled,
+  findShortHookTimeout,
   findUnmanagedApprovalHookBlocks,
   parseManagedBlock,
   type HookCommandDrift,
@@ -148,7 +149,9 @@ export async function verifyHookInstalled(
   if (
     !check.installed &&
     (check.state.kind === "duplicate" || check.state.kind === "orphan") &&
-    countCleanEntriesInFile(raw, expected.command) >= 1
+    countCleanEntriesInFile(raw, expected.command) >= 1 &&
+    // A short-timeout copy of the command can be the one kimi-code runs.
+    findShortHookTimeout(raw, expected.command) === null
   ) {
     warnings.push(
       `The managed kimi-code PreToolUse hook is installed and enforcing, but its config markers need repair: ${check.reason}`,

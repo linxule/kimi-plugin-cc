@@ -1608,3 +1608,79 @@ describe("host-scoped orphan markers", () => {
     expect(parseManagedBlock(text, "codex").state.kind).toBe("orphan");
   });
 });
+
+describe("H2-1: setup checks and repairs the hook's upstream timeout", () => {
+  const userPrefix = 'default_model = "kimi-code/kimi-for-coding"\n\n';
+
+  async function installed(name: string): Promise<{ env: NodeJS.ProcessEnv; configPath: string; healthy: string; command: string }> {
+    const { env, configPath } = await makeCase(name);
+    await writeFile(configPath, userPrefix, "utf8");
+    await runSetup([], makeContext(env));
+    const healthy = await readFile(configPath, "utf8");
+    expect(healthy.match(/^timeout = 15$/gm)).toHaveLength(1);
+    const hooks = (parseToml(healthy) as { hooks: Array<{ command: string }> }).hooks;
+    return { env, configPath, healthy, command: hooks[0]!.command };
+  }
+
+  test("--check fails on a too-short timeout without writing; install rewrites the block in place", async () => {
+    const { env, configPath, healthy } = await installed("timeout-short-marked");
+    const short = healthy.replace(/^timeout = 15$/m, "timeout = 1");
+    await writeFile(configPath, short, "utf8");
+
+    const check = await runSetup(["--check"], makeContext(env));
+    expect(check.probe).toBe("failed");
+    expect(check.probeError).toContain("timeout = 1");
+    expect(check.nextStep).toContain("without --check");
+    expect(check.nextStep).not.toContain("--uninstall");
+    expect(await readFile(configPath, "utf8")).toBe(short);
+
+    const repair = await runSetup([], makeContext(env));
+    expect(repair.blockWritten).toBe(true);
+    expect(repair.warnings.join("\n")).toContain("timeout = 1");
+    expect(await readFile(configPath, "utf8")).toBe(healthy);
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
+  });
+
+  test("a marker-less table with a short timeout fails --check and install re-adorns it at the installed timeout", async () => {
+    const { env, configPath, healthy } = await installed("timeout-short-bare");
+    const bare = healthy
+      .split("\n")
+      .filter((line) => !line.startsWith("#"))
+      .join("\n")
+      .replace(/^timeout = 15$/m, "timeout = 1");
+    await writeFile(configPath, bare, "utf8");
+
+    const check = await runSetup(["--check"], makeContext(env));
+    expect(check.probe).toBe("failed");
+    expect(check.probeError).toContain("timeout = 1");
+    expect(await readFile(configPath, "utf8")).toBe(bare);
+
+    const repair = await runSetup([], makeContext(env));
+    expect(repair.blockWritten).toBe(true);
+    expect(repair.warnings.join("\n")).not.toContain("never interrupted");
+    expect(repair.warnings.join("\n")).toContain("timeout = 1");
+    const after = await readFile(configPath, "utf8");
+    expect(after.startsWith(userPrefix)).toBe(true);
+    expect(after).not.toMatch(/^timeout = 1$/m);
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
+  });
+
+  test("install refuses, unchanged, when a short same-command entry it cannot prune would run first", async () => {
+    const { env, configPath, healthy, command } = await installed("timeout-short-shadow");
+    const shadow = [
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = ${JSON.stringify(command)}`,
+      'matcher = "Bash"',
+      "timeout = 1",
+      "",
+    ].join("\n");
+    expect(healthy.startsWith(userPrefix)).toBe(true);
+    const shadowed = userPrefix + shadow + healthy.slice(userPrefix.length);
+    await writeFile(configPath, shadowed, "utf8");
+
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("failed");
+    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({ code: "SETUP_INVALID_HOOKS_CONFIG" });
+    expect(await readFile(configPath, "utf8")).toBe(shadowed);
+  });
+});

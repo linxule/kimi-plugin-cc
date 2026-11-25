@@ -12,6 +12,11 @@ import {
 } from "../../runtime/hooks/install.js";
 import { buildHookShellCommand, resolveHostId } from "../../runtime/hooks/install-paths.js";
 import { evaluateInstalled } from "../../runtime/hooks/managed-block.js";
+import {
+  HOOK_DECISION_DEADLINE_MS,
+  HOOK_TIMEOUT_S,
+  UPSTREAM_DEFAULT_HOOK_TIMEOUT_S,
+} from "../../runtime/hooks/hook-timing.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 /**
@@ -1010,5 +1015,92 @@ describe("G6: job-time tolerance for marker damage around an enforcing hook", ()
       expect(status.installed).toBe(true);
       expect("warnings" in status).toBe(false);
     });
+  });
+});
+
+describe("H2-1: an entry enforces only when kimi-code waits for the hook's decision", () => {
+  const BEGIN = "# === BEGIN kimi-plugin-cc-managed (v1.0.0) ===";
+  const END = "# === END kimi-plugin-cc-managed ===";
+  const hookPath = "/opt/kimi-timeout-test/dist/hooks/approval-hook.js";
+  const command = canonicalCommandFor(hookPath);
+  const hostId = resolveHostId({}, hookPath);
+  const table = (extra: string[]) =>
+    ["[[hooks]]", 'event = "PreToolUse"', `command = ${JSON.stringify(command)}`, ...extra];
+  const evaluate = (lines: string[]) => evaluateInstalled(lines.join("\n"), command, { hostId });
+
+  test("the three timing numbers keep the deadline inside the timeout kimi-code applies", () => {
+    expect(UPSTREAM_DEFAULT_HOOK_TIMEOUT_S).toBe(30);
+    expect(UPSTREAM_DEFAULT_HOOK_TIMEOUT_S).toBeGreaterThanOrEqual(HOOK_TIMEOUT_S);
+    expect(HOOK_DECISION_DEADLINE_MS).toBeLessThan(HOOK_TIMEOUT_S * 1000);
+  });
+
+  test("a marked block enforces at timeout >= HOOK_TIMEOUT_S or with no key (upstream default)", () => {
+    for (const [extra, installed] of [
+      [[`timeout = ${HOOK_TIMEOUT_S}`], true],
+      [["timeout = 600"], true],
+      [[], true],
+      [[`timeout = ${HOOK_TIMEOUT_S - 1}`], false],
+      [["timeout = 1"], false],
+      [["timeout = 15.5"], false],
+    ] as const) {
+      const result = evaluate([BEGIN, ...table([...extra]), END]);
+      expect([extra, result.installed]).toEqual([extra, installed]);
+      if (!installed) {
+        expect(result.reason).toContain(`timeout = ${extra[0]!.split("= ")[1]}`);
+        expect(result.reason).toContain(`at least ${HOOK_TIMEOUT_S} seconds`);
+        expect(result.reason).toContain("Run /kimi:setup");
+        expect(result.timeoutTooShort).toBe(true);
+        expect(result.drift).toBeUndefined();
+      }
+    }
+  });
+
+  test("a short timeout after the END marker binds to the same table and refuses", () => {
+    const result = evaluate([BEGIN, ...table([]), END, "timeout = 1"]);
+    expect(result.installed).toBe(false);
+    expect(result.reason).toContain("timeout = 1");
+  });
+
+  test("a marker-less table counts only with an enforcing timeout", () => {
+    expect(evaluate(table([`timeout = ${HOOK_TIMEOUT_S}`]))).toMatchObject({ installed: true, via: "bare-table" });
+    const short = evaluate(table(["timeout = 1"]));
+    expect(short.installed).toBe(false);
+    expect(short.reason).toContain("timeout = 1");
+    expect(short.timeoutTooShort).toBe(true);
+  });
+
+  test("an earlier same-command entry with a short timeout shadows a clean block (kimi-code runs the first)", () => {
+    for (const shadow of [
+      [...table(["timeout = 1"])],
+      [...table(['matcher = "Bash"', "timeout = 1"])],
+    ]) {
+      const result = evaluate([...shadow, "", BEGIN, ...table([`timeout = ${HOOK_TIMEOUT_S}`]), END]);
+      expect([shadow, result.installed]).toEqual([shadow, false]);
+      expect(result.reason).toContain("timeout = 1");
+    }
+  });
+
+  test("verifyHookInstalled refuses a too-short timeout, including under G6 marker damage", async () => {
+    for (const [prefix, build] of [
+      ["hook-timeout-short", (cmd: string) => [BEGIN, "[[hooks]]", 'event = "PreToolUse"', `command = ${JSON.stringify(cmd)}`, "timeout = 1", END]],
+      ["hook-timeout-dup", (cmd: string) => [
+        BEGIN, "[[hooks]]", 'event = "PreToolUse"', `command = ${JSON.stringify(cmd)}`, "timeout = 1", END,
+        BEGIN, "[[hooks]]", 'event = "PreToolUse"', `command = ${JSON.stringify(cmd)}`, "timeout = 15", END,
+      ]],
+    ] as const) {
+      const home = await createTestPluginDataRoot(prefix);
+      try {
+        const script = path.join(home, "dist", "hooks", "approval-hook.js");
+        await mkdir(path.dirname(script), { recursive: true });
+        await writeFile(script, "// hook\n", "utf8");
+        await writeFile(path.join(home, "config.toml"), build(canonicalCommandFor(script)).join("\n"), "utf8");
+        const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_HOOK_SCRIPT: script });
+        expect([prefix, status.installed]).toEqual([prefix, false]);
+        expect(status.warnings).toBeUndefined();
+        if (prefix === "hook-timeout-short") expect(status.reason).toContain("timeout = 1");
+      } finally {
+        await cleanupTestPath(home);
+      }
+    }
   });
 });
