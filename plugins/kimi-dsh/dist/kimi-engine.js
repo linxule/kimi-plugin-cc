@@ -7,6 +7,7 @@ import { resolveKimiHome } from "./kimi-home.js";
 import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { isInTestedRange, parseVersionLine, probeKimiVersion, } from "./kimi-version-probe.js";
+import { isRecord } from "./util.js";
 export const NATIVE_V2_SAFETY_PROFILE = "native-v2-no-plan/1";
 /**
  * Minimum legacy-v1 version that actually contains each operation. The upper
@@ -607,9 +608,6 @@ async function resolveExactExecutable(command, cwd, env) {
         }
     }
     throw new RuntimeError("KIMI_EXECUTION_PLAN_UNRESOLVED", `Refusing to spawn kimi because executable ${JSON.stringify(command)} could not be resolved to an exact runnable path. Run Claude Code \`/kimi:setup\` or Codex \`$kimi-setup\` to verify the active binary, or correct KIMI_PLUGIN_CC_KIMI_BIN and retry.`, "kimi-engine.plan", { details: { command, cwd } });
-}
-function isRecord(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function parseProtocolVersion(value) {
     const match = value.match(/^(\d+)\.(\d+)(?:\.\d+)?$/);

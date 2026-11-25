@@ -14,6 +14,7 @@ import {
   type KimiVersionProbeOk,
 } from "./kimi-version-probe.js";
 import type { JobRecord, JobStore } from "./job-store.js";
+import { isRecord } from "./util.js";
 
 export type KimiEngine = "legacy-v1" | "native-v2";
 
@@ -895,10 +896,6 @@ async function resolveExactExecutable(
     "kimi-engine.plan",
     { details: { command, cwd } },
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseProtocolVersion(value: string): { major: number; minor: number } | null {
