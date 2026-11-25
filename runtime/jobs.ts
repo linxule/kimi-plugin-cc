@@ -139,7 +139,7 @@ export async function sweepStaleJobs(store: JobStore, paths: PluginPaths): Promi
         companionMissing
           ? "Background worker disappeared before reporting a terminal state."
           : "Kimi process disappeared before reporting a terminal state.",
-        job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined,
+        lineagePhase(job, "failed"),
       );
       continue;
     }
@@ -168,12 +168,17 @@ export async function sweepStaleJobs(store: JobStore, paths: PluginPaths): Promi
         "jobs.sweep",
       ),
       "Foreground Kimi job disappeared before reporting a terminal state.",
-      job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined,
+      lineagePhase(job, "failed"),
     );
   }
 }
 
 export const STALE_SWEEP_GRACE_MS = 15_000;
+
+/** Ask and rescue rows track a phase; the other lineages leave it untouched. */
+export function lineagePhase(job: Pick<JobRecord, "command_type">, phase: string): { phase: string } | undefined {
+  return job.command_type === "ask" || job.command_type === "rescue" ? { phase } : undefined;
+}
 
 function isStaleEnoughToSweep(job: JobRecord): boolean {
   const updatedAt = Date.parse(job.updated_at);
@@ -218,7 +223,7 @@ function terminateRecordedProcesses(job: JobRecord): void {
   }
 }
 
-function killPid(pid: number, signal: NodeJS.Signals): void {
+export function killPid(pid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(pid, signal);
   } catch (error) {
@@ -231,7 +236,7 @@ function killPid(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-function isPidAlive(pid: number): boolean {
+export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -244,8 +249,7 @@ function isPidAlive(pid: number): boolean {
     // pid in v0.2.2+; under normal usage we should always have permission
     // to signal our own descendants. Returning true here lets stale jobs
     // hide forever (the sweeper relies on isPidAlive=false to flip them to
-    // failed). signalJobProcesses and killPid already swallow EPERM
-    // consistently — this brings the read path in line with the write path.
+    // failed). killPid swallows EPERM the same way.
     if (code === "ESRCH" || code === "EPERM") {
       return false;
     }

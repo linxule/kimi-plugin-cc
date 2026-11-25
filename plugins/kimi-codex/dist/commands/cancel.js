@@ -1,7 +1,6 @@
-import process from "node:process";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
+import { isPidAlive, killPid, lineagePhase, markJobCancelled, sweepStaleJobs } from "../jobs.js";
 import { JobStore, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
@@ -104,7 +103,7 @@ export async function runCancel(argv, context) {
         await withJobStore(paths, async (forcedStore) => {
             const current = forcedStore.getJob(job.job_id);
             if (current?.status === "running") {
-                await markJobCancelled(forcedStore, paths, current, "Job was force-cancelled after recorded process termination.", undefined, current.command_type === "ask" || current.command_type === "rescue" ? { phase: "cancelled" } : undefined);
+                await markJobCancelled(forcedStore, paths, current, "Job was force-cancelled after recorded process termination.", undefined, lineagePhase(current, "cancelled"));
             }
         });
         return `${JSON.stringify({
@@ -150,20 +149,8 @@ function signalJobProcesses(job, signal, include = { companion: true, kimi: true
         pids.add(job.pid);
     if (include.kimi && job.kimi_pid !== null)
         pids.add(job.kimi_pid);
-    for (const pid of pids) {
-        try {
-            process.kill(pid, signal);
-        }
-        catch (error) {
-            const code = error.code;
-            // ESRCH: process already gone. EPERM: pid was likely reused by an
-            // unrelated process we don't own — silently skip rather than surface a
-            // confusing "operation not permitted" to the user.
-            if (code !== "ESRCH" && code !== "EPERM") {
-                throw error;
-            }
-        }
-    }
+    for (const pid of pids)
+        killPid(pid, signal);
 }
 async function waitForCancellation(paths, jobId) {
     const deadline = Date.now() + 4_000;
@@ -186,25 +173,5 @@ async function waitForCancellation(paths, jobId) {
     return null;
 }
 function hasLiveRecordedProcess(job) {
-    const pids = new Set();
-    if (job.pid !== null)
-        pids.add(job.pid);
-    if (job.kimi_pid !== null)
-        pids.add(job.kimi_pid);
-    for (const pid of pids) {
-        try {
-            process.kill(pid, 0);
-            return true;
-        }
-        catch (error) {
-            const code = error.code;
-            // ESRCH: definitively dead. EPERM: pid likely reused by an
-            // unrelated process — treat as dead for our purposes (consistent
-            // with isPidAlive in jobs.ts and signalJobProcesses above).
-            if (code !== "ESRCH" && code !== "EPERM") {
-                return true;
-            }
-        }
-    }
-    return false;
+    return (job.pid !== null && isPidAlive(job.pid)) || (job.kimi_pid !== null && job.kimi_pid !== job.pid && isPidAlive(job.kimi_pid));
 }

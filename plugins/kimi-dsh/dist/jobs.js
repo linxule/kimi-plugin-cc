@@ -100,7 +100,7 @@ export async function sweepStaleJobs(store, paths) {
                 ? `Background worker pid ${job.pid} is no longer running.`
                 : `Kimi pid ${job.kimi_pid} is no longer running while background worker pid ${job.pid} is still recorded.`, "jobs.sweep"), companionMissing
                 ? "Background worker disappeared before reporting a terminal state."
-                : "Kimi process disappeared before reporting a terminal state.", job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined);
+                : "Kimi process disappeared before reporting a terminal state.", lineagePhase(job, "failed"));
             continue;
         }
         if (!companionMissing && !kimiMissing) {
@@ -115,10 +115,14 @@ export async function sweepStaleJobs(store, paths) {
             continue;
         }
         terminateRecordedProcesses(job);
-        await markJobFailed(store, paths, job, new RuntimeError("FOREGROUND_PROCESS_DISAPPEARED", describeMissingForegroundProcess(job, companionMissing, kimiMissing), "jobs.sweep"), "Foreground Kimi job disappeared before reporting a terminal state.", job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined);
+        await markJobFailed(store, paths, job, new RuntimeError("FOREGROUND_PROCESS_DISAPPEARED", describeMissingForegroundProcess(job, companionMissing, kimiMissing), "jobs.sweep"), "Foreground Kimi job disappeared before reporting a terminal state.", lineagePhase(job, "failed"));
     }
 }
 export const STALE_SWEEP_GRACE_MS = 15_000;
+/** Ask and rescue rows track a phase; the other lineages leave it untouched. */
+export function lineagePhase(job, phase) {
+    return job.command_type === "ask" || job.command_type === "rescue" ? { phase } : undefined;
+}
 function isStaleEnoughToSweep(job) {
     const updatedAt = Date.parse(job.updated_at);
     return Number.isFinite(updatedAt) && Date.now() - updatedAt >= STALE_SWEEP_GRACE_MS;
@@ -156,7 +160,7 @@ function terminateRecordedProcesses(job) {
         timer.unref();
     }
 }
-function killPid(pid, signal) {
+export function killPid(pid, signal) {
     try {
         process.kill(pid, signal);
     }
@@ -169,7 +173,7 @@ function killPid(pid, signal) {
         }
     }
 }
-function isPidAlive(pid) {
+export function isPidAlive(pid) {
     try {
         process.kill(pid, 0);
         return true;
@@ -183,8 +187,7 @@ function isPidAlive(pid) {
         // pid in v0.2.2+; under normal usage we should always have permission
         // to signal our own descendants. Returning true here lets stale jobs
         // hide forever (the sweeper relies on isPidAlive=false to flip them to
-        // failed). signalJobProcesses and killPid already swallow EPERM
-        // consistently — this brings the read path in line with the write path.
+        // failed). killPid swallows EPERM the same way.
         if (code === "ESRCH" || code === "EPERM") {
             return false;
         }
