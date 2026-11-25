@@ -319,6 +319,7 @@ describe("evaluateRescueHookRequest", () => {
       { command: "rm -f <root>/two" },
       { command: "rm -fr <root>/dir/" },
       { command: "rm -- <root>/a.txt" },
+      { command: "rm -f -r -- <root>/dir" },
       { command: "rm <root>/a.txt <root>/dir/b.txt" },
       { command: "rm <root>/dir/b.txt", cwd: "dir" },
       { command: "rm -rf '<root>/dir'" },
@@ -429,7 +430,14 @@ describe("evaluateRescueHookRequest", () => {
       { command: "rm -Rf <root>/dir", reason: "only with" },
       { command: "cp -Rp <root>/dir <root>/new-dir", reason: "only with" },
       { command: "mv -rf <root>/a.txt <root>/b.txt", reason: "only with" },
-      { command: "rm <root>/a.txt -v", reason: "only with" },
+      // BSD getopt stops at the first operand, so a later dash-shaped token is an operand
+      { command: "rm <root>/a.txt -v", reason: "absolute paths" },
+      { command: "rm <root>/a.txt -f", reason: "absolute paths" },
+      { command: "rm -r <root>/dir -f", reason: "absolute paths" },
+      { command: "mkdir <root>/x -p", reason: "absolute paths" },
+      { command: "mv <root>/a.txt -f <root>/b.txt", reason: "absolute paths" },
+      { command: "mv <root>/a.txt -- <root>/b.txt", reason: "absolute paths" },
+      { command: "cp <root>/a.txt -R <root>/new", reason: "absolute paths" },
       // zero or too few operands
       { command: "rm", reason: "at least 1" },
       { command: "rm -rf", reason: "at least 1" },

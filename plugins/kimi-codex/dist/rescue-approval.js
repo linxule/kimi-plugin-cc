@@ -455,6 +455,9 @@ async function validateFileOperationStage(tokens, workspaceRoot) {
             flags.add(arg);
             continue;
         }
+        // BSD getopt stops at the first operand (`rm /x -f` also removes a file
+        // named `-f`), so every later token, `--` included, is an operand.
+        endOfFlags = true;
         if (!FILE_OPERAND.test(arg)) {
             return {
                 ok: false,
