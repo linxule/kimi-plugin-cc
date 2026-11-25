@@ -26,10 +26,7 @@
 // shell-quoted absolute tokens — the resolved Node binary and hook script — so
 // `/bin/sh -c` does not depend on its working directory or PATH.
 
-import { fileURLToPath } from "node:url";
-
 import { decideHookOutcome, type HookInput } from "./approval-policy.js";
-import { hookAbstainsForJob, JOB_HOOK_ENV, JOB_HOST_ENV, ownHookHostIds } from "./job-host.js";
 import { NETWORK_ENV, READ_ROOTS_ENV } from "../read-scope.js";
 import { evaluateRescueHookRequest } from "../rescue-approval.js";
 import { SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV } from "../swarm-policy.js";
@@ -48,22 +45,6 @@ async function main(): Promise<void> {
     input = parsed as HookInput;
   } catch (err) {
     failClosed(`stdin was not a JSON object: ${formatErr(err)}`);
-    return;
-  }
-
-  // Another host launched this job: emit no decision, exactly like a call with
-  // no plugin label. This adds no unguarded case. The launching runtime exports
-  // KIMI_PLUGIN_CC_JOB_HOST and KIMI_PLUGIN_CC_JOB_HOOK on the same spawn that
-  // sets the labels, and only after `verifyHookInstalled` proved its own host's
-  // block installed, enforcing and byte-exact, so that hook (whose id matches)
-  // still decides. We abstain only while that hook script still exists; a
-  // script removed mid-job makes every hook enforce again. Not covered: the
-  // launching block edited out of the config while its script remains, which
-  // kimi-code only notices on a hooks reload. Under
-  // KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 the runtime deletes both variables and
-  // every hook enforces as before. An unknown own identity enforces.
-  if (hookAbstainsForJob(process.env[JOB_HOST_ENV], process.env[JOB_HOOK_ENV], ownIdentity())) {
-    process.exit(0);
     return;
   }
 
@@ -89,14 +70,6 @@ async function main(): Promise<void> {
   }
 
   process.exit(0);
-}
-
-function ownIdentity(): string[] {
-  try {
-    return ownHookHostIds([process.argv[1], fileURLToPath(import.meta.url)]);
-  } catch {
-    return [];
-  }
 }
 
 function failClosed(reason: string): void {

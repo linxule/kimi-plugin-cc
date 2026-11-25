@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId } from "../../runtime/cli-client.js";
+import { buildKimiCliEnvironment, runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId } from "../../runtime/cli-client.js";
 import { assertCliResultSuccess } from "../../runtime/commands/cli-helpers.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import { classifyManagedCommandFailure, classifySetupFailure } from "../../runtime/kimi-errors.js";
@@ -2430,5 +2430,18 @@ describe("runCliPromptWithBudget", () => {
     } finally {
       await cleanupTestPath(root);
     }
+  });
+});
+
+describe("child environment names no launching host", () => {
+  test("every hook enforces: the spawn exports no job-host identity", () => {
+    const env = buildKimiCliEnvironment({
+      cwd: process.cwd(),
+      env: { KIMI_PLUGIN_CC_HOOK_SCRIPT: "/opt/kimi-plugin-cc/dist/hooks/approval-hook.js" },
+      executionPlan: testExecutionPlan("kimi"),
+      commandLabel: "review",
+    });
+    expect("KIMI_PLUGIN_CC_JOB_HOST" in env).toBe(false);
+    expect("KIMI_PLUGIN_CC_JOB_HOOK" in env).toBe(false);
   });
 });

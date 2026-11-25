@@ -18,8 +18,6 @@ import {
   type KimiEngine,
   type KimiExecutionPlan,
 } from "./kimi-engine.js";
-import { resolveHookScriptPath } from "./hooks/install-paths.js";
-import { JOB_HOOK_ENV, JOB_HOST_ENV, jobHostForHookScript } from "./hooks/job-host.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { kimiReleaseHas } from "./kimi-releases.js";
@@ -1332,15 +1330,6 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
   if (opts.commandLabel !== undefined) {
     env.KIMI_PLUGIN_CC_CMD = opts.commandLabel;
   }
-  // Set or deleted on every spawn: an ambient value never survives.
-  const launching = launchingHook(opts.env);
-  if (launching === undefined) {
-    delete env[JOB_HOST_ENV];
-    delete env[JOB_HOOK_ENV];
-  } else {
-    env[JOB_HOST_ENV] = launching.host;
-    env[JOB_HOOK_ENV] = launching.script;
-  }
   if (opts.swarmMaxConcurrency !== undefined) {
     env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY = String(opts.swarmMaxConcurrency);
   }
@@ -1361,22 +1350,6 @@ export function buildKimiCliEnvironment(opts: CliClientEnvironmentOptions): Node
     Object.assign(env, scopeEnv);
   }
   return env;
-}
-
-/**
- * The hook every command gate verified for this spawn (its id and resolved
- * script path), from the same environment and path the verifier uses. Other
- * hosts' hooks abstain for it while that script exists. Under the skip-check
- * bypass nothing was verified, so nothing is exported and every hook enforces.
- */
-function launchingHook(env: NodeJS.ProcessEnv): { host: string; script: string } | undefined {
-  if (env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK === "1") return undefined;
-  try {
-    const script = path.resolve(resolveHookScriptPath(env));
-    return { host: jobHostForHookScript(script), script };
-  } catch {
-    return undefined;
-  }
 }
 
 function appendToTail(tail: string, chunk: string, maxBytes: number): string {

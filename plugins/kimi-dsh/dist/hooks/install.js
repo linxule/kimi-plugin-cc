@@ -4,7 +4,6 @@ import path from "node:path";
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import { countCleanEntriesInFile, effectiveHost, evaluateInstalled, findUnmanagedApprovalHookBlocks, parseManagedBlock, } from "./managed-block.js";
 import { hostIdFromHookCommand, parseHookShellCommand, resolveHostId, tryBuildExpectedHookCommand, } from "./install-paths.js";
-import { jobHostForHookScript } from "./job-host.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 export async function verifyHookInstalled(env, options = {}) {
     const configPath = resolveKimiCodeConfigPath(env);
@@ -151,8 +150,8 @@ const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
  * executes anything and never refuses.
  */
 export async function olderHostHookWarnings(contents, ownHostId, ownCommand) {
-    const ownScript = parseHookShellCommand(ownCommand)?.hookScript;
-    const ownIds = new Set([ownHostId, ...(ownScript !== undefined ? [jobHostForHookScript(ownScript)] : [])]);
+    const ownDerived = hostIdFromHookCommand(ownCommand);
+    const ownIds = new Set([ownHostId, ...(ownDerived !== null ? [ownDerived] : [])]);
     const others = new Map();
     for (const block of parseManagedBlock(contents, ownHostId).blocks) {
         const host = effectiveHost(block, ownHostId);

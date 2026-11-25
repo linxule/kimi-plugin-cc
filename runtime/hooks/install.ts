@@ -17,7 +17,6 @@ import {
   resolveHostId,
   tryBuildExpectedHookCommand,
 } from "./install-paths.js";
-import { jobHostForHookScript } from "./job-host.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 import type { KimiVersionProbeOk } from "../kimi-version-probe.js";
 
@@ -240,8 +239,8 @@ export async function olderHostHookWarnings(
   ownHostId: string,
   ownCommand: string,
 ): Promise<string[]> {
-  const ownScript = parseHookShellCommand(ownCommand)?.hookScript;
-  const ownIds = new Set([ownHostId, ...(ownScript !== undefined ? [jobHostForHookScript(ownScript)] : [])]);
+  const ownDerived = hostIdFromHookCommand(ownCommand);
+  const ownIds = new Set([ownHostId, ...(ownDerived !== null ? [ownDerived] : [])]);
   const others = new Map<string, string>();
   for (const block of parseManagedBlock(contents, ownHostId).blocks) {
     const host = effectiveHost(block, ownHostId);

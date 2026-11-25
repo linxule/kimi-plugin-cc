@@ -15,12 +15,11 @@
 //
 //   The harness pattern mirrors tests/runtime/review-gate-hook.test.ts.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { JOB_HOOK_ENV, JOB_HOST_ENV, jobHostForHookScript } from "../../runtime/hooks/job-host.js";
 import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
 
 const hookScriptPath = path.join(process.cwd(), "runtime/hooks/approval-hook.ts");
@@ -324,68 +323,24 @@ describe("pursue metadata hook environment", () => {
   });
 });
 
-describe("job host: a hook decides only for its own host's jobs", () => {
-  const bash = { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "rm -rf x" } };
-  const ownHost = jobHostForHookScript(hookScriptPath);
-
-  let launchDir: string;
-  let codexHook: string;
-  beforeAll(async () => {
-    launchDir = await createTestPluginDataRoot("job-host-launcher");
-    codexHook = path.join(launchDir, ".codex", "plugins", "cache", "kimi-marketplace", "kimi", "3.0.0", "dist", "hooks", "approval-hook.js");
-    await mkdir(path.dirname(codexHook), { recursive: true });
-    await writeFile(codexHook, "", "utf8");
-  });
-  afterAll(async () => {
-    await cleanupTestPath(launchDir);
-  });
-  const codexJob = (): NodeJS.ProcessEnv => ({ ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: "codex", [JOB_HOOK_ENV]: codexHook });
-
-  test("another host's job: the hook abstains (exit 0, no output) for a call its policy denies", async () => {
-    const result = await invokeHook(bash, codexJob());
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).not.toContain("kimi-plugin-cc safety hook");
-  });
-
-  test("another host's job whose launching script is gone: the hook enforces", async () => {
-    const gone = codexHook.replace("3.0.0", "2.9.9");
-    const result = await invokeHook(bash, { ...codexJob(), [JOB_HOOK_ENV]: gone });
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("Bash");
-    const unset = codexJob();
-    delete unset[JOB_HOOK_ENV];
-    expect((await invokeHook(bash, unset)).exitCode).toBe(2);
-  });
-
-  test("its own job enforces: deny and allow", async () => {
-    const env = { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: ownHost };
-    const denied = await invokeHook(bash, env);
-    expect(denied.exitCode).toBe(2);
-    expect(denied.stderr).toContain("Bash");
-    const allowed = await invokeHook({ tool_name: "Read", tool_input: { file_path: "x" } }, env);
-    expect(allowed.exitCode).toBe(0);
-  });
-
-  test.each([["empty", ""], ["malformed", "Codex"], ["foreign grammar", "dsh"]])(
-    "%s job host enforces",
-    async (_name, value) => {
-      const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: value });
-      expect(result.exitCode).toBe(2);
-    },
-  );
-
-  test("a symlinked script path still recognizes both spellings as its own", async () => {
-    const dir = await createTestPluginDataRoot("job-host-link");
+describe("every installed hook enforces every labelled job", () => {
+  test("variables naming another host and its existing hook script never make the hook step aside", async () => {
+    const dir = await createTestPluginDataRoot("other-host-job");
     try {
-      const link = path.join(dir, "approval-hook.ts");
-      await symlink(hookScriptPath, link);
-      for (const host of [jobHostForHookScript(link), ownHost]) {
-        const result = await invokeHook(bash, { ...process.env, KIMI_PLUGIN_CC_CMD: "ask", [JOB_HOST_ENV]: host }, { scriptPath: link });
-        expect(result.exitCode).toBe(2);
-      }
-      const other = await invokeHook(bash, codexJob(), { scriptPath: link });
-      expect(other.exitCode).toBe(0);
+      const codexHook = path.join(dir, ".codex", "plugins", "cache", "kimi-marketplace", "kimi", "3.0.0", "dist", "hooks", "approval-hook.js");
+      await mkdir(path.dirname(codexHook), { recursive: true });
+      await writeFile(codexHook, "", "utf8");
+      const result = await invokeHook(
+        { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "rm -rf x" } },
+        {
+          ...process.env,
+          KIMI_PLUGIN_CC_CMD: "ask",
+          KIMI_PLUGIN_CC_JOB_HOST: "codex",
+          KIMI_PLUGIN_CC_JOB_HOOK: codexHook,
+        },
+      );
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("Bash");
     } finally {
       await cleanupTestPath(dir);
     }
