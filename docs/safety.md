@@ -353,10 +353,10 @@ become a non-swarm-only pin.
 
 `/kimi:setup` runs a two-layer probe before reporting success:
 
-1. **Direct probe.** Spawns the hook with the same Node binary (`process.execPath`) the companion is running under. Sends synthetic PreToolUse stdin with `KIMI_PLUGIN_CC_CMD=review` + a Bash tool request. Asserts exit 2 + non-empty stderr.
+1. **Direct probe.** Spawns the hook with the absolute Node path parsed back from the installed hook command, without a shell. Sends synthetic PreToolUse stdin with `KIMI_PLUGIN_CC_CMD=review` + a Bash tool request. Asserts exit 2 + non-empty stderr.
 2. **Shell probe.** Re-runs the same payload via `/bin/sh -c "<command>"` — the exact spawn shape kimi-code's hook runner uses. Same assertion.
 
-Both must pass. The shell probe catches the case where `process.execPath` works but `/bin/sh` can't resolve the path through quoting (a `KIMI_PLUGIN_CC_NODE_BIN` override pointing at a binary in a shell-unsafe path, for example). If either probe fails, setup reports failure with the captured stderr and the user can act on a clear signal rather than discover the gap by accident.
+Both must pass. The shell probe catches the case where that Node path works directly but `/bin/sh` can't resolve the path through quoting (a `KIMI_PLUGIN_CC_NODE_BIN` override pointing at a binary in a shell-unsafe path, for example). If either probe fails, setup reports failure with the captured stderr and the user can act on a clear signal rather than discover the gap by accident.
 
 ## How to verify the install yourself
 
