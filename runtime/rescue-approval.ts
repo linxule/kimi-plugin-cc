@@ -615,7 +615,8 @@ export function validateShellStage(
     return { ok: false, reason: `Rescue rejects non-standard shell entrypoints: ${tokens.join(" ")}` };
   }
 
-  if (hasMutatingFlag(args)) {
+  // grep's exact `-i` is --ignore-case; the global `-i` entry exists for sed.
+  if (hasMutatingFlag(command === "grep" ? args.filter((arg) => arg !== "-i") : args)) {
     return { ok: false, reason: `Rescue rejects mutating shell flags: ${tokens.join(" ")}` };
   }
 
@@ -627,7 +628,10 @@ export function validateShellStage(
   }
 
   if (command === "git") {
-    const firstArg = args[0] ?? "";
+    // A single leading --no-pager only disables paging; no other
+    // pre-subcommand flag is admitted, before or after it.
+    const gitArgs = args[0] === "--no-pager" ? args.slice(1) : args;
+    const firstArg = gitArgs[0] ?? "";
     // Pre-subcommand git flags shift where the subcommand lives in argv. The `-c` form in
     // particular can smuggle pager overrides: `git -c core.pager=bash show HEAD:exfil.sh`
     // makes git pipe blob contents through bash without any shell metacharacters. Any
@@ -637,7 +641,7 @@ export function validateShellStage(
     if (firstArg.startsWith("-")) {
       return {
         ok: false,
-        reason: `Rescue rejects git pre-subcommand flags (e.g. -c/-C/-p/--no-pager/--exec-path): ${tokens.join(" ")}. Put the read-only subcommand immediately after \`git\`.`,
+        reason: `Rescue rejects git pre-subcommand flags (e.g. -c/-C/-p/--exec-path): ${tokens.join(" ")}. Put the read-only subcommand immediately after \`git\` or \`git --no-pager\`.`,
       };
     }
     // git grep -O/--open-files-in-pager executes its pager value. The long form
