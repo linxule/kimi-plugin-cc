@@ -1,7 +1,7 @@
 import { RuntimeError } from "./errors.js";
 import type { JobRecord, JobStore } from "./job-store.js";
 import type { PluginPaths } from "./paths.js";
-import { formatBudgetDuration, type PartialJobOutput, renderTerminalJobArtifact, writeArtifact } from "./render.js";
+import { capitalize, formatBudgetDuration, type PartialJobOutput, renderTerminalJobArtifact, writeArtifact } from "./render.js";
 import type { JobError } from "./types.js";
 import { sleep } from "./util.js";
 
@@ -46,13 +46,12 @@ export async function markJobFailed(
   const current = store.getJob(job.job_id) ?? job;
   if (current.status !== "running") return current;
   if (options?.partialOutput) {
-    const label = job.command_type[0].toUpperCase() + job.command_type.slice(1);
-    summary = `${label} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
+    summary = `${capitalize(job.command_type)} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
   }
   const normalized = normalizeJobError(error);
   const phase = options?.phase;
   const artifactJob = {
-    ...(store.getJob(job.job_id) ?? job),
+    ...current,
     status: "failed" as const,
     summary,
     error: normalized,

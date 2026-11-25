@@ -1,5 +1,5 @@
 import { RuntimeError } from "./errors.js";
-import { formatBudgetDuration, renderTerminalJobArtifact, writeArtifact } from "./render.js";
+import { capitalize, formatBudgetDuration, renderTerminalJobArtifact, writeArtifact } from "./render.js";
 import { sleep } from "./util.js";
 export { sha256 as digestPrompt } from "./git.js";
 export function normalizeJobError(error) {
@@ -32,13 +32,12 @@ export async function markJobFailed(store, paths, job, error, summary = "Job fai
     if (current.status !== "running")
         return current;
     if (options?.partialOutput) {
-        const label = job.command_type[0].toUpperCase() + job.command_type.slice(1);
-        summary = `${label} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
+        summary = `${capitalize(job.command_type)} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
     }
     const normalized = normalizeJobError(error);
     const phase = options?.phase;
     const artifactJob = {
-        ...(store.getJob(job.job_id) ?? job),
+        ...current,
         status: "failed",
         summary,
         error: normalized,
