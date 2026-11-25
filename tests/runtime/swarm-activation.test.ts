@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { formatError, RuntimeError } from "../../runtime/errors.js";
@@ -792,6 +792,27 @@ describe("swarm web lifecycle", () => {
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.enter" });
     });
   }, 15_000);
+
+  test("deactivation refuses an exit recorded after a corrupt journal line; empty and CRLF lines still frame", async () => {
+    for (const [junk, ok] of [["   \n", false], ["{oops\n", false], ["\t\r\n", false], ["\r\n\n", true]] as const) {
+      await withFixture("success", async (fixture) => {
+        const options = makeOptions(fixture);
+        const identity = await preactivateSwarmSession(options);
+        await appendFile(journalPath(fixture, identity), junk, "utf8");
+        const pending = deactivateSwarmSession({ ...options, ...identity });
+        if (ok) {
+          await pending;
+        } else {
+          await expect(pending).rejects.toMatchObject({
+            code: "SWARM_SESSION_CLEANUP_FAILED",
+            stage: "swarm-deactivation.journal",
+            details: { journal_state: "unreadable" },
+          });
+        }
+        expect((await readFile(journalPath(fixture, identity), "utf8")).trimEnd().endsWith('"swarm_mode.exit","agentId":"main"}')).toBe(true);
+      });
+    }
+  }, 30_000);
 
   test("deactivation REST failure cannot be reported as cleanup success", async () => {
     await withFixture("success", async (fixture) => {

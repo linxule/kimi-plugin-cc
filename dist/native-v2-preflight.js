@@ -33,6 +33,7 @@ import { open, readdir } from "node:fs/promises";
 import path from "node:path";
 import { RuntimeError } from "./errors.js";
 import { kimiCodeConfigPath } from "./kimi-home.js";
+import { kimiJournalRecords, UNPARSEABLE_JOURNAL_LINE } from "./kimi-journal.js";
 import { kimiCertifiedReleaseHas } from "./kimi-releases.js";
 import { tomlErrorLocation } from "./util.js";
 import { parse as parseToml } from "./vendor/smol-toml/parse.js";
@@ -306,46 +307,6 @@ async function openJournalSafely(journalPath, maxBytes) {
 const ACTIVITY_RECORD = /^(turn\.|prompt\.|tool\.|llm\.|shell\.|subagent\.|task\.|assistant\.|context\.append_message$|context\.append_loop_event$)/;
 /** Records that make replay non-linear (branch switch or undo), so a fold could differ. */
 const REWIND_RECORD = /^(agent\.switched$|context\.undo$|context\.undone$)/;
-const UNPARSEABLE = Symbol("unparseable");
-/**
- * kimi-code's append-log framing (appendLogStore.read/parseLine, identical at
- * 2.4.0 and 2.7.3): split on "\n" only, strip ONE trailing "\r", skip only a
- * zero-length line, else JSON.parse. A terminated line that fails to parse is
- * corruption and wire replay stops there; an unparseable unterminated last
- * line is dropped as truncated. An unparseable line yields `UNPARSEABLE`.
- */
-async function* journalRecords(handle) {
-    const decoder = new TextDecoder();
-    let pending = "";
-    const frame = (raw, terminated) => {
-        const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-        if (line.length === 0)
-            return undefined;
-        try {
-            return { line, parsed: JSON.parse(line), terminated };
-        }
-        catch {
-            return { line, parsed: UNPARSEABLE, terminated };
-        }
-    };
-    for await (const chunk of handle.createReadStream()) {
-        pending += decoder.decode(chunk, { stream: true });
-        let newline = pending.indexOf("\n");
-        while (newline !== -1) {
-            const framed = frame(pending.slice(0, newline), true);
-            pending = pending.slice(newline + 1);
-            if (framed !== undefined)
-                yield framed;
-            newline = pending.indexOf("\n");
-        }
-    }
-    pending += decoder.decode();
-    if (pending.length > 0) {
-        const framed = frame(pending, false);
-        if (framed !== undefined)
-            yield framed;
-    }
-}
 async function scanJournalLines(handle, expectedExecutionRoot, tolerateCancelledDefaultEnter = false) {
     // G2: a print-created session's main journal holds the create-time
     // `default_plan_mode` enter immediately followed by print's id-less cancel,
@@ -360,9 +321,9 @@ async function scanJournalLines(handle, expectedExecutionRoot, tolerateCancelled
     let pendingEnter = null;
     let toleratedPair = false;
     const taintEnter = { kind: "tainted", recordType: "plan_mode.enter" };
-    for await (const framed of journalRecords(handle)) {
+    for await (const framed of kimiJournalRecords(handle.createReadStream())) {
         const { line, parsed } = framed;
-        if (parsed === UNPARSEABLE) {
+        if (parsed === UNPARSEABLE_JOURNAL_LINE) {
             if (framed.terminated)
                 sawCorrupt = true;
             if (pendingEnter !== null)

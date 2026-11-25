@@ -8,6 +8,7 @@ import { RuntimeError } from "./errors.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
+import { kimiJournalRecords, UNPARSEABLE_JOURNAL_LINE } from "./kimi-journal.js";
 import { kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
@@ -893,17 +894,13 @@ async function readSwarmJournalState(journalPath) {
                 break;
             offset += bytesRead;
         }
+        // Framed as kimi-code replays it. Replay stops at the first corrupt
+        // terminated line, so no later record may confirm a state: fail closed.
+        // An unparseable unterminated tail is truncation, which replay drops.
         let state = "missing";
-        for (const rawLine of buffer.subarray(0, offset).toString("utf8").split("\n")) {
-            const line = rawLine.trim();
-            if (line.length === 0)
-                continue;
-            let record;
-            try {
-                record = JSON.parse(line);
-            }
-            catch {
-                if (line.includes("swarm_mode."))
+        for await (const { line, parsed: record, terminated } of kimiJournalRecords([buffer.subarray(0, offset)])) {
+            if (record === UNPARSEABLE_JOURNAL_LINE) {
+                if (terminated || line.includes("swarm_mode."))
                     return "unreadable";
                 continue;
             }
