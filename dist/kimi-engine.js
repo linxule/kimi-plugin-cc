@@ -8,6 +8,13 @@ import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith } from "./ki
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { isInTestedRange, parseVersionLine, probeKimiVersion, } from "./kimi-version-probe.js";
 import { isRecord } from "./util.js";
+/**
+ * The user-visible operation actually being performed. This is deliberately
+ * separate from JobRecord.command_type: pursue and swarm-write reuse the
+ * rescue job lineage, while read-only swarm reuses review.
+ */
+const NON_SWARM_OPERATION_KINDS = ["review", "challenge", "ask", "rescue", "review_gate", "pursue"];
+const OPERATION_KINDS = [...NON_SWARM_OPERATION_KINDS, "swarm", "swarm-write"];
 export const NATIVE_V2_SAFETY_PROFILE = "native-v2-no-plan/1";
 /**
  * Minimum legacy-v1 version that actually contains each operation. The upper
@@ -560,7 +567,7 @@ function nativeV2NotCertified(operationKind, version) {
                 intended_engine: "native-v2",
                 kimi_version: normalized,
                 certified_versions: [...certified],
-                certified_operations: ["review", "challenge", "ask", "rescue", "review_gate", "pursue"],
+                certified_operations: [...NON_SWARM_OPERATION_KINDS],
             },
         });
     }
@@ -634,14 +641,7 @@ function operationKindFromLogEntry(entry) {
     return isOperationKind(candidate) ? candidate : null;
 }
 function isOperationKind(value) {
-    return (value === "review" ||
-        value === "challenge" ||
-        value === "ask" ||
-        value === "rescue" ||
-        value === "review_gate" ||
-        value === "pursue" ||
-        value === "swarm" ||
-        value === "swarm-write");
+    return OPERATION_KINDS.includes(value);
 }
 function isKimiEngine(value) {
     return value === "legacy-v1" || value === "native-v2";

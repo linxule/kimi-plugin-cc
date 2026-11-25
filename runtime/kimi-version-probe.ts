@@ -22,52 +22,15 @@ const KIMI_VERSION_PROBE_TIMEOUT_MS = 5_000;
  * Legacy-v1 kimi-code minors tested for plugin use. Membership is by
  * `{major, minor}`; every patch within a listed minor is accepted.
  *
- * This table intentionally never gains 0.42, which removed legacy v1.
- * Exact per-operation native-v2 certification lives in `kimi-engine.ts`.
+ * The table is 0.1 through 0.41 and never gains 0.42, which removed legacy v1.
+ * Exact native-v2 certification lives in `kimi-releases.ts` (rows) and
+ * `kimi-engine.ts` (per operation).
  */
-export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }> = [
-  { major: 0, minor: 1 },
-  { major: 0, minor: 2 },
-  { major: 0, minor: 3 },
-  { major: 0, minor: 4 },
-  { major: 0, minor: 5 },
-  { major: 0, minor: 6 },
-  { major: 0, minor: 7 },
-  { major: 0, minor: 8 },
-  { major: 0, minor: 9 },
-  { major: 0, minor: 10 },
-  { major: 0, minor: 11 },
-  { major: 0, minor: 12 },
-  { major: 0, minor: 13 },
-  { major: 0, minor: 14 },
-  { major: 0, minor: 15 },
-  { major: 0, minor: 16 },
-  { major: 0, minor: 17 },
-  { major: 0, minor: 18 },
-  { major: 0, minor: 19 },
-  { major: 0, minor: 20 },
-  { major: 0, minor: 21 },
-  { major: 0, minor: 22 },
-  { major: 0, minor: 23 },
-  { major: 0, minor: 24 },
-  { major: 0, minor: 25 },
-  { major: 0, minor: 26 },
-  { major: 0, minor: 27 },
-  { major: 0, minor: 28 },
-  { major: 0, minor: 29 },
-  { major: 0, minor: 30 },
-  { major: 0, minor: 31 },
-  { major: 0, minor: 32 },
-  { major: 0, minor: 33 },
-  { major: 0, minor: 34 },
-  { major: 0, minor: 35 },
-  { major: 0, minor: 36 },
-  { major: 0, minor: 37 },
-  { major: 0, minor: 38 },
-  { major: 0, minor: 39 },
-  { major: 0, minor: 40 },
-  { major: 0, minor: 41 },
-];
+const LEGACY_V1_LAST_MINOR = 41;
+export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }> = Array.from(
+  { length: LEGACY_V1_LAST_MINOR },
+  (_, index) => ({ major: 0, minor: index + 1 }),
+);
 
 export interface KimiVersionProbeOk {
   readonly kind: "ok";

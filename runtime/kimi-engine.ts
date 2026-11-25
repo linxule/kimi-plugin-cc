@@ -23,15 +23,9 @@ export type KimiEngine = "legacy-v1" | "native-v2";
  * separate from JobRecord.command_type: pursue and swarm-write reuse the
  * rescue job lineage, while read-only swarm reuses review.
  */
-export type KimiOperationKind =
-  | "review"
-  | "challenge"
-  | "ask"
-  | "rescue"
-  | "review_gate"
-  | "pursue"
-  | "swarm"
-  | "swarm-write";
+const NON_SWARM_OPERATION_KINDS = ["review", "challenge", "ask", "rescue", "review_gate", "pursue"] as const;
+const OPERATION_KINDS = [...NON_SWARM_OPERATION_KINDS, "swarm", "swarm-write"] as const;
+export type KimiOperationKind = (typeof OPERATION_KINDS)[number];
 
 export type KimiPlanCertification = "certified" | "test-bypass";
 
@@ -820,7 +814,7 @@ function nativeV2NotCertified(
           intended_engine: "native-v2",
           kimi_version: normalized,
           certified_versions: [...certified],
-          certified_operations: ["review", "challenge", "ask", "rescue", "review_gate", "pursue"],
+          certified_operations: [...NON_SWARM_OPERATION_KINDS],
         },
       },
     );
@@ -923,16 +917,7 @@ function operationKindFromLogEntry(entry: Record<string, unknown>): KimiOperatio
 }
 
 function isOperationKind(value: string): value is KimiOperationKind {
-  return (
-    value === "review" ||
-    value === "challenge" ||
-    value === "ask" ||
-    value === "rescue" ||
-    value === "review_gate" ||
-    value === "pursue" ||
-    value === "swarm" ||
-    value === "swarm-write"
-  );
+  return (OPERATION_KINDS as readonly string[]).includes(value);
 }
 
 function isKimiEngine(value: string): value is KimiEngine {
