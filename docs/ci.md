@@ -27,12 +27,15 @@ The real-binary smoke suite skips unless explicitly enabled. Before any model tu
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.7.3`; the release gate requires every operation, including bounded parallel and single-worker swarm paths. It has no recurring schedule and skips real-provider calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.8.0`; the release gate requires every operation, including bounded parallel and single-worker swarm paths. It has no recurring schedule and skips real-provider calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
 - forced writes denied under each read-only label
-- unsafe experimental selectors and default plan mode refused before spawn
+- the master experimental flag kept from native-v2 children (and refused before spawn on a pinned legacy-v1 binary)
+- an ask that runs with every experimental feature switched on in config and environment, with every non-read tool call denied and no tower state left behind
+- default plan mode cancelled by print on `print-cancels-plan` releases and refused before spawn elsewhere
+- a fresh ask that opens an earlier job's session log through `--reference-session` and answers from it
 - native-v2 provenance, resume, and plan-tainted journal refusal
 - deterministic loopback Write attempts for native-v2 resume and goal continuation, with exact call IDs and objective-digest store recovery; these two lanes require no real credentials
 - managed denials correlated with write attempts across goal-mode continuation turns
@@ -40,9 +43,11 @@ The suite checks:
 - write-swarm edits authored by distinct children and captured in a patch, with the real checkout unchanged; a coordinator-only patch is not fan-out evidence
 - out-of-worktree write attempts by real children denied
 
-On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3, plus the 2.6.2/2.6.3/2.7.2/2.7.3 parallel path), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
+The `--network` WebSearch lane runs only when the seed home has a Kimi login or config, or `KIMI_WEB_SEARCH_BASE_URL` is set. Kimi offers WebSearch only with its managed login, a provider `search_url`, `[services.moonshot_search]` or `KIMI_WEB_SEARCH_BASE_URL`, so on the API-key route with an empty seed home and no search endpoint the lane is skipped by name. A skip is not evidence: a certification record must say whether that lane ran.
 
-Exact 2.6.0 retains the narrowed non-swarm profile: its three swarm execution lanes are intentional exclusions and both real command paths must prove pre-spawn refusal. Exact 2.6.2/2.6.3/2.7.2/2.7.3 requires full operation evidence, including the canonical wave guard, new/resumed entry counting, fresh-singleton rejection, nested rejection, recovery, swarm-child-timeout protection, native Bash background-policy closure, explicit background denial, direct-worker read/write behavior, and normal-exit/cancellation quiescence before artifact capture and test-provider cleanup. Agent-turn counts and OS subprocess checks are separate evidence. Expected negative controls must actually reproduce their preconditions. Exact 2.6.1, 2.6.4, 2.7.0, 2.7.1 and 2.7.4 gain no certification by implication.
+On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3, plus the 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel path), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
+
+Exact 2.6.0 retains the narrowed non-swarm profile: its three swarm execution lanes are intentional exclusions and both real command paths must prove pre-spawn refusal. Exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 requires full operation evidence, including the canonical wave guard, new/resumed entry counting, fresh-singleton rejection, nested rejection, recovery, swarm-child-timeout protection, native Bash background-policy closure, explicit background denial, direct-worker read/write behavior, and normal-exit/cancellation quiescence before artifact capture and test-provider cleanup. Agent-turn counts and OS subprocess checks are separate evidence. Expected negative controls must actually reproduce their preconditions. Exact 2.6.1, 2.6.4, 2.7.0, 2.7.1 and 2.7.4 gain no certification by implication.
 
 Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidate, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
 

@@ -91,6 +91,7 @@ export const KIMI_V2_RELEASES: readonly KimiRelease[] = Object.freeze([
   { version: "2.6.3", commit: "b0de2fbd", scope: "all", capabilities: BOUNDED },
   { version: "2.7.2", commit: "56145f84", scope: "all", capabilities: JSON_READY },
   { version: "2.7.3", commit: "a8f643ad", scope: "all", capabilities: JSON_READY },
+  { version: "2.8.0", commit: "46d9085f", scope: "all", capabilities: JSON_READY },
 ] satisfies KimiRelease[]);
 
 /** Which row's engine mechanics apply to a version, and whether that version is the row itself. */

@@ -277,7 +277,7 @@ export function assertNetworkResumeConfined(store, kind, resolution, currentRoot
         jobId = job?.resumed_from_job_id;
     }
     if (!confined) {
-        throw new RuntimeError("INVALID_ARGS", `${kind} --network cannot resume session ${sessionId ?? "<unknown>"}: an earlier turn in it ran without confined reads, or could read outside this call's workspace and --read-root directories (or its history is not recorded), so those reads could be sent out. ` +
+        throw new RuntimeError("INVALID_ARGS", `${kind} --network cannot resume session ${sessionId ?? "<unknown>"}: an earlier turn in it ran without confined reads, or could read outside this call's workspace, --read-root directories and referenced sessions (or its history is not recorded), so those reads could be sent out. ` +
             `Start a fresh session instead: ${kind} --fresh --network [--read-root <dir>] <prompt>.`, `${kind}.resume`);
     }
 }

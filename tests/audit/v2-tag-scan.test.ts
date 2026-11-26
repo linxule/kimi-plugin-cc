@@ -30,6 +30,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { KIMI_V2_RELEASES, kimiVersionsWith } from "../../runtime/kimi-releases.js";
+import { PLAN_PAIR_BOOKKEEPING } from "../../runtime/native-v2-preflight.js";
 
 const SOURCE = process.env.KIMI_CODE_SOURCE_TAG_DIR;
 const suite = SOURCE !== undefined && existsSync(SOURCE) ? describe : describe.skip;
@@ -1385,6 +1386,167 @@ PINNED_HASHES["2.7.3"] = {
     "d1cce637f48de6e86f57d7185027b4135683a9f80a0bdc47d9677792642563db",
 };
 
+// 2.8.0 (46d9085f): both hook-composer.ts files became a shared core hook
+// registry, and the plan-file guard left the before-execute emitter for its own
+// `registerHook` starting hook that returns `skipPermitting` instead of calling
+// `.allow()`. Every changed inherited pin was re-read against its 2.7.3 diff.
+PINNED_HASHES["2.8.0"] = {
+  ...PINNED_HASHES["2.7.3"],
+  [`${CORE}/features/plan/planService.ts`]:
+    "bca08fffe66ed16dc75d932e39d5e069b70e099ed6fcf37544abe9a8e7cc20d2",
+  [`${SDK}/sdk-rpc-client-v2.ts`]:
+    "0e837e1ccf87f578f4018208b1a5ab1380065c3d68ffb0dbf1f45a48f90552e6",
+  [`${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`]:
+    "26aeced07e2a632f1ed9fe1f5b17e5755806084ce3756b841dc7fd4fd1ed8dec",
+  [`${CORE}/session/agentLifecycle/agentLifecycleService.ts`]:
+    "b69296cbf00b30993e45c8450f215696e7587a0c88a9b19e837a9cb4879ba3b5",
+  [`${CORE}/workspace/workspaceMcpConfig/workspaceMcpConfigService.ts`]:
+    "d1b5324ac1c7242f14c9428fe22809f92a275111610c47684c321dffed82ba8f",
+  [`${CORE}/agent/tools/os/bash/bashTool.ts`]:
+    "833de1b6a83e39ede4c7973815bf493bcc2a26ccea09bb0df61d0c80fe7b996f",
+  [`${KAP}/transport/ws/v1/agentState.ts`]:
+    "46d265a6ed2baa50c34beccb24255e3185d5b3630b518e8302aa47cedf66a05a",
+  [`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`]:
+    "0765abb76c9f02274b5d9868ec52461daac0434c7b6b97a19f21b42535724b35",
+  [`${KAP}/routes/environment.ts`]:
+    "c5e3a48fea50ab98e85b5d5d052e1a2e8e52063d5c843996f0cf5c971ae75f4d",
+  [`${KAP}/routes/sessions.ts`]:
+    "40f2640cfb434111597c2aa5129e47ba994f59aa07dbb5fc3913a22156dfad3f",
+  [`${KAP}/start.ts`]:
+    "789ac2191601f4a0def5cb8ded6a0000c7a9b7a7529548a32f5be07c540d1d30",
+  [`${CORE}/agent/toolExecutor/toolExecutorService.ts`]:
+    "eaf092c3fd053df510b126097bbeffc8901fdbe3a14404acecd23b0fa2adca5f",
+  [`${CORE}/tool/executor/legacy-adapter.ts`]:
+    "f0c6044ae8bc8d001e359aead0f0483a9620603e9aa8eec7e6cb670c38f749ca",
+  [`${CORE}/features/swarm/session/sessionSwarmService.ts`]:
+    "c2fd0e5a363918ab66f660e4b7b68120f62274dc3e1c6f751e50f6720359c547",
+  [`${CORE}/session/subagent/subagentService.ts`]:
+    "5f2dac3f6818892bc254f1464dc462bd01bc1e6aec0fc40a11c05ed00b395502",
+  [`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`]:
+    "9353c5e958f62e7c0ede4bc635b179bda2ed201790fbbf69a16537a935587514",
+  [`${CORE}/agent/loop/journal.ts`]:
+    "e1c351c9458f1a2e2aa2241d8b47ce3cc1c3673b81c64e70a9db12c14e0df132",
+  [`${CORE}/agent/loop/turnOps.ts`]:
+    "f45a1e8e41a2d8374015468fe22bb642d47c97d26ffdbd022aac216c66a919cd",
+  [`${CORE}/agent/loop/loopService.ts`]:
+    "5b4ba72ce809711e84b4b05ce3ae1020ec611bbe02c7dfbe321b32bf4f9fc050",
+  [`${CORE}/agent/loop/turnProjection.ts`]:
+    "fa4cad103b41fda7b3912e4414e216d71485706055999df3a7ca13f03e82f150",
+  [`${CORE}/agent/contextMemory/loopEventFold.ts`]:
+    "bbc2075e28049e68ee9c2cae1c2238c5d7fee91c067afb829380306447a276d4",
+  [`${CORE}/session/subagent/mirrorAgentRun.ts`]:
+    "c02c80ed75d961ce9c9f49ca12393bfd0698c9b9fceb69b9970dce439d03e5cb",
+  [`${CORE}/workspace/workspaceInstance/workspaceInstanceManagerService.ts`]:
+    "b3df3ca89f671efa6d6f755015a824128f6200937aaf17494de662430771bcb2",
+  [`${CORE}/features/btw/btwService.ts`]:
+    "ba5bdc6cfb2023b998ec04e9d05229d22e978b7483b5bc9a3d8e8448ca2b6d7f",
+  [`${CORE}/features/goal/goalService.ts`]:
+    "2f7099b1e7f0320adc193266e5c2fc8dd87716d76574da31411b70e17bf486c9",
+  [`${CORE}/features/tower/towerService.ts`]:
+    "2d2d041ecd66c2d204b3a36030e3c8c04870c9ce6fdf561da528c0dc38b12337",
+  [`${CORE}/agent/toolSelect/toolSelectService.ts`]:
+    "86fae31764e5ef88d055b22c84ba9a08c68ca20eb885d8126599839213c72595",
+  [`${CORE}/agent/mcp/mcpService.ts`]:
+    "2eeff269aa8f25f35fd32803f661e425d82e6e276de191fae8de89211f222c28",
+  [`${CORE}/features/swarm/tools/agent-swarm/agent-swarm.ts`]:
+    "49148cbd55ccfc9218a86f8ed00d66ca2e1da7e75bd6328150bba527c4b652b8",
+  [`${CORE}/session/subagent/spawn.ts`]:
+    "2d826b33e4ddcdf9f2fb2bd839b0ad30889f1448f10b290f39ff4a6ac5256bf9",
+  [`${CORE}/session/agentLifecycle/profile/profiles.ts`]:
+    "ca88c1c4034e2e06a5ba9cc2b99e20cba28d7bb29a135a98d60885caaa3c4ba3",
+  [`${CORE}/persistence/backends/node-fs/fileStorageService.ts`]:
+    "1ce85627f50b58de3fc7d8b0b029bdab9d773eeea96eb8753135078b3b9d0b9e",
+  [`${CORE}/features/tower/tools/spawn/spawnTool.ts`]:
+    "fdd1c37384683444bdd7f9b9595265578429061ce1ad1b346382b8bb800c60fc",
+  [`${CORE}/agent/tools/agent/agentTool.ts`]:
+    "8200b20096a62222f1ccd0f7ab8a89cdfa7c1c0b3fde8cade31b1bf57c20a3b4",
+  [`${CORE_RUNTIME}/tool/tool-executor.ts`]:
+    "320afa56cad79d80e1e2bef4b957e3033b6bfdb3eb141f267bdf948bf79a8c84",
+  [`${CORE_RUNTIME}/loop/loop-actor.ts`]:
+    "883a154b1fe3af41ecead4697b5bd465a27aa9c4d9bf07bd44a7611cfeccbf1a",
+  [`${KAP}/routes/meta.ts`]:
+    "152519f2e01799e8f672f5e8c734f88a47afa4917b202a6495eaa211d63de402",
+  [`${KAP}/protocol/rest-meta.ts`]:
+    "18516d8a5268747a058f37f7f1e71be47c4eeaa7447b3485909c64ece13a0143",
+  [`${KAP}/routes/registerApiV1Routes.ts`]:
+    "cf6bf3db62956b5b21acee22c65e20c21fad8b7d9c17c4fbb2e531dac11ed0bd",
+  [`${CORE_RUNTIME}/tool/types.ts`]:
+    "adaabc997192bd0d6139b86ee1c3a56245059eaf70233c65093e34b751fbc5fd",
+  [`${CORE_RUNTIME}/loop/create-loop.ts`]:
+    "6d8e4bf9a4fbe30de0d6a75da2c245c53c9a8ae33082afe06fb1d825f41ebb45",
+  [`${CORE_RUNTIME}/loop/contract/emitted.ts`]:
+    "9b4c255a31421ed37723ec995214e3952fd2142919c40593774710c15edd2ded",
+  [`${CORE_RUNTIME}/llm/policy/policy.ts`]:
+    "77f2dbe6f4cb64fefb4ff16df26f404bb8244c5959c743ee16e2bbe832b1ec09",
+  [`${CORE_RUNTIME}/llm/policy/settle.ts`]:
+    "308013b78708641c03ecb854578a62426b44f255d39f124b61f3314b85db63c7",
+  [`${CORE_RUNTIME}/llm/policy/recovery.ts`]:
+    "a622a10733b536d4215eac34e52973153038fc508a2e1a39b4682ecf7107ff4f",
+  [`${CORE}/llm-adapter/contract/errors.ts`]:
+    "87f74f5c5d749b83971c6777763d63dbf06cc3b43b653cfa46fd66f3e746946b",
+  [`${CORE_RUNTIME}/llm/response.ts`]:
+    "df1b9a89183d3f87b13e62fa3bdd656c962c34bb8ac374205fb799e6256d5e5c",
+  [`${CORE_RUNTIME}/llm/protocol/rules/status.ts`]:
+    "be47fb08fa85a6304ff934d1d9828594b5607f47caff8b4f110028f8dd081629",
+  [`${CORE}/features/promptPrediction/promptPrediction.ts`]:
+    "6ceab958a79db24510fcc1f679753075a8230fbbbee2fb835256bf0db5fc5d77",
+  [`${CORE}/features/promptPrediction/promptPredictionService.ts`]:
+    "9f921424589ab5a592be39fed84805c2f9a7147788e26090a3798acdd029301b",
+  [`${KLIENT}/core/facade/agent.ts`]:
+    "9a37f478ffa5ca249f0fa532dcb70481eddbafea04972122ebbb6b098b4020e3",
+  [`${CORE}/agent/loop/requestObservation.ts`]:
+    "51cac2b8cfb5e4312abc820c737f966711d500b3274cfde072f4220d47433250",
+  [`${KAP}/services/legacyStatus/legacyStatus.ts`]:
+    "b369f294ee6a3a2e53f62819384c5660c51836319824c55e391cc483b23ff0e3",
+  [`${KAP}/services/conversation/conversationFold.ts`]:
+    "7c4e6a02883630c1f1b7eb70be729c1d8862b88fdc16739712bf07ad49216c30",
+  // The executor starting chain and the insertion-ordered dispatch under it.
+  [`${CORE_RUNTIME}/hook/tool-executor/registry.ts`]:
+    "7c156995f7e90ef4c1d4a9c70a90b510da3c26d822e3fd12b1e0a25fbdebef22",
+  [`${CORE_RUNTIME}/hook/registry.ts`]:
+    "002603fe818e910ce87c40049ec256a0b66c3504a94f2b05821a9cc3e0242387",
+  [`${CORE_RUNTIME}/hook/result.ts`]:
+    "749b4c9bc71563e0fc3184787d4d2baac36e9df9944d91d4e68ac2da1a2c2e38",
+  // Loop hooks: a tool.batch-starting hook can block a batch, never run it.
+  [`${CORE_RUNTIME}/hook/loop/run.ts`]:
+    "ab1449f2f85debcef1921169217bf4b6f5a0590005b80b39dd94c130c199d7e5",
+  [`${CORE_RUNTIME}/hook/loop/registry.ts`]:
+    "bd41686e93f562ff3e38bbc3c77542ee890ef9b1691eaf5dd7cbf9bcac23c912",
+  [`${CORE_RUNTIME}/loop/turn/create-turn.ts`]:
+    "b0736f3722b0c03a9a7c9ff9ab8129d86bdd7980f319998df83b9548ba9aac76",
+  // FileStorageService.pathFor now lives in core.
+  [`${CORE_RUNTIME}/store/backend/node.ts`]:
+    "645f691cedf65e5041465ed35c2903b837053afe40ce6907d20c0304a77a3d53",
+  // Read-only Bash auto-approval and every remaining skipPermitting producer.
+  [`${CORE}/agent/permissionPolicy/permissionPolicyService.ts`]:
+    "b16bbc3c8678eb384dd0589f7e442d8e3ad1c7ecaecdadef8b6ca2499d02f0e1",
+  [`${CORE}/agent/permissionPolicy/policies/bash-read-only.ts`]:
+    "f2a640271f33957b95bc67017dbe8264a9632fe37b1f2f451bf09ec1bc47337e",
+  [`${CORE}/agent/permissionPolicy/policies/bash-read-only-specs.ts`]:
+    "e90a859048a860f141fd509517729d24d3080130cd7148b3d7759f0f5224563a",
+  [`${CORE}/agent/shellCommand/shellCommandService.ts`]:
+    "412b926a7df371c613b5006423d5b6d0062bb9052f0d34fbe7a26663d9e68006",
+  [`${CORE}/features/plan/tools/exit-plan-mode/exitPlanModeTool.ts`]:
+    "1d36cf9c8bcd8c24ab93199928740f147f6e6a959abf59afbf83f0cead38083a",
+  // The journal records the resume scan reads by name: the tower fold it
+  // mirrors and the MCP records it tolerates inside the cancelled plan pair.
+  [`${CORE}/features/tower/towerOps.ts`]:
+    "90de8ecdee312b68bcae931f2c2528f8ae827e3cb6559b78429e04742687f28f",
+  [`${CORE}/agent/mcp/mcpDiscoveryOps.ts`]:
+    "e0ab31236276de123509579d6b1a9ad8b5bb4110c60468eb4ac72aa009d7fe6c",
+  [`${CORE}/agent/mcp/mcpFailureOps.ts`]:
+    "cc345370443fc1064407ca56fb885cc0105a1ed4843628eb237a5c655df7b4a9",
+};
+for (const removed of [
+  `${CORE}/tool/executor/hook-composer.ts`,
+  `${CORE_RUNTIME}/tool/hook-composer.ts`,
+  `${CORE_RUNTIME}/loop/hook/run.ts`,
+  `${CORE}/session/subagent/flag.ts`,
+  `${CORE}/agent/loop/loopOps.ts`,
+]) {
+  delete PINNED_HASHES["2.8.0"][removed];
+}
+
 /**
  * Every durable plan-state event type at the pinned tag. The journal taint scan
  * (runtime/native-v2-preflight.ts::scanJournalLines) treats any record whose
@@ -1453,6 +1615,15 @@ function upstreamVersion(): string {
   return pkg.version;
 }
 
+function versionAtLeast(version: string, major: number, minor: number): boolean {
+  const [maj = 0, min = 0] = version.split(".").map(Number);
+  return maj > major || (maj === major && min >= minor);
+}
+
+function upstreamAtLeast(major: number, minor: number): boolean {
+  return versionAtLeast(upstreamVersion(), major, minor);
+}
+
 suite("native-v2 tag scan: the no-plan construction holds at this source tree", () => {
   test("the tag is pinned and its load-bearing files are byte-identical to the audited bytes", () => {
     const version = upstreamVersion();
@@ -1466,6 +1637,18 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("the plan-file guard is the ONLY final allow in the engine, CLI, and SDK", () => {
     const sites = filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], ".allow()");
+    if (upstreamAtLeast(2, 8)) {
+      // From 2.8.0 nothing calls the emitter's final allow; the plan-file guard
+      // is a registerHook starting hook (see the skipPermitting census below).
+      expect(sites).toEqual([]);
+      expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], /\ballow: true\b/)).toEqual([
+        `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
+      ]);
+      expect(read(`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`)).toContain(
+        "if (event.finalAllowed) return { allow: true };",
+      );
+      return;
+    }
     expect(sites).toEqual([`${CORE}/features/plan/planService.ts`]);
     const guard = read(`${CORE}/features/plan/planService.ts`);
     // The allow must stay gated on an active plan: `if (plan === null) return;`
@@ -1484,19 +1667,19 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       read(rel).includes(".enter("),
     );
     expect(enterCallers).toEqual([
-      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())
+      ...(["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())
         ? []
         : [`${CORE}/features/plan/tools/enter-plan-mode/enterPlanModeTool.ts`]),
       `${CORE}/workspace/sessionLifecycle/sessionLifecycleService.ts`,
       `${KAP}/routes/sessionAgentConfig.ts`,
     ]);
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "EnterPlanMode")).toEqual([]);
     }
   });
 
-  test("2.7.2/2.7.3 host plan entry stays explicit and outside the print runner", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ host plan entry stays explicit and outside the print runner", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     expect(read(`${SDK}/sdk-rpc-client-v2.ts`)).toContain("return agent.enterPlan()");
     expect(read(`${KLIENT}/core/facade/agent.ts`)).toContain(
       "enterPlan: () => call(scope, 'agentPlanService', 'enter', []) as Promise<void>",
@@ -1506,7 +1689,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ print bootstrap preserves provenance, local-selection, and host-only plan boundaries", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     const runner = read(`${CLI}/cli/v2/run-v2-print.ts`);
     const marker = runner.indexOf("writeExperimentalVersion(");
     const sdk = runner.indexOf("new SDKRpcClientV2(");
@@ -1523,7 +1706,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
   });
 
   test("2.5+ environment and workspace-trust dependencies are explicitly reviewed", () => {
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     expect(read(`${CORE}/app/sessionManager/sessionManagerService.ts`)).toContain(
       "options.environmentId === LOCAL_ENVIRONMENT_ID",
     );
@@ -1546,7 +1729,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 
   test("2.5+ WebSocket state proof remains authenticated and bound to the live main agent", () => {
     const version = upstreamVersion();
-    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) return;
+    if (!["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version)) return;
     const schema = read(`${KAP}/protocol/ws-agent.ts`);
     for (const field of ["session_id", "agent_id", "model", "permission_mode", "plan_mode", "swarm_mode", "tower_mode"]) {
       expect(schema).toContain(field);
@@ -1554,7 +1737,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${KAP}/transport/ws/bearerProtocol.ts`)).toContain("kimi-code.bearer.");
     expect(read(`${KAP}/transport/ws/v1/agentState.ts`)).toContain("readAgentState");
     const broadcaster = read(`${KAP}/transport/ws/v1/sessionEventBroadcaster.ts`);
-    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) {
+    if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version)) {
       const control = read(`${KAP}/protocol/ws-control.ts`);
       expect(control).toContain("type: z.literal('subscribe')");
       expect(control).toContain("type: z.literal('response')");
@@ -1585,8 +1768,8 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
-  test("2.7.2/2.7.3 JSON bootstrap and meta preserve authenticated direct-subscription discovery", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ JSON bootstrap and meta preserve authenticated direct-subscription discovery", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     const web = read(`${CLI}/cli/sub/web/run.ts`);
     expect(web).toContain("randomBytes(32).toString('base64url')");
     expect(web).toContain("timingSafeEqual(actual, expected)");
@@ -1641,7 +1824,13 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     const flag = read(`${CORE}/app/flag/flag.ts`);
     expect(flag).toContain("isPlainObject(rawSnake) ? cloneRecord(rawSnake) : rawSnake");
     expect(flag).toContain("fromToml: experimentalFromToml");
-    expect(read(`${CORE}/session/subagent/flag.ts`)).toContain("SUBAGENT_FORK_FLAG_ID = 'subagent_fork'");
+    if (upstreamAtLeast(2, 8)) {
+      // 2.8.0 removed fork; no production source registers or names the flag.
+      expect(existsSync(abs(`${CORE}/session/subagent/flag.ts`))).toBe(false);
+      expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], /subagent_fork|SUBAGENT_FORK/)).toEqual([]);
+    } else {
+      expect(read(`${CORE}/session/subagent/flag.ts`)).toContain("SUBAGENT_FORK_FLAG_ID = 'subagent_fork'");
+    }
     expect(read(`${CORE}/features/tower/tower.ts`)).toContain("TOWER_FLAG_ID = 'tower'");
   });
 
@@ -1651,15 +1840,15 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(runner).toContain("parseHeadlessGoalCreate(");
     expect(runner).not.toContain("dispatchInput(");
     expect(runner).not.toContain("'/plan'");
-    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
+    if (["2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) {
       expect(runner).toContain("plan.cancel();");
       expect(runner).toContain("await notePlanMode(agent, opts.session);");
       expect(runner).toContain("default_plan_mode is not applied in print mode");
     }
   });
 
-  test("2.7.2/2.7.3 print and update boundaries remain local, noninteractive, and goal-scoped", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ print and update boundaries remain local, noninteractive, and goal-scoped", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     const options = read(`${CLI}/cli/options.ts`);
     for (const flag of ["--yolo", "--auto", "--plan"]) {
       expect(options).toContain(`Cannot combine --prompt with ${flag}.`);
@@ -1688,12 +1877,44 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     const callers = filesContaining([CORE], "fireBeforeExecute(");
     expect(callers).toEqual([
       `${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`,
-      ...(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
+      ...(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion()) ? [`${CORE}/agent/toolExecutor/legacyHooks.ts`] : []),
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
   });
 
   test("the before-execute subscriber population is exactly the audited set", () => {
+    if (upstreamAtLeast(2, 8)) {
+      // planService left the emitter and mcpService lost its beforeExecute wait.
+      expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
+        `${CORE}/agent/toolExecutor/legacyHooks.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutor.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
+        `${CORE}/features/btw/btwService.ts`,
+        `${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`,
+        `${CORE}/features/goal/goalService.ts`,
+        `${CORE}/features/tower/towerService.ts`,
+      ]);
+      expect(filesContaining([CORE], "registerHook(")).toEqual([
+        `${CORE}/agent/agentsMdReminder/agentsMdReminderService.ts`,
+        `${CORE}/agent/permissionGate/permissionGateService.ts`,
+        `${CORE}/agent/shellCommand/shellCommandService.ts`,
+        `${CORE}/agent/task/taskService.ts`,
+        `${CORE}/agent/toolDedupe/toolDedupeService.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutor.ts`,
+        `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
+        `${CORE}/agent/toolPolicy/toolPolicyService.ts`,
+        `${CORE}/agent/toolSelect/toolSelectService.ts`,
+        `${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`,
+        `${CORE}/features/fileHistory/fileHistoryService.ts`,
+        `${CORE}/features/plan/planService.ts`,
+      ]);
+      expect(filesContaining([CORE], "registerToolBatchStarting(")).toEqual([
+        `${CORE}/agent/loop/loop.ts`,
+        `${CORE}/agent/loop/loopService.ts`,
+        `${CORE}/features/swarm/agent/swarmService.ts`,
+      ]);
+      return;
+    }
     if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
       expect(filesContaining([CORE], "registerLegacyStarting(")).toEqual([
         `${CORE}/agent/toolExecutor/legacyHooks.ts`,
@@ -1731,8 +1952,8 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     );
   });
 
-  test("2.7.2/2.7.3 generic executors are constructed only inside the managed agent composition", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ generic executors are constructed only inside the managed agent composition", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP], "new ToolExecutor(")).toEqual([
       `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
     ]);
@@ -1781,6 +2002,188 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(read(`${CORE}/agent/permissionGate/permissionGateService.ts`)).toContain("event.pass(");
   });
 
+  test("2.8+ the shared hook registry keeps the legacy emitter ahead of every registered starting hook", () => {
+    if (!upstreamAtLeast(2, 8)) return;
+    const service = read(`${CORE}/agent/toolExecutor/toolExecutorService.ts`);
+    expect(service).not.toContain("composeToolExecutorHooks(");
+    orderedIndexes(service, [
+      "const legacyHook: AgentToolHook = {",
+      "const decision = await this.legacyStarting.fireBeforeExecute(legacyExecutionContext(context));",
+      "return legacyStartingDecision(context, decision);",
+      "const registry = createToolExecutorHookRegistry<LegacyToolAgentContext, LegacyToolPreparation>();",
+      "for (const hook of [resetHook, legacyHook, ...hooks, internalHook]) {",
+      "if (hook.starting !== undefined) registry.addToolHook({ point: 'starting', hook: hook.starting.bind(hook) });",
+      "return registry.hook;",
+    ], "toolExecutorService composition");
+    // registerHook appends to the array spread between legacyHook and internalHook.
+    expect(service).toContain("private readonly hooks: AgentToolHook[] = [];");
+    const register = service.slice(service.indexOf("  registerHook(hook: AgentToolHook) {"));
+    expect(register.slice(0, register.indexOf("\n  }\n"))).toContain("this.hooks.push(hook);");
+
+    // The starting chain: the first reject returns, args carry forward, and a
+    // skipPermitting decision returns before any later starting hook runs.
+    const chain = read(`${CORE_RUNTIME}/hook/tool-executor/registry.ts`);
+    const starting = chain.slice(chain.indexOf("    async starting(items, [context], control) {"));
+    orderedIndexes(starting.slice(0, starting.indexOf("    async permitting(")), [
+      "for (const item of items) {",
+      "const decision = await control.invoke(item, [current]) as ToolStartingDecision | void;",
+      "if (decision === undefined) continue;",
+      "if ('reject' in decision) return decision;",
+      "if ('args' in decision) {",
+      "if ('skipPermitting' in decision) {",
+      "return rewritten ? { skipPermitting: true, args: current.args } : { skipPermitting: true };",
+    ], "tool-executor registry starting chain");
+
+    // Items dispatch in insertion order, so registration order is chain order.
+    const registry = read(`${CORE_RUNTIME}/hook/registry.ts`);
+    expect(registry).toContain("const items = [...groups.values()].flatMap(");
+
+    const executor = read(`${CORE_RUNTIME}/tool/tool-executor.ts`);
+    orderedIndexes(executor, [
+      "const starting = await this.decide('starting'",
+      "if (starting === undefined || !('skipPermitting' in starting))",
+      "const permitting = await this.decide('permitting'",
+      "await this.host.hook?.beforeExecute?.(this.decisionContext())",
+      "returned = await tool.execute(toolContext)",
+    ], "tool-executor phases");
+    const legacy = read(`${CORE}/agent/toolExecutor/legacyHooks.ts`);
+    expect(legacy).toContain("if (decision?.allow === true) return { skipPermitting: true };");
+    expect(legacy).toContain("if (decision?.veto !== undefined)");
+    expect(read(`${CORE}/agent/permissionGate/permissionGateService.ts`)).toContain(
+      "return decision !== undefined && 'skipPermitting' in decision ? undefined : decision;",
+    );
+  });
+
+  test("2.8+ managed PreToolUse sits on the legacy emitter and the plan guard on registerHook", () => {
+    if (!upstreamAtLeast(2, 8)) return;
+    const moved = "If either registration moves, hook-before-plan ordering becomes construction-order dependent; re-audit it.";
+    const external = read(`${CORE}/features/externalHooks/agent/agentExternalHooksService.ts`);
+    const tools = external.slice(external.indexOf("  private registerToolHooks(toolExecutor: IAgentToolExecutorService): void {"));
+    const body = tools.slice(0, tools.indexOf("\n  }\n"));
+    const legacy = body.indexOf("this._register(registerLegacyStarting(toolExecutor, async (event) => {");
+    const registered = body.indexOf("this._register(toolExecutor.registerHook({");
+    expect(legacy, moved).toBeGreaterThan(-1);
+    expect(registered, moved).toBeGreaterThan(legacy);
+    const legacyBlock = body.slice(legacy, registered);
+    expect(legacyBlock, moved).toContain("const reason = await this.runPreToolUse(event);");
+    expect(legacyBlock, moved).toContain("if (reason !== undefined) event.veto(denyToolExecution(reason));");
+    const registeredBlock = body.slice(registered);
+    expect(registeredBlock, moved).not.toContain("runPreToolUse");
+    expect(registeredBlock, moved).not.toMatch(/\bstarting\s*:/);
+    expect(external.split("this.runPreToolUse(").length - 1, moved).toBe(1);
+
+    const plan = read(`${CORE}/features/plan/planService.ts`);
+    expect(plan, moved).not.toContain("registerLegacyStarting(");
+    const guard = plan.slice(plan.indexOf("  private registerPlanGuard(toolExecutor: IAgentToolExecutorService): IDisposable {"));
+    expect(guard.slice(0, guard.indexOf("\n  }\n")), moved).toContain(
+      "return toolExecutor.registerHook({\n      starting: (context) => this.guardToolExecution(context),",
+    );
+    // The plan-file allow stays gated on an active plan.
+    const check = plan.slice(plan.indexOf("  private async guardToolExecution("));
+    const gate = check.indexOf("    if (plan === null) return undefined;\n\n    if (toolName === 'Write' || toolName === 'Edit') {");
+    expect(gate).toBeGreaterThan(-1);
+    expect(check.indexOf("if (target !== undefined && (await this.writesOnlyPlanFile(context, target))) {")).toBeGreaterThan(gate);
+  });
+
+  test("2.8+ the tower and MCP journal records the resume scan names fold as it assumes", () => {
+    if (!upstreamAtLeast(2, 8)) return;
+    // scanJournalLines mirrors this fold: enter sets tower state, exit clears it, both are agent-domain records.
+    const towerOps = read(`${CORE}/features/tower/towerOps.ts`);
+    expect(towerOps).toContain("export class TowerModeEnter extends AgentEvent2<");
+    expect(towerOps).toContain("static override readonly type = 'tower_mode.enter';");
+    expect(towerOps).toContain("export class TowerModeExit extends AgentEvent2<");
+    expect(towerOps).toContain("static override readonly type = 'tower_mode.exit';");
+    orderedIndexes(towerOps, [
+      "export const towerKey = defineState('tower', () => false).replayable({",
+      ".on(TowerModeEnter, (_s, e, ctx) => {",
+      "return true;",
+      ".on(TowerModeExit, (_s, e, ctx) => {",
+      "return false;",
+    ], "tower state fold");
+    const roots = [CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP];
+    expect(filesContaining(roots, /\.on\(TowerMode(?:Enter|Exit)\b/)).toEqual([`${CORE}/features/tower/towerOps.ts`]);
+    // Replay takes an id-less agent-domain record as the journal's own agent and drops another agent's.
+    const dispatcher = read(`${CORE}/state/eventDispatcherService.ts`);
+    orderedIndexes(dispatcher, [
+      "if (cls.agentDomain) {",
+      "const recordAgentId = record['agentId'];",
+      "if (recordAgentId === undefined) {",
+      "} else if (recordAgentId !== this.agentScope.agentId) {",
+      "return { cls, event: undefined };",
+    ], "agent-domain replay rule");
+    // Only the main agent adopts a foreign tower roster on restore, and only from folded tower state.
+    orderedIndexes(read(`${CORE}/features/tower/towerService.ts`), [
+      "private async reconcileForeignTower(): Promise<void> {",
+      "if (this.agentCtx.agentId !== 'main') return;",
+      "if (!this.agentState.get(towerKey)) return;",
+    ], "main-only tower adoption");
+
+    // PLAN_PAIR_BOOKKEEPING is exactly kimi's durable MCP events, and each folds only into MCP state.
+    // The census reads each event class body, so member order and spacing do not matter.
+    const durableMcp = new Map<string, string>();
+    for (const rel of filesContaining(roots, /static override readonly durable = true/)) {
+      for (const body of read(rel).split(/^export class /m).slice(1)) {
+        const type = /static override readonly type = '([^']+)'/.exec(body)?.[1];
+        if (type?.startsWith("mcp.") && /static override readonly durable = true/.test(body.split(/^\}/m)[0]!)) durableMcp.set(type, rel);
+      }
+    }
+    const mcpFiles = [`${CORE}/agent/mcp/mcpDiscoveryOps.ts`, `${CORE}/agent/mcp/mcpFailureOps.ts`];
+    expect([...durableMcp.keys()].sort()).toEqual([...PLAN_PAIR_BOOKKEEPING].sort());
+    expect([...new Set(durableMcp.values())].sort()).toEqual(mcpFiles);
+    // Every production `mcp.` event type, durable or not, so a new one is noticed here.
+    const allMcpTypes = filesContaining(roots, /static override readonly type = 'mcp\./).flatMap((rel) =>
+      [...read(rel).matchAll(/static override readonly type = '(mcp\.[^']+)'/g)].map((match) => match[1]!)).sort();
+    expect(allMcpTypes).toEqual(["mcp.server.status", "mcp.server_failed", "mcp.server_failure_resolved", "mcp.tools_discovered"]);
+    expect(filesContaining(roots, /\.on\(Mcp(?:ToolsDiscovered|ServerFailed|ServerFailureResolved)\b/)).toEqual(mcpFiles);
+    expect(read(`${CORE}/agent/mcp/mcpDiscoveryOps.ts`)).toContain("export const mcpDiscoveryKey = defineState('mcp.discovery', ");
+    expect(read(`${CORE}/agent/mcp/mcpFailureOps.ts`)).toContain("export const mcpFailureKey = defineState('mcp.failures', ");
+  });
+
+  test("2.8+ every skipPermitting producer is a reviewed site", () => {
+    if (!upstreamAtLeast(2, 8)) return;
+    const roots = [CORE, CORE_RUNTIME, CLI, KAP, SDK, KLIENT, ACP];
+    const counts = Object.fromEntries(
+      filesContaining(roots, "skipPermitting").map((rel) => [rel, read(rel).split("skipPermitting: true").length - 1]),
+    );
+    expect(counts).toEqual({
+      // Not a producer: strips skipPermitting from permitting decisions.
+      [`${CORE}/agent/permissionGate/permissionGateService.ts`]: 0,
+      // legacyStartingDecision (emitter allow, which has no caller) and the uncalled legacySkipPermitting().
+      [`${CORE}/agent/toolExecutor/legacyHooks.ts`]: 2,
+      // Calls with turnId -1, which only the host shell-command path creates.
+      [`${CORE}/agent/shellCommand/shellCommandService.ts`]: 1,
+      // ExitPlanMode review metadata and the plan-file Write/Edit, both behind an active plan.
+      [`${CORE}/features/plan/planService.ts`]: 2,
+      // The chain forwarding a hook's own decision.
+      [`${CORE_RUNTIME}/hook/tool-executor/registry.ts`]: 2,
+      // The decision type.
+      [`${CORE_RUNTIME}/tool/types.ts`]: 1,
+      // Consumers in run().
+      [`${CORE_RUNTIME}/tool/tool-executor.ts`]: 0,
+    });
+    const shell = read(`${CORE}/agent/shellCommand/shellCommandService.ts`);
+    expect(shell).toContain(
+      "starting: (context) => context.context.turnId === -1 ? { skipPermitting: true } : undefined,",
+    );
+    // turnId -1 is produced only by the host shell-command path's own execute call.
+    expect(filesContaining(roots, "turnId: -1")).toEqual([`${CORE}/agent/shellCommand/shellCommandService.ts`]);
+    expect(shell.split("turnId: -1").length - 1).toBe(1);
+    expect(shell).toContain("this.toolExecutor.executor.execute(call, { origin: 'shellCommand', turnId: -1 });");
+    const plan = read(`${CORE}/features/plan/planService.ts`);
+    const exit = plan.slice(plan.indexOf("    if (toolName === 'ExitPlanMode') {"));
+    orderedIndexes(exit, [
+      "if (plan === null) return undefined;",
+      "const decision = await this.review.requestApproval(legacyExecutionContext(context));",
+      "return { skipPermitting: true };",
+    ], "planService ExitPlanMode branch");
+    expect(filesContaining(roots, "legacySkipPermitting(")).toEqual([`${CORE}/agent/toolExecutor/legacyHooks.ts`]);
+    expect(filesContaining(roots, "legacyStartingDecision(")).toEqual([
+      `${CORE}/agent/toolExecutor/legacyHooks.ts`,
+      `${CORE}/agent/toolExecutor/toolExecutorService.ts`,
+      `${CORE}/features/plan/planService.ts`,
+    ]);
+  });
+
   test("the external-hooks agent service is eager (present in every agent scope)", () => {
     const feature = read(`${CORE}/features/externalHooks/externalHooksFeature.ts`);
     expect(feature).toContain("contributeAgentService(IAgentExternalHooksService, AgentExternalHooksService)");
@@ -1823,7 +2226,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     }
     expect(read(`${CORE}/wire/record.ts`)).toContain("AGENT_WIRE_RECORD_KEY = 'wire.jsonl'");
     const wireService = read(`${CORE}/wire/wireService.ts`);
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
+    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) {
       expect(wireService).toContain("for await (const { record } of this.readEntries(false))");
     }
     // Every append-log read in the wire service names the single wire key.
@@ -1852,7 +2255,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
       expect(end, "readRestoreChains body delimiter changed").toBeGreaterThan(-1);
       const chains = body.slice(0, end);
       expect(chains).toContain("const entries = await this.readStableEntries();");
-      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
+      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) {
         expect(chains).toContain(
           "restorable: normalizeLegacyTurnSteerRecords(restorableChain(entries, tree).map(({ record }) => record))",
         );
@@ -1937,7 +2340,7 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
 // These assertions pin the upstream premises of the plugin's bounded-wave
 // construction, including the cancellation weakness it must close. They do
 // not assert that native maxConcurrency is repaired or replace binary controls.
-const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())
+const boundedSwarmSuite = SOURCE !== undefined && existsSync(SOURCE) && ["2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())
   ? describe
   : describe.skip;
 
@@ -1979,7 +2382,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("this.pending.unshift(state);");
     expect(batch).toContain("this.launcher.retry(attempt.state.retryAgentId, runOptions)");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    if (["2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
+    if (["2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) {
       expect(runner).toContain("return awaitRunCompletion(target, loop, loop.retry(), options);");
       const quiescent = section(runner, "async function awaitQuiescent(", "async function stopChildTasks(");
       expect(quiescent).toContain("const result = await loop.settled();");
@@ -1991,6 +2394,15 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     const loop = read(`${CORE}/agent/loop/loopService.ts`);
     expect(section(loop, "async retry():", "private maybeSettle()")).toContain("await this.settled();");
     expect(loop).toContain("await loop.waitForIdle();\n    await this.turns.drain();");
+    if (upstreamAtLeast(2, 8)) {
+      // 2.8 starts agent loops lazily; settlement must still wait for a start in flight.
+      const settled = section(loop, "async settled(): Promise<TurnResult | undefined> {", "continueTurn(");
+      orderedIndexes(settled, [
+        "await this.startPromise;",
+        "if (loop === undefined) {",
+        "await loop.waitForIdle();\n    await this.turns.drain();",
+      ], "loopService.settled");
+    }
   });
 
   test("active swarm rejects parallel model batches and holds the tool lease until return", () => {
@@ -2044,6 +2456,21 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
   });
 
   test("fork stays explicit and copies profile tools and history without swarm activation", () => {
+    if (upstreamAtLeast(2, 8)) {
+      // 2.8 removed fork: every Agent or AgentSwarm child is a fresh create, never a copy of
+      // its caller. The only remaining agent fork is the host /btw side channel.
+      expect(read(`${CORE}/features/swarm/tools/agent-swarm/agent-swarm.ts`)).not.toMatch(/\bfork\b/i);
+      expect(read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`)).not.toMatch(/\bfork\b/i);
+      expect(existsSync(abs(`${CORE}/session/subagent/flag.ts`))).toBe(false);
+      expect(read(`${CORE}/session/subagent/spawn.ts`)).not.toMatch(/fork/i);
+      const subagents = read(`${CORE}/session/subagent/subagentService.ts`);
+      expect(subagents.split("this.agentLifecycle.create(").length - 1).toBe(1);
+      expect(subagents).not.toMatch(/fork/i);
+      expect(filesContaining([CORE, CLI, KAP, SDK], "agentLifecycle.fork(")).toEqual([
+        `${CORE}/features/btw/btwService.ts`,
+      ]);
+      return;
+    }
     const tool = read(`${CORE}/features/swarm/tools/agent-swarm/agentSwarmTool.ts`);
     expect(tool).toContain("const fork = args.fork === true;");
     expect(tool).toContain("if (fork && !this.flags.enabled(SUBAGENT_FORK_FLAG_ID))");
@@ -2085,7 +2512,7 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     const abort = read(`${CORE}/_base/utils/abort.ts`);
     expect(section(abort, "export function abortable<T>(", "export function linkAbortSignal(")).toContain("reject(abortReason(signal));");
     const runner = read(`${CORE}/session/subagent/runAgentTurn.ts`);
-    if (["2.6.3", "2.7.2", "2.7.3"].includes(upstreamVersion())) {
+    if (["2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) {
       const completion = section(runner, "async function awaitRunCompletion(", "async function awaitQuiescent(");
       expect(completion).toContain("loop.cancel(undefined, reason);");
       expect(completion).toContain("abortCleanup ??= stopChildTasks(target, loop, reason);");
@@ -2108,6 +2535,48 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
 
   test("detached completion can wake a finished child and must be prevented", () => {
     const version = upstreamVersion();
+    if (upstreamAtLeast(2, 8)) {
+      // 2.8 rebuilt the loop on core's actor. A detached slot still outlives its turn, its
+      // completion still queues a trigger and releases intake, and every actor checkpoint
+      // still schedules a new turn from that trigger.
+      const loop = read(`${CORE_RUNTIME}/loop/loop-actor.ts`);
+      const finish = section(loop, "private finishTurn(", "private closeRuntime(");
+      expect(finish).toContain("if (slot.turnId !== turn.machine.id || slot.detached) continue;");
+      expect(finish).toContain("ctrl.setState({ status: 'idle' });");
+      const complete = section(loop, "private completeTool(", "private completeDetached(");
+      expect(complete).toContain("if (slot.detached) {");
+      expect(complete).toContain("slot.completionPending = true;");
+      expect(complete).toContain("this.completeDetached(slot, settledOutcome, message);");
+      const completion = section(loop, "private drainDetachedCompletions(): void {", "private notifyCompletionWaiters(");
+      expect(completion).toContain("type: 'tool.async_ended'");
+      expect(completion).toContain("const shouldQueue = this.shouldQueueTaskNotification?.(slot.handler.taskId) ?? true;");
+      expect(completion).toContain("this.mailbox.queue([message]);");
+      expect(completion).toContain("if (drained && !this.resetting) this.held = false;");
+      expect(loop).toContain("return this.normal.length > 0 || this.notifyEntries.length > 0;");
+      const onSchedule = section(loop, "onSchedule: (ctrl) => {", "onClose: (ctrl) =>");
+      expect(onSchedule).toContain("if (ctrl.state.status !== 'idle' || this.hasPendingCompletions) return;");
+      expect(onSchedule).toContain("this.schedule(ctrl);");
+      const schedule = section(loop, "private canSchedule(state: LoopActorState): boolean {", "private schedule(ctrl: LoopControl): boolean {");
+      expect(schedule).toContain("state.status === 'idle' &&");
+      expect(schedule).toContain("!this.held &&");
+      expect(schedule).toContain("!this.hasPendingCompletions &&");
+      expect(schedule).toContain("(this.mailbox.hasTrigger || this.mailbox.hasReminders)");
+      const scheduled = section(loop, "private schedule(ctrl: LoopControl): boolean {", "private activate(");
+      expect(scheduled).toContain("const next = this.mailbox.hasTrigger ? this.mailbox.take(this.durable.nextTurnId) : undefined;");
+      expect(scheduled).toContain("this.activate(ctrl, next);");
+      const actor = read(`${CORE_RUNTIME}/actor/actor.ts`);
+      expect(section(actor, "const runSchedule = (): void => {", "const drainCheckpoint = (): void => {")).toContain("options.onSchedule?.(ctrl);");
+      expect(section(actor, "const drainCheckpoint = (): void => {", "flushingCheckpoint = false;")).toContain("runSchedule();");
+      // Only the runner's own cancellation path suppresses these notifications.
+      expect(read(`${CORE}/agent/loop/loopService.ts`)).toContain(
+        "shouldQueueTaskNotification: (taskId) => !this.suppressedTaskNotifications.has(taskId),",
+      );
+      expect(filesContaining([CORE, CORE_RUNTIME, CLI, KAP, SDK], ".suppressTaskNotifications(")).toEqual([
+        `${CORE}/session/subagent/runAgentTurn.ts`,
+      ]);
+      expect(read(`${CORE}/agent/task/taskOutput.ts`)).toContain("source: 'async-tool'");
+      return;
+    }
     const loop = read(["2.7.2", "2.7.3"].includes(version)
       ? `${CORE_RUNTIME}/loop/loop-actor.ts`
       : `${CORE}/agent/loop/core/loop-actor.ts`);
@@ -2169,13 +2638,39 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     const store = read(`${CORE}/persistence/backends/node-fs/atomicDocumentStore.ts`);
     expect(store).toContain("JSON.parse(textDecoder.decode(bytes))");
     expect(store).toContain("await this.storage.write(scope, key, this.codec.encode(value), { atomic: true });");
-    expect(read(`${CORE}/persistence/backends/node-fs/fileStorageService.ts`)).toContain("return join(this.baseDir, scope, key);");
+    const files = read(`${CORE}/persistence/backends/node-fs/fileStorageService.ts`);
+    if (upstreamAtLeast(2, 8)) {
+      // 2.8 moved file storage into core; the engine class is a thin subclass that keeps the
+      // same constructor base directory, so the policy path is unchanged.
+      expect(files).toContain("import { FileStorageService as CoreFileStorageService } from '@moonshot-ai/core/store/backend/node';");
+      expect(files).toContain("export class FileStorageService extends CoreFileStorageService implements IFileSystemStorageService {");
+      expect(files).toContain("super(baseDir, dirMode, fileMode, toStorageIoError);");
+      expect(files).not.toMatch(/\b(?:pathFor|read|write)\s*\(/);
+      expect(JSON.parse(read(`${CORE_RUNTIME}/../package.json`)).exports["./*"]).toEqual({ types: "./src/*.ts", default: "./src/*.ts" });
+      const backend = read(`${CORE_RUNTIME}/store/backend/node.ts`);
+      expect(backend).toContain("pathFor(scope: string, key: string): string {\n    return join(this.baseDir, scope, key);");
+      const coreRead = section(backend, "async read(scope: string, key: string): Promise<Uint8Array | undefined> {", "async *readStream(");
+      expect(coreRead).toContain("const filePath = this.pathFor(scope, key);");
+      expect(coreRead).toContain("bytes = await readFile(filePath);");
+      expect(coreRead).toContain("if (isEnoent(error)) return undefined;");
+      const coreWrite = section(backend, "async write(", "async writeStream(");
+      expect(coreWrite).toContain("const filePath = this.pathFor(scope, key);");
+      expect(coreWrite).toContain("await atomicWrite(filePath, data, undefined, this.fileMode, options.signal);");
+      const bootstrap = read(`${CORE}/app/bootstrap/bootstrap.ts`);
+      expect(bootstrap).toContain("import { FileStorageService } from '#/persistence/backends/node-fs/fileStorageService';");
+      expect(bootstrap).toContain("new SyncDescriptor(FileStorageService, [options.homeDir, 0o700, 0o600]);");
+    } else {
+      expect(files).toContain("return join(this.baseDir, scope, key);");
+    }
   });
 
-  test("2.7.2/2.7.3 moved retry code preserves per-attempt settlement and cancellation", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ moved retry code preserves per-attempt settlement and cancellation", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     const policy = read(`${CORE_RUNTIME}/llm/policy/policy.ts`);
-    const settled = policy.indexOf("const result = await settleLlmRequest(resolvedRequest, { signal, onEvent });");
+    // 2.8 renamed the per-attempt settler; each attempt is still awaited before any retry.
+    const settled = policy.indexOf(upstreamAtLeast(2, 8)
+      ? "const result = await runAttempt(resolvedRequest, { signal, onEvent });"
+      : "const result = await settleLlmRequest(resolvedRequest, { signal, onEvent });");
     const retryIndex = policy.indexOf("if (shouldRetry(policy.retry, attempt, result.error, listOf(policy.retryables)))");
     const delayed = policy.indexOf("if (!(await delay(delayMs, signal)))");
     expect(settled).toBeGreaterThan(-1);
@@ -2189,6 +2684,16 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     const settle = read(`${CORE_RUNTIME}/llm/policy/settle.ts`);
     expect(settle).toContain("if (isAbortError(error) || signal.aborted)");
     expect(settle).toContain("return aborted();");
+    if (upstreamAtLeast(2, 8)) {
+      expect(settle).toContain("export async function runAttempt(");
+      // Invalid-argument retries are new model requests inside one turn, still bounded by
+      // shouldRetry's attempt cap; only their delay is zero.
+      const retryBranch = policy.slice(retryIndex, policy.indexOf("attempt += 1;", retryIndex));
+      expect(retryBranch).toContain("const invalidToolArguments = result.error.kind === 'invalid_tool_arguments';");
+      expect(retryBranch).toContain("const delayMs = invalidToolArguments && policy.retry?.infiniteRetry !== true\n        ? 0");
+      expect(retryBranch).toContain("if (!(await delay(delayMs, signal)))");
+      expect(policy.slice(settled, retryIndex)).not.toContain("attempt += 1;");
+    }
     expect(read(`${CORE_RUNTIME}/llm/policy/credentials.ts`)).toContain(
       "appliedRecoveries.some((record) => record.strategy === 'credentials')",
     );
@@ -2197,8 +2702,8 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("this.rateLimitCapacity += 1;");
   });
 
-  test("2.7.2/2.7.3 structured errors retain swarm rate-limit classification", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ structured errors retain swarm rate-limit classification", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     const errors = read(`${CORE}/llm-adapter/contract/errors.ts`);
     expect(errors).toContain("if (error instanceof APIProviderQuotaExhaustedError) return false;");
     expect(errors).toContain("if (error instanceof APIProviderRateLimitError) return true;");
@@ -2217,8 +2722,8 @@ boundedSwarmSuite("exact bounded-swarm source premises", () => {
     expect(batch).toContain("if (isProviderRateLimitError(error)) {");
   });
 
-  test("2.7.2/2.7.3 host task.background remains outside the model-tool detachment census", () => {
-    if (!["2.7.2", "2.7.3"].includes(upstreamVersion())) return;
+  test("2.7.2+ host task.background remains outside the model-tool detachment census", () => {
+    if (!["2.7.2", "2.7.3", "2.8.0"].includes(upstreamVersion())) return;
     const requests = read(`${KAP}/transport/ws/v1/taskRequests.ts`);
     expect(requests).toContain("const background = taskBackgroundMessageSchema.safeParse(frame);");
     expect(requests).toContain("handler?.detach();");
@@ -2337,9 +2842,20 @@ releaseRowSuite("per-release premises of the scope, flag and print relaxations (
       const tower = gitShow(v, `${CORE}/features/tower/flag.ts`);
       expect(tower).toContain("export const TOWER_FLAG_ENV = 'KIMI_CODE_EXPERIMENTAL_TOWER';");
       expect(tower).toContain("env: TOWER_FLAG_ENV,");
-      const fork = gitShow(v, `${CORE}/session/subagent/flag.ts`);
-      expect(fork).toContain("export const SUBAGENT_FORK_FLAG_ENV = 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK';");
-      expect(fork).toContain("env: SUBAGENT_FORK_FLAG_ENV,");
+      if (versionAtLeast(v, 2, 8)) {
+        // 2.8.0 removed fork. ls-tree reads the tree, so a failed blob fetch
+        // cannot pass for an absent file.
+        const listed = execFileSync("git", ["-C", SOURCE!, "ls-tree", "--name-only", releaseTag(v), "--", `${CORE}/session/subagent/flag.ts`], {
+          encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+        });
+        expect(listed.trim(), `${v}: session/subagent/flag.ts is back`).toBe("");
+        expect(gitFilesContaining(v, "subagent_fork")).toEqual([]);
+        expect(gitFilesContaining(v, "SUBAGENT_FORK")).toEqual([]);
+      } else {
+        const fork = gitShow(v, `${CORE}/session/subagent/flag.ts`);
+        expect(fork).toContain("export const SUBAGENT_FORK_FLAG_ENV = 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK';");
+        expect(fork).toContain("env: SUBAGENT_FORK_FLAG_ENV,");
+      }
     });
 
     test(`${v}: the scoped read and web tools are default-approved, so the hook is their only gate`, () => {

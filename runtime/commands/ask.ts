@@ -27,6 +27,7 @@ import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, assertNetworkResumeConfined, resumeBudget, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { appendSessionReferences, resolveSessionReferences, stripSessionReferences, withReferenceReadRoots } from "../session-references.js";
 import { shorten } from "../util.js";
 
 const ASK_SUMMARY_MAX = 120;
@@ -56,7 +57,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
   const parsed = parseAskArgs(argv);
   if (parsed.help) return companionHelp(["ask", ...argv])!;
   // Scope always comes from this invocation, never from a resumed job.
-  const readScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
+  const callerScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
     : await resolveReadScope(parsed.readRoots, parsed.network, "ask.parse");
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
     await requireAskHookInstalled(context);
@@ -72,10 +73,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
 
     const jobId = allocateJobId(context);
     const sessionResolution = await resolveResumeSession(store, "ask", repoIdentity.repoId, parsed);
-    if (readScope?.network === true) {
-      assertNetworkResumeConfined(store, "ask", sessionResolution, effectiveReadRoots(readScope, context.cwd));
-    }
-    const askPrompt = buildAskPrompt(parsed.prompt, sessionResolution.reusedSession);
+    const basePrompt = buildAskPrompt(parsed.prompt, sessionResolution.reusedSession);
     const executionPlan = await prepareKimiExecutionPlan({
       operationKind: "ask",
       cwd: context.cwd,
@@ -85,7 +83,17 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       resumeSessionId: sessionResolution.kimiSessionId ?? undefined,
       resumeSource: sessionResolution.sourceJob,
     });
-    assertScopeSupported(readScope, executionPlan.certification, "INVALID_ARGS", "ask.parse");
+    assertScopeSupported(callerScope, executionPlan.certification, "INVALID_ARGS", "ask.parse");
+    const references = await resolveSessionReferences(parsed.referenceSessions, {
+      store, env: context.env, spawnCwd: context.cwd, plan: executionPlan,
+      resumeSessionId: sessionResolution.kimiSessionId, stage: "ask.reference-session",
+    });
+    // A named session is a root this call grants, so the resume rule judges the widened roots.
+    const readScope = withReferenceReadRoots(callerScope, references);
+    if (readScope?.network === true) {
+      assertNetworkResumeConfined(store, "ask", sessionResolution, effectiveReadRoots(readScope, context.cwd));
+    }
+    const askPrompt = appendSessionReferences(basePrompt, references);
     const logPath = path.join(paths.logsDir, `ask-${jobId}.jsonl`);
     const job = store.createJob({
       job_id: jobId,
@@ -330,6 +338,7 @@ function buildAskPrompt(question: string | undefined, reusedSession: boolean): s
 }
 
 export function askPromptSubject(prompt: string): string {
-  if (prompt.startsWith(ASK_PROMPT_PREFIX)) return prompt.slice(ASK_PROMPT_PREFIX.length);
-  return prompt === ASK_RESUME_PROMPT ? ASK_CONTINUE_TASK : prompt;
+  const body = stripSessionReferences(prompt);
+  if (body.startsWith(ASK_PROMPT_PREFIX)) return body.slice(ASK_PROMPT_PREFIX.length);
+  return body === ASK_RESUME_PROMPT ? ASK_CONTINUE_TASK : body;
 }

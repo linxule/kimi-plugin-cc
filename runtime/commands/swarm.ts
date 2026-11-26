@@ -43,6 +43,7 @@ import type { CommandContext } from "../types.js";
 import { hookGateRefusal, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { appendSessionReferences, resolveSessionReferences, withReferenceReadRoots } from "../session-references.js";
 import { usesBoundedSwarmPolicy } from "../swarm-policy.js";
 
 // /kimi:swarm — parallel fan-out, read-only by default and runtime-foreground-only.
@@ -258,7 +259,7 @@ async function runReadSwarm(
   parsed: SwarmArgs,
   objective: string,
   context: CommandContext,
-  readScope: ReadScope | undefined,
+  callerScope: ReadScope | undefined,
 ): Promise<string> {
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
@@ -275,9 +276,14 @@ async function runReadSwarm(
     });
 
     const maxConcurrency = resolveSwarmMaxConcurrency(parsed.maxConcurrency);
-    const prompt = buildSwarmPrompt(
+    const executionCwd = await realpath(context.cwd);
+    const references = await resolveSessionReferences(parsed.referenceSessions, {
+      store, env: context.env, spawnCwd: executionCwd, plan: executionPlan, stage: "swarm.reference-session",
+    });
+    const readScope = withReferenceReadRoots(callerScope, references);
+    const prompt = appendSessionReferences(buildSwarmPrompt(
       objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined,
-    );
+    ), references);
     const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `swarm-${jobId}.jsonl`);
 
@@ -297,7 +303,7 @@ async function runReadSwarm(
       maxConcurrency,
       context,
       undefined,
-      await realpath(context.cwd),
+      executionCwd,
     );
     if (!completed.final_output_path) {
       throw new RuntimeError("SWARM_RESULT_MISSING", "Swarm finished without a rendered result.", "swarm.result");
@@ -376,9 +382,12 @@ async function runWriteSwarm(
         env: context.env,
         stderr: context.stderr,
       });
-      const prompt = buildSwarmWritePrompt(
+      const executionCwd = await realpath(worktreePath);
+      const prompt = appendSessionReferences(buildSwarmWritePrompt(
         objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined,
-      );
+      ), await resolveSessionReferences(parsed.referenceSessions, {
+        store, env: context.env, spawnCwd: executionCwd, plan: executionPlan, stage: "swarm.reference-session",
+      }));
 
       // Reuse the rescue (write-capable) lineage, like pursue; the hook label
       // ("swarm-write") drives the allowlist. cwd stays the USER's real cwd for
@@ -404,7 +413,7 @@ async function runWriteSwarm(
             preserveWorktree = true;
           },
         },
-        await realpath(worktreePath),
+        executionCwd,
       );
       if (preserveWorktree && completed.error) {
         throw new RuntimeError(completed.error.code, completed.error.message, completed.error.stage, {

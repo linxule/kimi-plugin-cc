@@ -1,6 +1,6 @@
 ---
 description: Hand Kimi a task. Read-only answer by default; --write lets Kimi edit the workspace.
-argument-hint: "[--write] [--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] <prompt>"
+argument-hint: "[--write] [--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [--reference-session <id>] <prompt>"
 disable-model-invocation: true
 ---
 
@@ -22,6 +22,7 @@ Supported flags:
 - `--fresh` — force a new session id instead of reusing a prior session
 - `-m`, `--model <name>`
 - `--read-root <absolute-dir>` (repeatable) and `--network` — read-only only; `--write` rejects them. `--network` enables web search and URL fetch and confines file reads to the workspace plus any `--read-root` directories.
+- `--reference-session <job-id-or-session-id>` (repeatable, at most 8) — point Kimi at the log of an earlier session so it can pick up from that work. With `--read-root` or `--network` the session's whole main-agent directory (its log, saved tool outputs and plans) becomes readable, and with `--network` that content can reach the web.
 
 Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). Backgrounding does not extend the runtime budget.
 

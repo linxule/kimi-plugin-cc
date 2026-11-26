@@ -9,8 +9,9 @@ export interface KimiJournalLine {
 }
 
 /**
- * kimi-code's append-log framing (appendLogStore.read/parseLine, identical at
- * 2.4.0 and 2.7.3): one TextDecoder over the stream, split on "\n" only, strip
+ * kimi-code's append-log framing (appendLogStore.read/parseLine at 2.4.0 and
+ * 2.7.3; packages/core `store/append-log.ts` at 2.8.0, same behaviour): one
+ * TextDecoder over the stream, split on "\n" only, strip
  * ONE trailing "\r", skip only a zero-length line, else JSON.parse. A
  * terminated line that fails to parse is corruption and wire replay stops
  * there; an unparseable unterminated last line is dropped as truncated.

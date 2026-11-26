@@ -30,7 +30,7 @@
 //     described as hook drift.
 
 import { constants as fsConstants } from "node:fs";
-import { open, readdir } from "node:fs/promises";
+import { lstat, open, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import { RuntimeError } from "./errors.js";
@@ -47,7 +47,7 @@ const CONFIG_MAX_BYTES = 1 * 1024 * 1024;
 const JOURNAL_MAX_BYTES = 64 * 1024 * 1024;
 /** Bounded directory enumeration so a pathological sessions/ tree refuses
  * instead of scanning forever. */
-const DIR_ENUM_CAP = 4096;
+export const DIR_ENUM_CAP = 4096;
 
 const TRUTHY_STRINGS = new Set(["1", "true", "yes", "on"]);
 
@@ -57,7 +57,7 @@ function isTruthySelectorValue(value: unknown): boolean {
   return false;
 }
 
-type SmallFileRead =
+export type SmallFileRead =
   | { readonly kind: "absent" }
   | { readonly kind: "ok"; readonly contents: string }
   | { readonly kind: "unreadable"; readonly reason: string };
@@ -67,7 +67,7 @@ type SmallFileRead =
  * config lock reader in runtime/hooks/config-safety.ts. Never partial-reads:
  * an oversized file refuses rather than being silently truncated.
  */
-async function readSmallFileSafe(filePath: string, maxBytes: number): Promise<SmallFileRead> {
+export async function readSmallFileSafe(filePath: string, maxBytes: number): Promise<SmallFileRead> {
   let handle;
   try {
     handle = await open(
@@ -197,7 +197,7 @@ export type EnvironmentConfigInspection =
  * sessionManagerService.openCreation, i.e. when a session is created. A fresh
  * print on a certified row passes `--environment local`, which skips the
  * declarations; a resume goes through doResume, which applies the session's
- * stored binding (state.json) and never consults the default (2.5.0-2.7.3).
+ * stored binding (state.json) and never consults the default (2.5.0-2.8.0).
  * The stored binding is checked separately by scanSessionJournalsForPlan, so
  * that one key stops refusing. A non-table section still refuses.
  */
@@ -256,6 +256,11 @@ export async function inspectEnvironmentConfig(
 export const WORKSPACE_TRUST_DISABLED_WARNING =
   "Workspace trust is disabled in kimi-code's config: MCP servers configured by this repository can start outside the plugin's hook.";
 
+/** Launch warning for an uncertified release with experimental selectors switched on. */
+export function experimentalSelectorsWarning(selectors: readonly string[]): string {
+  return `kimi-code experimental features are switched on (${selectors.join(", ")}) and this kimi-code release is not certified by the plugin. The plugin starts Kimi with KIMI_CODE_EXPERIMENTAL_TOWER=0 and without KIMI_CODE_EXPERIMENTAL_FLAG; how this release reads them has not been reviewed.`;
+}
+
 export type ExperimentalSelectorInspection =
   | { readonly kind: "ok" }
   | {
@@ -266,7 +271,8 @@ export type ExperimentalSelectorInspection =
     };
 
 /**
- * Refuse v2-only experimental features this plugin does not certify.
+ * Find v2-only experimental features this plugin runs its tasks without.
+ * A plan-less launch refuses on them; an uncertified release only warns.
  * Sources (per-flag precedence upstream is env → [experimental] config →
  * master flag → default): the `[experimental]` table keys `tower` and
  * `subagent_fork` in `<kimiHome>/config.toml`, and the per-flag env vars
@@ -280,18 +286,36 @@ export async function inspectExperimentalSelectors(
   kimiHome: string,
   env: Readonly<NodeJS.ProcessEnv>,
 ): Promise<ExperimentalSelectorInspection> {
+  return (await inspectExperimentalConfig(kimiHome, env)).inspection;
+}
+
+/**
+ * One read of the config for both answers: the two selectors a plan-less
+ * launch refuses on, and every selector the user switched on (truthy
+ * `[experimental]` keys and truthy `KIMI_CODE_EXPERIMENTAL_*` variables, the
+ * master flag included). An uncertified release's flag set is unreviewed, so
+ * its warning names them all, not only the two the plugin forces off.
+ */
+async function inspectExperimentalConfig(
+  kimiHome: string,
+  env: Readonly<NodeJS.ProcessEnv>,
+): Promise<{ inspection: ExperimentalSelectorInspection; switchedOn: readonly string[] }> {
   const parsed = await readParsedConfig(kimiHome);
   if (parsed.kind === "unreadable") {
-    return { kind: "refuse", selectors: [], reason: parsed.reason };
+    return { inspection: { kind: "refuse", selectors: [], reason: parsed.reason }, switchedOn: [] };
   }
 
   const selectors: string[] = [];
+  const switchedOn: string[] = [];
   const experimental = parsed.config?.["experimental"];
   if (experimental !== null && typeof experimental === "object" && !Array.isArray(experimental)) {
     const table = experimental as Record<string, unknown>;
     if (isTruthySelectorValue(table["tower"])) selectors.push("config:[experimental].tower");
     if (isTruthySelectorValue(table["subagent_fork"])) {
       selectors.push("config:[experimental].subagent_fork");
+    }
+    for (const [key, value] of Object.entries(table)) {
+      if (isTruthySelectorValue(value)) switchedOn.push(`config:[experimental].${key}`);
     }
   }
   if (isTruthySelectorValue(env.KIMI_CODE_EXPERIMENTAL_TOWER)) {
@@ -300,22 +324,40 @@ export async function inspectExperimentalSelectors(
   if (isTruthySelectorValue(env.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK)) {
     selectors.push("env:KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK");
   }
+  // Environment names are case-sensitive except on Windows, where Kimi reads any spelling.
+  const selectorName = (name: string): string => (process.platform === "win32" ? name.toUpperCase() : name);
+  for (const [name, value] of Object.entries(env)) {
+    if (selectorName(name).startsWith("KIMI_CODE_EXPERIMENTAL_") && isTruthySelectorValue(value)) switchedOn.push(`env:${name}`);
+  }
 
-  if (selectors.length === 0) return { kind: "ok" };
+  if (selectors.length === 0) return { inspection: { kind: "ok" }, switchedOn };
   return {
-    kind: "refuse",
-    selectors,
-    reason: `Refusing v2-only experimental feature(s) not certified by kimi-plugin-cc: ${selectors.join(", ")}.`,
+    inspection: {
+      kind: "refuse",
+      selectors,
+      reason: `Refusing v2-only experimental feature(s) not certified by kimi-plugin-cc: ${selectors.join(", ")}.`,
+    },
+    switchedOn,
   };
 }
 
-type BoundedReaddir =
+/** Device and inode of a directory, without following a final link; undefined when it cannot be read. */
+async function directoryIdentity(directory: string): Promise<string | undefined> {
+  try {
+    const info = await lstat(directory, { bigint: true });
+    return info.isDirectory() ? `${info.dev}:${info.ino}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export type BoundedReaddir =
   | { readonly kind: "ok"; readonly entries: readonly import("node:fs").Dirent[] }
   | { readonly kind: "absent" }
   | { readonly kind: "cap-exceeded" }
   | { readonly kind: "unreadable"; readonly reason: string };
 
-async function boundedReaddir(dirPath: string, cap: number): Promise<BoundedReaddir> {
+export async function boundedReaddir(dirPath: string, cap: number): Promise<BoundedReaddir> {
   let entries;
   try {
     entries = await readdir(dirPath, { withFileTypes: true });
@@ -330,11 +372,12 @@ async function boundedReaddir(dirPath: string, cap: number): Promise<BoundedRead
   return { kind: "ok", entries };
 }
 
-type JournalOpen =
+export type JournalOpen =
   | { readonly kind: "ok"; readonly handle: import("node:fs/promises").FileHandle }
   | { readonly kind: "unavailable"; readonly reason: string };
 
-async function openJournalSafely(journalPath: string, maxBytes: number): Promise<JournalOpen> {
+/** `maxBytes` omitted: no size cap (the caller never reads the content). */
+export async function openJournalSafely(journalPath: string, maxBytes?: number): Promise<JournalOpen> {
   let handle;
   try {
     // O_NONBLOCK so a FIFO planted at the journal path (no writer) does not
@@ -355,7 +398,7 @@ async function openJournalSafely(journalPath: string, maxBytes: number): Promise
     await handle.close().catch(() => undefined);
     return { kind: "unavailable", reason: "journal is not a regular file" };
   }
-  if (stats.size > BigInt(maxBytes)) {
+  if (maxBytes !== undefined && stats.size > BigInt(maxBytes)) {
     await handle.close().catch(() => undefined);
     return { kind: "unavailable", reason: `journal exceeds ${maxBytes} byte cap` };
   }
@@ -364,10 +407,21 @@ async function openJournalSafely(journalPath: string, maxBytes: number): Promise
 
 type JournalScanFinding =
   | { readonly kind: "tainted"; readonly recordType: string }
-  | { readonly kind: "environment"; readonly recordType: string };
+  | { readonly kind: "environment"; readonly recordType: string }
+  | { readonly kind: "tower" };
 
 /** Records that mean the session already did work: a turn, prompt, tool, model or delegated task. */
 const ACTIVITY_RECORD = /^(turn\.|prompt\.|tool\.|llm\.|shell\.|subagent\.|task\.|assistant\.|context\.append_message$|context\.append_loop_event$)/;
+/**
+ * Records kimi may write between the create-time `plan_mode.enter` and print's
+ * `plan_mode.cancel` without doing work. These are kimi's three durable MCP
+ * events (2.8.0): its MCP service writes them on its own clock while servers
+ * connect, and each folds only into MCP discovery or failure state. Discovery
+ * was observed there on 2.8.0. Anything else between the two taints.
+ */
+export const PLAN_PAIR_BOOKKEEPING: ReadonlySet<string> = new Set([
+  "mcp.tools_discovered", "mcp.server_failed", "mcp.server_failure_resolved",
+]);
 /** Records that make replay non-linear (branch switch or undo), so a fold could differ. */
 const REWIND_RECORD = /^(agent\.switched$|context\.undo$|context\.undone$)/;
 
@@ -375,12 +429,14 @@ async function scanJournalLines(
   handle: import("node:fs/promises").FileHandle,
   expectedExecutionRoot: string | undefined,
   tolerateCancelledDefaultEnter = false,
+  main = false,
 ): Promise<JournalScanFinding | null> {
   // G2: a print-created session's main journal holds the create-time
-  // `default_plan_mode` enter immediately followed by print's id-less cancel,
-  // before any work. On a linear journal that pair folds to inactive, so it
-  // alone is tolerated; every other plan record, or that pair anywhere else,
-  // still taints.
+  // `default_plan_mode` enter followed by print's id-less cancel, before any
+  // work. On a linear journal that pair folds to inactive, so it alone is
+  // tolerated; every other plan record, or that pair anywhere else, still
+  // taints. Bookkeeping records may sit between the two (2.8.0 journals MCP
+  // discovery there); work, a rewind or another plan record may not.
   // Replay stops at the first corrupt line, so records after it may add
   // taints (seeing more is conservative) but never start or complete a fold.
   let sawActivity = false;
@@ -388,10 +444,17 @@ async function scanJournalLines(
   let sawCorrupt = false;
   let pendingEnter: { readonly id: unknown } | null = null;
   let toleratedPair = false;
+  // Restoring a session left in tower mode lets kimi adopt the workspace's
+  // `.tower` state without a tool call, whatever the tower flag says. Kimi
+  // folds tower state from the main journal only, takes a record with no
+  // agentId as the journal's own, ignores another agent's, and stops at the
+  // first corrupt line: an exit it will not replay must not clear the state.
+  let towerActive = false;
   const taintEnter = { kind: "tainted", recordType: "plan_mode.enter" } as const;
   for await (const framed of kimiJournalRecords(handle.createReadStream())) {
     const { line, parsed } = framed;
     if (parsed === UNPARSEABLE_JOURNAL_LINE) {
+      const firstCorrupt = framed.terminated && !sawCorrupt;
       if (framed.terminated) sawCorrupt = true;
       if (pendingEnter !== null) return taintEnter;
       if (line.includes('"plan_mode.') || line.includes('"plan.')) {
@@ -400,25 +463,38 @@ async function scanJournalLines(
       if (line.includes('"environment.set_binding')) {
         return { kind: "environment", recordType: "<unparseable-environment-binding>" };
       }
+      // Kimi drops a torn final line and stops replaying at the first complete
+      // corrupt one; that one line is read conservatively as an enter.
+      if (main && firstCorrupt && line.includes('"tower_mode.')) towerActive = true;
       continue;
     }
     const record = parsed as Record<string, unknown> | null;
     const type = record?.["type"];
+    // Kimi stops replaying at the first complete corrupt line, so nothing after it changes tower state.
+    if (main && !sawCorrupt && (record?.["agentId"] === undefined || record["agentId"] === "main")) {
+      if (type === "tower_mode.enter") towerActive = true;
+      else if (type === "tower_mode.exit") towerActive = false;
+    }
+    const isPlanRecord = typeof type === "string" && (type.startsWith("plan_mode.") || type.startsWith("plan."));
+    const isRewind = typeof type === "string" && REWIND_RECORD.test(type);
+    const isActivity = typeof type === "string" && ACTIVITY_RECORD.test(type);
     if (pendingEnter !== null) {
       const cancelId = record?.["id"];
       const cancels = type === "plan_mode.cancel" && record?.["agentId"] === "main" &&
         (cancelId === undefined || cancelId === pendingEnter.id);
-      if (!cancels) return taintEnter;
-      pendingEnter = null;
-      toleratedPair = true;
-      continue;
+      if (cancels) {
+        pendingEnter = null;
+        toleratedPair = true;
+        continue;
+      }
+      if (typeof type !== "string" || !PLAN_PAIR_BOOKKEEPING.has(type)) return taintEnter;
     }
-    if (typeof type === "string" && REWIND_RECORD.test(type)) {
+    if (isRewind) {
       if (toleratedPair) return taintEnter;
       sawRewind = true;
     }
-    if (typeof type === "string" && ACTIVITY_RECORD.test(type)) sawActivity = true;
-    if (typeof type === "string" && (type.startsWith("plan_mode.") || type.startsWith("plan."))) {
+    if (isActivity) sawActivity = true;
+    if (isPlanRecord) {
       if (
         tolerateCancelledDefaultEnter && type === "plan_mode.enter" && !toleratedPair &&
         !sawActivity && !sawRewind && !sawCorrupt && record?.["agentId"] === "main" && typeof record?.["id"] === "string"
@@ -440,13 +516,14 @@ async function scanJournalLines(
   }
   // An enter as the last record was never cancelled.
   if (pendingEnter !== null) return taintEnter;
-  return null;
+  return towerActive ? { kind: "tower" } : null;
 }
 
 export type SessionJournalPlanScan =
   | { readonly kind: "clean"; readonly journals: readonly string[] }
   | { readonly kind: "tainted"; readonly journal: string; readonly recordType: string }
   | { readonly kind: "environment"; readonly journal: string; readonly recordType: string }
+  | { readonly kind: "tower"; readonly journal: string }
   | { readonly kind: "unavailable"; readonly reason: string };
 
 async function inspectSessionMetadataEnvironment(
@@ -540,6 +617,10 @@ export async function scanSessionJournalsForPlan(
     if (agentEntries.kind === "unreadable") {
       return { kind: "unavailable", reason: `could not enumerate agent journals: ${agentEntries.reason}` };
     }
+    // Kimi opens `agents/main` by that spelling. On a case-insensitive volume
+    // a directory stored as `Main` answers to it, so the main journal is
+    // identified by what that lookup reaches, not by the stored name.
+    const mainIdentity = await directoryIdentity(path.join(agentsDir, "main"));
     for (const agentEntry of agentEntries.entries) {
       if (agentEntry.isSymbolicLink()) {
         return {
@@ -548,7 +629,10 @@ export async function scanSessionJournalsForPlan(
         };
       }
       if (!agentEntry.isDirectory()) continue;
-      journalPaths.push({ path: path.join(agentsDir, agentEntry.name, "wire.jsonl"), main: agentEntry.name === "main" });
+      const agentDir = path.join(agentsDir, agentEntry.name);
+      const main = agentEntry.name === "main" ||
+        (mainIdentity !== undefined && (await directoryIdentity(agentDir)) === mainIdentity);
+      journalPaths.push({ path: path.join(agentDir, "wire.jsonl"), main });
     }
   }
 
@@ -566,6 +650,7 @@ export async function scanSessionJournalsForPlan(
         opened.handle,
         expectedExecutionRoot,
         main && options.tolerateCancelledDefaultEnter === true,
+        main,
       );
       if (finding?.kind === "tainted") {
         return { kind: "tainted", journal: journalPath, recordType: finding.recordType };
@@ -573,6 +658,7 @@ export async function scanSessionJournalsForPlan(
       if (finding?.kind === "environment") {
         return { kind: "environment", journal: journalPath, recordType: finding.recordType };
       }
+      if (finding?.kind === "tower") return { kind: "tower", journal: journalPath };
     } finally {
       await opened.handle.close().catch(() => undefined);
     }
@@ -609,10 +695,11 @@ export interface NativeV2PreflightRelease {
  *   CLI_V2_PLAN_MODE_CONFIGURED   details.refusal_kind = "v2-plan-mode-configured"
  *   CLI_V2_CONFIG_UNREADABLE      details.refusal_kind = "v2-config-unreadable"
  *   CLI_V2_EXPERIMENTAL_UNSAFE    details.refusal_kind = "v2-experimental-unsafe", details.selectors
- *                                 (uncertified releases only)
+ *                                 (launches with no plan only)
  *   CLI_V2_ENVIRONMENT_UNSAFE / CLI_V2_WORKSPACE_TRUST_UNSAFE for unsafe config
  *   KIMI_SESSION_ENVIRONMENT_UNSAFE details.refusal_kind = "session-environment-unsafe"
  *   KIMI_SESSION_PLAN_TAINTED     details.refusal_kind = "session-plan-tainted", details.record_type
+ *   KIMI_SESSION_TOWER_ACTIVE     details.refusal_kind = "session-tower-active"
  *   KIMI_SESSION_JOURNAL_UNAVAILABLE details.refusal_kind = "session-journal-unavailable"
  * Every message carries a truthful remedy (edit the named setting / start a
  * fresh session) and MUST NOT mention /kimi:setup or hook drift.
@@ -687,13 +774,16 @@ export async function assertNativeV2Preflight(
   }
   if (environment.trustDisabled === true) warnings.push(WORKSPACE_TRUST_DISABLED_WARNING);
 
-  // Certified and test-bypass children run with tower and subagent fork forced
-  // off by per-flag env, which outranks config and the master flag on every
-  // reviewed release. An uncertified release's flag names are unreviewed.
-  const experimental = options.release === undefined || options.release.certification === "uncertified"
-    ? await inspectExperimentalSelectors(options.kimiHome, options.env)
-    : { kind: "ok" as const };
-  if (experimental.kind === "refuse") {
+  // Every native-v2 child runs with tower and subagent fork forced off by
+  // per-flag env and without the master flag. On a reviewed release that is
+  // proven to win; an uncertified release's flag handling is unreviewed, so
+  // the caller is told what is switched on. Only a launch with no plan refuses.
+  const uncertified = options.release?.certification === "uncertified";
+  const experimentalConfig = options.release === undefined || uncertified
+    ? await inspectExperimentalConfig(options.kimiHome, options.env)
+    : { inspection: { kind: "ok" as const }, switchedOn: [] };
+  const experimental: ExperimentalSelectorInspection = experimentalConfig.inspection;
+  if (experimental.kind === "refuse" && !(uncertified && experimental.selectors.length > 0)) {
     throw new RuntimeError(
       "CLI_V2_EXPERIMENTAL_UNSAFE",
       `${experimental.reason} Unset the listed selector(s) before retrying.`,
@@ -706,6 +796,9 @@ export async function assertNativeV2Preflight(
         },
       },
     );
+  }
+  if (uncertified && experimentalConfig.switchedOn.length > 0) {
+    warnings.push(experimentalSelectorsWarning(experimentalConfig.switchedOn));
   }
 
   if (options.resumeSessionId !== undefined) {
@@ -741,6 +834,14 @@ export async function assertNativeV2Preflight(
             retryable_after_setup: false,
           },
         },
+      );
+    }
+    if (journalScan.kind === "tower") {
+      throw new RuntimeError(
+        "KIMI_SESSION_TOWER_ACTIVE",
+        `Saved session ${options.resumeSessionId} is in tower mode (${journalScan.journal}). Resuming it lets Kimi update this workspace's .tower state outside the plugin's hook. Turn tower mode off in that session with /tower, or start a fresh session; saved session state was not modified.`,
+        stage,
+        { details: { refusal_kind: "session-tower-active", retryable_after_setup: false } },
       );
     }
     if (journalScan.kind === "unavailable") {

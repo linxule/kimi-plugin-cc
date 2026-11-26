@@ -185,8 +185,8 @@ export function describeReadScope(scope: ReadScope | undefined): string | undefi
 // ---------------------------------------------------------------------------
 // Hook enforcement of confined reads.
 //
-// Input schemas are those of kimi-code 0.41.0 (legacy agent-core), 2.0.0 and
-// 2.7.3 (agent-core-v2): Read/ReadMediaFile resolve `path`; Glob and Grep
+// Input schemas are those of kimi-code 0.41.0 (legacy agent-core), 2.0.0,
+// 2.7.3 and 2.8.0 (agent-core-v2): Read/ReadMediaFile resolve `path`; Glob and Grep
 // search `path` or, when omitted, the session cwd; Glob's `pattern` and Grep's
 // `glob` are ripgrep --glob filters inside that search root. Upstream expands
 // `~`, resolves relative paths against the cwd and normalizes `..` lexically

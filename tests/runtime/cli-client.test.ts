@@ -5,11 +5,11 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { buildKimiCliEnvironment, runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId } from "../../runtime/cli-client.js";
+import { buildKimiCliEnvironment, runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId, copyChildEnvironment } from "../../runtime/cli-client.js";
 import { assertCliResultSuccess } from "../../runtime/commands/cli-helpers.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import { classifyManagedCommandFailure, classifySetupFailure } from "../../runtime/kimi-errors.js";
-import { isNativeV2Certified, type KimiExecutionPlan } from "../../runtime/kimi-engine.js";
+import { assertNoUnsafeExperimentalSelector, isNativeV2Certified, type KimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import {
   collectDescendantIdentities,
   collectDescendants,
@@ -242,7 +242,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
     const root = await createTestPluginDataRoot("cli-client-local-environment");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;
@@ -329,7 +329,7 @@ describe("runCliPrompt", () => {
       await writeFile(path.join(agentDir, "wire.jsonl"), `${JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: root })}\n`);
       await writeFile(path.join(agentDir, "..", "..", "state.json"), JSON.stringify({ environmentCwd: root }));
       options.resumeSessionId = sessionId;
-      for (const candidate of ["2.5.0", "2.7.2", "2.7.3"]) {
+      for (const candidate of ["2.5.0", "2.7.2", "2.7.3", "2.8.0"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([
@@ -1372,7 +1372,23 @@ describe("native-v2 provenance", () => {
     return { ...base, env, executionPlan: v2Plan(base.prefixArgs) };
   }
 
-  test("G3b: native-v2 children run without the master experimental flag; uncertified plans still refuse", async () => {
+  test("on Windows, KIMI_* names in any letter case are re-keyed so exact-name deletes and overrides decide them", () => {
+    const source = {
+      kimi_code_experimental_flag: "1", Kimi_Code_Experimental_Tower: "1", KIMI_CODE_HOME: "/upper", kimi_code_home: "/lower",
+      Path: "C:\\bin", other_tool: "x",
+    };
+    expect(copyChildEnvironment(source, "win32")).toEqual({
+      KIMI_CODE_EXPERIMENTAL_FLAG: "1", KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_HOME: "/upper", Path: "C:\\bin", other_tool: "x",
+    });
+    expect(copyChildEnvironment(source, "darwin")).toEqual(source);
+    expect(copyChildEnvironment(source, "darwin")).not.toBe(source);
+    // The companion re-keys once at entry, so the legacy master-flag guard sees a mixed-case name too.
+    expect(() => assertNoUnsafeExperimentalSelector(copyChildEnvironment({ Kimi_Code_Experimental_Flag: "1" }, "win32")))
+      .toThrow(expect.objectContaining({ code: "CLI_V2_HOOK_ORDER_UNSAFE" }));
+    expect(() => assertNoUnsafeExperimentalSelector({ Kimi_Code_Experimental_Flag: "1" })).not.toThrow();
+  });
+
+  test("G3b: every native-v2 child runs without the master experimental flag, certified or not", async () => {
     const root = await createTestPluginDataRoot("cli-v2-master-flag");
     const originalSpawn = childProcess.spawn;
     let capturedEnv: NodeJS.ProcessEnv | undefined;
@@ -1387,7 +1403,15 @@ describe("native-v2 provenance", () => {
         env: { ...certified.env, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" },
         executionPlan: { ...certified.executionPlan, kimiVersion: null, certification: "test-bypass" as const },
       };
-      for (const options of [certified, bypass]) {
+      const uncertifiedBase = v2Options(root, {
+        cwd: root, records: [{ ...V2_MARKER, version: "2.99.0" }, { role: "assistant", content: "ok" }],
+      });
+      const uncertified = {
+        ...uncertifiedBase,
+        executionPlan: { ...uncertifiedBase.executionPlan, operationKind: "ask" as const, kimiVersion: "2.99.0", certification: "uncertified" as const },
+        commandLabel: "ask",
+      };
+      for (const options of [certified, bypass, uncertified]) {
         capturedEnv = undefined;
         const result = await runCliPrompt({ ...options, env: { ...options.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" } });
         expect(result.exitCode).toBe(0);
@@ -1397,14 +1421,10 @@ describe("native-v2 provenance", () => {
         expect(capturedEnv!.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK).toBe("0");
       }
 
-      const uncertified = {
-        ...certified,
-        env: { ...certified.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" },
-        executionPlan: { ...certified.executionPlan, operationKind: "ask" as const, kimiVersion: "2.8.0", certification: "uncertified" as const },
-        commandLabel: "ask",
-      };
+      // A legacy-v1 plan cannot keep the flag from the child, so it still refuses before spawning.
+      const legacy = mockOptions({ cwd: root, records: [{ role: "assistant", content: "ok" }] });
       const spawnCount = spawnSpy.mock.calls.length;
-      await expect(runCliPrompt(uncertified)).rejects.toMatchObject({
+      await expect(runCliPrompt({ ...legacy, env: { ...legacy.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" } })).rejects.toMatchObject({
         code: "CLI_V2_HOOK_ORDER_UNSAFE", stage: "cli-client.pre-spawn",
       });
       expect(spawnSpy).toHaveBeenCalledTimes(spawnCount);

@@ -36,7 +36,7 @@ You need:
 - macOS or Linux
 - Claude Code, Codex, or DSH `>=0.2.1-rc.5 <0.3.0`, with plugin support
 - Node.js 22.5 or newer (24.9 or newer for DSH)
-- Kimi Code CLI 2.7.3 for every task, including swarm; exact 2.6.2, 2.6.3 and 2.7.2 work the same way
+- Kimi Code CLI 2.8.0 for every task, including swarm; exact 2.6.2, 2.6.3, 2.7.2 and 2.7.3 work the same way
 
 Windows is not supported. Contributors can help with the [no-model Windows diagnostics checks](./docs/windows-validation.md).
 
@@ -101,7 +101,7 @@ Restart DSH when asked, then run `/kimi-setup` and `/kimi-setup --check`. See th
 The marketplace commands above are the default. Releases are also published as [`kimi-plugin-cc` on npm](https://www.npmjs.com/package/kimi-plugin-cc). To pin a version for Claude Code:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.0.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.1.0
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 
@@ -149,6 +149,16 @@ Version 3.0 merged some commands:
 In Codex, use the nine skills, such as `$kimi-task` and `$kimi-review`. In DSH, the seven tools are unchanged, including `kimi_challenge`.
 
 `/kimi:task` can continue a session: `/kimi:task -r Explain the next step.`
+
+## Point a task at an earlier session
+
+A new task can read what an earlier Kimi session did. Pass the earlier task's job ID, or a Kimi session ID, with `--reference-session`:
+
+`/kimi:task --reference-session <job-id> Continue the migration from where that session stopped.`
+
+Kimi gets the path of that session's log and reads what it needs. You can repeat the flag, up to 8 times. `/kimi:task` and `/kimi:swarm` accept it with or without `--write`, and `/kimi:review` accepts it with or without `--challenge`. `/kimi:pursue` does not. The MCP tools take the same list as `referenced_sessions`. An agent that calls the plugin decides when an earlier session is worth passing.
+
+A scoped task can read the log too: with `--read-root` or `--network`, the plugin adds that session's main-agent folder to what Kimi may read. The folder holds the log and what Kimi saved beside it, such as full tool outputs and plans: everything that session read. With `--network` Kimi can send what it reads to the web. Combine the two only for a session whose contents may leave your machine. It does not work with Kimi Code CLI 0.41 or earlier.
 
 ## Limit what a task can read and reach
 
@@ -279,7 +289,7 @@ Report bugs or propose changes in [GitHub issues](https://github.com/linxule/kim
 - macOS 或 Linux
 - 支持插件的 Claude Code、Codex 或 DSH `>=0.2.1-rc.5 <0.3.0`
 - Node.js 22.5 或更高版本（DSH 需 24.9 或更高版本）
-- Kimi Code CLI 2.7.3（支持所有任务，包括 swarm）；精确版本 2.6.2、2.6.3 和 2.7.2 的工作方式相同
+- Kimi Code CLI 2.8.0（支持所有任务，包括 swarm）；精确版本 2.6.2、2.6.3、2.7.2 和 2.7.3 的工作方式相同
 
 不支持 Windows。贡献者可以协助完成[无模型 Windows 诊断检查](./docs/windows-validation.md)。
 
@@ -344,7 +354,7 @@ dsh plugin --profile web add ./plugins/kimi-dsh
 上方的插件市场命令是默认安装方式。各版本也会作为 [npm 上的 `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc) 发布。如需为 Claude Code 锁定版本：
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.0.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.1.0
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 
@@ -392,6 +402,16 @@ claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 在 Codex 中，请使用九个技能，例如 `$kimi-task` 和 `$kimi-review`。在 DSH 中，包括 `kimi_challenge` 在内的七个工具保持不变。
 
 `/kimi:task` 可以继续已有会话：`/kimi:task -r Explain the next step.`
+
+## 让任务参考之前的会话
+
+新任务可以读取之前某个 Kimi 会话做过的事。用 `--reference-session` 传入之前任务的作业 ID 或 Kimi 会话 ID：
+
+`/kimi:task --reference-session <job-id> Continue the migration from where that session stopped.`
+
+Kimi 会拿到该会话日志的路径，并按需读取。该标志可以重复，最多 8 次。`/kimi:task` 和 `/kimi:swarm` 接受它，带不带 `--write` 均可；`/kimi:review` 也接受它，带不带 `--challenge` 均可。`/kimi:pursue` 不接受。MCP 工具通过 `referenced_sessions` 接受同样的列表。是否传入之前的会话，由调用插件的智能体自行判断。
+
+限定范围的任务同样可以读取该日志：使用 `--read-root` 或 `--network` 时，插件会把该会话的主智能体目录加入 Kimi 可读取的范围。该目录包含日志以及 Kimi 保存在旁边的内容，例如完整的工具输出和计划，也就是该会话读取过的全部内容。启用 `--network` 后，Kimi 可以把读到的内容发送到网络。只有当该会话的内容可以离开本机时，才同时使用两者。它不支持 Kimi Code CLI 0.41 及更早版本。
 
 ## 限制任务可读取和访问的范围
 
@@ -522,7 +542,7 @@ Il vous faut :
 - macOS ou Linux
 - Claude Code, Codex ou DSH `>=0.2.1-rc.5 <0.3.0`, avec prise en charge des plugins
 - Node.js 22.5 ou plus récent (24.9 ou plus récent pour DSH)
-- Kimi Code CLI 2.7.3 pour toutes les tâches, y compris les swarms ; les versions exactes 2.6.2, 2.6.3 et 2.7.2 fonctionnent de la même manière
+- Kimi Code CLI 2.8.0 pour toutes les tâches, y compris les swarms ; les versions exactes 2.6.2, 2.6.3, 2.7.2 et 2.7.3 fonctionnent de la même manière
 
 Windows n'est pas pris en charge. Les contributeurs peuvent aider avec les [vérifications de diagnostic Windows sans modèle](./docs/windows-validation.md).
 
@@ -587,7 +607,7 @@ Redémarrez DSH lorsque cela vous est demandé, puis exécutez `/kimi-setup` et 
 Les commandes de marketplace ci-dessus constituent la méthode par défaut. Les versions sont également publiées sous [`kimi-plugin-cc` sur npm](https://www.npmjs.com/package/kimi-plugin-cc). Pour figer une version dans Claude Code :
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.0.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.1.0
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 
@@ -635,6 +655,16 @@ La version 3.0 a fusionné certaines commandes :
 Dans Codex, utilisez les neuf compétences, telles que `$kimi-task` et `$kimi-review`. Dans DSH, les sept outils sont inchangés, y compris `kimi_challenge`.
 
 `/kimi:task` peut poursuivre une session : `/kimi:task -r Explain the next step.`
+
+## Indiquer une session antérieure à une tâche
+
+Une nouvelle tâche peut lire ce qu'une session Kimi antérieure a fait. Passez l'ID de job de la tâche antérieure, ou un ID de session Kimi, avec `--reference-session` :
+
+`/kimi:task --reference-session <job-id> Continue the migration from where that session stopped.`
+
+Kimi reçoit le chemin du journal de cette session et lit ce dont il a besoin. Vous pouvez répéter l'option, jusqu'à 8 fois. `/kimi:task` et `/kimi:swarm` l'acceptent avec ou sans `--write`, et `/kimi:review` l'accepte avec ou sans `--challenge`. `/kimi:pursue` ne l'accepte pas. Les outils MCP prennent la même liste dans `referenced_sessions`. Un agent qui appelle le plugin décide quand une session antérieure mérite d'être transmise.
+
+Une tâche à portée restreinte peut aussi lire ce journal : avec `--read-root` ou `--network`, le plugin ajoute le dossier de l'agent principal de cette session à ce que Kimi peut lire. Ce dossier contient le journal et ce que Kimi a enregistré à côté, comme les sorties d'outils complètes et les plans : tout ce que cette session a lu. Avec `--network`, Kimi peut envoyer sur le web ce qu'il lit. Ne combinez les deux que pour une session dont le contenu peut quitter votre machine. Elle ne fonctionne pas avec Kimi Code CLI 0.41 ou une version antérieure.
 
 ## Limiter ce qu'une tâche peut lire et atteindre
 
@@ -765,7 +795,7 @@ Claude Code、Codex、またはDeepSeek Harness（DSH）から、質問、コー
 - macOSまたはLinux
 - プラグインに対応したClaude Code、Codex、またはDSH `>=0.2.1-rc.5 <0.3.0`
 - Node.js 22.5以降（DSHの場合は24.9以降）
-- スウォームを含むすべてのタスクに対応するKimi Code CLI 2.7.3。バージョンが完全一致する2.6.2、2.6.3、2.7.2も同様に動作します
+- スウォームを含むすべてのタスクに対応するKimi Code CLI 2.8.0。バージョンが完全一致する2.6.2、2.6.3、2.7.2、2.7.3も同様に動作します
 
 Windowsには対応していません。コントリビューターは、[モデルを使わないWindows診断チェック](./docs/windows-validation.md)に協力できます。
 
@@ -830,7 +860,7 @@ dsh plugin --profile web add ./plugins/kimi-dsh
 上記のマーケットプレイスコマンドがデフォルトです。各リリースは[npmの`kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc)としても公開されています。Claude Codeでバージョンを固定するには、以下を実行します。
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.0.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@3.1.0
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 
@@ -878,6 +908,16 @@ Codexのようにホストからデフォルトのプロジェクトディレク
 Codexでは、`$kimi-task`や`$kimi-review`などの9つのスキルを使用します。DSHでは、`kimi_challenge`を含む7つのツールに変更はありません。
 
 `/kimi:task`では、`/kimi:task -r Explain the next step.`のようにセッションを継続できます。
+
+## 以前のセッションをタスクに参照させる
+
+新しいタスクは、以前のKimiセッションが行った内容を読み取れます。`--reference-session`で、以前のタスクのジョブIDまたはKimiセッションIDを渡します。
+
+`/kimi:task --reference-session <job-id> Continue the migration from where that session stopped.`
+
+Kimiはそのセッションのログのパスを受け取り、必要な部分を読み取ります。このフラグは最大8回まで繰り返し指定できます。`/kimi:task`と`/kimi:swarm`は`--write`の有無にかかわらず、`/kimi:review`は`--challenge`の有無にかかわらず、このフラグを受け付けます。`/kimi:pursue`は受け付けません。MCPツールは同じリストを`referenced_sessions`で受け取ります。以前のセッションを渡すかどうかは、プラグインを呼び出すエージェントが判断します。
+
+スコープを指定したタスクでもログを読み取れます。`--read-root`または`--network`を指定すると、プラグインはそのセッションのメインエージェントのフォルダーをKimiが読み取れる範囲に追加します。このフォルダーには、ログと、Kimiがその横に保存した内容（ツール出力の全文や計画など）が含まれます。つまり、そのセッションが読み取ったすべての内容です。`--network`を指定すると、Kimiは読み取った内容をウェブに送信できます。両方を指定するのは、内容がマシンの外に出てもよいセッションに限ってください。Kimi Code CLI 0.41以前では使用できません。
 
 ## タスクの読み取り範囲とアクセス先を制限する
 

@@ -19,18 +19,18 @@ import {
 const EXPECTED: Record<KimiReleaseCapability, string[]> = {
   "hook-schema": [
     "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0",
-    "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3",
+    "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0",
   ],
   "web-preactivation": [
-    "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3",
+    "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0",
   ],
-  "local-environment": ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"],
-  "agent-state": ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"],
-  "modern-ws-control": ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"],
-  "bounded-swarm": ["2.6.2", "2.6.3", "2.7.2", "2.7.3"],
-  "web-json-ready": ["2.7.2", "2.7.3"],
+  "local-environment": ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"],
+  "agent-state": ["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"],
+  "modern-ws-control": ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"],
+  "bounded-swarm": ["2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"],
+  "web-json-ready": ["2.7.2", "2.7.3", "2.8.0"],
   "print-cancels-plan": [
-    "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3",
+    "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0",
   ],
 };
 
@@ -70,7 +70,7 @@ describe("kimi-releases table", () => {
   });
 
   test("malformed, suffixed, other-major and old versions resolve to nothing", () => {
-    for (const version of [null, undefined, "", "2.7", "3.0.0", "1.9.9", "2.0.0-rc.1", "v2.7.3", " 2.7.3", "2.7.3-rc.1", "2.8.0+build", "0.44.0"]) {
+    for (const version of [null, undefined, "", "2.7", "3.0.0", "1.9.9", "2.0.0-rc.1", "v2.7.3", " 2.7.3", "2.8.0-rc.1", "2.8.0+build", "0.44.0"]) {
       expect(resolveKimiRelease(version)).toBeNull();
       for (const capability of Object.keys(EXPECTED) as KimiReleaseCapability[]) {
         expect(kimiReleaseHas(version, capability)).toBe(false);
@@ -80,32 +80,32 @@ describe("kimi-releases table", () => {
   });
 
   test("an unlisted plain 2.x borrows only the argv mechanics of the row below it", () => {
-    expect(resolveKimiRelease("2.7.3")).toMatchObject({ certified: true, release: { version: "2.7.3" } });
-    expect(resolveKimiRelease("2.8.0")).toMatchObject({ certified: false, release: { version: "2.7.3" } });
+    expect(resolveKimiRelease("2.8.0")).toMatchObject({ certified: true, release: { version: "2.8.0" } });
+    expect(resolveKimiRelease("2.8.1")).toMatchObject({ certified: false, release: { version: "2.8.0" } });
     expect(resolveKimiRelease("2.7.4")).toMatchObject({ certified: false, release: { version: "2.7.3" } });
     expect(resolveKimiRelease("2.6.1")).toMatchObject({ certified: false, release: { version: "2.6.0" } });
     expect(resolveKimiRelease("2.0.3")).toMatchObject({ certified: false, release: { version: "2.0.2" } });
-    expect(resolveKimiRelease("2.10.0")).toMatchObject({ certified: false, release: { version: "2.7.3" } });
-    expect(resolveKimiRelease("2.8.0", { strict: true })).toBeNull();
+    expect(resolveKimiRelease("2.10.0")).toMatchObject({ certified: false, release: { version: "2.8.0" } });
+    expect(resolveKimiRelease("2.8.1", { strict: true })).toBeNull();
     expect(resolveKimiRelease("2.7.3", { strict: true })).toMatchObject({ certified: true });
 
     for (const capability of Object.keys(EXPECTED) as KimiReleaseCapability[]) {
       const borrowable = capability === "local-environment";
-      expect([capability, kimiReleaseHas("2.8.0", capability)]).toEqual([capability, borrowable]);
-      expect([capability, kimiCertifiedReleaseHas("2.8.0", capability)]).toEqual([capability, false]);
-      expect([capability, kimiCertifiedReleaseHas("2.7.3", capability)]).toEqual([capability, true]);
+      expect([capability, kimiReleaseHas("2.8.1", capability)]).toEqual([capability, borrowable]);
+      expect([capability, kimiCertifiedReleaseHas("2.8.1", capability)]).toEqual([capability, false]);
+      expect([capability, kimiCertifiedReleaseHas("2.8.0", capability)]).toEqual([capability, true]);
     }
     // A borrowed row never lends a capability it does not itself have.
     expect(kimiReleaseHas("2.4.2", "local-environment")).toBe(false);
     expect(kimiReleaseHas("2.5.4", "local-environment")).toBe(true);
-    expect(kimiReleaseHas("2.8.0", "hook-schema")).toBe(false);
+    expect(kimiReleaseHas("2.8.1", "hook-schema")).toBe(false);
   });
 
   test("formatVersionChoice matches the refusal wording", () => {
     expect(formatVersionChoice([])).toBe("");
     expect(formatVersionChoice(["2.6.2"])).toBe("2.6.2");
     expect(formatVersionChoice(["2.6.2", "2.6.3"])).toBe("2.6.2 or 2.6.3");
-    expect(formatVersionChoice(kimiVersionsWith("bounded-swarm"))).toBe("2.6.2, 2.6.3, 2.7.2 or 2.7.3");
+    expect(formatVersionChoice(kimiVersionsWith("bounded-swarm"))).toBe("2.6.2, 2.6.3, 2.7.2, 2.7.3 or 2.8.0");
   });
 });
 

@@ -21,7 +21,7 @@ import { JobStore } from "../../runtime/job-store.js";
 import { RuntimeError } from "../../runtime/errors.js";
 import * as hookInstall from "../../runtime/hooks/install.js";
 import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
-import { WORKSPACE_TRUST_DISABLED_WARNING } from "../../runtime/native-v2-preflight.js";
+import { experimentalSelectorsWarning, WORKSPACE_TRUST_DISABLED_WARNING } from "../../runtime/native-v2-preflight.js";
 import { maxTestedMinor } from "../../runtime/kimi-version-probe.js";
 import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
@@ -90,7 +90,7 @@ describe("kimi execution plan", () => {
   });
 
   test("native-v2 certifies only the exact per-operation version set, under the no-plan profile", async () => {
-    expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"]);
+    expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["0.42.0", "0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"]);
     for (const operationKind of ["swarm", "swarm-write"] as const) {
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).not.toContain("2.6.0");
       expect(NATIVE_V2_CERTIFIED.get(operationKind)).toContain("2.6.2");
@@ -189,7 +189,7 @@ describe("kimi execution plan", () => {
         }
       }
 
-      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.2", "2.6.3", "2.7.2", "2.7.3"]) {
+      for (const version of ["2.0.2", "2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"]) {
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           const majorTwo = await prepareKimiExecutionPlan({
             operationKind,
@@ -282,7 +282,7 @@ describe("kimi execution plan", () => {
         await expect(prepareKimiExecutionPlan({ operationKind, cwd, env, stderr }))
           .resolves.toMatchObject({ certification: "certified", kimiVersion: "2.7.3" });
       }
-      for (const [operationKind, version] of [["swarm", "2.7.3"], ["ask", "2.4.1"], ["ask", "2.8.0"]] as const) {
+      for (const [operationKind, version] of [["swarm", "2.7.3"], ["ask", "2.4.1"], ["ask", "2.99.0"]] as const) {
         await expect(prepareKimiExecutionPlan({
           operationKind, cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version }, stderr,
         })).rejects.toMatchObject({ code: "CLI_V2_ENVIRONMENT_UNSAFE" });
@@ -375,7 +375,7 @@ describe("kimi execution plan", () => {
           operationKind, cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3" }, stderr,
         })).resolves.toMatchObject({ certification: "certified" });
       }
-      for (const [operationKind, version] of [["swarm", "2.7.3"], ["ask", "2.3.3"], ["ask", "2.8.0"]] as const) {
+      for (const [operationKind, version] of [["swarm", "2.7.3"], ["ask", "2.3.3"], ["ask", "2.99.0"]] as const) {
         await expect(prepareKimiExecutionPlan({
           operationKind, cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version }, stderr,
         })).rejects.toMatchObject({ code: "CLI_V2_PLAN_MODE_CONFIGURED" });
@@ -392,7 +392,7 @@ describe("kimi execution plan", () => {
     expect(selectIntendedEngine("review", { version: "0.42.1" })).toBe("legacy-v1");
     expect(selectIntendedEngine("review", { version: "garbage" })).toBe("legacy-v1");
     // An unlisted 2.x never falls back to the deleted legacy engine.
-    expect(selectIntendedEngine("rescue", { version: "2.8.0" })).toBe("native-v2");
+    expect(selectIntendedEngine("rescue", { version: "2.99.0" })).toBe("native-v2");
     expect(selectIntendedEngine("review", { version: "2.7.4" })).toBe("native-v2");
   });
 
@@ -405,16 +405,16 @@ describe("kimi execution plan", () => {
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
       KIMI_CODE_HOME: path.join(cwd, "kimi-home"),
       KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
-      KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+      KIMI_PLUGIN_CC_MOCK_VERSION: "2.99.0",
     };
     const stderrChunks: string[] = [];
     const stderr = { write: (chunk: string) => { stderrChunks.push(chunk); return true; } } as unknown as NodeJS.WritableStream;
     try {
       for (const operationKind of ["ask", "review", "challenge", "review_gate"] as const) {
         const plan = await prepareKimiExecutionPlan({ operationKind, cwd, env, stderr });
-        const warning = `kimi-code 2.8.0 is not certified by this plugin release; running ${operationKind} read-only with 2.7.3 mechanics.`;
+        const warning = `kimi-code 2.99.0 is not certified by this plugin release; running ${operationKind} read-only with 2.8.0 mechanics.`;
         expect(plan).toMatchObject({
-          operationKind, intendedEngine: "native-v2", kimiVersion: "2.8.0",
+          operationKind, intendedEngine: "native-v2", kimiVersion: "2.99.0",
           certification: "uncertified", safetyProfile: NATIVE_V2_SAFETY_PROFILE, warnings: [warning],
         });
         expect(stderrChunks.at(-1)).toContain(warning);
@@ -439,12 +439,12 @@ describe("kimi execution plan", () => {
         await expect(prepareKimiExecutionPlan({ operationKind, cwd, env, stderr })).rejects.toMatchObject({
           code: "KIMI_CAPABILITY_NOT_CERTIFIED",
           message: expect.stringContaining("write and swarm operations need an exact certified release"),
-          details: { refusal_kind: "v2-version-not-certified", intended_engine: "native-v2", kimi_version: "2.8.0" },
+          details: { refusal_kind: "v2-version-not-certified", intended_engine: "native-v2", kimi_version: "2.99.0" },
         });
         // A forged uncertified plan for a write/swarm operation never reaches spawn.
         const forged = {
           schemaVersion: 1 as const, operationKind, intendedEngine: "native-v2" as const, command: process.execPath,
-          prefixArgs: [], kimiVersion: "2.8.0", certification: "uncertified" as const, resumedFromJobId: null,
+          prefixArgs: [], kimiVersion: "2.99.0", certification: "uncertified" as const, resumedFromJobId: null,
           safetyProfile: NATIVE_V2_SAFETY_PROFILE,
         };
         expect(() => assertExecutionPlanMatchesSpawn(forged, process.execPath, [], env))
@@ -459,7 +459,7 @@ describe("kimi execution plan", () => {
         details: { refusal_kind: "v2-version-not-certified" },
       });
       // Suffixed, other-major, and at-or-below-2.0.0 versions never borrow.
-      for (const version of ["2.8.0-rc.1", "2.8.0+build", "3.0.0", "1.9.0"]) {
+      for (const version of ["2.99.0-rc.1", "2.99.0+build", "3.0.0", "1.9.0"]) {
         await expect(prepareKimiExecutionPlan({
           operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: version }, intendedEngine: "native-v2", stderr,
         })).rejects.toMatchObject({ code: "KIMI_CAPABILITY_NOT_CERTIFIED", details: { refusal_kind: "v2-version-not-certified" } });
@@ -580,17 +580,11 @@ describe("kimi execution plan", () => {
     });
   });
 
-  test("G3b: the master flag refuses only legacy-v1, uncertified and plan-less launches", async () => {
+  test("G3b: the master flag refuses only legacy-v1 and plan-less launches; an uncertified release warns", async () => {
     const env = { KIMI_CODE_EXPERIMENTAL_FLAG: "on" };
     const refused = { code: "CLI_V2_HOOK_ORDER_UNSAFE", details: { refusal_kind: "v2-hook-order-unsafe" } };
-    expect(() => assertNoUnsafeExperimentalSelector(env, "t", { intendedEngine: "native-v2", certification: "certified" })).not.toThrow();
-    expect(() => assertNoUnsafeExperimentalSelector(env, "t", { intendedEngine: "native-v2", certification: "test-bypass" })).not.toThrow();
-    for (const plan of [
-      { intendedEngine: "native-v2" as const, certification: "uncertified" as const },
-      { intendedEngine: "legacy-v1" as const, certification: "certified" as const },
-      { intendedEngine: "legacy-v1" as const, certification: "test-bypass" as const },
-      undefined,
-    ]) {
+    expect(() => assertNoUnsafeExperimentalSelector(env, "t", { intendedEngine: "native-v2" })).not.toThrow();
+    for (const plan of [{ intendedEngine: "legacy-v1" as const }, undefined]) {
       expect(() => assertNoUnsafeExperimentalSelector(env, "t", plan)).toThrowError(expect.objectContaining({ code: refused.code }));
     }
 
@@ -613,9 +607,11 @@ describe("kimi execution plan", () => {
       await expect(prepareKimiExecutionPlan({
         operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" }, intendedEngine: "native-v2", stderr,
       })).resolves.toMatchObject({ intendedEngine: "native-v2", certification: "test-bypass" });
-      await expect(prepareKimiExecutionPlan({
-        operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0" }, stderr,
-      })).rejects.toMatchObject({ ...refused, stage: "kimi-engine.plan" });
+      const uncertified = await prepareKimiExecutionPlan({
+        operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_MOCK_VERSION: "2.99.0" }, stderr,
+      });
+      expect(uncertified).toMatchObject({ intendedEngine: "native-v2", certification: "uncertified" });
+      expect(uncertified.warnings).toContain(experimentalSelectorsWarning(["env:KIMI_CODE_EXPERIMENTAL_FLAG"]));
       await expect(prepareKimiExecutionPlan({
         operationKind: "ask", cwd, env: { ...base, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" }, stderr,
       })).rejects.toMatchObject(refused);

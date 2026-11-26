@@ -8,6 +8,7 @@ import { runResult } from "./commands/result.js";
 import { renderSetupResult, runSetup } from "./commands/setup.js";
 import { runStatus } from "./commands/status.js";
 import { runWorker } from "./commands/worker.js";
+import { copyChildEnvironment } from "./cli-client.js";
 import { formatError, RuntimeError } from "./errors.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { runModelCommand } from "./model-command.js";
@@ -27,8 +28,10 @@ async function main(rawArgv: string[]): Promise<void> {
   const cwd = process.env.KIMI_PLUGIN_CC_WORKSPACE_CWD || process.cwd();
   const context: CommandContext = {
     cwd,
+    // One environment for every guard, probe and child: on Windows a KIMI_*
+    // name in another case is re-keyed here, before anything reads it by name.
     env: {
-      ...process.env,
+      ...copyChildEnvironment(process.env),
       KIMI_CODE_HOME: command === "mcp" ? process.env.KIMI_CODE_HOME : resolveKimiHome(process.env, cwd),
     },
     stdout: process.stdout,

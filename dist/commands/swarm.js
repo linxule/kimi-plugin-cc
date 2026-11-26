@@ -22,6 +22,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import { hookGateRefusal, verifyHookInstalled } from "../hooks/install.js";
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { appendSessionReferences, resolveSessionReferences, withReferenceReadRoots } from "../session-references.js";
 import { usesBoundedSwarmPolicy } from "../swarm-policy.js";
 // /kimi:swarm — parallel fan-out, read-only by default and runtime-foreground-only.
 // A finite wall-clock budget bounds the whole run. --cap is a SOFT total-count
@@ -217,7 +218,7 @@ export async function runSwarm(argv, context) {
     return runReadSwarm(parsed, objective, context, readScope);
 }
 /** Read-only swarm (default). */
-async function runReadSwarm(parsed, objective, context, readScope) {
+async function runReadSwarm(parsed, objective, context, callerScope) {
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
@@ -231,7 +232,12 @@ async function runReadSwarm(parsed, objective, context, readScope) {
             stderr: context.stderr,
         });
         const maxConcurrency = resolveSwarmMaxConcurrency(parsed.maxConcurrency);
-        const prompt = buildSwarmPrompt(objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined);
+        const executionCwd = await realpath(context.cwd);
+        const references = await resolveSessionReferences(parsed.referenceSessions, {
+            store, env: context.env, spawnCwd: executionCwd, plan: executionPlan, stage: "swarm.reference-session",
+        });
+        const readScope = withReferenceReadRoots(callerScope, references);
+        const prompt = appendSessionReferences(buildSwarmPrompt(objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined), references);
         const jobId = allocateJobId(context);
         const logPath = path.join(paths.logsDir, `swarm-${jobId}.jsonl`);
         // Reuse the read-only review lineage; the hook label ("swarm") is what
@@ -241,7 +247,7 @@ async function runReadSwarm(parsed, objective, context, readScope) {
             agentProfile: SWARM_AGENT_PROFILE, failureSummary: "Swarm failed.",
             parsed, objective, prompt, executionPlan, logPath, cwd: context.cwd, readScope,
         });
-        const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, maxConcurrency, context, undefined, await realpath(context.cwd));
+        const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, maxConcurrency, context, undefined, executionCwd);
         if (!completed.final_output_path) {
             throw new RuntimeError("SWARM_RESULT_MISSING", "Swarm finished without a rendered result.", "swarm.result");
         }
@@ -304,7 +310,10 @@ async function runWriteSwarm(parsed, objective, context) {
                 env: context.env,
                 stderr: context.stderr,
             });
-            const prompt = buildSwarmWritePrompt(objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined);
+            const executionCwd = await realpath(worktreePath);
+            const prompt = appendSessionReferences(buildSwarmWritePrompt(objective, parsed.cap, usesBoundedSwarmPolicy(executionPlan) ? maxConcurrency : undefined), await resolveSessionReferences(parsed.referenceSessions, {
+                store, env: context.env, spawnCwd: executionCwd, plan: executionPlan, stage: "swarm.reference-session",
+            }));
             // Reuse the rescue (write-capable) lineage, like pursue; the hook label
             // ("swarm-write") drives the allowlist. cwd stays the USER's real cwd for
             // lineage — the kimi spawn cwd is the worktree (threaded via the writeMode
@@ -320,7 +329,7 @@ async function runWriteSwarm(parsed, objective, context) {
                 onPatchCaptureFailure: () => {
                     preserveWorktree = true;
                 },
-            }, await realpath(worktreePath));
+            }, executionCwd);
             if (preserveWorktree && completed.error) {
                 throw new RuntimeError(completed.error.code, completed.error.message, completed.error.stage, {
                     details: completed.error.details,

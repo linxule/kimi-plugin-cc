@@ -85,7 +85,7 @@ import { fileURLToPath } from "node:url";
 import { runCliPrompt, type CliClientResult } from "../../runtime/cli-client.js";
 import { runAsk } from "../../runtime/commands/ask.js";
 import { reassembleProseFromRecords } from "../../runtime/commands/cli-helpers.js";
-import { decideHookOutcome } from "../../runtime/hooks/approval-policy.js";
+import { decideHookOutcome, READ_ONLY_TOOLS } from "../../runtime/hooks/approval-policy.js";
 import { readScopeEnvironment, resolveReadScope, type ReadScope } from "../../runtime/read-scope.js";
 import { evaluateRescueHookRequest } from "../../runtime/rescue-approval.js";
 import { runRescue } from "../../runtime/commands/rescue.js";
@@ -115,7 +115,7 @@ import {
   type KimiOperationKind,
 } from "../../runtime/kimi-engine.js";
 import { usesBoundedSwarmPolicy } from "../../runtime/swarm-policy.js";
-import { kimiCertifiedReleaseHas } from "../../runtime/kimi-releases.js";
+import { kimiCertifiedReleaseHas, kimiVersionsWith } from "../../runtime/kimi-releases.js";
 import { scanSessionJournalsForPlan } from "../../runtime/native-v2-preflight.js";
 import { parseVersionLine } from "../../runtime/kimi-version-probe.js";
 import { resolveRepoIdentity } from "../../runtime/git.js";
@@ -131,6 +131,14 @@ const SEED_HOME =
 const PER_RUN_BUDGET_MS = Number(
   process.env.KIMI_PLUGIN_CC_SMOKE_BUDGET_MS ?? "120000",
 );
+// Kimi offers WebSearch only with the managed Kimi login, a provider
+// `search_url`, `[services.moonshot_search]` or `KIMI_WEB_SEARCH_BASE_URL`.
+// The lane is skipped, by name, only when none of those can be present: an
+// empty seed home driven by `KIMI_MODEL_API_KEY`. With any possible source it
+// runs, and a tool that is still not offered fails it. A skip is not evidence.
+const SEED_MAY_OFFER_WEB_SEARCH = existsSync(path.join(SEED_HOME, "credentials")) ||
+  existsSync(path.join(SEED_HOME, "config.toml")) ||
+  (process.env.KIMI_WEB_SEARCH_BASE_URL ?? "").trim().length > 0;
 
 // Entries copied from the seed home into the isolated KIMI_CODE_HOME. This
 // is the auth + config surface kimi needs to authenticate and run; the
@@ -297,7 +305,7 @@ test("smoke plans satisfy the final spawn gate and retain exact native policy se
       matrix.set(operation, previous);
     }
   }
-  if (["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(BINARY_VERSION ?? "")) {
+  if (kimiVersionsWith("bounded-swarm").includes(BINARY_VERSION ?? "")) {
     for (const operation of ["swarm", "swarm-write"] as const) {
       const plan = smokePlan("node", ["fixture.mjs"], operation);
       expect(usesBoundedSwarmPolicy(plan)).toBe(true);
@@ -1017,7 +1025,7 @@ const PRODUCTION_NON_SWARM =
 const swarmReadSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const swarmWriteSuite = PREREQS_OK && !PRODUCTION_NON_SWARM ? describe : describe.skip;
 const nonSwarmSuite = PREREQS_OK && PRODUCTION_NON_SWARM ? describe : describe.skip;
-const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && ["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(BINARY_VERSION ?? "")
+const boundedSwarmSuite = PREREQS_OK && !PRODUCTION_NON_SWARM && kimiVersionsWith("bounded-swarm").includes(BINARY_VERSION ?? "")
   ? describe : describe.skip;
 
 suite("real-binary smoke: read-only commands cannot write (H7)", () => {
@@ -1317,6 +1325,70 @@ suite("real-binary smoke: the master experimental flag never reaches a model chi
       }
     },
     PER_RUN_BUDGET_MS + 30_000,
+  );
+
+  // The user's own experimental settings must not stop a plugin task. Print
+  // mode cannot enter tower mode, the child gets tower forced off and no
+  // master flag, and every tool a flag adds is outside each label's allowlist.
+  test.skipIf(!BINARY_IS_V2)(
+    "[ask] every experimental feature switched on in config and environment runs, stays hook-denied and leaves no tower state",
+    async () => {
+      const workspace = await realpath(await createTestPluginDataRoot("smoke-ws-experimental-on"));
+      let homes: { kimiHome: string; pluginData: string } | undefined;
+      try {
+        homes = await installSmokeHook("experimental-on", workspace);
+        const configPath = path.join(homes.kimiHome, "config.toml");
+        expect(await readFile(configPath, "utf8"), "the seed config must not already set [experimental]").not.toContain("[experimental]");
+        await appendFile(configPath, "\n[experimental]\ntower = true\nnotify_user = true\nwait_for = true\nprompt_prediction = true\n");
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          KIMI_CODE_HOME: homes.kimiHome,
+          CLAUDE_PLUGIN_DATA: homes.pluginData,
+          KIMI_CODE_EXPERIMENTAL_FLAG: "1",
+          KIMI_CODE_EXPERIMENTAL_TOWER: "1",
+          KIMI_CODE_EXPERIMENTAL_NOTIFY_USER: "1",
+        };
+        // A model sometimes answers in prose, so allow one more turn to see a
+        // denied call; no turn may let a tool outside the read-only list through.
+        const repoId = (await resolveRepoIdentity(workspace)).repoId;
+        const sessionsDir = path.join(homes.kimiHome, "sessions");
+        let denied = 0;
+        for (let attempt = 1; attempt <= 2 && denied === 0; attempt += 1) {
+          const answer = await runAsk(["--fresh", "--budget", `${Math.round(PER_RUN_BUDGET_MS / 1000)}s`, WRITE_PROMPT], makeContext(workspace, env));
+          const store = new JobStore(resolvePluginPaths(env));
+          let job;
+          try {
+            job = store.findLatestJob({ repoId, commandType: "ask" });
+          } finally {
+            store.close();
+          }
+          expect(job?.status).toBe("completed");
+          expect(job?.system_version).toBe(BINARY_VERSION);
+          expect(job?.warnings ?? null, "a certified release neutralizes the selectors without a warning").toBeNull();
+          const outcomes = streamToolOutcomes(jobLogRecords(await readFile(job!.stream_log_path!, "utf8")));
+          console.log(`[smoke] experimental-on attempt ${attempt}: tools called=${toolKeys(outcomes)} answer=${JSON.stringify(answer.slice(0, 160))}`);
+          for (const outcome of outcomes) {
+            if (READ_ONLY_TOOLS.has(outcome.name)) continue;
+            expect(isManagedDenialText(outcome.content), `${outcome.name} must be denied on the same call under ask`).toBe(true);
+            denied += 1;
+          }
+          const journals: string[] = [];
+          for (const ws of await readdir(sessionsDir)) {
+            const journal = path.join(sessionsDir, ws, job!.kimi_session_id!, "agents", "main", "wire.jsonl");
+            if (await fileExists(journal)) journals.push(journal);
+          }
+          expect(journals, "the run's own session journal must be found").toHaveLength(1);
+          expect(await readFile(journals[0]!, "utf8"), "the session journal must hold no tower record").not.toContain('"tower_mode.');
+        }
+        expect(denied, "a tool outside the read-only list must be attempted and denied").toBeGreaterThan(0);
+        expect(await fileExists(path.join(workspace, TARGET_FILENAME))).toBe(false);
+        expect(await fileExists(path.join(workspace, ".tower"))).toBe(false);
+      } finally {
+        await cleanupTestPath(workspace);
+        if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
+      }
+    },
+    PER_RUN_BUDGET_MS * 2 + 60_000,
   );
 });
 
@@ -2890,6 +2962,18 @@ function streamToolOutcomes(records: CliClientResult["records"]): StreamToolOutc
   return outcomes;
 }
 
+/** The stream records a job log holds; each is wrapped as `{ ts, event: "record", record }`. */
+function jobLogRecords(log: string): CliClientResult["records"] {
+  return log.split("\n").flatMap((line) => {
+    try {
+      const entry = JSON.parse(line) as { event?: string; record?: CliClientResult["records"][number] };
+      return entry.event === "record" && entry.record !== undefined ? [entry.record] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 const isManagedDenialText = (content: string | undefined): boolean =>
   content !== undefined && content.startsWith(DENY_MARKER);
 const RESCUE_DENIAL = /^(?:Rescue|rescue) (?:rejects|does not allow|requires|cannot)/;
@@ -2988,6 +3072,11 @@ const SCOPE_PROMPTS = {
     `First use the Grep tool to search the current workspace for the string ${f.grepToken}.`,
     "Then use the Glob tool with the pattern *.txt in the current workspace.",
     "Report the matching file names. Do not use any other tool.",
+  ].join(" "),
+  fetchUrl: [
+    "This is an authorized network-scope test.",
+    "Call the FetchURL tool on https://example.com/ and then, whatever it returns, call FetchURL on http://127.0.0.1:9/private.",
+    "Report the first page's title and what the second call returned. Do not use any other tool.",
   ].join(" "),
   webSearch: [
     "This is an authorized network-scope test.",
@@ -3218,7 +3307,10 @@ scopeSuite("real-binary smoke: per-call read scope and network access (ask)", ()
     }
   }, PER_RUN_BUDGET_MS + 30_000);
 
-  test("--network: WebSearch passes the hook; without it WebSearch is denied naming --network", async () => {
+  if (PREREQS_OK && !SEED_MAY_OFFER_WEB_SEARCH) {
+    console.log("[smoke] scope-web SKIPPED (not evidence): no Kimi login, config or search endpoint, so Kimi offers no WebSearch tool");
+  }
+  test.skipIf(!SEED_MAY_OFFER_WEB_SEARCH)("--network: WebSearch passes the hook; without it WebSearch is denied naming --network", async () => {
     let fixture: ScopeFixture | undefined;
     let homes: { kimiHome: string; pluginData: string } | undefined;
     try {
@@ -3237,6 +3329,7 @@ scopeSuite("real-binary smoke: per-call read scope and network access (ask)", ()
       expect(isManagedDenialText(searched!.content), "the hook must not deny WebSearch under --network").toBe(false);
       // Provider failures are not hook failures; record what happened.
       console.log(`[smoke] scope-web --network WebSearch keys=${toolKeys([searched!])} result=${JSON.stringify(searched!.content!.slice(0, 200))}`);
+      console.log(`[smoke] scope-web answer=${JSON.stringify(reassembleProseFromRecords(online.records).slice(0, 300))}`);
 
       const offline = await runSmokeTurn({
         kimiHome: homes.kimiHome, workspace: fixture.workspace, label: "ask",
@@ -3251,6 +3344,36 @@ scopeSuite("real-binary smoke: per-call read scope and network access (ask)", ()
       if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
     }
   }, PER_RUN_BUDGET_MS * 2 + 30_000);
+
+  // FetchURL always has a local fetcher behind Kimi's hosted fetch service, so
+  // this lane runs on every route and cannot tell which of the two answered.
+  test("--network: FetchURL of a public page passes the hook and returns it; a loopback URL is denied", async () => {
+    let fixture: ScopeFixture | undefined;
+    let homes: { kimiHome: string; pluginData: string } | undefined;
+    try {
+      fixture = await createScopeFixture("scope-fetch");
+      homes = await installSmokeHook("scope-fetch", fixture.workspace);
+      const result = await runSmokeTurn({
+        kimiHome: homes.kimiHome, workspace: fixture.workspace, label: "ask",
+        prompt: SCOPE_PROMPTS.fetchUrl,
+        readScope: await resolveReadScope(undefined, true, "smoke"),
+      });
+      const outcomes = streamToolOutcomes(result.records);
+      console.log(`[smoke] scope-fetch calls: ${toolKeys(outcomes)}`);
+      const urlIs = (url: string) => (args: Record<string, unknown>): boolean => args.url === url;
+      const fetched = allowedCall(outcomes, "FetchURL", urlIs("https://example.com/"));
+      expect(fetched, `FetchURL of the public page must run without a managed denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      console.log(`[smoke] scope-fetch public result=${JSON.stringify(fetched!.content!.slice(0, 160))}`);
+      // Kimi returns the page's extracted main text, which need not include its title.
+      expect(fetched!.content, "the public page's content must come back on the same call").toMatch(/Example Domain|documentation examples/i);
+      const denied = deniedCall(outcomes, "FetchURL", urlIs("http://127.0.0.1:9/private"));
+      expect(denied, `FetchURL of a loopback URL must carry the managed denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      expect(denied!.content).toContain("loopback");
+    } finally {
+      await cleanupScopeFixture(fixture);
+      if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
 
   test("--network without read roots confines Read to the workspace", async () => {
     let fixture: ScopeFixture | undefined;
@@ -3516,6 +3639,100 @@ boundedSwarmSuite("real-binary smoke: swarm children inherit the read scope", ()
       await cleanupTestPath(pluginData);
     }
   }, SWARM_BUDGET_MS + 60_000);
+});
+
+// A referenced session reaches Kimi as a log path in the prompt and nothing
+// else, so only a real model turn shows that Kimi opens that log and that the
+// hook lets the read through.
+scopeSuite("real-binary smoke: a referenced session's log is read (ask --reference-session)", () => {
+  test("a fresh ask answers from an earlier job's session log, also when web-enabled and read-confined", async () => {
+    const workspace = await realpath(await createTestPluginDataRoot("smoke-ws-session-ref"));
+    let homes: { kimiHome: string; pluginData: string } | undefined;
+    try {
+      homes = await installSmokeHook("session-ref", workspace);
+      const env: NodeJS.ProcessEnv = { ...process.env, KIMI_CODE_HOME: homes.kimiHome, CLAUDE_PLUGIN_DATA: homes.pluginData };
+      // The token reaches the first session only as a tool result, so it is in
+      // that session's log and in nothing the second run is given: not the
+      // session title (the first request), and the file is gone by then.
+      const token = smokeToken("SESSIONREF");
+      const note = path.join(workspace, "reference-note.txt");
+      await writeFile(note, `reference code ${token}\n`, "utf8");
+      const budget = ["--budget", `${Math.round(PER_RUN_BUDGET_MS / 1000)}s`];
+      await runAsk([...budget, `Use the Read tool on ${note}, then reply with exactly: stored. Do not repeat the file's contents.`],
+        makeContext(workspace, env));
+      await rm(note);
+
+      const repoId = (await resolveRepoIdentity(workspace)).repoId;
+      const latestAsk = (): ReturnType<JobStore["findLatestJob"]> => {
+        const store = new JobStore(resolvePluginPaths(env));
+        try {
+          return store.findLatestJob({ repoId, commandType: "ask" });
+        } finally {
+          store.close();
+        }
+      };
+      const first = latestAsk();
+      expect(first?.status).toBe("completed");
+      expect(first?.kimi_session_id, "the first ask must record its Kimi session").toBeTruthy();
+
+      const answer = await runAsk([
+        ...budget, "--reference-session", first!.job_id,
+        "Read the log of the referenced session and reply with the reference code that session read from a file. Reply with the code only.",
+      ], makeContext(workspace, env));
+      const second = latestAsk();
+      expect(second?.job_id).not.toBe(first!.job_id);
+      expect(second?.status).toBe("completed");
+      expect(second?.kimi_session_id).not.toBe(first!.kimi_session_id);
+      const log = await readFile(second!.stream_log_path!, "utf8");
+      const spawnLine = log.split("\n").find((line) => line.includes('"event":"spawn"')) ?? "";
+      const journal = `${first!.kimi_session_id}/agents/main/wire.jsonl`;
+      expect(spawnLine, "the submitted prompt must name the referenced log").toContain(journal);
+      expect(spawnLine, "the submitted prompt must not already hold the code").not.toContain(token);
+      const outcomes = streamToolOutcomes(jobLogRecords(log));
+      const opened = outcomes.find((outcome) =>
+        (outcome.name === "Read" || outcome.name === "Grep") && typeof outcome.args?.path === "string" &&
+        outcome.args.path.endsWith(journal) && outcome.content?.includes(token) === true);
+      expect(opened, `Read or Grep of ${journal} must return the code on the same call; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      expect(log).not.toContain(DENY_MARKER);
+      expect(answer).toContain(token);
+      console.log(`[smoke] session-ref: first=${first!.kimi_session_id} second=${second!.kimi_session_id} opened-with=${opened!.name}`);
+
+      // The same reference on a web-enabled call, whose reads are confined: the
+      // log must stay readable as an added root and the session's other files must not.
+      const sessionsDir = path.join(homes.kimiHome, "sessions");
+      let sessionDir: string | undefined;
+      for (const name of await readdir(sessionsDir)) {
+        const candidate = path.join(sessionsDir, name, first!.kimi_session_id!);
+        if (await stat(candidate).then((info) => info.isDirectory(), () => false)) sessionDir = candidate;
+      }
+      expect(sessionDir, "the first session's directory must exist in the smoke home").toBeDefined();
+      const statePath = path.join(sessionDir!, "state.json");
+      const scopedAnswer = await runAsk([
+        ...budget, "--network", "--reference-session", first!.job_id,
+        `Step 1: call the Read tool on ${statePath} and carry on whatever it returns. ` +
+        "Step 2: read the log of the referenced session and reply with the reference code that session read from a file. Reply with the code only.",
+      ], makeContext(workspace, env));
+      const third = latestAsk();
+      expect(third?.job_id).not.toBe(second!.job_id);
+      expect(third?.status).toBe("completed");
+      expect(JSON.parse(third!.read_scope!)).toEqual({
+        read_roots: [await realpath(path.join(sessionDir!, "agents", "main"))], network: true,
+      });
+      const scopedOutcomes = streamToolOutcomes(jobLogRecords(await readFile(third!.stream_log_path!, "utf8")));
+      const scopedOpen = scopedOutcomes.find((outcome) =>
+        (outcome.name === "Read" || outcome.name === "Grep") && typeof outcome.args?.path === "string" &&
+        outcome.args.path.endsWith(journal) && outcome.content?.includes(token) === true);
+      expect(scopedOpen, `a confined Read or Grep of ${journal} must return the code; calls: ${toolKeys(scopedOutcomes)}`).toBeDefined();
+      const outside = deniedCall(scopedOutcomes, "Read", pathArgIs(workspace, statePath));
+      expect(outside, `the Read of the session's state.json must carry the managed denial; calls: ${toolKeys(scopedOutcomes)}`).toBeDefined();
+      expect(outside!.content).toContain("reads are confined to");
+      expect(scopedAnswer).toContain(token);
+      console.log(`[smoke] session-ref scoped: third=${third!.kimi_session_id} opened-with=${scopedOpen!.name} denied=state.json network=on`);
+    } finally {
+      await cleanupTestPath(workspace);
+      if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
+    }
+  }, PER_RUN_BUDGET_MS * 3 + 90_000);
 });
 
 // The one networked step in this file: `setup --install-kimi` downloads the

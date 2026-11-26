@@ -17,7 +17,7 @@ const mock = path.resolve("tests/helpers/mock-kimi-web.mjs");
 function launch(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   // Candidate admission stays inside this test process; no production flag
   // bypasses certification before the reviewed version enters the matrix.
-  const candidate = env.MOCK_KIMI_WEB_VERSION === "2.6.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.3"
+  const candidate = env.MOCK_KIMI_WEB_VERSION === "2.6.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.3" || env.MOCK_KIMI_WEB_VERSION === "2.8.0"
     ? env.MOCK_KIMI_WEB_VERSION
     : undefined;
   const nodeArgs = candidate !== undefined ? ["--input-type=module", "-e", `
@@ -56,8 +56,9 @@ describe("durable swarm recovery", () => {
     { alreadyTerminal: false, version: "2.6.3" },
     { alreadyTerminal: false, version: "2.7.2" },
     { alreadyTerminal: false, version: "2.7.3" },
+    { alreadyTerminal: false, version: "2.8.0" },
   ])("compiled hard-kill recovery preserves work and terminal outcomes %j", async ({ alreadyTerminal, version }) => {
-    const bounded = ["2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version);
+    const bounded = ["2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version);
     const root = await createTestPluginDataRoot("swarm-crash");
     const repo = await createGitRepoFixture("swarm-crash-repo");
     const home = path.join(root, "home");

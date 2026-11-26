@@ -23,7 +23,7 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
       KIMI_CODE_SWARM_TIMEOUT_MS: '3', KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '9999',
       KIMI_PLUGIN_CC_OPERATION: 'rescue', KIMI_PLUGIN_CC_CMD: 'rescue',
     };
-    for (const kimiVersion of ['2.6.2', '2.7.2', '2.7.3']) {
+    for (const kimiVersion of ['2.6.2', '2.7.2', '2.7.3', '2.8.0']) {
       for (const operationKind of ['swarm', 'swarm-write']) {
         for (const concurrency of [1, 4]) {
           const env = buildKimiCliEnvironment({

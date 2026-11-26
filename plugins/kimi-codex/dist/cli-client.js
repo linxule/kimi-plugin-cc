@@ -59,9 +59,9 @@ export async function runCliPrompt(opts) {
     if (opts.commandLabel === "rescue" || opts.commandLabel === "swarm-write") {
         assertWorkspaceSpellable(opts.commandLabel, [opts.cwd, opts.trustedWorkspaceRoot], "cli-client.pre-spawn");
     }
-    // The master experimental flag enables v2-only features (tower, subagent
-    // fork) outside the certified no-plan profile. Legacy-v1 and uncertified
-    // plans refuse it at the final boundary too; native-v2 children never get it.
+    // The master experimental flag enables v2-only features outside the
+    // reviewed profile. A legacy-v1 plan refuses it at the final boundary too;
+    // native-v2 children never get it.
     assertNoUnsafeExperimentalSelector(opts.env, "cli-client.pre-spawn", opts.executionPlan);
     // Validate the ACTUAL prefix argv used for this spawn — not only the
     // env-resolved value — so a forged/corrupt persisted plan cannot smuggle a
@@ -1001,8 +1001,28 @@ function buildArgs(opts) {
     args.push("-p", opts.prompt);
     return args;
 }
+/**
+ * Windows environment names are case-insensitive, so `kimi_code_experimental_flag`
+ * reaches a child exactly like the upper-case name. Re-key every KIMI_* name to
+ * upper case, so the exact-name deletes and overrides below decide it. Where
+ * both spellings exist the upper-case one wins, as it does in Windows itself.
+ */
+export function copyChildEnvironment(source, platform = process.platform) {
+    const env = { ...source };
+    if (platform !== "win32")
+        return env;
+    for (const key of Object.keys(env)) {
+        const upper = key.toUpperCase();
+        if (upper === key || !upper.startsWith("KIMI_"))
+            continue;
+        if (env[upper] === undefined)
+            env[upper] = env[key];
+        delete env[key];
+    }
+    return env;
+}
 export function buildKimiCliEnvironment(opts) {
-    const env = { ...opts.env };
+    const env = copyChildEnvironment(opts.env);
     // A previous host/job cannot opt another operation into a swarm policy or
     // choose its bound. Only this immutable execution plan grants the policy.
     delete env[SWARM_POLICY_ENV];
@@ -1033,9 +1053,10 @@ export function buildKimiCliEnvironment(opts) {
     env.KIMI_CODE_NO_AUTO_UPDATE = "1";
     // Plugin-owned web lifecycles must not inherit ambient idle-session reclamation.
     env.KIMI_CODE_SESSION_IDLE_RECLAIM_MS = "0";
-    // Tower and subagent fork are uncertified. A per-flag env value outranks
-    // [experimental] config and the master flag upstream (0.42.0-2.7.3), and
-    // "0" parses as false there, so these force both off for print and web.
+    // Plugin tasks run without tower and subagent fork. A per-flag env value
+    // outranks [experimental] config and the master flag upstream
+    // (0.42.0-2.8.0), and "0" parses as false there, so these force both off
+    // for print and web. 2.8.0 removed subagent fork and ignores its variable.
     env.KIMI_CODE_EXPERIMENTAL_TOWER = "0";
     env.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK = "0";
     // The master flag is read only from the child's own environment, so a

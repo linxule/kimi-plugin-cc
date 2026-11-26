@@ -1,6 +1,6 @@
 ---
 description: Run a read-only Kimi review over the current working tree changes or a base ref diff; --challenge questions the approach instead.
-argument-hint: "[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [extra prose]"
+argument-hint: "[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [--reference-session <id>] [extra prose]"
 disable-model-invocation: true
 ---
 
@@ -21,6 +21,7 @@ Supported flags:
 - `-m`, `--model <name>`
 - `--read-root <absolute-dir>` (repeatable) — let Kimi read these directories in addition to the workspace
 - `--network` — enable web search and URL fetch; file reads are then confined to the workspace plus any `--read-root` directories
+- `--reference-session <job-id-or-session-id>` (repeatable, at most 8) — point Kimi at the log of an earlier session so it can pick up from that work. With `--read-root` or `--network` the session's whole main-agent directory (its log, saved tool outputs and plans) becomes readable, and with `--network` that content can reach the web
 - trailing text — optional focus hint, or adversarial framing with `--challenge`
 
 Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). The default budget is 30m; use `--budget` to change it. Review runs foreground-synchronously; it does not support `--background` or `--wait`.

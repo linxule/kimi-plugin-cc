@@ -223,7 +223,7 @@ async function isSafeSessionsRoot(sessionsRoot) {
         return false;
     }
 }
-async function isRealPathInside(parent, child) {
+export async function isRealPathInside(parent, child) {
     try {
         let current = parent;
         for (const part of relative(parent, child).split(path.sep)) {

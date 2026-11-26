@@ -17,7 +17,7 @@ Forward this request to the local Kimi Code companion runtime by shell. Do not u
 
 ## Arguments
 
-Pass through: `[--write] [--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] <prompt>`
+Pass through: `[--write] [--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [--reference-session <id>] <prompt>`
 
 ## Handling
 
@@ -30,6 +30,7 @@ Pass through: `[--write] [--budget <30m|1h|90s>] [--background] [--wait] [-r | -
 - Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for read-only task, review and challenge, 45m for `task --write`. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Task resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).
 - Without `--write` the run is read-only. Put `--write` first only when the user explicitly asked for edits; never promote a question or investigation into edits. With `--write`, Kimi may edit, create, move and delete files in the workspace but cannot mutate git state.
 - `--read-root <absolute-dir>` (repeatable) and `--network` apply only without `--write`; `--network` enables web search and URL fetch and confines file reads to the workspace plus the read roots.
+- `--reference-session <job-id-or-session-id>` (repeatable, at most 8) points Kimi at the log of an earlier session; consider it when the task builds on earlier Kimi work whose job or session id you have. With `--read-root` or `--network` the session's whole main-agent directory (its log, saved tool outputs and plans) becomes readable, and with `--network` that content can reach the web.
 - Preserve the user's text and supplied flags exactly; use `-r` only for explicit resume intent unless `--fresh` is requested. Sessions are kind-scoped: `-r` with `--write` resumes the latest write session, without it the latest read-only session.
 - Choose `--background` for broad or long-running work and return the job id that the companion prints.
 - A background job finishes silently: its completion is observable only through `companion.sh status` / `result <jobId>`, never through a notification. Re-check on your own schedule and never read silence as still running; a budget timeout leaves partial output in the artifact.

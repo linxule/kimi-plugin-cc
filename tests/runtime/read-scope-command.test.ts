@@ -231,7 +231,7 @@ describe("S1 scope flags: commands", () => {
     const pluginDataRoot = await createTestPluginDataRoot("read-scope-uncertified");
     const repoRoot = await createGitRepoFixture("read-scope-uncertified-repo");
     const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
-    const env = { ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath), KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+    const env = { ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath), KIMI_PLUGIN_CC_MOCK_VERSION: "2.99.0",
       KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1", KIMI_PLUGIN_CC_STRICT_VERSIONS: "" };
     try {
       await expect(runAsk(["--network", "q"], makeContext(repoRoot, env))).rejects.toMatchObject({

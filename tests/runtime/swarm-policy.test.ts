@@ -22,7 +22,7 @@ function plan(overrides: Partial<KimiExecutionPlan> = {}): KimiExecutionPlan {
 describe("bounded swarm environment", () => {
   test("selects only the exact engine, version and swarm operation", () => {
     for (const operationKind of ["swarm", "swarm-write"] as const) {
-      for (const kimiVersion of ["2.6.2", "2.6.3", "2.7.2", "2.7.3"]) {
+      for (const kimiVersion of ["2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"]) {
         expect(usesBoundedSwarmPolicy(plan({ operationKind, kimiVersion }))).toBe(true);
       }
       for (const kimiVersion of ["2.5.3", "2.6.0", "2.6.1", "2.6.4", "2.7.0", "2.7.1", "2.7.4", "2.7", "2.7.x", ">=2.7.2", "2.7.2+local", "2.7.2-rc.1", "2.6.2+local", "2.6.2-rc.1", null]) {
@@ -36,7 +36,7 @@ describe("bounded swarm environment", () => {
   });
 
   test.each([1, 2, 4])("overwrites forged ambient admission and child timeout at concurrency %i", (limit) => {
-    for (const kimiVersion of ["2.6.2", "2.7.2", "2.7.3"]) {
+    for (const kimiVersion of ["2.6.2", "2.7.2", "2.7.3", "2.8.0"]) {
       for (const operationKind of ["swarm", "swarm-write"] as const) {
         const ambient = Object.freeze({
           KIMI_CODE_HOME: "/isolated/kimi", [SWARM_POLICY_ENV]: "forged", [SWARM_WAVE_SIZE_ENV]: "999",

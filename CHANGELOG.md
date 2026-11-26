@@ -2,6 +2,25 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 3.1.0 — 2026-11-26
+
+Certifies exact kimi-code 2.8.0 for all eight operations, with the same bounded-swarm construction as 2.6.2, 2.6.3, 2.7.2 and 2.7.3. Evidence: [docs/upstream-2.8.0-certification.md](./docs/upstream-2.8.0-certification.md). Older certified versions are unchanged.
+
+### Added
+
+- `--reference-session <job-id|session-id>` (repeatable, at most 8) on `ask`, `rescue`, `review`, `challenge`, `swarm` and `swarm --write`, and the matching `referenced_sessions` argument on MCP `kimi_ask`, `kimi_rescue`, `kimi_review`, `kimi_swarm` and `kimi_swarm_write`. The plugin resolves each id to that session's main-agent log and appends the same `<referenced_sessions>` block that kimi-code 2.8.0's own clients send, so Kimi can read the earlier session with its Read tool. The plugin reads no log content. The flag refuses with `INVALID_ARGS` before any job row when an id is unknown, ambiguous or unsafe, names the session being resumed, or the run is legacy-v1. On a call with `--read-root` or `--network`, the plugin adds that session's whole main-agent directory (its log, saved tool outputs and plans) to the read roots; with `--network` that content can then reach the web. `pursue`, the review gate and DSH do not take it. The block is never part of a summary, title or session preview.
+- A resumed session whose main journal is left in tower mode refuses with `KIMI_SESSION_TOWER_ACTIVE`. Restoring such a session lets kimi-code update the workspace's `.tower` state without a tool call, so outside the hook. Turn tower mode off in that session with `/tower`, or start a fresh session.
+
+### Changed
+
+- On an uncertified native-v2 release, enabled experimental selectors (`[experimental]` config, per-flag environment variables, `KIMI_CODE_EXPERIMENTAL_FLAG`) no longer refuse the launch. The job carries a warning that names every switched-on `[experimental]` key and `KIMI_CODE_EXPERIMENTAL_*` variable. The plugin still starts Kimi with `KIMI_CODE_EXPERIMENTAL_TOWER=0` and `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0` and without the master flag; how an unlisted release reads those is not reviewed. The plugin does not change any other experimental setting, and the hook denies any tool one adds. `CLI_V2_EXPERIMENTAL_UNSAFE` and `CLI_V2_HOOK_ORDER_UNSAFE` remain for a launch with no execution plan and, for the master flag, a legacy-v1 plan. Certified releases are unchanged: the selectors are neutralized silently.
+- At kimi-code 2.8.0 a Write to the plan file reaches the managed hook; through 2.7.3 it skipped it. Every no-plan closure stays on for every release.
+
+### Fixed
+
+- With `default_plan_mode = true` and an MCP server configured, kimi-code 2.8.0 can journal `mcp.tools_discovered` between the plan record written at session creation and the cancel that print mode writes. The resume scan required the two records to be adjacent, so every later resume of such a session refused with `KIMI_SESSION_PLAN_TAINTED`. The scan now accepts Kimi's three MCP bookkeeping records between them (`mcp.tools_discovered`, `mcp.server_failed` and `mcp.server_failure_resolved`). Any other record there still refuses.
+- The real-binary smoke skips its WebSearch lane by name when the seed home has no Kimi login or config. Kimi offers WebSearch only with its managed login, a provider `search_url` or `[services.moonshot_search]`, so the lane could never dispatch on the API-key route.
+
 ## 3.0.0 — 2026-11-26
 
 The plugin makes promises about the sessions it launches and no longer polices the user's own Kimi configuration. Certified kimi-code versions are unchanged: exact 0.42.0 through 2.7.3 as listed in `runtime/kimi-releases.ts`, with 2.7.3 the newest and 2.6.0 still non-swarm-only.

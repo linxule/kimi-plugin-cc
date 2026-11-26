@@ -17,7 +17,7 @@ Forward this request to the local Kimi Code companion runtime by shell. Do not u
 
 ## Arguments
 
-Pass through: `[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [extra prose]`
+Pass through: `[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [--read-root <dir>] [--network] [--reference-session <id>] [extra prose]`
 
 ## Handling
 
@@ -29,7 +29,7 @@ Pass through: `[--challenge] [--budget <30m|1h|90s>] [--base <ref>] [-m <model>]
 - For subscription auth, guide native Kimi `/login`; for API keys or other providers, guide native `/provider` and have the user enter secrets there. Only an explicit saved-default request calls for native `/model`. Re-list after setup; use `setup --check` for hook readiness. Swarm `-m` selects the coordinator; `[secondary_model]` can select different child models.
 - Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for read-only task, review and challenge, 45m for `task --write`. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Task resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).
 - Put `--challenge` first when the user wants pushback on whether the approach is right; otherwise run a defect review. Preserve adversarial framing as trailing focus text.
-- Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, `--read-root <absolute-dir>`, `--network`, and any trailing focus text only. `--network` enables web search and URL fetch and confines file reads to the workspace plus the read roots.
+- Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, `--read-root <absolute-dir>`, `--network`, `--reference-session <job-id-or-session-id>`, and any trailing focus text only. `--network` enables web search and URL fetch and confines file reads to the workspace plus the read roots. `--reference-session <job-id-or-session-id>` (repeatable, at most 8) points Kimi at the log of an earlier session; consider it when the task builds on earlier Kimi work whose job or session id you have. With `--read-root` or `--network` the session's whole main-agent directory (its log, saved tool outputs and plans) becomes readable, and with `--network` that content can reach the web.
 - Do not invent file/path flags; working-tree review supplies Git status and diff context, with untracked files read from the workspace, plus optional focus text. `--base` keeps the branch diff as its scope. Do not pass background/wait flags; the runtime rejects them.
 - If the companion reports REVIEW_HOOK_NOT_INSTALLED or CHALLENGE_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.
 - Return companion stdout verbatim without softening a challenge, and leave any fixes to a separate user request.

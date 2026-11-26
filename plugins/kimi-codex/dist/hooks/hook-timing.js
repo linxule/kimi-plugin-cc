@@ -15,7 +15,7 @@ export const HOOK_DECISION_DEADLINE_MS = HOOK_TIMEOUT_S * 1000 - 5_000;
 /**
  * kimi-code's timeout (seconds) for a [[hooks]] entry with no `timeout` key:
  * `DEFAULT_HOOK_TIMEOUT_SECONDS` in agent-core-v2 `externalHooks/internal/
- * matchHooks.ts`, 30 in every certified source through 2.7.3. Each compat
+ * matchHooks.ts`, 30 in every certified source through 2.8.0. Each compat
  * audit re-verifies it.
  */
 export const UPSTREAM_DEFAULT_HOOK_TIMEOUT_S = 30;

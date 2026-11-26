@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
   assertNativeV2Preflight,
+  experimentalSelectorsWarning,
   inspectExperimentalSelectors,
   inspectPlanModeConfig,
   upstreamSnakeToCamel,
@@ -447,7 +448,7 @@ describe("assertNativeV2Preflight", () => {
       const certified = (operationKind: string, kimiVersion: string | null = "2.7.3") =>
         ({ operationKind, kimiVersion, certification: "certified" as const });
       for (const operationKind of ["ask", "review", "challenge", "review_gate", "rescue", "pursue"]) {
-        for (const version of ["2.5.0", "2.6.0", "2.7.3"]) {
+        for (const version of ["2.5.0", "2.6.0", "2.7.3", "2.8.0"]) {
           await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified(operationKind, version) }))
             .resolves.toEqual({ warnings: [] });
         }
@@ -456,8 +457,8 @@ describe("assertNativeV2Preflight", () => {
       // Swarm (web-created sessions), rows without the local flag, uncertified and
       // test-bypass plans, and unlabeled callers keep the refusal.
       for (const release of [
-        certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"), certified("ask", "2.8.0"),
-        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"), certified("ask", "2.99.0"),
+        { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
       ]) {
@@ -486,7 +487,7 @@ describe("assertNativeV2Preflight", () => {
       await session("remote-state", { environmentId: "local", cwd: home }, { environmentId: "build", environmentCwd: "/work" });
       await session("wrong-root", { environmentId: "local", cwd: "/elsewhere" });
       for (const operationKind of ["ask", "review", "rescue", "pursue", "review_gate"]) {
-        for (const version of ["2.5.0", "2.7.3"]) {
+        for (const version of ["2.5.0", "2.7.3", "2.8.0"]) {
           await expect(resume("local", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
         }
       }
@@ -502,7 +503,7 @@ describe("assertNativeV2Preflight", () => {
       const refused = { code: "CLI_V2_ENVIRONMENT_UNSAFE", details: { refusal_kind: "v2-environment-configured" } };
       for (const release of [
         certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"),
-        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
       ]) {
@@ -655,24 +656,102 @@ describe("assertNativeV2Preflight", () => {
     });
   });
 
-  test("throws CLI_V2_EXPERIMENTAL_UNSAFE for an uncertified release with a truthy selector", async () => {
+  test("an uncertified release warns about experimental selectors; only a launch with no plan refuses", async () => {
     await withHome("assert-experimental", async (home) => {
-      await writeConfig(home, "[experimental]\ntower = true\n");
+      await writeConfig(home, "[experimental]\ntower = true\nsubagent_fork = true\nnotify_user = true\n");
+      const uncertified = { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const };
+      const env = { KIMI_CODE_EXPERIMENTAL_FLAG: "1", KIMI_CODE_EXPERIMENTAL_TOWER: "on" };
+      await expect(assertNativeV2Preflight({ kimiHome: home, env, release: uncertified })).resolves.toEqual({
+        warnings: [experimentalSelectorsWarning([
+          "config:[experimental].tower", "config:[experimental].subagent_fork", "config:[experimental].notify_user",
+          "env:KIMI_CODE_EXPERIMENTAL_FLAG", "env:KIMI_CODE_EXPERIMENTAL_TOWER",
+        ])],
+      });
+      await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: uncertified })).resolves.toEqual({
+        warnings: [experimentalSelectorsWarning([
+          "config:[experimental].tower", "config:[experimental].subagent_fork", "config:[experimental].notify_user",
+        ])],
+      });
+      // Every switched-on selector is named, not only the two the plugin forces off; a falsy one is not.
+      await writeConfig(home, "[experimental]\nwait_for = false\n");
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: { KIMI_CODE_EXPERIMENTAL_PROMPT_PREDICTION: "1", KIMI_CODE_EXPERIMENTAL_NOTIFY_USER: "0" }, release: uncertified,
+      })).resolves.toEqual({ warnings: [experimentalSelectorsWarning(["env:KIMI_CODE_EXPERIMENTAL_PROMPT_PREDICTION"])] });
+      // A name in another letter case is Kimi's selector only on Windows.
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env: { kimi_code_experimental_wait_for: "1" }, release: uncertified,
+      })).resolves.toEqual({
+        warnings: process.platform === "win32" ? [experimentalSelectorsWarning(["env:kimi_code_experimental_wait_for"])] : [],
+      });
+      await writeConfig(home, "[experimental]\ntower = true\nsubagent_fork = true\nnotify_user = true\n");
+      // A certified release forces the same features off without comment.
+      await expect(assertNativeV2Preflight({
+        kimiHome: home, env, release: { operationKind: "ask", kimiVersion: "2.8.0", certification: "certified" },
+      })).resolves.toEqual({ warnings: [] });
+
       try {
-        await assertNativeV2Preflight({
-          kimiHome: home, env: NO_ENV,
-          release: { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" },
-        });
+        await assertNativeV2Preflight({ kimiHome: home, env: NO_ENV });
         throw new Error("expected assertNativeV2Preflight to throw");
       } catch (error) {
         expect(error).toBeInstanceOf(RuntimeError);
         const runtimeError = error as RuntimeError;
         expect(runtimeError.code).toBe("CLI_V2_EXPERIMENTAL_UNSAFE");
         expect(runtimeError.details.refusal_kind).toBe("v2-experimental-unsafe");
-        expect(runtimeError.details.selectors).toEqual(["config:[experimental].tower"]);
+        expect(runtimeError.details.selectors).toEqual(["config:[experimental].tower", "config:[experimental].subagent_fork"]);
         expect(runtimeError.details.retryable_after_setup).toBe(false);
         expect(runtimeError.message).not.toContain("/kimi:setup");
       }
+    });
+  });
+
+  test("a resumed session left in tower mode refuses; one that exited tower mode resumes", async () => {
+    await withHome("assert-session-tower", async (home) => {
+      const ENTER = JSON.stringify({ type: "tower_mode.enter", agentId: "main", sessionId: "session-1" });
+      const EXIT = JSON.stringify({ type: "tower_mode.exit", agentId: "main" });
+      const TURN = JSON.stringify({ type: "turn.begin", agentId: "main" });
+      const resume = (sessionId: string) => assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, resumeSessionId: sessionId,
+        release: { operationKind: "ask", kimiVersion: "2.8.0", certification: "certified" },
+      });
+      await writeJournal(home, "ws1", "active", "main", [TURN, ENTER, TURN]);
+      await writeJournal(home, "ws1", "reentered", "main", [ENTER, EXIT, TURN, ENTER]);
+      await writeJournal(home, "ws1", "torn", "main", [ENTER, EXIT, '{"type":"tower_mode.ent']);
+      await writeJournal(home, "ws1", "exited", "main", [TURN, ENTER, TURN, EXIT, TURN]);
+      for (const sessionId of ["active", "reentered", "torn"]) {
+        await expect(resume(sessionId)).rejects.toMatchObject({
+          code: "KIMI_SESSION_TOWER_ACTIVE",
+          details: { refusal_kind: "session-tower-active", retryable_after_setup: false },
+        });
+      }
+      await expect(resume("exited")).resolves.toEqual({ warnings: [] });
+
+      // Kimi folds tower state from the main journal alone, takes an id-less
+      // record as the journal's own, ignores another agent's, and stops
+      // replaying at the first corrupt line.
+      await writeJournal(home, "ws1", "exit-after-corrupt", "main", [ENTER, "{corrupt", EXIT, TURN]);
+      await writeJournal(home, "ws1", "foreign-exit", "main", [ENTER, JSON.stringify({ type: "tower_mode.exit", agentId: "sub-1" })]);
+      await writeJournal(home, "ws1", "idless-enter", "main", [JSON.stringify({ type: "tower_mode.enter" }), TURN]);
+      for (const sessionId of ["exit-after-corrupt", "foreign-exit", "idless-enter"]) {
+        await expect(resume(sessionId), sessionId).rejects.toMatchObject({ code: "KIMI_SESSION_TOWER_ACTIVE" });
+      }
+      await writeJournal(home, "ws1", "idless-exit", "main", [ENTER, JSON.stringify({ type: "tower_mode.exit" }), TURN]);
+      await writeJournal(home, "ws1", "foreign-enter", "main", [TURN, JSON.stringify({ type: "tower_mode.enter", agentId: "sub-1" })]);
+      await writeJournal(home, "ws1", "child-only", "main", [TURN]);
+      await writeJournal(home, "ws1", "child-only", "sub-1", [ENTER, JSON.stringify({ type: "tower_mode.enter", agentId: "sub-1" })]);
+      // Kimi drops a torn final line as truncation; a complete corrupt line stops its replay.
+      await appendFile(await writeJournal(home, "ws1", "torn-tail", "main", [ENTER, EXIT]), '{"type":"tower_mode.ent', "utf8");
+      // Nothing after the first complete corrupt line reaches Kimi's replay: not an enter, and not a second corrupt line.
+      await writeJournal(home, "ws1", "enter-after-corrupt", "main", [TURN, "{corrupt", ENTER]);
+      await writeJournal(home, "ws1", "second-corrupt", "main", [TURN, "{corrupt", '{"type":"tower_mode.enter",bad']);
+      for (const sessionId of ["idless-exit", "foreign-enter", "child-only", "torn-tail", "enter-after-corrupt", "second-corrupt"]) {
+        await expect(resume(sessionId), sessionId).resolves.toEqual({ warnings: [] });
+      }
+
+      // Kimi opens agents/main by that spelling; where the volume folds case, a directory stored as Main is that journal.
+      const cased = await writeJournal(home, "ws1", "cased", "Main", [ENTER]);
+      const foldsCase = await stat(path.join(path.dirname(path.dirname(cased)), "main")).then(() => true, () => false);
+      if (foldsCase) await expect(resume("cased")).rejects.toMatchObject({ code: "KIMI_SESSION_TOWER_ACTIVE" });
+      else await expect(resume("cased")).resolves.toEqual({ warnings: [] });
     });
   });
 
@@ -820,7 +899,7 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
     await withHome("g2-fresh", async (home) => {
       await writeConfig(home, "default_plan_mode = true\n");
       for (const operationKind of ["ask", "review", "challenge", "review_gate", "rescue", "pursue"]) {
-        for (const version of ["2.4.0", "2.5.3", "2.6.0", "2.7.3"]) {
+        for (const version of ["2.4.0", "2.5.3", "2.6.0", "2.7.3", "2.8.0"]) {
           await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified(operationKind, version) }))
             .resolves.toEqual({ warnings: [] });
         }
@@ -828,7 +907,7 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       const refused = { code: "CLI_V2_PLAN_MODE_CONFIGURED", details: { refusal_kind: "v2-plan-mode-configured" } };
       for (const release of [
         certified("swarm"), certified("swarm-write"), certified("ask", "2.3.3"), certified("ask", "0.42.0"),
-        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
       ]) {
@@ -860,7 +939,7 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       const refused = { code: "CLI_V2_PLAN_MODE_CONFIGURED", details: { refusal_kind: "v2-plan-mode-configured" } };
       for (const release of [
         certified("swarm"), certified("swarm-write"), certified("ask", "2.3.3"),
-        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const },
+        { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
       ]) {
@@ -879,7 +958,46 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
     });
   });
 
-  test("resume tolerates only an adjacent main enter→cancel pair before any work on a linear journal", async () => {
+  test("only kimi's MCP bookkeeping records may sit between the enter and the cancel; any other record there taints", async () => {
+    await withHome("g2-resume-between", async (home) => {
+      // Shaped as upstream's schema requires (mcpDiscoveryOps.ts), so Kimi's own replay would decode it.
+      const MCP = JSON.stringify({
+        type: "mcp.tools_discovered", agentId: "main", serverName: "mini", hash: "0a1b2c", tools: [], enabledNames: [],
+      });
+      const resume = (sessionId: string) => assertNativeV2Preflight({
+        kimiHome: home, env: NO_ENV, resumeSessionId: sessionId, expectedExecutionRoot: home, release: certified("ask", "2.8.0"),
+      });
+      // The order exact 2.8.0 writes when an MCP server connects during session creation.
+      await writeJournal(home, "ws1", "mcp-between", "main", [ENTER, MCP, CANCEL, JSON.stringify({ type: "permission.set_mode" }), TURN]);
+      await writeJournal(home, "ws1", "two-mcp-between", "main", [
+        ENTER, MCP, JSON.stringify({ type: "mcp.server_failed", agentId: "main", serverName: "down", transport: "stdio" }),
+        JSON.stringify({ type: "mcp.server_failure_resolved", agentId: "main", serverName: "down", transport: "stdio", resolution: "recovered" }),
+        MCP, CANCEL, TURN,
+      ]);
+      await expect(resume("mcp-between")).resolves.toEqual({ warnings: [] });
+      await expect(resume("two-mcp-between")).resolves.toEqual({ warnings: [] });
+
+      const between: Record<string, string> = {
+        "rewind-between": JSON.stringify({ type: "context.undone" }),
+        "message-between": JSON.stringify({ type: "context.append_message" }),
+        "unknown-between": JSON.stringify({ type: "permission.set_mode" }),
+        "mcp-status-between": JSON.stringify({ type: "mcp.server.status", agentId: "main" }),
+        "profile-between": JSON.stringify({ type: "profile.bind" }),
+        "tower-between": JSON.stringify({ type: "tower_mode.enter" }),
+        "local-binding-between": JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: home }),
+        "remote-binding-between": JSON.stringify({ type: "environment.set_binding", environmentId: "remote-1" }),
+        "untyped-between": JSON.stringify({ agentId: "main" }),
+      };
+      for (const [sessionId, record] of Object.entries(between)) {
+        await writeJournal(home, "ws1", sessionId, "main", [ENTER, MCP, record, CANCEL, TURN]);
+        await expect(resume(sessionId), sessionId).rejects.toMatchObject({ code: "KIMI_SESSION_PLAN_TAINTED" });
+      }
+      await writeJournal(home, "ws1", "mcp-then-no-cancel", "main", [ENTER, MCP, TURN]);
+      await expect(resume("mcp-then-no-cancel")).rejects.toMatchObject({ code: "KIMI_SESSION_PLAN_TAINTED" });
+    });
+  });
+
+  test("resume tolerates only one main enter→cancel pair before any work on a linear journal", async () => {
     await withHome("g2-resume-ok", async (home) => {
       await writeJournal(home, "ws1", "session-1", "main", [
         JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: home }),
@@ -891,7 +1009,7 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       })).resolves.toEqual({ warnings: [] });
       // The same journal still taints without a certified cancelling row.
       for (const release of [undefined, certified("ask", "2.3.3"), certified("swarm"),
-        { operationKind: "ask", kimiVersion: "2.8.0", certification: "uncertified" as const }]) {
+        { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const }]) {
         await expect(assertNativeV2Preflight({
           kimiHome: home, env: NO_ENV, resumeSessionId: "session-1", expectedExecutionRoot: home, release,
         })).rejects.toMatchObject({ code: "KIMI_SESSION_PLAN_TAINTED" });

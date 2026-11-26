@@ -27,6 +27,7 @@ import type { CommandContext } from "../types.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, resolveResumeSession, resumeBudget, type SessionResolution, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { appendSessionReferences, resolveSessionReferences, stripSessionReferences } from "../session-references.js";
 import { shorten } from "../util.js";
 
 // "Continue working on the bug" verbs that auto-attach to the latest
@@ -63,7 +64,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
     await sweepStaleJobs(store, paths);
 
     const sessionResolution = await resolveRescueSession(store, repoIdentity.repoId, parsed);
-    const prompt = buildRescuePrompt(parsed.prompt, sessionResolution.reusedSession);
+    const basePrompt = buildRescuePrompt(parsed.prompt, sessionResolution.reusedSession);
     const executionPlan = await prepareKimiExecutionPlan({
       operationKind: "rescue",
       cwd: context.cwd,
@@ -73,6 +74,10 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       resumeSessionId: sessionResolution.kimiSessionId ?? undefined,
       resumeSource: sessionResolution.sourceJob,
     });
+    const prompt = appendSessionReferences(basePrompt, await resolveSessionReferences(parsed.referenceSessions, {
+      store, env: context.env, spawnCwd: context.cwd, plan: executionPlan,
+      resumeSessionId: sessionResolution.kimiSessionId, stage: "rescue.reference-session",
+    }));
     const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `rescue-${jobId}.jsonl`);
 
@@ -340,7 +345,8 @@ function buildRescuePrompt(prompt: string | undefined, reusedSession: boolean): 
 }
 
 export function stripRescuePromptPrefix(prompt: string): string {
-  return prompt.startsWith(RESCUE_PROMPT_PREFIX) ? prompt.slice(RESCUE_PROMPT_PREFIX.length) : prompt;
+  const body = stripSessionReferences(prompt);
+  return body.startsWith(RESCUE_PROMPT_PREFIX) ? body.slice(RESCUE_PROMPT_PREFIX.length) : body;
 }
 
 async function resolveRescueSession(

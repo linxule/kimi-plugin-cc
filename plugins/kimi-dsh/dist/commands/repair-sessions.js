@@ -8,6 +8,7 @@ import { resolveRepoIdentity } from "../git.js";
 import { digestPrompt } from "../jobs.js";
 import { resolvePluginPaths } from "../paths.js";
 import { syncKimiSessionTitle } from "../session-title.js";
+import { stripSessionReferences } from "../session-references.js";
 import { askPromptSubject } from "./ask.js";
 import { buildGoalPrompt } from "./pursue.js";
 import { stripRescuePromptPrefix } from "./rescue.js";
@@ -185,7 +186,8 @@ const TASK_SLOT = "\u0000kimi-plugin-cc-task\u0000";
 /**
  * Recover the raw task text a live run previews from its verified submitted
  * prompt. Derivations are exact or absent: prompts from other plugin releases,
- * ambiguous parameter choices and unknown operations return undefined.
+ * ambiguous parameter choices and unknown operations return undefined. A
+ * trailing referenced-sessions block is not task text; pursue never carries one.
  */
 export function rawTaskTextFromSubmittedPrompt(operationKind, prompt) {
     switch (operationKind) {
@@ -201,17 +203,18 @@ export function rawTaskTextFromSubmittedPrompt(operationKind, prompt) {
             const build = operationKind === "swarm" ? buildSwarmPrompt : buildSwarmWritePrompt;
             const caps = [undefined, ...numbersAfter(prompt, /at most (\d+) subagents/g)];
             const waves = [undefined, 1, ...numbersAfter(prompt, /at most (\d+) entries/g)];
-            return uniqueInversion(prompt, caps.flatMap((cap) => waves.map((wave) => (task) => build(task, cap, wave))));
+            return uniqueInversion(stripSessionReferences(prompt), caps.flatMap((cap) => waves.map((wave) => (task) => build(task, cap, wave))));
         }
         case "review":
         case "challenge":
-            return reviewTaskText(prompt);
+            return reviewTaskText(stripSessionReferences(prompt));
         default:
             return undefined;
     }
 }
+/** The plugin prefix must have been removed, not merely a referenced-sessions block. */
 function strippedOrUndefined(prompt, stripped) {
-    return stripped !== prompt && stripped.trim() ? stripped : undefined;
+    return stripped !== stripSessionReferences(prompt) && stripped.trim() ? stripped : undefined;
 }
 function numbersAfter(prompt, pattern) {
     return [...new Set([...prompt.matchAll(pattern)].map((match) => Number(match[1])))];

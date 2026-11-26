@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { renderSetupResult, runSetup } from "../../runtime/commands/setup.js";
+import { kimiVersionsWith } from "../../runtime/kimi-releases.js";
 import {
   KIMI_CONFIG_LOCK_METADATA_MAX_BYTES,
   kimiConfigLockPath,
@@ -962,7 +963,7 @@ describe("setup managed-block installer", () => {
     expect(warnings).not.toContain("outside the versions");
   });
 
-  test.each(["2.6.2", "2.6.3", "2.7.2", "2.7.3"])("%s setup reports bounded swarm and the single-worker path", async (version) => {
+  test.each(kimiVersionsWith("bounded-swarm"))("%s setup reports bounded swarm and the single-worker path", async (version) => {
     if (process.platform === "win32") return;
     const { env, configPath } = await makeCase(`bounded-swarm-version-notice-${version}`);
     const kimiBin = path.join(path.dirname(configPath), `kimi-${version}`);
@@ -983,7 +984,7 @@ describe("setup managed-block installer", () => {
   });
 
   test.each(["PermissionRequest", "PermissionResult", "Interrupt"].flatMap((event) =>
-    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].map((version) => [event, version] as const)))(
+    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].map((version) => [event, version] as const)))(
     "exact reviewed 2.x schemas accept %s (setup %s) but refuse unreviewed versions",
     async (event, setupVersion) => {
       const contents = `[[hooks]]\nevent = "${event}"\ncommand = "foreign-hook"\n`;

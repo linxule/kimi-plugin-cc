@@ -25,6 +25,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes, hookRefusal } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
+import { appendSessionReferences, resolveSessionReferences, withReferenceReadRoots } from "../session-references.js";
 
 const REVIEW_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 
@@ -43,7 +44,7 @@ export async function runReview(
     );
   }
 
-  const readScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
+  const callerScope = parsed.readRoots === undefined && parsed.network === undefined ? undefined
     : await resolveReadScope(parsed.readRoots, parsed.network, `${commandType}.parse`);
 
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
@@ -60,15 +61,25 @@ export async function runReview(
     env: context.env,
     stderr: context.stderr,
   });
-  assertScopeSupported(readScope, executionPlan.certification, "INVALID_ARGS", `${commandType}.parse`);
+  assertScopeSupported(callerScope, executionPlan.certification, "INVALID_ARGS", `${commandType}.parse`);
   const store = new JobStore(paths);
+  let references;
+  try {
+    references = await resolveSessionReferences(parsed.referenceSessions, {
+      store, env: context.env, spawnCwd: context.cwd, plan: executionPlan, stage: `${commandType}.reference-session`,
+    });
+  } catch (error) {
+    store.close();
+    throw error;
+  }
+  const readScope = withReferenceReadRoots(callerScope, references);
 
   const jobId = allocateJobId(context);
   // Leave kimi_session_id NULL until kimi announces an actual ID; never invent
   // one that no on-disk session matches.
   const reviewSessionId: string | null = null;
   const logPath = path.join(paths.logsDir, `${commandType}-${jobId}.jsonl`);
-  const previewPrompt = buildReviewPrompt(commandType, reviewContext, parsed.focus);
+  const previewPrompt = appendSessionReferences(buildReviewPrompt(commandType, reviewContext, parsed.focus), references);
   const job = store.createJob({
     job_id: jobId,
     repo_id: repoIdentity.repoId,

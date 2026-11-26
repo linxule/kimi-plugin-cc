@@ -303,7 +303,7 @@ async function isSafeSessionsRoot(sessionsRoot: string): Promise<boolean> {
   }
 }
 
-async function isRealPathInside(parent: string, child: string): Promise<boolean> {
+export async function isRealPathInside(parent: string, child: string): Promise<boolean> {
   try {
     let current = parent;
     for (const part of relative(parent, child).split(path.sep)) {

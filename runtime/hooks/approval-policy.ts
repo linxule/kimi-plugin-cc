@@ -63,13 +63,15 @@ const WEB_TOOLS: ReadonlySet<string> = new Set(["WebSearch", "FetchURL"]);
  */
 const AGENT_SWARM_TOOL = "AgentSwarm";
 /**
- * agent-core-v2's ONLY chain-breaking final allow is the plan-file guard, and
- * it fires only while plan mode is ACTIVE. Native v2 is therefore certified on
- * the invariant that plan mode is never armed in a plugin-managed session:
- * `default_plan_mode` is refused pre-spawn (runtime/native-v2-preflight.ts),
- * plan-tainted sessions are never resumed, and the model-reachable entry tool
- * is denied HERE for every label. ExitPlanMode is denied too so the deny set
- * is explicit rather than a side effect of the read-only allowlists.
+ * Through 2.7.3, agent-core-v2's ONLY chain-breaking final allow is the
+ * plan-file guard, and it fires only while plan mode is ACTIVE. Native v2 is
+ * therefore certified on the invariant that plan mode is never armed in a
+ * plugin-managed session: `default_plan_mode` is refused pre-spawn
+ * (runtime/native-v2-preflight.ts), plan-tainted sessions are never resumed,
+ * and the model-reachable entry tool is denied HERE for every label.
+ * ExitPlanMode is denied too so the deny set is explicit rather than a side
+ * effect of the read-only allowlists. 2.8.0 runs this hook before the plan
+ * guard and has no final allow; the same closures stay on for every release.
  */
 const PLAN_MODE_TOOLS: ReadonlySet<string> = new Set(["EnterPlanMode", "ExitPlanMode"]);
 

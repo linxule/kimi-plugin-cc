@@ -17,11 +17,14 @@ function looksLikeFlag(token: string): boolean {
 }
 
 const SCOPE_SUPPORTED_FLAGS = "--read-root <absolute-dir> (repeatable), --network";
+export const MAX_SESSION_REFERENCES = 8;
+export const SESSION_REFERENCE_ID_MAX = 128;
+const REFERENCE_SUPPORTED_FLAG = `--reference-session <job-id|session-id> (repeatable, at most ${MAX_SESSION_REFERENCES})`;
 export const RESCUE_SUPPORTED_FLAGS =
-  "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+  `-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>, ${REFERENCE_SUPPORTED_FLAG}`;
 export const ASK_SUPPORTED_FLAGS = `${RESCUE_SUPPORTED_FLAGS}, ${SCOPE_SUPPORTED_FLAGS}`;
 
-export const REVIEW_SUPPORTED_FLAGS = `--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, ${SCOPE_SUPPORTED_FLAGS}`;
+export const REVIEW_SUPPORTED_FLAGS = `--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, ${SCOPE_SUPPORTED_FLAGS}, ${REFERENCE_SUPPORTED_FLAG}`;
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
 
 export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags), --install-kimi [--json] (without other setup flags)";
@@ -49,7 +52,12 @@ export interface ScopeFlagState {
   network?: boolean;
 }
 
-export interface AskArgs extends KimiFlagState, ScopeFlagState {
+/** Raw `--reference-session` values, deduplicated in first order; resolved by runtime/session-references.ts. */
+export interface ReferenceFlagState {
+  referenceSessions?: string[];
+}
+
+export interface AskArgs extends KimiFlagState, ScopeFlagState, ReferenceFlagState {
   help?: boolean;
   budgetMs?: number;
   background: boolean;
@@ -60,7 +68,7 @@ export interface AskArgs extends KimiFlagState, ScopeFlagState {
   prompt?: string;
 }
 
-export interface ReviewArgs extends KimiFlagState, ScopeFlagState {
+export interface ReviewArgs extends KimiFlagState, ScopeFlagState, ReferenceFlagState {
   budgetMs?: number;
   base?: string;
   background: boolean;
@@ -88,7 +96,7 @@ export interface PursueArgs extends KimiFlagState {
 
 export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --turns <N>";
 
-export interface SwarmArgs extends KimiFlagState, ScopeFlagState {
+export interface SwarmArgs extends KimiFlagState, ScopeFlagState, ReferenceFlagState {
   /**
    * Hard wall-clock ceiling in ms — the hard bound on total runtime. Undefined
    * means "apply the command default" (swarm.ts owns the default so parsing
@@ -128,7 +136,7 @@ export interface SwarmArgs extends KimiFlagState, ScopeFlagState {
 }
 
 export const SWARM_SUPPORTED_FLAGS =
-  `-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write, ${SCOPE_SUPPORTED_FLAGS} (read-only swarm only)`;
+  `-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write, ${SCOPE_SUPPORTED_FLAGS} (read-only swarm only), ${REFERENCE_SUPPORTED_FLAG}`;
 
 /**
  * Parser for /kimi:swarm. Foreground-only: no --background/--fresh/--resume.
@@ -143,6 +151,7 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
   let write = false;
   const readRoots: string[] = [];
   let network = false;
+  const references: string[] = [];
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -167,6 +176,9 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
       case "-m":
       case "--model":
         model = readModel(token, argv[++index], "swarm.parse");
+        break;
+      case "--reference-session":
+        references.push(referenceSessionValue(argv[++index], "swarm.parse"));
         break;
       case "--write":
         write = true;
@@ -212,8 +224,30 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
     model,
     thinkingEffort,
     ...scopeFields(readRoots, network),
+    ...referenceSessionsField(references, "swarm.parse"),
     objective: trailingTokens?.join(" "),
   };
+}
+
+function referenceSessionValue(value: string | undefined, stage: string): string {
+  if (!value || value.startsWith("-")) {
+    throw new RuntimeError("INVALID_ARGS", "--reference-session requires a job id or Kimi session id.", stage);
+  }
+  return value;
+}
+
+/** Omitted when absent so parsed shapes stay unchanged; refuses more than the cap. */
+function referenceSessionsField(values: readonly string[], stage: string): ReferenceFlagState {
+  if (values.length === 0) return {};
+  const unique = [...new Set(values)];
+  if (unique.length > MAX_SESSION_REFERENCES) {
+    throw new RuntimeError(
+      "INVALID_ARGS",
+      `--reference-session accepts at most ${MAX_SESSION_REFERENCES} distinct sessions; got ${unique.length}.`,
+      stage,
+    );
+  }
+  return { referenceSessions: unique };
 }
 
 /** Omit default-scope fields so parsed shapes stay unchanged without the flags. */
@@ -411,7 +445,7 @@ export interface JobLookupArgs {
   json: boolean;
 }
 
-const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type", "--read-root"]);
+const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type", "--read-root", "--reference-session"]);
 
 /**
  * `--help` / `-h` counts only inside the leading flag region: before `--`
@@ -486,6 +520,7 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
   let explicitResumeTarget = false;
   const readRoots: string[] = [];
   let network = false;
+  const references: string[] = [];
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -509,6 +544,9 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
     switch (token) {
       case "--budget":
         budgetMs = readBudget(argv[++index], `${kind}.parse`, "response");
+        break;
+      case "--reference-session":
+        references.push(referenceSessionValue(argv[++index], `${kind}.parse`));
         break;
       case "-m":
       case "--model":
@@ -589,6 +627,7 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
     model,
     thinkingEffort,
     ...scopeFields(readRoots, network),
+    ...referenceSessionsField(references, `${kind}.parse`),
     prompt: trailingTokens?.join(" "),
   };
 }
@@ -596,7 +635,7 @@ function parsePromptArgs(argv: string[], kind: "ask" | "rescue"): AskArgs {
 export function parseReviewArgs(argv: string[], commandName: string = "review"): ReviewArgs {
   const parsed = parseKnownFlags(
     argv,
-    new Set(["--budget", "--base", "--background", "--wait", "-m", "--model", "--read-root", "--network"]),
+    new Set(["--budget", "--base", "--background", "--wait", "-m", "--model", "--read-root", "--network", "--reference-session"]),
     commandName,
   );
 
@@ -608,6 +647,7 @@ export function parseReviewArgs(argv: string[], commandName: string = "review"):
     model: parsed.model,
     thinkingEffort: parsed.thinkingEffort,
     ...scopeFields(parsed.readRoots, parsed.network),
+    ...referenceSessionsField(parsed.references, `${commandName}.parse`),
     focus: parsed.trailingText,
   };
 }
@@ -668,6 +708,7 @@ export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
 interface ParsedKnownFlags extends KimiFlagState {
   readRoots: string[];
   network: boolean;
+  references: string[];
   budgetMs?: number;
   base?: string;
   background: boolean;
@@ -698,6 +739,7 @@ function parseKnownFlags(
   let wait = false;
   const readRoots: string[] = [];
   let network = false;
+  const references: string[] = [];
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -761,6 +803,9 @@ function parseKnownFlags(
       case "--network":
         network = true;
         break;
+      case "--reference-session":
+        references.push(referenceSessionValue(argv[++index], `${commandName}.parse`));
+        break;
       // The early `if (!knownFlags.has(token))` gate above means we only
       // reach this switch with tokens that ARE in knownFlags, and every
       // member is handled above. A `default` arm would be unreachable.
@@ -774,6 +819,7 @@ function parseKnownFlags(
     wait,
     readRoots,
     network,
+    references,
     model,
     thinkingEffort,
     trailingText: trailingTokens?.join(" "),

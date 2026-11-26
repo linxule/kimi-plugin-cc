@@ -1,6 +1,6 @@
 import { RuntimeError } from "../errors.js";
 import { kimiVersionsWith } from "../kimi-releases.js";
-import { parseDurationMs, validateThinkingEffort } from "../parsing.js";
+import { MAX_SESSION_REFERENCES, parseDurationMs, SESSION_REFERENCE_ID_MAX, validateThinkingEffort } from "../parsing.js";
 const WORKSPACE_PROPERTY = {
     type: "string",
     description: "Absolute workspace directory. Required when the host does not configure a default; Codex normally supplies it explicitly.",
@@ -56,6 +56,13 @@ const SCOPE_PROPERTIES = {
         description: "Enable web search and URL fetch; file reads are then confined to the workspace plus read_roots. Default false.",
     },
 };
+const REFERENCE_PROPERTIES = {
+    referenced_sessions: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional. Job IDs or Kimi session IDs of earlier sessions for Kimi to consult (at most 8). Each is passed as a referenced session log that Kimi can read. Use when prior work matters. On a job with read_roots or network, each session's whole main-agent directory (its log, saved tool outputs and plans) becomes readable; with network that content can reach the web.",
+    },
+};
 const REVIEW_MODE_PROPERTY = {
     type: "string",
     enum: ["defects", "challenge"],
@@ -94,21 +101,21 @@ const OPERATION_SPECS = {
         command: ["ask"],
         write: false,
         summary: "Start an independent read-only Kimi repository explanation.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, ...REFERENCE_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
     },
     kimi_review: {
         kind: "review",
         command: ["review"],
         write: false,
         summary: "Start an independent read-only Kimi review of working-tree changes, including untracked files, or a committed base diff. Mode challenge questions the approach instead of hunting defects.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, mode: REVIEW_MODE_PROPERTY, base: BASE_PROPERTY, focus: FOCUS_PROPERTY }),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, ...REFERENCE_PROPERTIES, mode: REVIEW_MODE_PROPERTY, base: BASE_PROPERTY, focus: FOCUS_PROPERTY }),
     },
     kimi_rescue: {
         kind: "rescue",
         command: ["task", "rescue"],
         write: true,
         summary: "Start a bounded write-capable Kimi investigation or fix inside the validated workspace. Review the resulting changes; no commit is made.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...REFERENCE_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
     },
     kimi_pursue: {
         kind: "pursue",
@@ -122,14 +129,14 @@ const OPERATION_SPECS = {
         command: ["task", "swarm"],
         write: false,
         summary: "Start a read-only parallel Kimi fan-out across many independent review targets.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY }, ["objective"]),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, ...REFERENCE_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY }, ["objective"]),
     },
     kimi_swarm_write: {
         kind: "swarm-write",
         command: ["task", "swarm"],
         write: true,
         summary: "Start parallel Kimi implementation in a disposable worktree off HEAD. The real tree is not edited; the result is a patch to review and apply separately.",
-        inputSchema: schema({ ...COMMON_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY }, ["objective"]),
+        inputSchema: schema({ ...COMMON_PROPERTIES, ...REFERENCE_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY }, ["objective"]),
     },
 };
 const JOB_CONTROL_SCHEMA = schema({
@@ -181,6 +188,7 @@ export function buildMcpOperationInvocation(name, input) {
     const argv = challenge ? ["task", "challenge"] : [...spec.command];
     appendCommonOptions(argv, args, kind === "pursue" || kind === "swarm" || kind === "swarm-write" ? "safety" : "response");
     appendScopeOptions(argv, args);
+    appendReferenceOptions(argv, args);
     switch (kind) {
         case "ask":
         case "rescue": {
@@ -283,6 +291,28 @@ function appendScopeOptions(argv, args) {
     }
     if (optionalBoolean(args, "network") === true)
         argv.push("--network");
+}
+/**
+ * The companion parser and resolver own every reference rule. This only keeps
+ * an oversized list or id out of the child's argv, where it could fail the
+ * launch before the companion can answer.
+ */
+function appendReferenceOptions(argv, args) {
+    const references = args.referenced_sessions;
+    if (references === undefined)
+        return;
+    if (!Array.isArray(references) || references.some((reference) => typeof reference !== "string")) {
+        throw invalidArguments("referenced_sessions must be an array of strings.");
+    }
+    const unique = [...new Set(references)];
+    if (unique.length > MAX_SESSION_REFERENCES) {
+        throw invalidArguments(`referenced_sessions accepts at most ${MAX_SESSION_REFERENCES} distinct sessions; got ${unique.length}.`);
+    }
+    if (unique.some((reference) => reference.length > SESSION_REFERENCE_ID_MAX)) {
+        throw invalidArguments(`referenced_sessions ids are at most ${SESSION_REFERENCE_ID_MAX} characters.`);
+    }
+    for (const reference of unique)
+        argv.push("--reference-session", reference);
 }
 function readArguments(input, allowedKeys) {
     if (input === undefined)

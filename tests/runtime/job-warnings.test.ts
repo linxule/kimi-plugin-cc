@@ -15,7 +15,7 @@ import { renderManagedJobOutput, renderTerminalJobArtifact, withWarningsBlock } 
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const WARNINGS = ["kimi-code 2.8.0 is not certified by this plugin release; running ask read-only with 2.7.3 mechanics."];
+const WARNINGS = ["kimi-code 2.99.0 is not certified by this plugin release; running ask read-only with 2.8.0 mechanics."];
 const WARNINGS_JSON = JSON.stringify(WARNINGS);
 
 const PLAN: KimiExecutionPlan = {
@@ -136,11 +136,11 @@ describe("channel W end to end", () => {
         KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",
         KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", path.resolve("tests/helpers/mock-kimi-cli-v1.ts")]),
-        KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+        KIMI_PLUGIN_CC_MOCK_VERSION: "2.99.0",
         KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1",
         KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
       };
-      const warning = "kimi-code 2.8.0 is not certified by this plugin release; running ask read-only with 2.7.3 mechanics.";
+      const warning = "kimi-code 2.99.0 is not certified by this plugin release; running ask read-only with 2.8.0 mechanics.";
       let commandStderr = "";
       const stderr = { write(chunk: string) { commandStderr += chunk; return true; } } as unknown as NodeJS.WriteStream;
       const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr };

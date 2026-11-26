@@ -1,4 +1,12 @@
-# Native v2 status — 2026-11-24
+# Native v2 status — 2026-11-26
+
+## Exact 2.8.0 certification — plugin 3.1.0
+
+Exact CLI 2.8.0 (`46d9085f37c1b145ccfc82a24387e26aa940e94f`, bundle `dist/main.mjs` SHA-256 `8d2ef20b253b604435bc1d71cbff9c79e537a9bc501fbb2de7a7ec615410fdb1`) is admitted for all eight operations by plugin 3.1.0 under the no-plan and bounded-swarm/direct-worker construction, with the same capabilities as 2.7.2 and 2.7.3. The deterministic stock-binary suite passes 23 tests / 0 failures / 138 assertions in 612.48 seconds. The [2.8.0 record](upstream-2.8.0-certification.md) holds the source scan, live matrices and repository gates. Certification and release do not update installed hosts or operator pins.
+
+At 2.8.0 the external hook runs before the plan guard: the guard is an ordinary `registerHook` hook that returns `skipPermitting`, it sits in a later group than the PreToolUse listener, and no production code calls `event.allow()`. On the exact binary, plan OFF denied an ordinary Write on the same call; a forced EnterPlanMode call returned `Tool "EnterPlanMode" not found` before any hook; and an armed, resumed plan-ON session sent Glob and both plan-file Write attempts to the deny-all hook, which denied each on the same call, with no plan file and no workspace file written. Through 2.7.3 the same plan-ON control shows the bypass. MoonshotAI/kimi-code#3431 is still open, so the fix is observed, not announced, and every no-plan closure stays on as a second layer.
+
+With `default_plan_mode = true` and an MCP server configured, 2.8.0 can journal `mcp.tools_discovered` between the create-time plan enter and print's cancel; the resume scan tolerates Kimi's three durable MCP records there (`mcp.tools_discovered`, `mcp.server_failed` and `mcp.server_failure_resolved`) and refuses any other record or an unparseable line. A resume also refuses a session left in tower mode (`KIMI_SESSION_TOWER_ACTIVE`). The hook engine, print mode, session store layout and the swarm, task and KAP fields the plugin reads are unchanged; `Agent` and `AgentSwarm` lost `fork`, and 2.8.0 removed the `subagent_fork` and `tool-select` flags.
 
 ## Exact 2.7.3 certification — plugin 2.7.3
 
@@ -55,14 +63,14 @@ captured a 278-byte child-authored patch with a clean user tree and removed
 worktree. Repository and package evidence is recorded separately in the
 [2.5.3 certification record](upstream-2.5.3-certification.md).
 
-Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3, plus 2.6.2/2.6.3/2.7.2/2.7.3 parallel runs, require host-preactivated swarm sessions. Exact 2.6.0 activation remains candidate-only.
+Exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3, plus 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel runs, require host-preactivated swarm sessions. Exact 2.6.0 activation remains candidate-only.
 Short-lived authenticated loopback lifecycles bracket one ordinary
 `kimi -p -r` runner. Exact 2.5.0/2.5.1/2.5.2/2.5.3 replaces removed `/status` with protocol-v2
 WebSocket main-agent state, requiring unique request IDs, an accepted
 subscription, and the latest frame through intentional bounded close. It also
 pins `environment_id:"local"` and the expected cwd before either profile mutation.
 Remote defaults, disabled workspace trust, and resumed nonlocal or wrong-root
-bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2/2.6.3/2.7.2/2.7.3 print selects `--environment local`;
+bindings refuse before spawn. Fresh 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 print selects `--environment local`;
 resume never receives that flag; the environment preflight rejects any persisted nonlocal or wrong-root metadata/binding, while older sessions without environment records do not fail this check merely for lacking them.
 Tokens remain in memory, activation consumes the finite budget, graceful shutdown
 retains the 15-second allowance, and unverified cleanup prevents success.
@@ -70,14 +78,14 @@ retains the 15-second allowance, and unverified cleanup prevents success.
 Parallel swarm evidence requires distinct child journals and each assigned
 Write/Edit path correlated with its own toolCallId/result. A tool-call record,
 exit 0, aggregate denial or coordinator-only patch is insufficient for fan-out.
-The exact-2.6.2/2.6.3/2.7.2/2.7.3 concurrency-1 path instead requires fresh direct-worker provenance,
+The exact-2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 concurrency-1 path instead requires fresh direct-worker provenance,
 no child journals or activation, delegation denials, confinement and cancellation. The 2.5.3 OFF
 control created no children; ON produced two children with managed denials and
 verified deactivation, including with parent idle reclamation set to 1 ms. A
 separate evidence-preserving out-of-root control correlated two child Writes with
 rescue denials and created no files.
 
-Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2, 2.6.3, 2.7.2 and 2.7.3 remove EnterPlanMode and cancel default plan mode on
+Exact 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0, 2.6.2, 2.6.3, 2.7.2, 2.7.3 and 2.8.0 remove EnterPlanMode and cancel default plan mode on
 fresh print; deterministic forced calls reject before the hook with no plan
 state. Resumed plan sessions remain possible, so every-agent journal refusal
 stays mandatory. Stream records still lack execution outcomes, and session hints
@@ -223,7 +231,7 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
 - `-r` refuses when the session's recorded cwd differs from the current cwd
   (`run-v2-print.ts:426-432`).
 - `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` caps normal launches on 0.18.0+, but **unset = no
-  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3/2.7.2/2.7.3 sources can
+  cap**; the plugin always exports it (4 read / 1 write). Reviewed 2.5.3/2.6.0/2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 sources can
   exceed the requested cap during rate-limit recovery, so this is not an unconditional peak
   or write-serialization guarantee. See `docs/safety.md` for the current limitation.
 - The update preflight runs on the `-p` path; every spawn exports `KIMI_CODE_NO_AUTO_UPDATE=1`.
@@ -231,8 +239,11 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
   `KIMI_CODE_EXPERIMENTAL_<NAME>` value outranks config and the master flag
   (`app/flag/flagService.ts`). Every plugin child gets `KIMI_CODE_EXPERIMENTAL_TOWER=0` and
   `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0`, and native-v2 children never receive the master
-  `KIMI_CODE_EXPERIMENTAL_FLAG`. Only uncertified releases still refuse an enabled selector
-  (`CLI_V2_EXPERIMENTAL_UNSAFE`) or the master flag (`CLI_V2_HOOK_ORDER_UNSAFE`).
+  `KIMI_CODE_EXPERIMENTAL_FLAG`. On an uncertified release the child is set up the same way
+  and the launch warns, naming the switched-on selectors. Only a launch with no plan refuses an
+  enabled selector (`CLI_V2_EXPERIMENTAL_UNSAFE`), and only a legacy-v1 plan or a launch with no
+  plan refuses the master flag (`CLI_V2_HOOK_ORDER_UNSAFE`). 2.8.0 removed `subagent_fork`
+  and ignores its variable.
 - `system.version` is always the first stream-json line; a native-v2 plan REQUIRES it and it
   must equal the probed version (`CLI_ENGINE_PROVENANCE_MISMATCH` otherwise).
 - Write/Edit still use `path`; a new singular `Agent` tool exists and stays denied.
@@ -260,3 +271,6 @@ ON (monitor control), the plan-file `Write` bypasses the hook in both unflagged 
 [#3431](https://github.com/MoonshotAI/kimi-code/issues/3431) stays open as the preferred end
 state (a released external-hook-before-every-final-allow guarantee would let the gate return to
 its original form and permit native plan mode). The reference fix needs a rebase onto 0.42.0.
+At 2.8.0 the hook runs before the plan guard in source and in the live plan-ON control, but
+the issue is still open and the fix is not announced, so every no-plan closure stays on.
+Relaxing them for 2.8.0 is a separate decision.

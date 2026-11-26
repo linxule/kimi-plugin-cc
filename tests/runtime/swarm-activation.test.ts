@@ -1058,13 +1058,13 @@ describe("swarm web lifecycle", () => {
     });
   }, 20_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
     await withFixture("ws-success", async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_VERSION = version;
       const options = makeOptions(fixture, { expectedVersion: version, model: "chosen-model" });
       const identity = await preactivateSwarmSession(options);
       const activationLog = await readLog(fixture);
-      if (["2.7.2", "2.7.3"].includes(version)) {
+      if (["2.7.2", "2.7.3", "2.8.0"].includes(version)) {
         expect(spawns(activationLog)[0]?.argv).toEqual([
           "web", "--json", "--host", "127.0.0.1", "--port", "0", "--log-level", "error",
         ]);
@@ -1083,9 +1083,9 @@ describe("swarm web lifecycle", () => {
       });
       const control = activationLog.filter((entry) => entry.kind === "ws-message");
       expect(control.map((entry) => entry.frame.type)).toEqual(
-        ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version) ? ["subscribe"] : ["client_hello", "subscribe_v2"],
+        ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version) ? ["subscribe"] : ["client_hello", "subscribe_v2"],
       );
-      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version)) {
+      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version)) {
         expect(control[0]?.frame).toMatchObject({
           session_id: "session_mock",
           agent_ids: ["main"],
@@ -1106,7 +1106,7 @@ describe("swarm web lifecycle", () => {
         "POST /api/v1/shutdown",
       ]);
       expect(requests(fullLog).some((entry) => entry.path?.endsWith("/status"))).toBe(false);
-      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].includes(version) ? 2 : 4);
+      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version) ? 2 : 4);
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
     });
   }, 15_000);
@@ -1162,7 +1162,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].flatMap((version) => [
+  test.each(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].flatMap((version) => [
     "ws-auth-reject",
     "ws-subscription-reject",
     "ws-unacknowledged-state",
@@ -1209,7 +1209,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3"].flatMap((version) =>
+  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].flatMap((version) =>
     ["ws-environment-remote", "ws-environment-workspace", "ws-environment-cwd"].map((scenario) => [version, scenario] as const)))(
     "exact %s rejects an invalid local binding before profile mutation: %s",
     async (version, scenario) => {
