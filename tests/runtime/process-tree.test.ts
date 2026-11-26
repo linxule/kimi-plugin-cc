@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { revalidateProcessIdentities, waitForProcessTreeExit, type ProcessIdentity } from "../../runtime/process-tree.js";
+import { retryIncompleteCapture, revalidateProcessIdentities, waitForProcessTreeExit, type ProcessIdentity } from "../../runtime/process-tree.js";
 
 const captured = { pid: 4_242, processGroupId: 100, startToken: "test:start", state: "S" };
 
@@ -308,6 +308,7 @@ describe("process identity group changes", () => {
       waitForProcessTreeExit: (ids: any, timeout: number, options: any) =>
         waitForProcessTreeExit(ids, timeout, { ...options, identityReader: reader }),
       collectProcessGroupsIdentities: async (groups: number[]) => groups.includes(current.processGroupId) ? [current] : [],
+      retryIncompleteCapture,
       ESCALATION_MS: 1_500,
       POST_KILL_QUIESCENCE_MS: 500,
       IDENTITY_REVALIDATION_TIMEOUT_MS: 250,
@@ -337,6 +338,7 @@ describe("process identity group changes", () => {
       revalidateProcessIdentities,
       waitForProcessTreeExit: async () => true,
       collectProcessGroupsIdentities: async () => [],
+      retryIncompleteCapture,
       ESCALATION_MS: 1_500,
       POST_KILL_QUIESCENCE_MS: 500,
       IDENTITY_REVALIDATION_TIMEOUT_MS: 250,
@@ -380,6 +382,8 @@ describe("process identity group changes", () => {
     const bindings = {
       process: { platform: "darwin" },
       captureDescendantIdentities: async () => ({ identities: [], complete: calls++ === 0 ? false : true }),
+      // The in-refresh retry is tested separately; here each refresh sees one capture.
+      retryIncompleteCapture: (capture: () => Promise<unknown>) => capture(),
       identityKey: (identity: { pid: number; startToken: string; processGroupId: number }) =>
         `${identity.pid}:${identity.startToken}:${identity.processGroupId}`,
     };
@@ -424,6 +428,45 @@ describe("process identity group changes", () => {
     await refresh(previouslyRooted);
     expect(previouslyRooted.lastSnapshotComplete).toBe(true);
     expect(previouslyRooted.snapshotIncomplete).toBe(false);
+  });
+
+  test("a capture caught mid-exit is looked at again within the same refresh", async () => {
+    const source = await readFile("runtime/swarm-activation.ts", "utf8");
+    const code = new Bun.Transpiler({ loader: "ts" }).transformSync(
+      source.slice(source.indexOf("async function refreshOwnedDescendants("), source.indexOf("async function teardownOwnedChild(")),
+    );
+    const root = { pid: 101, processGroupId: 101, startToken: "proc:root", state: "S" };
+    // First refresh identifies the root. During the second, the first look
+    // overlaps the root exiting (incomplete) and the second look finds it gone.
+    const captures = [
+      { identities: [], complete: true, root },
+      { identities: [], complete: false },
+      { identities: [], complete: true },
+    ];
+    let calls = 0;
+    const bindings = {
+      process: { platform: "darwin" },
+      captureDescendantIdentities: async () => captures[calls++]!,
+      retryIncompleteCapture,
+      identityKey: (identity: { pid: number; startToken: string; processGroupId: number }) =>
+        `${identity.pid}:${identity.startToken}:${identity.processGroupId}`,
+    };
+    const refresh = new Function(...Object.keys(bindings), `${code}; return refreshOwnedDescendants;`)(
+      ...Object.values(bindings),
+    ) as (owned: any) => Promise<void>;
+    const owned = {
+      child: { pid: 101 },
+      exited: false,
+      descendants: [],
+      lastSnapshotComplete: false,
+      snapshotIncomplete: false,
+      refreshPromise: undefined,
+    };
+    await refresh(owned);
+    await refresh(owned);
+    expect(calls).toBe(3);
+    expect(owned.lastSnapshotComplete).toBe(true);
+    expect(owned.snapshotIncomplete).toBe(false);
   });
 
   test("an observed descendant's ancestry and PGID changes preserve its verified identity", async () => {

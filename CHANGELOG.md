@@ -52,6 +52,7 @@ GPT Astra and Kimi found the first round of these issues in an adversarial revie
 
 ### Fixed
 
+- On Linux, a swarm could fail to start or stop with "The Kimi web process tree did not become quiescent after shutdown" although nothing was left running. A process snapshot that overlapped the web process exiting came back incomplete, and one incomplete snapshot made the whole teardown unverifiable. An incomplete snapshot or group scan is now looked at again before it counts; a process table that stays unreadable still fails. The race was present in 2.7.x.
 - `grep -i` and `git --no-pager <read-only subcommand>` are allowed under rescue; both were wrongly rejected.
 - An MCP job that finished between the server's job read and its process-identity probe now attaches normally instead of failing with `MCP_PROCESS_IDENTITY_MISMATCH`.
 

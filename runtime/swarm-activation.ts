@@ -27,6 +27,7 @@ import {
   collectDescendantIdentities,
   collectProcessGroupsIdentities,
   probeProcessIdentity,
+  retryIncompleteCapture,
   revalidateProcessIdentities,
   waitForProcessTreeExit,
   type ProcessIdentity,
@@ -1020,7 +1021,7 @@ async function shutdownWeb(
       failureCode,
       "swarm-activation.shutdown",
       "The Kimi web process tree did not become quiescent after shutdown.",
-      { exit_code: settlement.exitCode, signal: settlement.signal },
+      { exit_code: settlement.exitCode, signal: settlement.signal, cleanup_summary: web.cleanupSummary ?? null },
     );
   }
   if (web.processError || settlement.exitCode !== 0) {
@@ -1303,7 +1304,7 @@ async function refreshOwnedDescendants(owned: OwnedWebChild): Promise<void> {
     return;
   }
   owned.refreshPromise = (async () => {
-    const snapshot = await captureDescendantIdentities(childPid);
+    const snapshot = await retryIncompleteCapture(() => captureDescendantIdentities(childPid));
     const previousRoot = owned.rootIdentity;
     if (snapshot.root !== undefined) {
       if (previousRoot === undefined) {
@@ -1413,13 +1414,16 @@ async function teardownOwnedChildInner(owned: OwnedWebChild): Promise<boolean> {
 async function processGroupsQuiescent(owned: OwnedWebChild, childPid: number): Promise<boolean> {
   const groupIds = new Set<number>([childPid]);
   for (const identity of owned.descendants) groupIds.add(identity.processGroupId);
-  const members = await collectProcessGroupsIdentities([...groupIds]);
-  return members !== undefined && members.every((identity) => /^[ZX]/i.test(identity.state.trim()));
+  const scan = await retryIncompleteCapture(async () => {
+    const members = await collectProcessGroupsIdentities([...groupIds]);
+    return { members, complete: members !== undefined };
+  });
+  return scan.members !== undefined && scan.members.every((identity) => /^[ZX]/i.test(identity.state.trim()));
 }
 
 async function captureDescendantIdentities(
   childPid: number,
-): Promise<{ identities: ProcessIdentity[]; complete: boolean; root?: ProcessIdentity }> {
+): Promise<{ identities: ProcessIdentity[]; complete: boolean; root?: ProcessIdentity; timedOut?: boolean }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const snapshot = await Promise.race([
@@ -1431,7 +1435,7 @@ async function captureDescendantIdentities(
         timer = setTimeout(() => resolve(null), DESCENDANT_SNAPSHOT_TIMEOUT_MS);
       }),
     ]);
-    if (snapshot === null) return { identities: [], complete: false };
+    if (snapshot === null) return { identities: [], complete: false, timedOut: true };
     const [collected, rootProbe] = snapshot;
     const identities: ProcessIdentity[] = [];
     const seen = new Set<string>();

@@ -34,6 +34,24 @@ async function snapshotWithinTimeout(collect) {
     }
     return snapshot;
 }
+const INCOMPLETE_CAPTURE_RETRY_DELAYS_MS = [5, 20];
+/**
+ * A capture that overlaps a process exit can read a row in mid-release and
+ * come back incomplete, and one incomplete capture makes a whole teardown
+ * unverifiable. Look again at once: a root that has gone then reads as absent,
+ * which is a complete observation, while a table that stays unreadable still
+ * fails. A capture that timed out is not retried.
+ */
+export async function retryIncompleteCapture(capture, retryDelaysMs = INCOMPLETE_CAPTURE_RETRY_DELAYS_MS) {
+    let snapshot = await capture();
+    for (const delayMs of retryDelaysMs) {
+        if (snapshot.complete || snapshot.timedOut === true)
+            break;
+        await sleep(delayMs);
+        snapshot = await capture();
+    }
+    return snapshot;
+}
 /** Return current members of the selected process groups, or undefined when unreadable. */
 export async function collectProcessGroupsIdentities(processGroupIds) {
     if (process.platform === "win32")
