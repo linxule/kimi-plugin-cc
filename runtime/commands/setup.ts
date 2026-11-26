@@ -633,6 +633,7 @@ async function runCheck(
   const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
   const installedCheck = evaluateInstalled(existing, expectedCommand, {
     nodeExists: (binPath) => existsSync(binPath),
+    env: context.env,
   });
 
   const bareTables = findUnmanagedApprovalHookBlocks(existing);
@@ -659,14 +660,16 @@ async function runCheck(
       nextStep:
         installedCheck.timeoutTooShort === true
           ? "Run setup (without --check) to rewrite the hook timeout."
-          : installedCheck.state.kind === "absent"
-          ? "Run setup (without --check) to install the managed block."
-          : installedCheck.state.kind === "orphan"
-            ? ORPHAN_MARKER_REMEDY
-            : installedCheck.state.kind === "duplicate" &&
-                parseManagedBlock(existing).blocks.some((entry) => entry.hostId !== null)
-              ? 'Run `kimi_setup` (action "install") or `scripts/companion.sh setup` to consolidate legacy host-scoped blocks into one canonical block.'
-              : "Run setup --uninstall, then setup to repair.",
+          : installedCheck.drift?.dataOverrideFromCanonical === true
+            ? "Unset KIMI_PLUGIN_CC_DATA in your host environment (for example in ~/.claude/settings.json), restart the host, and run setup --check again."
+            : installedCheck.state.kind === "absent"
+              ? "Run setup (without --check) to install the managed block."
+              : installedCheck.state.kind === "orphan"
+                ? ORPHAN_MARKER_REMEDY
+                : installedCheck.state.kind === "duplicate" &&
+                    parseManagedBlock(existing).blocks.some((entry) => entry.hostId !== null)
+                  ? 'Run `kimi_setup` (action "install") or `scripts/companion.sh setup` to consolidate legacy host-scoped blocks into one canonical block.'
+                  : "Run setup --uninstall, then setup to repair.",
     });
   }
 

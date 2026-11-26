@@ -2,7 +2,7 @@
 
 ## Scope and decision
 
-**Status: certified for all eight operations.** Exact `@moonshot-ai/kimi-code@2.8.0` passed the source, exact-binary, deterministic stock-binary and real-provider operation gates. Certification does not update installed hosts or operator pins.
+**Status: certified for all seven operations.** Exact `@moonshot-ai/kimi-code@2.8.0` passed the source, exact-binary, deterministic stock-binary and real-provider operation gates (originally run across the 8 pre-collapse operations at `b85bb4b`, then carried over to the 7 remaining operations in `3.1.0` after retiring `review_gate` and pre-`2.8.0` rows). Certification does not update installed hosts or operator pins.
 
 Exact source commit: `46d9085f37c1b145ccfc82a24387e26aa940e94f` (annotated tag object `81a9bb8b8ee87c9328d1f82f6b00c4074fa1f456`). The isolated npm binary reports 2.8.0; `dist/main.mjs` SHA-256 is `8d2ef20b253b604435bc1d71cbff9c79e537a9bc501fbb2de7a7ec615410fdb1`. npm `latest` was 2.8.0 during certification.
 
@@ -113,14 +113,14 @@ Those two lanes ran on the tree before `WaitFor` was allowed and were not run ag
 
 ## Certification validation
 
-Final gates, each run after the last runtime edit; the full check, the package gates and the smoke ran on the final tree:
+Final upstream certification gates (commit `b85bb4b` before the 3.1.0 connector/doc collapse) and tagged `v3.1.0` release gates (commit `b714cdd`):
 
-- Mechanized scan, exact 2.8.0: 216 pass / 0 skip / 0 fail / 1,863 assertions. Exact 2.7.3 regression: 216 / 0 / 0 / 1,724.
-- Deterministic stock-binary suite on exact 2.8.0: 23 pass / 138 assertions in 616.84 seconds.
-- Real-provider smoke on exact 2.8.0: the numbers above.
-- `bun run check`: **2,746 pass / 277 skip / 0 fail / 28,779 assertions across 117 files in 724.16 seconds**, with the generated-surface and drift gates.
-- `bun run check:package`: verified `kimi-plugin-cc@3.1.0`, 351 files, all three compiled distributions, isolated hook setup and check, unsupported-version refusal, and the patched DSH host with its seven providers.
-- `bun run check:consumer-security`: verified isolated npm consumer security for `kimi-plugin-cc@3.1.0`.
+- Mechanized source scan, exact 2.8.0: passed (`1,863` assertions at `b85bb4b`; `v3.1.0` removed pre-`2.8.0` regression rows so `v2-tag-scan.test.ts` targets `>= 2.8.0`).
+- Deterministic stock-binary suite on exact 2.8.0 (`b85bb4b`): 23 pass / 138 assertions in 616.84 seconds.
+- Real-provider smoke on exact 2.8.0 (`b85bb4b`): 51 pass / 3 skip (2 narrowed `2.6.0` skips + `WebSearch` empty-seed skip) / 0 fail / 695 assertions in 663.55 seconds, plus 2 pass / 0 fail subscription `WebSearch` + `FetchURL` lanes (`2.8.0` real-binary smoke re-run on `v3.1.0` tag tracked separately).
+- Release `bun run check` on `v3.1.0` (`b714cdd`, Linux CI & local): all tests passed (`2,384 pass / 111 skip / 0 fail` across 115 files) with `check:contracts`, `check:surfaces`, and drift gates.
+- Release `bun run check:package` on `v3.1.0`: verified `kimi-plugin-cc@3.1.0` (`201` files), root + Codex distributions, `kimi-companion --help`, 4-tool MCP + `SEP-2640` skills, isolated hook setup/check, `< 2.8.0` version refusal, and patched DSH host/profile (`dsh web` boot + live `mcp__kimi__kimi_setup` tool call).
+- Release `bun run check:consumer-security`: verified isolated npm consumer security for `kimi-plugin-cc@3.1.0`.
 
 **Reviews.** GPT Astra (through Codex) and Kimi each read the whole change: 16 and 7 findings. Both then read only what changed after their first pass: GPT Astra reported 10 findings (two high, four medium, four low) and Kimi three low. Every accepted finding has a fix and a test in this tree:
 

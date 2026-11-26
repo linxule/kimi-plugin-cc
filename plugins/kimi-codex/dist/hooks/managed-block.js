@@ -448,13 +448,15 @@ export function evaluateInstalled(contents, expectedCommand, opts = {}) {
             };
         }
         const staleOwn = findBareApprovalHookTables(contents).find((table) => table.command !== expectedCommand && isOurApprovalHookCommand(table.command));
+        const bareDrift = staleOwn !== undefined ? classifyHookCommandDrift(staleOwn.command, expectedCommand, undefined, opts.env) : undefined;
+        const bareOverrideReason = bareDrift?.dataOverrideFromCanonical === true && opts.nodeExists !== undefined
+            ? describeHookCommandDrift(staleOwn.command, expectedCommand, opts.nodeExists, undefined, opts.env)
+            : undefined;
         return {
             installed: false,
-            reason: "managed block is not present",
+            reason: bareOverrideReason ?? "managed block is not present",
             state,
-            ...(staleOwn !== undefined
-                ? { drift: classifyHookCommandDrift(staleOwn.command, expectedCommand) }
-                : {}),
+            ...(bareDrift !== undefined ? { drift: bareDrift } : {}),
         };
     }
     if (state.kind === "duplicate") {
@@ -487,14 +489,14 @@ export function evaluateInstalled(contents, expectedCommand, opts = {}) {
     }
     if (state.commandPath !== expectedCommand) {
         const classified = opts.nodeExists !== undefined
-            ? describeHookCommandDrift(state.commandPath, expectedCommand, opts.nodeExists)
+            ? describeHookCommandDrift(state.commandPath, expectedCommand, opts.nodeExists, undefined, opts.env)
             : undefined;
         return {
             installed: false,
             reason: classified ??
                 `installed block's command does not match the canonical command this companion would write. Run setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
             state,
-            drift: classifyHookCommandDrift(state.commandPath, expectedCommand),
+            drift: classifyHookCommandDrift(state.commandPath, expectedCommand, undefined, opts.env),
         };
     }
     if (shortTimeout !== null)

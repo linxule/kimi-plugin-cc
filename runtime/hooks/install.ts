@@ -129,6 +129,7 @@ export async function verifyHookInstalled(
 
   const check = evaluateInstalled(raw, expected.command, {
     nodeExists: (binPath) => existsSync(binPath),
+    env,
   });
   // Markers are bookkeeping, not the security boundary. At job time a
   // duplicate or orphan marker is tolerated when the real parser finds a clean,
@@ -246,7 +247,9 @@ export function hookRefusalDetails(status: HookInstallStatus): Record<string, un
           drift_installed_command: status.drift.installedCommand,
           drift_expected_command: status.drift.expectedCommand,
           retryable_after_setup:
-            status.drift.axis === "hook-script" || status.drift.nodeInterpreterUnchanged === true,
+            status.drift.dataOverrideFromCanonical === true
+              ? false
+              : status.drift.axis === "hook-script" || status.drift.nodeInterpreterUnchanged === true,
         }
       : {}),
   };
@@ -334,13 +337,19 @@ export function hookGateRefusal(
 ): RuntimeError {
   const gate = HOOK_GATES[operation];
   maybeWarnHookMissing(status, gate.warnLabel, stderr);
+  const repairParts =
+    status.drift?.dataOverrideFromCanonical === true
+      ? [
+          "Unset KIMI_PLUGIN_CC_DATA in your host environment and restart the host, then retry.",
+          "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
+        ]
+      : [...gate.repair, hookRefusalRetryProtocol(env)];
   return new RuntimeError(
     gate.code,
     [
       ...gate.intro,
       `Hook check failed: ${status.reason ?? "unknown"}.`,
-      ...gate.repair,
-      hookRefusalRetryProtocol(env),
+      ...repairParts,
     ].join(" "),
     gate.stage,
     { details: hookRefusalDetails(status) },
@@ -351,6 +360,20 @@ export function formatHookMissingWarning(
   status: HookInstallStatus,
   commandLabel: string,
 ): string {
+  const fixLines =
+    status.drift?.dataOverrideFromCanonical === true
+      ? [
+          "  Fix: unset KIMI_PLUGIN_CC_DATA in your host environment (for example in",
+          "  ~/.claude/settings.json) and restart the host so it uses the shared canonical",
+          "  hook.",
+        ]
+      : [
+          "  Fix: run `kimi_setup` (action \"install\") or `scripts/companion.sh setup`",
+          "  to install or repair the canonical managed block in ~/.kimi-code/config.toml.",
+          "  If you use nvm, asdf, mise, or fnm, re-run setup after any Node version",
+          "  switch — the verifier pins the absolute Node binary path and a switch",
+          "  invalidates the previously-installed block by design. See docs/safety.md.",
+        ];
   return [
     "",
     "WARNING: kimi-plugin-cc safety hook is NOT installed (or is invalid).",
@@ -365,11 +388,7 @@ export function formatHookMissingWarning(
     "  This command will not start a Kimi model run until enforcement is",
     "  repaired.",
     "",
-    "  Fix: run `kimi_setup` (action \"install\") or `scripts/companion.sh setup`",
-    "  to install or repair the canonical managed block in ~/.kimi-code/config.toml.",
-    "  If you use nvm, asdf, mise, or fnm, re-run setup after any Node version",
-    "  switch — the verifier pins the absolute Node binary path and a switch",
-    "  invalidates the previously-installed block by design. See docs/safety.md.",
+    ...fixLines,
     "",
     "  KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 explicitly bypasses hook-verification",
     "  refusals and restores un-enforced `permission: auto` execution. It does",

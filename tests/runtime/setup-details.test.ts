@@ -246,4 +246,59 @@ describe("setup rendered details", () => {
       nextStep: "Run setup to install the managed block again.",
     }));
   });
+
+  test("check with active KIMI_PLUGIN_CC_DATA against the default canonical hook advises unsetting instead of re-pinning", async () => {
+    const root = path.join(scratch, "check-data-override");
+    const home = path.join(root, "home");
+    const kimiHome = path.join(root, "kimi-code-home");
+    const overrideData = path.join(root, "old-3.0-host-data");
+    await mkdir(path.join(home, ".local", "share", "kimi-plugin-cc", "hook"), { recursive: true });
+    await mkdir(kimiHome, { recursive: true });
+    await mkdir(overrideData, { recursive: true });
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: home,
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_DATA: overrideData,
+      KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
+    };
+    delete env.XDG_DATA_HOME;
+    delete env.KIMI_PLUGIN_CC_HOOK_SCRIPT;
+    delete env.KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA;
+    delete env.KIMI_PLUGIN_CC_KIMI_BIN;
+
+    const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr: process.stderr };
+    const canonicalHook = path.join(home, ".local", "share", "kimi-plugin-cc", "hook", "approval-hook.js");
+    const expectedOverrideHook = path.join(overrideData, "kimi-plugin-cc", "hook", "approval-hook.js");
+    const installedCommand = buildHookShellCommand(canonicalHook, env);
+    const configPath = path.join(kimiHome, "config.toml");
+    await writeFile(
+      configPath,
+      [
+        "# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===",
+        "[[hooks]]",
+        'event = "PreToolUse"',
+        `command = ${JSON.stringify(installedCommand)}`,
+        "timeout = 15",
+        "# === END kimi-plugin-cc-managed ===",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await runSetup(["--check"], context);
+    expect(result.probe).toBe("failed");
+    expect(result.hookScriptPath).toBe(expectedOverrideHook);
+    expect(result.probeError).toContain("KIMI_PLUGIN_CC_DATA");
+    expect(result.probeError).toContain(canonicalHook);
+    expect(result.probeError).toContain("Unset KIMI_PLUGIN_CC_DATA");
+    expect(result.probeError).toContain("restart the host");
+    expect(result.probeError).not.toContain("re-pin");
+    expect(result.probeError).not.toContain("version-stamped");
+    expect(result.probeError).not.toContain("kimi_setup");
+    expect(result.nextStep).toContain("Unset KIMI_PLUGIN_CC_DATA");
+    expect(result.nextStep).toContain("restart the host");
+    expect(result.nextStep).not.toContain("Run setup --uninstall");
+    expect(result.nextStep).not.toContain("re-pin");
+  });
 });

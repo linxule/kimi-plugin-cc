@@ -6,11 +6,12 @@ import path from "node:path";
 import {
   __resetHookMissingWarning,
   formatHookMissingWarning,
+  hookGateRefusal,
   hookRefusalDetails,
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../../runtime/hooks/install.js";
-import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
+import { buildHookShellCommand, resolveDefaultCanonicalHookScriptPath } from "../../runtime/hooks/install-paths.js";
 import { evaluateInstalled } from "../../runtime/hooks/managed-block.js";
 import {
   HOOK_DECISION_DEADLINE_MS,
@@ -1102,6 +1103,120 @@ describe("H2-1: an entry enforces only when kimi-code waits for the hook's decis
       } finally {
         await cleanupTestPath(home);
       }
+    }
+  });
+
+  test("KIMI_PLUGIN_CC_DATA override against the default canonical hook advises unsetting and marks retryable_after_setup false", async () => {
+    const scratch = await createTestPluginDataRoot("hook-install-data-override");
+    try {
+      const home = path.join(scratch, "home");
+      const kimiHome = path.join(scratch, "kimi-home");
+      const overrideData = path.join(scratch, "legacy-claude-data");
+      await mkdir(kimiHome, { recursive: true });
+      await mkdir(overrideData, { recursive: true });
+
+      const env: NodeJS.ProcessEnv = {
+        HOME: home,
+        USERPROFILE: home,
+        LOCALAPPDATA: path.join(home, "AppData", "Local"),
+        KIMI_CODE_HOME: kimiHome,
+        KIMI_PLUGIN_CC_DATA: overrideData,
+      };
+      const canonicalHook = resolveDefaultCanonicalHookScriptPath(env)!;
+      expect(canonicalHook).toBeDefined();
+      const installedCommand = buildHookShellCommand(canonicalHook, env);
+      const expectedHook = path.join(overrideData, "kimi-plugin-cc", "hook", "approval-hook.js");
+      await writeFile(
+        path.join(kimiHome, "config.toml"),
+        [
+          BEGIN,
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          `command = ${JSON.stringify(installedCommand)}`,
+          "timeout = 15",
+          END,
+        ].join("\n"),
+        "utf8",
+      );
+
+      const status = await verifyHookInstalled(env);
+      expect(status.installed).toBe(false);
+      expect(status.drift).toEqual({
+        axis: "hook-script",
+        installedCommand,
+        expectedCommand: buildHookShellCommand(expectedHook, env),
+        dataOverrideFromCanonical: true,
+      });
+      expect(status.reason).toContain("Hook script path drift");
+      expect(status.reason).toContain("KIMI_PLUGIN_CC_DATA");
+      expect(status.reason).toContain("Unset KIMI_PLUGIN_CC_DATA");
+      expect(status.reason).toContain("restart the host");
+      expect(status.reason).not.toContain("re-pin");
+      expect(status.reason).not.toContain("version-stamped");
+      expect(status.reason).not.toContain("kimi_setup");
+      expect(status.reason).not.toContain("companion.sh setup");
+
+      expect(hookRefusalDetails(status)).toMatchObject({
+        drift_axis: "hook-script",
+        retryable_after_setup: false,
+      });
+
+      const gateError = hookGateRefusal("ask", status, env, {
+        write: () => true,
+      } as unknown as NodeJS.WriteStream);
+      expect(gateError.message).toContain("Unset KIMI_PLUGIN_CC_DATA");
+      expect(gateError.message).not.toContain("re-pin");
+      expect(gateError.message).not.toContain("kimi_setup");
+
+      const warning = formatHookMissingWarning(status, "ask");
+      expect(warning).toContain("unset KIMI_PLUGIN_CC_DATA");
+      expect(warning).not.toContain("run `kimi_setup`");
+    } finally {
+      await cleanupTestPath(scratch);
+    }
+  });
+
+  test("real non-canonical hook-script drift still advises re-pinning even when KIMI_PLUGIN_CC_DATA is set", async () => {
+    const scratch = await createTestPluginDataRoot("hook-install-real-drift-with-data");
+    try {
+      const home = path.join(scratch, "home");
+      const kimiHome = path.join(scratch, "kimi-home");
+      const overrideData = path.join(scratch, "custom-data");
+      await mkdir(kimiHome, { recursive: true });
+      await mkdir(overrideData, { recursive: true });
+
+      const env: NodeJS.ProcessEnv = {
+        HOME: home,
+        USERPROFILE: home,
+        LOCALAPPDATA: path.join(home, "AppData", "Local"),
+        KIMI_CODE_HOME: kimiHome,
+        KIMI_PLUGIN_CC_DATA: overrideData,
+      };
+      const oldNonCanonicalHook = "/old/non-canonical/dist/hooks/approval-hook.js";
+      const installedCommand = buildHookShellCommand(oldNonCanonicalHook, env);
+      await writeFile(
+        path.join(kimiHome, "config.toml"),
+        [
+          BEGIN,
+          "[[hooks]]",
+          'event = "PreToolUse"',
+          `command = ${JSON.stringify(installedCommand)}`,
+          "timeout = 15",
+          END,
+        ].join("\n"),
+        "utf8",
+      );
+
+      const status = await verifyHookInstalled(env);
+      expect(status.installed).toBe(false);
+      expect(status.drift?.dataOverrideFromCanonical).toBeUndefined();
+      expect(status.reason).toContain("Hook script path drift");
+      expect(status.reason).toContain("Run `kimi_setup`");
+      expect(status.reason).toContain("re-pin");
+      expect(status.reason).not.toContain("version-stamped");
+      expect(hookRefusalDetails(status).retryable_after_setup).toBe(true);
+    } finally {
+      await cleanupTestPath(scratch);
     }
   });
 });

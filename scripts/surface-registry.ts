@@ -147,7 +147,7 @@ export const DSH_BUNDLE_PATCH = [
   "",
 ].join("\n");
 
-export const DSH_PUBLISH_TIMESTAMP = 1795723107;
+export const DSH_PUBLISH_TIMESTAMP = 1795727725;
 
 export const DSH_DISCOVERY_INDEX = {
   format: 1,

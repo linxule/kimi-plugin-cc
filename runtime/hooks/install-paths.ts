@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { RuntimeError } from "../errors.js";
 import { resolvePluginPaths } from "../paths.js";
+import { resolvePluginDataRoot } from "../plugin-data.js";
 
 /**
  * Prefer a stable, non-version-stamped path to the SAME Node binary.
@@ -240,11 +241,43 @@ function defaultSameFile(a: string, b: string): boolean {
   }
 }
 
+export function resolveDefaultCanonicalHookScriptPath(env: NodeJS.ProcessEnv): string | undefined {
+  const baseEnv: NodeJS.ProcessEnv = { ...env };
+  delete baseEnv.KIMI_PLUGIN_CC_DATA;
+  delete baseEnv.KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA;
+  try {
+    return path.join(resolvePluginDataRoot(baseEnv), "kimi-plugin-cc", "hook", "approval-hook.js");
+  } catch {
+    return undefined;
+  }
+}
+
+export function isDataOverrideFromCanonicalHook(
+  installedHookScript: string,
+  expectedHookScript: string,
+  env?: NodeJS.ProcessEnv,
+  sameFile: (a: string, b: string) => boolean = defaultSameFile,
+): boolean {
+  if (
+    env === undefined ||
+    env.KIMI_PLUGIN_CC_DATA === undefined ||
+    (env.KIMI_PLUGIN_CC_HOOK_SCRIPT && env.KIMI_PLUGIN_CC_HOOK_SCRIPT.length > 0) ||
+    installedHookScript === expectedHookScript
+  ) {
+    return false;
+  }
+  const canonicalHook = resolveDefaultCanonicalHookScriptPath(env);
+  if (canonicalHook === undefined) return false;
+  return path.normalize(installedHookScript) === path.normalize(canonicalHook) || sameFile(installedHookScript, canonicalHook);
+}
+
 /**
  * Machine-readable classification of a canonical-command mismatch. Returns
  * which token moved and, for Node, whether both spellings name the same file.
  *
- * `"hook-script"` drift is recoverable by running setup on this host.
+ * `"hook-script"` drift is recoverable by running setup on this host unless it
+ * stems from an active `KIMI_PLUGIN_CC_DATA` override while the shared block
+ * points at the canonical hook (`dataOverrideFromCanonical: true`).
  * `"node-bin"`/`"both"` drift is also recoverable when
  * `nodeInterpreterUnchanged === true`; a token naming a different interpreter
  * is not automatically repairable. A hook that cannot spawn fails open upstream.
@@ -256,12 +289,14 @@ export function classifyHookCommandDrift(
   installedCommand: string,
   expectedCommand: string,
   sameFile: (a: string, b: string) => boolean = defaultSameFile,
+  env?: NodeJS.ProcessEnv,
 ):
   | {
       axis: "hook-script" | "node-bin" | "both";
       installedCommand: string;
       expectedCommand: string;
       nodeInterpreterUnchanged?: boolean;
+      dataOverrideFromCanonical?: true;
     }
   | undefined {
   const installed = parseHookShellCommand(installedCommand);
@@ -275,6 +310,8 @@ export function classifyHookCommandDrift(
     return undefined;
   }
   const axis = nodeDrift && hookDrift ? "both" : nodeDrift ? "node-bin" : "hook-script";
+  const dataOverride =
+    hookDrift && isDataOverrideFromCanonicalHook(installed.hookScript, expected.hookScript, env, sameFile);
   // A changed Node spelling that still names the same file is path drift, not
   // an interpreter move; callers use this to decide whether setup may retry.
   return {
@@ -282,6 +319,7 @@ export function classifyHookCommandDrift(
     installedCommand,
     expectedCommand,
     ...(nodeDrift ? { nodeInterpreterUnchanged: sameFile(installed.nodeBin, expected.nodeBin) } : {}),
+    ...(dataOverride ? { dataOverrideFromCanonical: true as const } : {}),
   };
 }
 
@@ -297,6 +335,7 @@ export function describeHookCommandDrift(
   expectedCommand: string,
   nodeExists: (binPath: string) => boolean,
   sameFile: (a: string, b: string) => boolean = defaultSameFile,
+  env?: NodeJS.ProcessEnv,
 ): string | undefined {
   const installed = parseHookShellCommand(installedCommand);
   const expected = parseHookShellCommand(expectedCommand);
@@ -308,6 +347,8 @@ export function describeHookCommandDrift(
   if (!nodeDrift && !hookDrift) {
     return undefined;
   }
+  const dataOverride =
+    hookDrift && isDataOverrideFromCanonicalHook(installed.hookScript, expected.hookScript, env, sameFile);
 
   const parts: string[] = [];
   if (nodeDrift) {
@@ -335,12 +376,26 @@ export function describeHookCommandDrift(
     }
   }
   if (hookDrift) {
-    parts.push(
-      `Hook script path drift: the installed hook points at ${installed.hookScript}, but this companion's ` +
-        `hook is ${expected.hookScript} (likely a plugin update or move — the install path is version-stamped).`,
-    );
+    if (dataOverride) {
+      parts.push(
+        `Hook script path drift: the installed hook points at the shared canonical hook ${installed.hookScript}, ` +
+          `but KIMI_PLUGIN_CC_DATA=${JSON.stringify(env!.KIMI_PLUGIN_CC_DATA)} directs this host to ` +
+          `${expected.hookScript} (likely a KIMI_PLUGIN_CC_DATA override left over from a 3.0 per-host setup).`,
+      );
+    } else {
+      parts.push(
+        `Hook script path drift: the installed hook points at ${installed.hookScript}, but this companion's ` +
+          `hook is ${expected.hookScript} (likely an upgrade from an earlier hook path or a moved data directory).`,
+      );
+    }
   }
-  parts.push("Run `kimi_setup` (action \"install\") or `scripts/companion.sh setup` to re-pin the managed block to this companion's current paths.");
+  if (dataOverride) {
+    parts.push(
+      "Unset KIMI_PLUGIN_CC_DATA in your host environment (for example in ~/.claude/settings.json) and restart the host so it uses the shared canonical hook.",
+    );
+  } else {
+    parts.push("Run `kimi_setup` (action \"install\") or `scripts/companion.sh setup` to re-pin the managed block to this companion's current paths.");
+  }
   return parts.join(" ");
 }
 

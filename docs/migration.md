@@ -43,11 +43,12 @@ Plugin 3.1.0 includes 5 runtime behavior updates:
 
 ### Upgrade steps
 
-1. Update Kimi Code CLI to `2.8.0` or newer, or let the plugin install a dedicated copy in step 4.
-2. Update the plugin in each host you use. If you installed `plugins/kimi-dsh` in DSH, remove it and add the root package with `dsh plugin --profile web add kimi-plugin-cc`.
-3. Run setup once from any host with `kimi_setup({ action: "install" })` or `./scripts/companion.sh setup`. Setup rejects symlinks under `pluginRoot` and `hook/`, probes the staged hook before activating `<pluginRoot>/hook/approval-hook.js`, and merges legacy `:<host-id>` blocks in `~/.kimi-code/config.toml`. If 2 hosts use different Node binaries, set `KIMI_PLUGIN_CC_NODE_BIN` to the same absolute Node `22.5` or newer path in both hosts.
-4. Run `kimi_setup({ action: "install_kimi" })` or `./scripts/companion.sh setup --install-kimi` if you want a plugin-owned certified `2.8.0` binary shared across all hosts.
-5. Run `kimi_setup({ action: "check" })` or `./scripts/companion.sh setup --check` and confirm that the output shows `Probe: ok`.
+1. Remove any `KIMI_PLUGIN_CC_DATA` override from your host environment (for example in the `env` block of `~/.claude/settings.json` for Claude Code), then restart the host. Version 3.1.0 treats `KIMI_PLUGIN_CC_DATA` as a strict directory override, so leaving a 3.0 per-host path set makes that host look for its hook under the old directory while the shared block points at the canonical data directory.
+2. Update Kimi Code CLI to `2.8.0` or newer, or let the plugin install a dedicated copy in step 5.
+3. Update the plugin in each host you use. If you installed `plugins/kimi-dsh` in DSH, remove it and add the root package with `dsh plugin --profile web add kimi-plugin-cc`.
+4. Run setup once from any host with `kimi_setup({ action: "install" })` or `./scripts/companion.sh setup`. Setup rejects symlinks under `pluginRoot` and `hook/`, probes the staged hook before activating `<pluginRoot>/hook/approval-hook.js`, and merges legacy `:<host-id>` blocks in `~/.kimi-code/config.toml`. If 2 hosts use different Node binaries, set `KIMI_PLUGIN_CC_NODE_BIN` to the same absolute Node `22.5` or newer path in both hosts.
+5. Run `kimi_setup({ action: "install_kimi" })` or `./scripts/companion.sh setup --install-kimi` if you want a plugin-owned certified `2.8.0` binary shared across all hosts.
+6. Run `kimi_setup({ action: "check" })` or `./scripts/companion.sh setup --check` and confirm that the output shows `Probe: ok`.
 
 ### Previous job databases
 
