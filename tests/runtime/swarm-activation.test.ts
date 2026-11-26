@@ -877,14 +877,19 @@ describe("swarm web lifecycle", () => {
     if (process.platform === "win32") return;
     await withFixture("shutdown-survivor", async (fixture) => {
       const options = makeOptions(fixture);
+      // Each web process logs its descendant's pid before it is ready. The
+      // descendant's own log line is no evidence: a fast teardown reaps it
+      // before it has started far enough to write one.
+      const descendantPids = async () =>
+        spawns(await readLog(fixture)).map((entry) => (entry as { descendant_pid?: unknown }).descendant_pid);
       const identity = await preactivateSwarmSession(options);
-      const first = (await readLog(fixture)).find((entry) => entry.kind === "descendant");
-      expect(first).toBeDefined();
-      await expectProcessInactive(first!.pid);
+      const afterActivation = await descendantPids();
+      expect(afterActivation).toEqual([expect.any(Number)]);
+      await expectProcessInactive(afterActivation[0] as number);
       await deactivateSwarmSession({ ...options, ...identity });
-      const descendants = (await readLog(fixture)).filter((entry) => entry.kind === "descendant");
-      expect(descendants).toHaveLength(2);
-      await expectProcessInactive(descendants[1]!.pid);
+      const afterDeactivation = await descendantPids();
+      expect(afterDeactivation).toEqual([afterActivation[0], expect.any(Number)]);
+      await expectProcessInactive(afterDeactivation[1] as number);
     });
   }, 15_000);
 
