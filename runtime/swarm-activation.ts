@@ -1512,6 +1512,7 @@ function failure(
   message: string,
   details: Record<string, unknown> = {},
 ): RuntimeError {
+  console.error("[probe-failure]", JSON.stringify({ code, stage, message, details }));
   return new RuntimeError(code, message, stage, { details });
 }
 

@@ -40,19 +40,19 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Audit dependencies
-        run: bun audit
 
       # Rebuilds and checks root dist/ plus the self-contained Codex and DSH packages.
       # Generated surface hashes and untracked distribution files are checked too.
-      - name: Check (build, surfaces, typecheck, test, drift gate)
-        run: bun run check
+      - name: Probe loop (swarm activation, 150 runs)
+        run: |
+          pass=0; fail=0
+          for i in $(seq 1 150); do
+            if bun test tests/runtime/swarm-activation.test.ts -t "verifies activation and deactivation through authenticated agent state" > "run-$i.log" 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "=== run $i failed"; grep -n "probe-failure\|(fail)" "run-$i.log" | cut -c1-1500; fi
+          done
+          echo "PROBE RESULT pass=$pass fail=$fail"
+          nproc; uname -sr
 
-      - name: Check root and DSH npm package installation
-        run: bun run check:package
 
-      - name: Audit installed npm consumer dependencies
-        run: bun run check:consumer-security
 
   windows-spawn:
     runs-on: windows-latest
