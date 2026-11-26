@@ -111,7 +111,7 @@ describe("MCP kimi_job actions", () => {
   test("wait polls to completion, handles wait_ms timeout, and result refuses while running", async () => {
     const fixture = await createMcpFixture("mcp-job-actions-wait", {
       scenario: "ask-success",
-      delayMs: "1500",
+      delayMs: "3000",
     });
     let client: McpClient | undefined;
     let jobId: string | undefined;

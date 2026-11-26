@@ -1,38 +1,47 @@
 import { createRequire } from "node:module";
 import { RuntimeError, formatError } from "./errors.js";
-export class JobStore {
-    db;
-    constructor(paths) {
-        // Open the adapter into a local before assigning to this.db so the
-        // catch can release the handle even if pragma throws AFTER the
-        // adapter opened — `journal_mode = WAL` on a read-only mount, for
-        // example, would otherwise leak the handle because the constructor
-        // exits via throw before any caller reference exists for cleanup.
+const JOB_STORE_SCHEMA_VERSION = 310;
+const BUSY_OPEN_WAIT = new Int32Array(new SharedArrayBuffer(4));
+function openAndInitializeJobStore(paths) {
+    // Retry transient SQLITE_BUSY / SQLITE_PROTOCOL contention during concurrent
+    // process open/WAL setup because PRAGMA journal_mode = WAL ignores busy_timeout.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
         let db;
         try {
             db = createSqliteAdapter(paths.stateDbPath);
-            // busy_timeout FIRST: switching the journal mode takes a brief write lock,
-            // and a second opener (status/result racing a worker) otherwise fails
-            // immediately with SQLITE_BUSY instead of waiting (seen 2026-10-14).
+            // busy_timeout FIRST: switching the journal mode or migrating schema takes a write lock.
             db.pragma("busy_timeout = 5000");
-            db.pragma("journal_mode = WAL");
+            const mode = db.all("PRAGMA journal_mode")[0]?.journal_mode?.toLowerCase();
+            if (mode !== "wal") {
+                db.pragma("journal_mode = WAL");
+            }
+            const userVersion = db.all("PRAGMA user_version")[0]?.user_version ?? 0;
+            if (userVersion < JOB_STORE_SCHEMA_VERSION) {
+                initializeJobStoreSchema(db);
+                db.pragma(`user_version = ${JOB_STORE_SCHEMA_VERSION}`);
+            }
+            return db;
         }
         catch (error) {
+            // Release the OS handle before backoff or propagation; swallow close errors
+            // so the original SQLite failure takes priority.
             try {
                 db?.close();
             }
             catch {
-                // Best-effort — original error takes priority over close failure.
+                // intentionally swallow — original error takes priority
+            }
+            if (attempt < 7 && isSqliteBusyError(error)) {
+                Atomics.wait(BUSY_OPEN_WAIT, 0, 0, 25 * (attempt + 1));
+                continue;
             }
             throw translateSqliteError(error);
         }
-        this.db = db;
-        // Every `this.db.exec` / `existingColumns` below can throw on a
-        // corrupt DB, full disk, mid-migration failure, etc. Catch
-        // internally, close the adapter, and rethrow the translated error
-        // so the SQLite handle never leaks past a failed migration.
-        try {
-            this.db.exec(`
+    }
+    throw translateSqliteError(new Error("database is locked"));
+}
+function initializeJobStoreSchema(db) {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
         job_id TEXT PRIMARY KEY,
         repo_id TEXT NOT NULL,
@@ -67,13 +76,13 @@ export class JobStore {
         error TEXT
       );
     `);
-            for (const [column, type] of ADDED_JOB_COLUMNS) {
-                // Re-read per column: another process may be migrating the same store.
-                if (!existingColumns(this.db, "jobs").has(column)) {
-                    this.db.exec(`ALTER TABLE jobs ADD COLUMN ${column} ${type};`);
-                }
-            }
-            this.db.exec(`
+    for (const [column, type] of ADDED_JOB_COLUMNS) {
+        // Re-read per column: another process may be migrating the same store.
+        if (!existingColumns(db, "jobs").has(column)) {
+            db.exec(`ALTER TABLE jobs ADD COLUMN ${column} ${type};`);
+        }
+    }
+    db.exec(`
       CREATE TABLE IF NOT EXISTS mcp_tasks (
         task_id TEXT PRIMARY KEY,
         operation_kind TEXT NOT NULL,
@@ -146,22 +155,14 @@ export class JobStore {
       -- 0.1.6 migration: rename adversarial_review to challenge
       UPDATE jobs SET command_type = 'challenge' WHERE command_type = 'adversarial_review';
     `);
-            if (!existingColumns(this.db, "mcp_tasks").has("kimi_identity")) {
-                this.db.exec("ALTER TABLE mcp_tasks ADD COLUMN kimi_identity TEXT;");
-            }
-        }
-        catch (error) {
-            // Migration failed — close the adapter so the OS handle is released
-            // before propagating. Wrap close() in its own try so a double-fault
-            // doesn't mask the original migration error.
-            try {
-                this.db.close();
-            }
-            catch {
-                // intentionally swallow — original error takes priority
-            }
-            throw translateSqliteError(error);
-        }
+    if (!existingColumns(db, "mcp_tasks").has("kimi_identity")) {
+        db.exec("ALTER TABLE mcp_tasks ADD COLUMN kimi_identity TEXT;");
+    }
+}
+export class JobStore {
+    db;
+    constructor(paths) {
+        this.db = openAndInitializeJobStore(paths);
     }
     getSwarmRecovery(jobId) {
         const row = this.db.get("SELECT payload, recovery_owner FROM swarm_recovery WHERE job_id = ?", jobId);
@@ -640,7 +641,7 @@ function isSqliteConstraintError(error) {
 }
 function isSqliteBusyError(error) {
     const message = formatError(error).toLowerCase();
-    return message.includes("database is locked") || message.includes("busy");
+    return message.includes("database is locked") || message.includes("busy") || message.includes("locking protocol");
 }
 function translateSqliteError(error) {
     if (isSqliteBusyError(error)) {

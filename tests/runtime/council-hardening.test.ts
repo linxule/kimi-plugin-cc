@@ -676,7 +676,7 @@ describe("Council 3.1.0 hardening regressions", () => {
     test("notifications/cancelled aborts wait polling without cancelling the durable Kimi job", async () => {
       const fixture = await createMcpFixture("council-mcp-cancel-wait", {
         scenario: "ask-success",
-        delayMs: "1200",
+        delayMs: "3000",
       });
       const child = spawn(path.join(fixture.pluginRoot, "scripts/companion.sh"), ["mcp"], {
         cwd: fixture.repo,
@@ -685,6 +685,7 @@ describe("Council 3.1.0 hardening regressions", () => {
       });
       const responses = new Map<number, any>();
       let stdoutBuf = "";
+      let stderrBuf = "";
       child.stdout!.on("data", (chunk) => {
         stdoutBuf += chunk.toString("utf8");
         for (;;) {
@@ -697,6 +698,9 @@ describe("Council 3.1.0 hardening regressions", () => {
           if (typeof msg.id === "number") responses.set(msg.id, msg);
         }
       });
+      child.stderr!.on("data", (chunk) => {
+        stderrBuf += chunk.toString("utf8");
+      });
 
       const send = (payload: Record<string, unknown>) => {
         child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", ...payload })}\n`);
@@ -707,7 +711,7 @@ describe("Council 3.1.0 hardening regressions", () => {
           if (responses.has(id)) return responses.get(id);
           await sleep(25);
         }
-        throw new Error(`Timed out waiting for response ${id}`);
+        throw new Error(`Timed out waiting for response ${id}; stderr=${stderrBuf}`);
       };
 
       try {
@@ -732,21 +736,28 @@ describe("Council 3.1.0 hardening regressions", () => {
           },
         });
 
-        // Wait until the job row is created in SQLite.
-        const paths = resolvePluginPaths(fixture.env);
-        const repoIdentity = await resolveRepoIdentity(fixture.repo);
+        // Discover the job via multiplexed kimi_job list over the same MCP stream.
         let launchedJobId: string | undefined;
-        const discoverDeadline = Date.now() + 10_000;
+        let probeId = 200;
+        const discoverDeadline = Date.now() + 15_000;
         while (Date.now() < discoverDeadline) {
-          const store = new JobStore(paths);
-          try {
-            const latest = store.findLatestJob({ repoId: repoIdentity.repoId });
-            if (latest) {
-              launchedJobId = latest.job_id;
-              break;
-            }
-          } finally {
-            store.close();
+          if (responses.has(99)) {
+            throw new Error(`Request 99 settled unexpectedly before cancel: ${JSON.stringify(responses.get(99))}; stderr=${stderrBuf}`);
+          }
+          const currentProbe = probeId++;
+          send({
+            id: currentProbe,
+            method: "tools/call",
+            params: {
+              name: "kimi_job",
+              arguments: { action: "list", workspace: fixture.repo },
+            },
+          });
+          const listed = await waitForResponse(currentProbe, 10_000);
+          const firstJobId = listed.result?.structuredContent?.jobs?.[0]?.job_id;
+          if (typeof firstJobId === "string" && firstJobId.length > 0) {
+            launchedJobId = firstJobId;
+            break;
           }
           await sleep(40);
         }
@@ -783,15 +794,16 @@ describe("Council 3.1.0 hardening regressions", () => {
     test("client disconnect (stdin EOF) during wait:true does not cancel the durable Kimi job", async () => {
       const fixture = await createMcpFixture("council-mcp-eof-wait", {
         scenario: "ask-success",
-        delayMs: "1000",
+        delayMs: "3000",
       });
       const child = spawn(path.join(fixture.pluginRoot, "scripts/companion.sh"), ["mcp"], {
         cwd: fixture.repo,
         env: { ...fixture.env, KIMI_PLUGIN_CC_MCP_WORKSPACE: fixture.repo },
         stdio: ["pipe", "pipe", "pipe"],
       });
-      let initialized = false;
+      const responses = new Map<number, any>();
       let buf = "";
+      let stderrBuf = "";
       child.stdout!.on("data", (chunk) => {
         buf += chunk.toString("utf8");
         for (;;) {
@@ -801,45 +813,64 @@ describe("Council 3.1.0 hardening regressions", () => {
           buf = buf.slice(idx + 1);
           if (!line) continue;
           const msg = JSON.parse(line);
-          if (msg.id === 1) initialized = true;
+          if (typeof msg.id === "number") responses.set(msg.id, msg);
         }
       });
+      child.stderr!.on("data", (chunk) => {
+        stderrBuf += chunk.toString("utf8");
+      });
 
+      const send = (payload: Record<string, unknown>) => {
+        child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", ...payload })}\n`);
+      };
+      const waitForResponse = async (id: number, timeoutMs = 15_000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          if (responses.has(id)) return responses.get(id);
+          await sleep(25);
+        }
+        throw new Error(`Timed out waiting for response ${id}; stderr=${stderrBuf}`);
+      };
+
+      let client: McpClient | undefined;
       try {
-        child.stdin!.write(`${JSON.stringify({
-          jsonrpc: "2.0",
+        send({
           id: 1,
           method: "initialize",
           params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "eof-test", version: "1" } },
-        })}\n`);
-        const initDeadline = Date.now() + 10_000;
-        while (!initialized && Date.now() < initDeadline) await sleep(25);
-        expect(initialized).toBe(true);
+        });
+        await waitForResponse(1);
 
-        child.stdin!.write(`${JSON.stringify({
-          jsonrpc: "2.0",
+        send({
           id: 2,
           method: "tools/call",
           params: {
             name: "kimi_read",
             arguments: { mode: "ask", prompt: "Survive client disconnect", workspace: fixture.repo },
           },
-        })}\n`);
+        });
 
-        const paths = resolvePluginPaths(fixture.env);
-        const repoIdentity = await resolveRepoIdentity(fixture.repo);
         let launchedJobId: string | undefined;
-        const discoverDeadline = Date.now() + 10_000;
+        let probeId = 200;
+        const discoverDeadline = Date.now() + 15_000;
         while (Date.now() < discoverDeadline) {
-          const store = new JobStore(paths);
-          try {
-            const latest = store.findLatestJob({ repoId: repoIdentity.repoId });
-            if (latest) {
-              launchedJobId = latest.job_id;
-              break;
-            }
-          } finally {
-            store.close();
+          if (responses.has(2)) {
+            throw new Error(`Request 2 settled unexpectedly before disconnect: ${JSON.stringify(responses.get(2))}; stderr=${stderrBuf}`);
+          }
+          const currentProbe = probeId++;
+          send({
+            id: currentProbe,
+            method: "tools/call",
+            params: {
+              name: "kimi_job",
+              arguments: { action: "list", workspace: fixture.repo },
+            },
+          });
+          const listed = await waitForResponse(currentProbe, 10_000);
+          const firstJobId = listed.result?.structuredContent?.jobs?.[0]?.job_id;
+          if (typeof firstJobId === "string" && firstJobId.length > 0) {
+            launchedJobId = firstJobId;
+            break;
           }
           await sleep(40);
         }
@@ -850,24 +881,16 @@ describe("Council 3.1.0 hardening regressions", () => {
         child.stdin!.end();
         expect(await exitCode).toBe(0);
 
-        // Durable job still finishes cleanly in SQLite.
-        let finalStatus: string | undefined;
-        const settleDeadline = Date.now() + 15_000;
-        while (Date.now() < settleDeadline) {
-          const store = new JobStore(paths);
-          try {
-            const job = store.getJob(launchedJobId!);
-            if (job && job.status !== "running") {
-              finalStatus = job.status;
-              break;
-            }
-          } finally {
-            store.close();
-          }
-          await sleep(50);
-        }
-        expect(finalStatus).toBe("completed");
+        // Durable job still finishes cleanly on reconnect.
+        client = await McpClient.legacy(fixture);
+        const waited = await client.request("tools/call", {
+          name: "kimi_job",
+          arguments: { action: "wait", job_id: launchedJobId, workspace: fixture.repo, wait_ms: 15_000 },
+        });
+        expect(waited.isError).toBe(false);
+        expect(waited.structuredContent.status).toBe("completed");
       } finally {
+        if (client) await client.close();
         if (!child.killed) child.kill("SIGTERM");
         await fixture.cleanup();
       }
