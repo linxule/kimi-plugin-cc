@@ -44,6 +44,9 @@ export async function resolveReadScope(
       throw new RuntimeError("INVALID_ARGS", `--read-root must be an absolute directory path; got "${root}".`, stage);
     }
     let real: string;
+    if (root.includes("\\")) {
+      throw new RuntimeError("INVALID_ARGS", `--read-root ${root} contains a backslash, which kimi-code reads as a path separator.`, stage);
+    }
     try {
       real = await realpath(root);
       if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
@@ -82,6 +85,9 @@ export function assertScopeSupported(
 export function effectiveReadRoots(scope: ReadScope, cwd: string): string[] {
   // Root 1 is the directory kimi runs in, so relative and defaulted tool
   // paths resolve inside it exactly as upstream resolves them.
+  if (cwd.includes("\\")) {
+    throw new RuntimeError("READ_SCOPE_INVALID", `Read confinement cannot use ${cwd}: it contains a backslash, which kimi-code reads as a path separator.`, "read-scope.roots");
+  }
   const roots = [realpathSync.native(cwd)];
   for (const root of scope.readRoots) if (!roots.includes(root)) roots.push(root);
   // kimi-code resolves with pathe, which reads "\\" as a separator, so such a

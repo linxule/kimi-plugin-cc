@@ -166,6 +166,12 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
     if (READ_ONLY_TOOLS.has(toolName)) {
         return { decision: "allow" };
     }
+    // The spelling is judged before and after resolution: the given root is
+    // refused even where realpath cannot resolve a backslash path.
+    const posix = process.platform !== "win32";
+    if (posix && workspaceRoot.includes("\\")) {
+        return { decision: "deny", reason: backslashRootReason(workspaceRoot, toolName) };
+    }
     let root;
     try {
         root = await realpath(workspaceRoot);
@@ -176,7 +182,7 @@ export async function evaluateRescueHookRequest(workspaceRoot, toolName, toolInp
             reason: `rescue cannot resolve workspace root: ${err.message}`,
         };
     }
-    if (process.platform !== "win32" && root.includes("\\")) {
+    if (posix && root.includes("\\")) {
         return { decision: "deny", reason: backslashRootReason(root, toolName) };
     }
     if (toolName === "Bash") {

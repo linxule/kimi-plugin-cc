@@ -184,13 +184,16 @@ describe("evaluateRescueHookRequest", () => {
         await mkdir(slashed);
         await symlink(slashed, path.join(fixture, "plain-link"));
         await mkdir(path.join(fixture, "plain"));
-        for (const root of [slashed, path.join(fixture, "plain-link")]) {
-          for (const [tool, input] of [["Write", { path: "x.txt" }], ["Bash", { command: "ls" }]] as const) {
-            expect(await evaluateRescueHookRequest(root, tool, input)).toEqual({
-              decision: "deny",
-              reason: expect.stringContaining("contains a backslash, which kimi-code reads as a path separator"),
-            });
-          }
+        for (const [tool, input] of [["Write", { path: "x.txt" }], ["Bash", { command: "ls" }]] as const) {
+          expect(await evaluateRescueHookRequest(slashed, tool, input)).toEqual({
+            decision: "deny",
+            reason: expect.stringContaining("contains a backslash, which kimi-code reads as a path separator"),
+          });
+          // Through a link the backslash appears only after resolution. Bun on
+          // Linux cannot resolve such a path at all; both outcomes deny.
+          const viaLink = await evaluateRescueHookRequest(path.join(fixture, "plain-link"), tool, input);
+          expect(viaLink.decision).toBe("deny");
+          expect(viaLink.reason).toMatch(/contains a backslash, which kimi-code reads as a path separator|rescue cannot resolve workspace root/);
         }
         expect(await evaluateRescueHookRequest(path.join(fixture, "plain"), "Write", { path: "x.txt" })).toEqual({ decision: "allow" });
       } finally {
