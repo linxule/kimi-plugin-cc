@@ -27,7 +27,7 @@ import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from 
 //   table verbatim so the security contract regresses loudly if a
 //   helper was accidentally changed during the refactor.
 
-const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "ReadMediaFile", "TaskList", "TaskOutput"];
+const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "ReadMediaFile", "TaskList", "TaskOutput", "WaitFor"];
 
 describe("evaluateRescueHookRequest", () => {
   describe("read-only tools always pass", () => {

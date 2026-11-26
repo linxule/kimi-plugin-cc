@@ -36,6 +36,7 @@ The suite checks:
 - an ask that runs with every experimental feature switched on in config and environment, with every non-read tool call denied and no tower state left behind
 - default plan mode cancelled by print on `print-cancels-plan` releases and refused before spawn elsewhere
 - a fresh ask that opens an earlier job's session log through `--reference-session` and answers from it
+- `WaitFor` passing the hook under `ask`, `rescue` (a real wait on a background test run, which needs `bun` on the child's PATH) and `pursue`, each with a recording hook and a same-run managed denial
 - native-v2 provenance, resume, and plan-tainted journal refusal
 - deterministic loopback Write attempts for native-v2 resume and goal continuation, with exact call IDs and objective-digest store recovery; these two lanes require no real credentials
 - managed denials correlated with write attempts across goal-mode continuation turns

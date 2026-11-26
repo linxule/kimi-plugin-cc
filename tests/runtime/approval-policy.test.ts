@@ -364,6 +364,31 @@ describe("pursue goal metadata", () => {
   });
 });
 
+test("WaitFor is a task-status tool every label allows; other feature tools stay denied", async () => {
+  const { evaluateRescueHookRequest } = await import("../../runtime/rescue-approval.js");
+  const contexts = [
+    { commandLabel: "ask" }, { commandLabel: "review" }, { commandLabel: "challenge" }, { commandLabel: "review_gate" },
+    { commandLabel: "swarm" }, { commandLabel: "unknown-label" },
+    // A confined, web-enabled call: WaitFor names no path, so confinement does not apply to it.
+    { commandLabel: "ask", readRoots: JSON.stringify(["/workspace"]), network: "1" },
+    { commandLabel: "swarm-write", trustedWorkspaceRoot: "/workspace", rescueEvaluator: evaluateRescueHookRequest },
+    { commandLabel: "rescue", operationKind: "rescue", trustedWorkspaceRoot: "/workspace", rescueEvaluator: evaluateRescueHookRequest },
+    { commandLabel: "rescue", operationKind: "pursue", trustedWorkspaceRoot: "/workspace", rescueEvaluator: evaluateRescueHookRequest },
+    // A misconfigured write label still gets the read-only set.
+    { commandLabel: "rescue", operationKind: "pursue" },
+  ];
+  for (const ctx of contexts) {
+    for (const tool_input of [{ timeout: 30 }, { timeout: 90, task_id: "task-1" }]) {
+      expect([ctx.commandLabel, await decideHookOutcome({ tool_name: "WaitFor", tool_input }, ctx)])
+        .toEqual([ctx.commandLabel, { decision: "allow" }]);
+    }
+    for (const tool_name of ["NotifyUser", "TaskStop", "select_tools", "TowerInit"]) {
+      expect([ctx.commandLabel, tool_name, (await decideHookOutcome({ tool_name, tool_input: {} }, ctx)).decision])
+        .toEqual([ctx.commandLabel, tool_name, "deny"]);
+    }
+  }
+});
+
 test("pure policy plus evaluator matches async policy across the fixture matrix", async () => {
   const { decideHookOutcomePure, READ_ONLY_TOOLS } = await import("../../runtime/hooks/approval-policy.js");
   for (const commandLabel of [undefined, "", "unknown", "ask", "review", "challenge", "review_gate", "swarm", "rescue", "swarm-write"]) {

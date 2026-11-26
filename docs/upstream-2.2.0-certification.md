@@ -50,7 +50,7 @@ only — `runPreToolUse` reads neither `hookParts` nor `structuredOutput`; 04:
   spawn. Pre-existing route via persisted trust records; hardening, not a
   regression fix.
 - **WaitFor** 90-second cap (#4061) is the schema maximum of a background-task
-  wait tool the hook denies; foreground Bash (`bash.ts`) is byte-identical.
+  wait tool the hook denied at the time (plugin 3.1.0 allows it); foreground Bash (`bash.ts`) is byte-identical.
 - Unchanged residuals: hook runner fail-open behaviour, trusted operator state,
   repository executable Git configuration, no hostile-repository sandbox.
 

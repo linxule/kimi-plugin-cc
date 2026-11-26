@@ -1296,7 +1296,7 @@ async function collectKimiVersionWarnings(env, warnings) {
  * Non-blocking notice for kimi-code's own enabled plugins from
  * ~/.kimi-code/plugins/installed.json. Their tools can register on every
  * session, but read-only commands deny everything outside READ_ONLY_TOOLS
- * (Read, Grep, Glob, ReadMediaFile, TaskList, TaskOutput), which can waste model
+ * (Read, Grep, Glob, ReadMediaFile, TaskList, TaskOutput, WaitFor), which can waste model
  * turns. Missing, unreadable, or malformed manifests produce no notice; setup
  * never blocks on or mutates the plugin list.
  */
@@ -1333,7 +1333,7 @@ async function collectInstalledKimiPluginsNotice(env, warnings) {
         `NOTE: ${enabledIds.length} kimi-code plugin(s) installed and enabled: ${enabledIds.join(", ")}.`,
         "  kimi-code registers their tools (including MCP) on every session. Under kimi-plugin-cc's",
         "  read-only commands (/kimi:task, /kimi:review and the review gate) the",
-        "  PreToolUse hook denies any tool outside Read/Grep/Glob, so calls to these plugins' tools",
+        "  PreToolUse hook denies every tool that is not on its read-only list, so calls to these plugins' tools",
         "  are blocked — safe, but they can waste model turns. This is expected; no action needed.",
         "  (/kimi:task --write and /kimi:swarm apply their own allowlists.) To avoid the turn-waste, disable",
         "  kimi-code plugins you don't need for delegated work in your kimi-code config.",

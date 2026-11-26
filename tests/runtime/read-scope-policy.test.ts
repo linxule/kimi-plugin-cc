@@ -101,6 +101,7 @@ describe("confined reads", () => {
       ["Glob", { pattern: "*.md", path: extra }],
       ["TaskList", {}],
       ["TaskOutput", { task_id: "t" }],
+      ["WaitFor", { timeout: 5 }],
     ] as const) {
       expect([tool, input, await decide(label, tool, input, scope)]).toEqual([tool, input, { decision: "allow" }]);
     }

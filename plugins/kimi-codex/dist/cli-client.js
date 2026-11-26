@@ -138,7 +138,7 @@ export async function runCliPrompt(opts) {
     const hookMonitor = createHookEscapeMonitor({ commandLabel: opts.commandLabel,
         operationKind: opts.executionPlan.operationKind, trustedWorkspaceRoot: opts.trustedWorkspaceRoot, cwd: opts.cwd,
         swarmPolicy: env[SWARM_POLICY_ENV], swarmWaveSize: env[SWARM_WAVE_SIZE_ENV],
-        readRoots: env[READ_ROOTS_ENV], network: env[NETWORK_ENV] });
+        readRoots: env[READ_ROOTS_ENV], network: env[NETWORK_ENV], kimiVersion: opts.executionPlan.kimiVersion });
     const hookEscapes = [];
     const noteHookEscape = (escape) => {
         hookEscapes.push(escape);

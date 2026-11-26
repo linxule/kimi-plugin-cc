@@ -36,7 +36,11 @@ export interface HookDecision {
  *
  * Includes kimi-code's own local-read defaults (`Read`, `Grep`, `Glob`)
  * plus a few additional read-safe tools the runtime auto-allows
- * (`ReadMediaFile`, `TaskList`, `TaskOutput`). Network tools
+ * (`ReadMediaFile`, `TaskList`, `TaskOutput`, `WaitFor`). `WaitFor` waits,
+ * up to a schema cap, on background tasks that already exist and can neither
+ * start nor stop one; kimi-code's goal guidance tells the model to call it,
+ * so denying it cost pursue a wasted call. Only the write labels can have a
+ * background task to wait on (docs/invariants.md). Network tools
  * (`WebSearch`, `FetchURL`) are excluded; read-only labels allow them only
  * for a call started with --network, which also confines these reads to the
  * plugin-exported read roots (runtime/read-scope.ts).
@@ -48,6 +52,7 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "ReadMediaFile",
   "TaskList",
   "TaskOutput",
+  "WaitFor",
 ]);
 
 /** Web tools: denied unless the plugin exported KIMI_PLUGIN_CC_NETWORK=1 with read roots. */

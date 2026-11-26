@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { carriesDenial, createHookEscapeMonitor } from "../../runtime/hook-escape.js";
+import { carriesDenial, createHookEscapeMonitor, emitsHandoffVeto } from "../../runtime/hook-escape.js";
 import { decideHookOutcomePure } from "../../runtime/hooks/approval-policy.js";
 import { BOUNDED_SWARM_POLICY } from "../../runtime/swarm-policy.js";
 import type { AssistantRecord } from "../../runtime/stream-json.js";
@@ -31,6 +31,25 @@ test("byte-exact denial, repeat-breaker decorated denial and handoff veto all co
   for (const other of [reason + "\n", reason + " extra", "ok: wrote file", REMINDER_1, reason.slice(1), `Tool "Write" not found`]) {
     expect(carriesDenial(other, reason)).toBe(false);
   }
+});
+
+test("the handoff text counts as a denial only on releases that can emit it", () => {
+  const reason = denialFor("Write");
+  for (const version of ["0.41.3", "0.42.0", "2.0.0", "2.5.3", null, undefined, "", "2.6", "next", "2.8.0-beta.1"]) {
+    expect([version, emitsHandoffVeto(version)]).toEqual([version, true]);
+  }
+  for (const version of ["2.6.0", "2.6.2", "2.8.0", "2.10.0", "3.0.0"]) {
+    expect([version, emitsHandoffVeto(version)]).toEqual([version, false]);
+  }
+  expect(carriesDenial(HANDOFF, reason, false)).toBe(false);
+  expect(carriesDenial(reason + REMINDER_1, reason, false)).toBe(true);
+  const handoff = { role: "tool" as const, tool_call_id: "c1", content: HANDOFF };
+  const old = createHookEscapeMonitor({ ...ctx, kimiVersion: "2.5.3" });
+  old.observe(call("Write", "{}", "c1"));
+  expect(old.observe(handoff)).toBeUndefined();
+  const current = createHookEscapeMonitor({ ...ctx, kimiVersion: "2.8.0" });
+  current.observe(call("Write", "{}", "c1"));
+  expect(current.observe(handoff)).toMatchObject({ tool_call_id: "c1", tool_name: "Write", kind: "mismatch" });
 });
 
 test("monitor reports mismatch and unresolved, clears on any denial shape, and never reports twice for one call", () => {

@@ -587,8 +587,11 @@ async function assertSwarmChildEvidence(options: {
   expect(childIds.length, "the operation must launch real children, not fall back to the coordinator").toBeGreaterThanOrEqual(options.targets.length);
   const mainWire = await readFile(path.join(agentsDir, "main", "wire.jsonl"), "utf8");
   expect(mainWire).toContain("subagent.spawned");
+  // The children must have done the assigned work: the coordinator may write a file of its own (a report), never a target.
   const mainCalls = swarmToolEvidence(mainWire).calls;
-  expect(mainCalls.filter((call) => call.name === "Write" || call.name === "Edit")).toEqual([]);
+  expect(mainCalls.filter((call) => (call.name === "Write" || call.name === "Edit") &&
+    options.targets.some((target) => isAssignedToolPath((call.args as Record<string, unknown> | null | undefined)?.path, target)),
+  ).map((call) => `${call.name} ${String((call.args as Record<string, unknown>).path)}`), "the coordinator must not write a target").toEqual([]);
 
   const children = await Promise.all(childIds.map(async (id): Promise<SwarmChildEvidence> => {
     const wire = await readFile(path.join(agentsDir, id, "wire.jsonl"), "utf8");
@@ -710,13 +713,14 @@ function smokeToolResult(toolCallId: string, output: string, isError = false): R
 
 async function writeSwarmEvidenceFixture(
   children: Readonly<Record<string, readonly unknown[]>>,
+  coordinator: readonly unknown[] = [],
 ): Promise<string> {
   const home = await createTestPluginDataRoot("smoke-swarm-evidence");
   const agentsDir = path.join(home, "sessions", "wd_smoke", "session_smoke", "agents");
   await mkdir(path.join(agentsDir, "main"), { recursive: true });
   await writeFile(
     path.join(agentsDir, "main", "wire.jsonl"),
-    `${JSON.stringify({ type: "subagent.spawned", agentId: "main" })}\n`,
+    [{ type: "subagent.spawned", agentId: "main" }, ...coordinator].map((record) => `${JSON.stringify(record)}\n`).join(""),
     "utf8",
   );
   for (const [id, records] of Object.entries(children)) {
@@ -752,6 +756,35 @@ test("swarm child evidence accepts correlated Write and Edit success with extra 
     });
   } finally {
     await cleanupTestPath(home);
+  }
+});
+
+test("swarm child evidence lets the coordinator write its own file, never a target", async () => {
+  const children = {
+    child_a: [
+      smokeToolCall("write-a", "Write", { path: "./alpha.txt", content: "sentinel" }),
+      smokeToolResult("write-a", "Wrote 8 bytes to ./alpha.txt"),
+    ],
+  };
+  const check = (home: string) => assertSwarmChildEvidence({
+    kimiHome: home, sessionId: "session_smoke", targets: ["alpha.txt"], outcome: "write-success", sentinel: "sentinel",
+  });
+  const withReport = await writeSwarmEvidenceFixture(children, [
+    smokeToolCall("report", "Write", { path: "compliance-report.md", content: "alpha.txt now holds sentinel" }),
+    smokeToolResult("report", "Wrote 28 bytes to compliance-report.md"),
+  ]);
+  try {
+    await check(withReport);
+  } finally {
+    await cleanupTestPath(withReport);
+  }
+  for (const [name, args] of [["Write", { path: "/tmp/work/alpha.txt", content: "sentinel" }], ["Edit", { path: "alpha.txt", new_string: "sentinel" }]] as const) {
+    const withTarget = await writeSwarmEvidenceFixture(children, [smokeToolCall("own", name, args), smokeToolResult("own", "Wrote 8 bytes")]);
+    try {
+      await expect(check(withTarget)).rejects.toThrow();
+    } finally {
+      await cleanupTestPath(withTarget);
+    }
   }
 });
 
@@ -3507,6 +3540,182 @@ test("the spelling lanes' intended calls get the expected denials from the real 
   } finally {
     await cleanupTestPath(workspace);
   }
+});
+
+// WaitFor is in the hook's read-only tool set. The read-only lane proves the
+// call passes the hook where no background task can exist; the rescue lane
+// proves a real wait on a background Bash task; the pursue lane proves the
+// label Kimi's goal guidance sends the model to it under.
+//
+// An allowed call looks the same whether or not Kimi consulted the hook, so
+// each lane carries two controls. A second PreToolUse hook in its disposable
+// home records every payload and allows: a record with the WaitFor call's own
+// id proves Kimi dispatched PreToolUse hooks for that call. And the same run
+// makes one call the managed hook denies, in text only it writes: that proves
+// the managed hook, another entry for the same event with no matcher, was
+// deciding in that run.
+const waitForSuite = PREREQS_OK && BINARY_IS_V2 && process.platform !== "win32" ? describe : describe.skip;
+const waitField = (name: string, value: string): RegExp => new RegExp(`^${name}: ${value}$`, "m");
+
+async function installHookTrace(kimiHome: string): Promise<() => Promise<Array<Record<string, unknown>>>> {
+  const trace = path.join(kimiHome, "pretooluse-trace.jsonl");
+  const script = path.join(kimiHome, "pretooluse-trace.sh");
+  expect(`${trace}${script}`, "the trace paths go into a shell script and a TOML literal unquoted").toMatch(/^[\w./-]+$/);
+  await writeFile(script, `#!/bin/sh\ncat >> ${trace}\necho >> ${trace}\nexit 0\n`, { mode: 0o755 });
+  await appendFile(path.join(kimiHome, "config.toml"), `\n[[hooks]]\nevent = "PreToolUse"\ncommand = '${script}'\ntimeout = 15\n`);
+  return async () => {
+    const text = await readFile(trace, "utf8").catch(() => "");
+    return text.split("\n").filter((line) => line.trim() !== "").map((line) => JSON.parse(line) as Record<string, unknown>);
+  };
+}
+
+function expectHookDispatched(payloads: Array<Record<string, unknown>>, call: StreamToolOutcome): void {
+  const seen = payloads.map((payload) => `${String(payload.tool_name)}#${String(payload.tool_call_id)}`);
+  expect(seen, "Kimi must dispatch PreToolUse for this exact call").toContain(`${call.name}#${call.toolCallId}`);
+}
+
+const waitedNothing = (args: Record<string, unknown>): boolean => args.timeout === 1 && args.task_id === undefined;
+
+const SLEEP_CONTROL = "First call Bash once with the exact command `sleep 1`. The hook will deny it; that is expected, so do not retry it. ";
+
+/** The rescue evaluator's own denial of `sleep 1`, on that call. */
+function rescueDeniedSleep(outcomes: readonly StreamToolOutcome[]): StreamToolOutcome | undefined {
+  return outcomes.find((outcome) => outcome.name === "Bash" && outcome.args?.command === "sleep 1" &&
+    (outcome.content ?? "").includes("Rescue rejects shell command: sleep 1"));
+}
+
+waitForSuite("real-binary smoke: WaitFor passes the hook as a task-status tool", () => {
+  test("ask: WaitFor with nothing running returns at once, not a denial", async () => {
+    const workspace = await realpath(await createTestPluginDataRoot("smoke-ws-waitfor-ask"));
+    let homes: { kimiHome: string; pluginData: string } | undefined;
+    try {
+      homes = await installSmokeHook("waitfor-ask", workspace);
+      const readTrace = await installHookTrace(homes.kimiHome);
+      const result = await runSmokeTurn({
+        kimiHome: homes.kimiHome, workspace, label: "ask",
+        prompt: "This is an authorized tool test. First call the WaitFor tool once with timeout 1 and no task_id. " +
+          "Then call the Write tool once to create control.txt containing the letter x. The hook will deny that; it is expected. " +
+          "Report exactly what WaitFor returned. Do not use any other tool and do not retry.",
+      });
+      const outcomes = streamToolOutcomes(result.records);
+      console.log(`[smoke] waitfor-ask calls: ${toolKeys(outcomes)}`);
+      const waited = allowedCall(outcomes, "WaitFor", waitedNothing);
+      expect(waited, `WaitFor{timeout:1} must run without a managed denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      console.log(`[smoke] waitfor-ask result=${JSON.stringify(waited!.content!.slice(0, 160))}`);
+      expect(waited!.content).toMatch(waitField("wait_status", "no_tasks"));
+      const control = deniedCall(outcomes, "Write");
+      expect(control, `the Write control must carry the managed denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      const payloads = await readTrace();
+      expectHookDispatched(payloads, waited!);
+      expectHookDispatched(payloads, control!);
+      expect([result.aborted, result.exitCode]).toEqual([false, 0]);
+      expect(await readdir(workspace)).toEqual([]);
+    } finally {
+      await cleanupTestPath(workspace);
+      if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
+
+  test("rescue: WaitFor waits for the background test run it started to finish, and stops nothing", async () => {
+    const workspace = await realpath(await createTestPluginDataRoot("smoke-ws-waitfor-rescue"));
+    let homes: { kimiHome: string; pluginData: string } | undefined;
+    try {
+      // Long enough that the task is still running when the model's next step issues the wait.
+      await writeFile(path.join(workspace, "slow.test.ts"), [
+        'import { test } from "bun:test";',
+        'test("slow", async () => { await new Promise((resolve) => setTimeout(resolve, 12000)); }, 30000);',
+        "",
+      ].join("\n"), "utf8");
+      homes = await installSmokeHook("waitfor-rescue", workspace);
+      const readTrace = await installHookTrace(homes.kimiHome);
+      const result = await runSmokeTurn({
+        kimiHome: homes.kimiHome, workspace, label: "rescue",
+        prompt: "This is an authorized tool test in a disposable directory. " + SLEEP_CONTROL +
+          'Next call Bash with the exact command `bun test slow.test.ts`, run_in_background true and description "slow test". ' +
+          "Then, in a separate step, call WaitFor with timeout 60 and no task_id. " +
+          "Report exactly what WaitFor returned. Do not use any other tool, do not edit files and do not stop the task.",
+      });
+      const outcomes = streamToolOutcomes(result.records);
+      console.log(`[smoke] waitfor-rescue calls: ${toolKeys(outcomes)}`);
+      const started = allowedCall(outcomes, "Bash", (args) => args.command === "bun test slow.test.ts" && args.run_in_background === true);
+      expect(started, `the background Bash call must run; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      // A background Bash call's streamed result is the command's final output, so the test's own success shows there.
+      console.log(`[smoke] waitfor-rescue bash result=${JSON.stringify(started!.content!.slice(0, 300))}`);
+      expect(started!.content).toMatch(/^ 1 pass$/m);
+      expect(started!.content).toMatch(/^ 0 fail$/m);
+      // The wait began while a task ran, lasted, and ended on the task that Bash call started finishing cleanly.
+      const waited = outcomes.find((outcome) => outcome.name === "WaitFor" && waitField("wait_status", "completed").test(outcome.content ?? ""));
+      for (const wait of outcomes.filter((outcome) => outcome.name === "WaitFor")) {
+        console.log(`[smoke] waitfor-rescue result=${JSON.stringify(wait.content?.slice(0, 900))}`);
+      }
+      expect(waited, `one WaitFor call must see the task complete; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      // With no task named, WaitFor answers `no_tasks` unless a task was running when it began.
+      expect(waited!.args).toEqual({ timeout: 60 });
+      const [head = "", finished = ""] = waited!.content!.split("\n[finished]\n");
+      const taskId = /^task_id: (\S+)$/m.exec(head)?.[1];
+      expect(taskId, "the wait must name the task it ended on").toBeDefined();
+      expect(Number(/^waited_ms: (\d+)$/m.exec(head)?.[1] ?? "0"), "the wait must have lasted").toBeGreaterThan(500);
+      expect(finished).toMatch(waitField("task_id", taskId!));
+      expect(finished).toMatch(waitField("description", "slow test"));
+      expect(finished).toMatch(waitField("status", "completed"));
+      expect(finished).toMatch(waitField("command", "bun test slow\\.test\\.ts"));
+      expect(finished).toMatch(waitField("exit_code", "0"));
+      expect(finished).toMatch(waitField("parent_tool_call_id", started!.toolCallId));
+      const control = rescueDeniedSleep(outcomes);
+      expect(control, `the sleep control must carry the rescue evaluator's denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      const payloads = await readTrace();
+      expectHookDispatched(payloads, waited!);
+      expectHookDispatched(payloads, control!);
+      expect(outcomes.some((outcome) => outcome.name === "TaskStop")).toBe(false);
+      expect(JSON.stringify(result.records)).not.toContain(DENY_MARKER);
+      expect([result.aborted, result.exitCode]).toEqual([false, 0]);
+      expect((await readdir(workspace)).sort()).toEqual(["slow.test.ts"]);
+    } finally {
+      await cleanupTestPath(workspace);
+      if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
+
+  test("pursue: WaitFor passes the hook and the goal still completes", async () => {
+    const workspace = await realpath(await createTestPluginDataRoot("smoke-ws-waitfor-pursue"));
+    let homes: { kimiHome: string; pluginData: string } | undefined;
+    try {
+      homes = await installSmokeHook("waitfor-pursue", workspace);
+      const readTrace = await installHookTrace(homes.kimiHome);
+      const { command, prefixArgs } = resolveKimiCliCommand(process.env);
+      const result = await runCliPrompt({
+        cwd: workspace,
+        env: { ...process.env, KIMI_CODE_HOME: homes.kimiHome, KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" },
+        command, prefixArgs,
+        executionPlan: smokePlan(command, prefixArgs, "pursue"),
+        commandLabel: "rescue", trustedWorkspaceRoot: workspace,
+        prompt: buildGoalPrompt(
+          "This is a goal-lifecycle test. " + SLEEP_CONTROL + "Next call WaitFor with timeout 1 and no task_id. " +
+          'Then call UpdateGoal with status "complete" as your last tool call. ' +
+          "The goal is complete once WaitFor has returned. " +
+          "Do not create or edit files, do not use other tools, and do not retry denied tools.",
+        ),
+        signal: AbortSignal.timeout(PER_RUN_BUDGET_MS),
+      });
+      const outcomes = streamToolOutcomes(result.records);
+      console.log(`[smoke] waitfor-pursue calls: ${toolKeys(outcomes)}`);
+      const waited = allowedCall(outcomes, "WaitFor", waitedNothing);
+      expect(waited, `WaitFor{timeout:1} must run without a managed denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      expect(waited!.content).toMatch(waitField("wait_status", "no_tasks"));
+      const control = rescueDeniedSleep(outcomes);
+      expect(control, `the sleep control must carry the rescue evaluator's denial; calls: ${toolKeys(outcomes)}`).toBeDefined();
+      const payloads = await readTrace();
+      expectHookDispatched(payloads, waited!);
+      expectHookDispatched(payloads, control!);
+      expect(JSON.stringify(result.records)).not.toContain(DENY_MARKER);
+      expect([result.aborted, result.exitCode]).toEqual([false, 0]);
+      expect(result.goalSummary?.status).toBe("complete");
+      expect(await readdir(workspace)).toEqual([]);
+    } finally {
+      await cleanupTestPath(workspace);
+      if (homes) for (const dir of Object.values(homes)) await cleanupTestPath(dir);
+    }
+  }, PER_RUN_BUDGET_MS + 30_000);
 });
 
 const spellingSuite = PREREQS_OK && BINARY_IS_V2 ? describe : describe.skip;

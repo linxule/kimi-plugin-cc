@@ -1536,6 +1536,11 @@ PINNED_HASHES["2.8.0"] = {
     "e0ab31236276de123509579d6b1a9ad8b5bb4110c60468eb4ac72aa009d7fe6c",
   [`${CORE}/agent/mcp/mcpFailureOps.ts`]:
     "cc345370443fc1064407ca56fb885cc0105a1ed4843628eb237a5c655df7b4a9",
+  // WaitFor, which the hook allows under every label as a task-status tool.
+  [`${CORE}/agent/tools/task/task-wait/taskWaitTool.ts`]:
+    "2b6c62a2fc611c6bf27f998d76d3de98f072dde83e91e1fb4ea09fd9aa42dc35",
+  [`${CORE}/agent/tools/task/task-wait/task-wait.ts`]:
+    "70a620adb3bad8da904d5e5d77e6e6ac2fa5e8f7540d1c9507a60a269c7b08e2",
 };
 for (const removed of [
   `${CORE}/tool/executor/hook-composer.ts`,
@@ -2137,6 +2142,49 @@ suite("native-v2 tag scan: the no-plan construction holds at this source tree", 
     expect(filesContaining(roots, /\.on\(Mcp(?:ToolsDiscovered|ServerFailed|ServerFailureResolved)\b/)).toEqual(mcpFiles);
     expect(read(`${CORE}/agent/mcp/mcpDiscoveryOps.ts`)).toContain("export const mcpDiscoveryKey = defineState('mcp.discovery', ");
     expect(read(`${CORE}/agent/mcp/mcpFailureOps.ts`)).toContain("export const mcpFailureKey = defineState('mcp.failures', ");
+  });
+
+  test("2.8+ a turn reaches tools only through the loop's batch executor, and blocked or aborted batches run nothing", () => {
+    if (!upstreamAtLeast(2, 8)) return;
+    const turn = read(`${CORE_RUNTIME}/loop/turn/create-turn.ts`);
+    // The turn machine never holds an executor: its only route to a tool is the runtime's executeBatch.
+    expect(turn).not.toContain("executor");
+    expect(turn.split("this.runtime.executeBatch(step.batch)").length - 1).toBe(4);
+    expect(turn.split(".executeBatch(").length - 1).toBe(4);
+    // Calls come only from a completed model response.
+    expect(turn).toContain("const toolCalls = outcome.type === 'done' ? outcome.message.toolCalls : [];");
+    const loop = read(`${CORE_RUNTIME}/loop/loop-actor.ts`);
+    expect(loop.split("this.executor.execute(").length - 1).toBe(1);
+    // Both early exits are returns that sit before the one executor call, inside the same method.
+    const method = sliceBetween(loop, "  private executeToolBatch(batch: TurnToolBatch)", "\n  private abortToolBatch(");
+    const blocked = sliceBetween(method, "    if (batch.blocked !== undefined) {\n      return this.transition(() => {", "\n      });\n    }\n");
+    expect(blocked).toContain("const outcome = blockedToolOutcome(toolCall, blocked.cause, blocked.result);");
+    expect(blocked).toContain("\n        return result;\n");
+    expect(blocked).not.toContain("executor");
+    orderedIndexes(method.slice(method.indexOf(blocked) + blocked.length), [
+      "\n    if (batch.aborted !== undefined) return this.abortedBatchResult(batch, batch.aborted.reason);\n",
+      "const handler = this.executor.execute(call.toolCall, context);",
+    ], "an aborted batch returns before execution");
+    // The storage backend maps a scope and key to one path, and its read goes through that mapping.
+    const backend = read(`${CORE_RUNTIME}/store/backend/node.ts`);
+    expect(backend).toContain("  pathFor(scope: string, key: string): string {\n    return join(this.baseDir, scope, key);\n  }");
+    const readMethod = sliceBetween(backend, "  async read(scope: string, key: string): Promise<Uint8Array | undefined> {", "\n  async *readStream(");
+    expect(readMethod).toContain("    const filePath = this.pathFor(scope, key);\n");
+    expect(readMethod).toContain("        bytes = await readFile(filePath);\n");
+    expect(readMethod.split("readFile(").length - 1).toBe(1);
+  });
+
+  test("2.8+ goal continuation points the model at WaitFor, which only waits", () => {
+    if (!upstreamAtLeast(2, 8)) return;
+    expect(read(`${CORE}/features/goal/injection/goalInjection.ts`))
+      .toContain("call WaitFor to wait for them inside this turn instead of ending the turn");
+    expect(read(`${CORE}/agent/tools/task/task-wait/task-wait.ts`)).toContain("export const WAIT_FOR_MAX_TIMEOUT_S = 90;");
+    const tool = read(`${CORE}/agent/tools/task/task-wait/taskWaitTool.ts`);
+    // Its only calls on a task handler read a snapshot or wait; the one executor use lists handlers.
+    expect([...tool.matchAll(/\bhandler\??\.(\w+)\b/g)].map((match) => match[1]).filter((name, index, all) => all.indexOf(name) === index).sort())
+      .toEqual(["snapshot", "taskId", "wait"]);
+    expect([...tool.matchAll(/this\.toolExecutor\.(\w+)\(/g)].map((match) => match[1]).filter((name, index, all) => all.indexOf(name) === index).sort())
+      .toEqual(["handler", "handlers"]);
   });
 
   test("2.8+ every skipPermitting producer is a reviewed site", () => {
@@ -2801,6 +2849,24 @@ function orderedIndexes(source: string, needles: readonly string[], label: strin
   }
 }
 
+function sliceBetween(source: string, start: string, end: string): string {
+  const from = source.indexOf(start);
+  expect(from, `missing ${JSON.stringify(start)}`).toBeGreaterThanOrEqual(0);
+  const to = source.indexOf(end, from + start.length);
+  expect(to, `missing ${JSON.stringify(end)} after ${JSON.stringify(start)}`).toBeGreaterThan(from);
+  return source.slice(from, to);
+}
+
+// SHA-256 of each distinct `taskWaitTool.ts` across the certified rows, with the rows that carry it. The 2.6.0+
+// and 2.2.0+ sources were read whole; the three older ones as their differences from the 2.2.0 source.
+const WAIT_FOR_TOOL_SOURCES: Readonly<Record<string, readonly string[]>> = {
+  edb2ef823b801e23c102554aedfcfb487e63b209ae872a820d25966c54353ef1: ["0.42.0"],
+  "96a04f133b948bb8a78b3cf976fc082b9819074e25bdf50d5bb1a23ac73c5c0d": ["0.43.0", "0.43.1", "2.0.0", "2.0.1", "2.0.2"],
+  "817e29cbf0cae20dbe6d4406f62697570c6120918388fe65644b9746abf49e8d": ["2.1.0", "2.1.1"],
+  fd7b86d8a8fc546c7c32b04cbef8062f0b0816fd8f54dcb1c82a48109dfe3396: ["2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3"],
+  "2b6c62a2fc611c6bf27f998d76d3de98f072dde83e91e1fb4ea09fd9aa42dc35": ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"],
+};
+
 const releaseRowSuite = sourceIsGitClone() ? describe : describe.skip;
 
 releaseRowSuite("per-release premises of the scope, flag and print relaxations (git tags)", () => {
@@ -2856,6 +2922,63 @@ releaseRowSuite("per-release premises of the scope, flag and print relaxations (
         expect(fork).toContain("export const SUBAGENT_FORK_FLAG_ENV = 'KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK';");
         expect(fork).toContain("env: SUBAGENT_FORK_FLAG_ENV,");
       }
+    });
+
+    test(`${v}: WaitFor's whole service surface is waiting on, and reading, tasks that already exist`, () => {
+      const tool = gitShow(v, `${CORE}/agent/tools/task/task-wait/taskWaitTool.ts`);
+      // The tool is one of the five sources that were read; a release with a sixth fails here until it is read.
+      expect(WAIT_FOR_TOOL_SOURCES[createHash("sha256").update(tool).digest("hex")] ?? [], `${v}: unread WaitFor source`).toContain(v);
+      const unique = (pattern: RegExp): string[] => [...new Set([...tool.matchAll(pattern)].map((match) => match[1]!))].sort();
+      const handlerEra = versionAtLeast(v, 2, 6);
+      const goalEra = versionAtLeast(v, 2, 2);
+      // Exact sets: a release that hands WaitFor another service, or calls another method, fails here.
+      expect(unique(/@(I[A-Za-z]+) /g), `${v}: injected services`).toEqual(
+        handlerEra
+          ? ["IAgentGoalService", "IAgentScopeContext", "IAgentTaskHistoryService", "IAgentToolExecutorService", "IFlagService", "ITelemetryService"]
+          : goalEra
+            ? ["IAgentGoalService", "IAgentScopeContext", "IAgentTaskService", "IFlagService", "ITelemetryService"]
+            : ["IAgentTaskService", "IFlagService", "ITelemetryService"],
+      );
+      expect(unique(/this\.([a-zA-Z]+\.[a-zA-Z0-9]+)\(/g), `${v}: service calls`).toEqual(
+        handlerEra
+          ? ["flags.enabled", "goals.getGoal", "history.getTask", "telemetry.track2", "toolExecutor.handler", "toolExecutor.handlers"]
+          : [
+              "flags.enabled", ...(goalEra ? ["goals.getGoal"] : []),
+              // Through 2.5.3 a wait also marks the finished tasks' completion notices delivered (a durable
+              // `task.waitDelivered` record) and returns an output preview, as TaskOutput does.
+              "tasks.getOutputSnapshot", "tasks.getTask", "tasks.list", "tasks.markTasksDeliveredViaWait", "tasks.wait",
+              "telemetry.track2",
+            ],
+      );
+      if (handlerEra) expect(unique(/\bhandler\??\.(\w+)\b/g), `${v}: task handler members`).toEqual(["snapshot", "taskId", "wait"]);
+      // The one place the task service (or its 2.6+ stand-in) is handed to a helper: the progress ticker, which only lists.
+      expect(unique(/(?<![.\w])tasks\.(\w+)\(/g), `${v}: calls through the progress helper's parameter`).toEqual(["list"]);
+      expect(tool.split("startWaitProgress(").length - 1, `${v}: progress helper uses`).toBe(2);
+      expect(tool, `${v}: what the progress helper is given`).toContain(
+        handlerEra ? "startWaitProgress(args, { list: () => this.listTasks() }, ctx.onUpdate, startedAt)" : "startWaitProgress(args, this.tasks, ctx.onUpdate, startedAt)");
+      // The wait is capped by the input schema: ten minutes before 2.2.0, ninety seconds from it.
+      const schema = gitShow(v, `${CORE}/agent/tools/task/task-wait/task-wait.ts`);
+      expect(schema, `${v}: timeout cap applies`).toContain(".max(WAIT_FOR_MAX_TIMEOUT_S)");
+      if (goalEra) {
+        expect(schema, `${v}: cap`).toContain("export const WAIT_FOR_MAX_TIMEOUT_S = 90;");
+      } else {
+        expect(schema, `${v}: cap`).toContain("export const WAIT_FOR_MAX_TIMEOUT_S = DEFAULT_BACKGROUND_TIMEOUT_S;");
+        expect(gitShow(v, `${CORE}/agent/tools/os/bash/bash.ts`), `${v}: cap value`).toContain("export const DEFAULT_BACKGROUND_TIMEOUT_S = 10 * 60;");
+      }
+    });
+
+    test(`${v}: a denied result is at most decorated with reminder blocks; the fixed handoff and skip texts end at 2.5.3`, () => {
+      const dedupe = gitShow(v, `${CORE}/agent/toolDedupe/toolDedupeService.ts`);
+      expect(dedupe).toContain("wrapSystemReminder(");
+      const hasOldTexts = !versionAtLeast(v, 2, 6);
+      // Through 2.5.3 the fixed text goes to every call attempted in the handoff step; from 2.6.0 that phase is gone.
+      expect(dedupe.includes("if (this.handoffPhase === 'active') {"), `${v}: handoff phase`).toBe(hasOldTexts);
+      expect(dedupe.includes("event.veto(HANDOFF_VETO_RESULT);"), `${v}: handoff veto`).toBe(hasOldTexts);
+      expect(dedupe.includes("this.repeatBreakerStop = true;"), `${v}: stop without a handoff step`).toBe(!hasOldTexts);
+      expect(gitFilesContaining(v, "This turn was ended by the repeat breaker after the same tool call was issued ").length > 0,
+        `${v}: handoff text`).toBe(hasOldTexts);
+      expect(gitFilesContaining(v, "Tool skipped because a previous tool call stopped the turn.").length > 0,
+        `${v}: skip text`).toBe(hasOldTexts);
     });
 
     test(`${v}: the scoped read and web tools are default-approved, so the hook is their only gate`, () => {

@@ -45,7 +45,7 @@ The review establishes:
 - KAP adds `agent_close`, `session_continue` and `home_dir` to `/meta` and `environment_cwd` to the environment response; the plugin reads named fields only;
 - the read and web tool argument keys and Kimi's default-approve list are unchanged; the new static read-only Bash approval runs in the permitting phase, after the hook, and print's auto mode never consults it;
 - the flag registry holds `tower`, `notify_user`, `wait_for` and `prompt_prediction`; `subagent_fork` and `tool-select` are removed; precedence is unchanged, so per-flag environment values still win;
-- print mode has no route into tower mode, and every tool a flag can add is denied under every label because each label allows a fixed list of tool names.
+- print mode has no route into tower mode, and each label allows a fixed list of tool names, so a tool a flag adds is denied unless the list names it. The list names one: `WaitFor`, which only waits on background tasks that already exist.
 
 Two findings changed the plugin:
 
@@ -65,9 +65,12 @@ The scan now carries 2.8.0 invariants beside the older ones, which are unchanged
 - the exact subscriber sets of `registerLegacyStarting`, `registerHook` and `registerToolBatchStarting`;
 - the absent subagent-fork flag file and no remaining `subagent_fork` reference;
 - the tower and MCP records the resume scan names: the tower state fold, the agent-id rule replay applies to it, main-only adoption on restore, and the exact set of durable MCP events with their folds;
+- a turn reaches tools only through the loop's batch executor, and a blocked or aborted batch returns before the one executor call;
+- `WaitFor`, which the hook allows: on every certified row, the tool's source is one of five that were read (pinned by hash per row), with the exact services it is given, the methods it calls and its timeout cap; at 2.8.0 the goal guidance that sends the model to it;
+- the repeat breaker's handoff step and its fixed text, present on every row through 2.5.3 and absent from 2.6.0;
 - for bounded swarm: no fork path (every child is a fresh create), the lazy loop start awaited before settlement, the detached-completion path in the rewritten loop actor, the session tool-policy path through the core file store, and the retry loop's attempt cap under the new invalid-argument retry.
 
-The 2.8.0 row has **169 pins**: it inherits 2.7.3, re-pins 54 changed files, adds the new hook-registry, read-only-Bash-policy, turn, store, tower-record and MCP-record files, and drops five removed paths. Final exact 2.8.0 scan: **164 pass / 0 skip / 0 fail / 1,473 assertions**. Exact 2.7.3 regression: **164 pass / 0 skip / 0 fail / 1,360 assertions**. The implementing lane reported that mutating nine of the new assertions made each fail; that was not re-run. A later run that mutated four of the tower and MCP assertions and one pin failed the scan.
+The 2.8.0 row has **171 pins**: it inherits 2.7.3, re-pins 54 changed files, adds the new hook-registry, read-only-Bash-policy, turn, store, tower-record, MCP-record and `WaitFor` files, and drops five removed paths. Final exact 2.8.0 scan: **216 pass / 0 skip / 0 fail / 1,863 assertions** (`tag-scan-03.log`). Exact 2.7.3 regression: **216 pass / 0 skip / 0 fail / 1,724 assertions**. Two of the new source pins, the turn machine and the file-storage backend, had been read only in part; both are now read whole and each has an assertion of its own. The implementing lane reported that mutating nine of the new assertions made each fail; that was not re-run. A later run that mutated four of the tower and MCP assertions and one pin failed the scan.
 
 ## Exact-binary controls
 
@@ -83,9 +86,9 @@ Receipts are `write-off/summary.json`, `plan-on/summary.json`, `enter-off-forced
 
 ## Deterministic and real-provider operation evidence
 
-The deterministic untouched-binary suite passed **23 tests / 138 assertions in 644.98 seconds** on the release tree (`deterministic-03.log`). It covers real new, resumed and odd waves, child-authored writes and patches, explicit and automatic background controls, direct workers, nested-profile refusal, timeout and cancellation tails, and both long recovery controls.
+The deterministic untouched-binary suite passed **23 tests / 138 assertions in 616.84 seconds** (`deterministic-05.log`) on the final runtime; only tests and documents changed after it. It covers real new, resumed and odd waves, child-authored writes and patches, explicit and automatic background controls, direct workers, nested-profile refusal, timeout and cancellation tails, and both long recovery controls.
 
-The final real-provider smoke ran on exact 2.8.0 through the maintainer route, a read-only Agent Keys API key and an empty dedicated seed home, with `KIMI_PLUGIN_CC_SMOKE_INSTALL=1`: **47 pass / 3 skip / 0 fail / 632 assertions in 645.56 seconds** (`smoke-final-01.log`). A skip is not evidence. The three skips, by name:
+The final real-provider smoke ran on exact 2.8.0 through the maintainer route, a read-only Agent Keys API key and an empty dedicated seed home, with `KIMI_PLUGIN_CC_SMOKE_INSTALL=1`: **51 pass / 3 skip / 0 fail / 695 assertions in 663.55 seconds** (`smoke-final-04.log`). A skip is not evidence. The three skips, by name:
 
 - `narrowed production certification refuses swarm before spawn > swarm returns the scoped refusal without creating a model session` and its `swarm-write` twin. They apply only to the narrowed 2.6.0 row.
 - `per-call read scope and network access (ask) > --network: WebSearch passes the hook; without it WebSearch is denied naming --network`. Kimi offers no WebSearch tool on an API-key route with an empty seed home. This lane ran separately; see below.
@@ -96,21 +99,26 @@ Lanes new in this release, all passing on that run:
 - **A referenced session.** A fresh ask with `--reference-session` answered with a code that existed only in the earlier session's journal, read through Kimi's own Read. The same reference on a `--network` call read the journal through the added read root, while a Read of that session's `state.json` was denied.
 - **FetchURL.** On a `--network` call a public page came back and a loopback URL was denied. FetchURL has a local fetcher behind Kimi's hosted fetch service, and the tool result does not say which one answered.
 - **`setup --install-kimi`** installed 2.8.0 into the smoke's own data root and an ask ran that binary.
+- **`WaitFor`.** Under `ask` it returned at once with nothing to wait for. Under `rescue` it waited on a background test run that the same turn had started, named no task, and ended on that task finishing with exit code 0; nothing stopped the task. Under `pursue` it ran and the goal completed. In each lane a second, recording hook saw the `WaitFor` call's own id, and the managed hook denied another call in the same run.
 
 The bounded-swarm lanes now follow the release table, so they ran on 2.8.0.
 
 **WebSearch and FetchURL on the owner's own Kimi setup.** With the owner's explicit authorization for this run, those two lanes alone ran on exact 2.8.0 seeded from the owner's Kimi home: the config copied into a temporary home, the token stores linked and never copied, no API key, no model override. **2 pass / 0 fail / 17 assertions** (`smoke-subscription-web-03.log`). WebSearch returned real results on the `--network` turn and was denied, naming `--network`, without it. FetchURL returned the public page and the loopback URL was denied. The plugin's credential-safe inventory lists a Magpie-routed model as the fresh-session default; the stream does not name the model that answered, so that route is read from the default and was not observed. Upstream resolves a search provider from a services entry, then the model provider's search URL, then the managed login; which of them served the search was not determined, and the config was not read to find out.
 
+Those two lanes ran on the tree before `WaitFor` was allowed and were not run again on the owner's login. That change does not touch the web tools.
+
+**A failed run.** The full smoke before the final one (`smoke-final-03.log`) failed one lane, 49 pass / 3 skip / 1 fail. In the directed bounded-swarm write lane the coordinator wrote a report file of its own. The children had done every assigned edit, but the shared evidence check refused any coordinator write, where the lane's instruction forbids only writing a target. The check now refuses a coordinator write to a target and has a unit test for both cases. That lane had passed on the two full runs before it.
+
 **Disclosure.** Earlier in this certification a full smoke was started on the personal seed route without authorization. It was stopped and its temporary home removed, links first. Its log is kept as `smoke-01-ABORTED-personal-seed-route-not-evidence.log`; none of its results count.
 
 ## Certification validation
 
-Final gates on the release tree, run once each after the last runtime edit:
+Final gates, each run after the last runtime edit; the full check, the package gates and the smoke ran on the final tree:
 
-- Mechanized scan, exact 2.8.0: 164 pass / 0 skip / 0 fail / 1,473 assertions. Exact 2.7.3 regression: 164 / 0 / 0 / 1,360.
-- Deterministic stock-binary suite on exact 2.8.0: 23 pass / 138 assertions in 644.98 seconds.
+- Mechanized scan, exact 2.8.0: 216 pass / 0 skip / 0 fail / 1,863 assertions. Exact 2.7.3 regression: 216 / 0 / 0 / 1,724.
+- Deterministic stock-binary suite on exact 2.8.0: 23 pass / 138 assertions in 616.84 seconds.
 - Real-provider smoke on exact 2.8.0: the numbers above.
-- `bun run check`: **2,742 pass / 222 skip / 0 fail / 28,133 assertions across 117 files in 724.66 seconds**, with the generated-surface and drift gates.
+- `bun run check`: **2,746 pass / 277 skip / 0 fail / 28,779 assertions across 117 files in 724.16 seconds**, with the generated-surface and drift gates.
 - `bun run check:package`: verified `kimi-plugin-cc@3.1.0`, 351 files, all three compiled distributions, isolated hook setup and check, unsupported-version refusal, and the patched DSH host with its seven providers.
 - `bun run check:consumer-security`: verified isolated npm consumer security for `kimi-plugin-cc@3.1.0`.
 
@@ -131,6 +139,22 @@ Not changed, and why:
 - A warning that first appears between planning and spawn is not reported; the spawn-time check only refuses.
 
 The fixes made after the second review were not reviewed a third time.
+
+**The `WaitFor` change had its own review.** It was decided after the two passes above. GPT Astra (through Codex) read it and reported 10 findings, five medium and five low. After those fixes Kimi read the result and reported four, one medium and three low. Accepted, each with a fix in this tree:
+
+- The contract said `WaitFor` writes nothing. Through 2.5.3 a wait also marks completion notices delivered and returns up to 32 KiB of task output. The contract now says what it does on each release, that its cap bounds the requested wait and not the whole call, and that swarm members appear in task history.
+- The scan's census missed a call made through a helper's parameter and did not say which sources had been read. It now covers that call and pins the five distinct tool sources by hash.
+- The live lanes could pass if Kimi skipped the hook for this one tool, or with the managed hook dead. Each lane now has the recording hook and a call the managed hook denies in the same run. The rescue lane ties the wait to the Bash call that started the task and requires that no task was named, which the tool answers with `no_tasks` unless one was running.
+- The escape monitor accepted upstream's old handoff text on every release. It now accepts it only before 2.6.0 or when the version is unknown, and the documents describe the handoff step as it is: every call attempted in the step after a twelfth identical call, not the twelfth call's own result.
+- The setup notice and one changelog line said the hook denies tools it allows.
+
+Not changed, and why:
+
+- `TaskOutput` and `WaitFor` read the session's task history and are not confined by `--read-root` or `--network`. A session the user continued outside the plugin can hold task output, and through 2.5.3 a wait there marks a notice delivered. `TaskOutput` already read that output before this release; refusing both tools on scoped calls is a separate decision.
+- The task-service methods behind the tool are not pinned on older rows. They were read at 2.5.3 and 2.8.0.
+- `WaitFor` is allowed on unlisted releases too, like every other name on the read-only list.
+
+The fixes made after Kimi's pass, which are test and document changes, were not reviewed again.
 
 ## Residual boundaries
 
