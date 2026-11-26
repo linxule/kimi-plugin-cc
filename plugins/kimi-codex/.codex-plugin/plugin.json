@@ -1,6 +1,6 @@
 {
   "name": "kimi",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Universal Kimi Code connector for Codex: 4-tool MCP (kimi_read, kimi_write, kimi_job, kimi_setup), progressive kimi skill, and canonical PreToolUse safety hook.",
   "author": {
     "name": "linxule"

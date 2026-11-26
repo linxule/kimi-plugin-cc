@@ -2,6 +2,20 @@
 
 Release notes for notable plugin changes. Published tags and GitHub Releases never change.
 
+## 3.1.1 — 2026-11-26
+
+Fixes what a host reports when a leftover `KIMI_PLUGIN_CC_DATA` override points it away from the shared hook. Certified Kimi Code versions and hook policy are unchanged.
+
+### Fixed
+
+- A host that has `KIMI_PLUGIN_CC_DATA` set while the shared block points at the default hook now names the override as the cause. This happens when a 3.0 per-host value is left behind, for example in the `env` block of `~/.claude/settings.json`. `setup --check`, the launch warning and the refusal tell you to unset the variable and restart the host. They no longer tell you to re-pin, which would point the one shared block at a single host's directory. The refusal carries `retryable_after_setup: false`, so agents do not run setup and retry. Verification is unchanged and still fails closed.
+- The ordinary hook-path drift message no longer says the install path is version-stamped.
+
+### Changed
+
+- `docs/migration.md` now starts with removing any `KIMI_PLUGIN_CC_DATA` override before you upgrade.
+- `docs/upstream-2.8.0-certification.md` separates the gates run before the 3.1.0 host collapse from the gates run on the published 3.1.0 tree and on this release.
+
 ## 3.1.0 — 2026-11-26
 
 Certifies exact kimi-code `2.8.0` for all 7 model operations under a new rolling `>= 2.8.0` compatibility window, collapses all host interfaces onto 4 MCP tools plus `SEP-2640` skill discovery and 5 primary CLI subcommands, unifies all hosts on one canonical shared data directory and one bundled PreToolUse hook, and adds universal packaging across Claude Code, Codex, Antigravity, DeepSeek Harness, and Magpie. Certification evidence: [docs/upstream-2.8.0-certification.md](./docs/upstream-2.8.0-certification.md). Upgrade steps: [docs/migration.md](./docs/migration.md#upgrading-from-30-to-31).

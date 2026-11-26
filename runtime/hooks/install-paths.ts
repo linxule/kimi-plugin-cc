@@ -244,7 +244,6 @@ function defaultSameFile(a: string, b: string): boolean {
 export function resolveDefaultCanonicalHookScriptPath(env: NodeJS.ProcessEnv): string | undefined {
   const baseEnv: NodeJS.ProcessEnv = { ...env };
   delete baseEnv.KIMI_PLUGIN_CC_DATA;
-  delete baseEnv.KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA;
   try {
     return path.join(resolvePluginDataRoot(baseEnv), "kimi-plugin-cc", "hook", "approval-hook.js");
   } catch {

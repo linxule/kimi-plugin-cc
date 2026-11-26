@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Universal Kimi Code connector for Claude Code: 4-tool MCP, progressive kimi skill, and canonical PreToolUse safety hook.",
-    "version": "3.1.0"
+    "version": "3.1.1"
   },
   "plugins": [
     {

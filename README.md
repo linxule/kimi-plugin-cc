@@ -119,7 +119,7 @@ Run `/path/to/kimi-plugin-cc/scripts/companion.sh setup` and `setup --check` onc
 You can also install [`kimi-plugin-cc` from npm](https://www.npmjs.com/package/kimi-plugin-cc) into a dedicated package directory. Keep that directory separate from `~/.local/share/kimi-plugin-cc`, which stores shared runtime data:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.0
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -190,7 +190,7 @@ To keep all 7 operations working on a certified binary across every host, run `k
 
 All 5 hosts share one data directory (`<data-dir>`) and one bundled PreToolUse safety hook at `<data-dir>/hook/approval-hook.js`. The default data directory is `~/.local/share/kimi-plugin-cc` (or `$XDG_DATA_HOME/kimi-plugin-cc`) on macOS and Linux, and `%LOCALAPPDATA%\kimi-plugin-cc` on Windows. You can override the base directory with `KIMI_PLUGIN_CC_DATA` so data lives in `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc`.
 
-Running `setup` once publishes the bundled hook and writes one `# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===` block in `~/.kimi-code/config.toml`. It also replaces any older `:<host-id>` blocks from version 3.0. Hosts that use the same Node binary need only one setup run. If your hosts use different Node paths, point them to the same binary with `KIMI_PLUGIN_CC_NODE_BIN`.
+Running `setup` once publishes the bundled hook and writes one `# === BEGIN kimi-plugin-cc-managed (v3.1.1) ===` block in `~/.kimi-code/config.toml`. It also replaces any older `:<host-id>` blocks from version 3.0. Hosts that use the same Node binary need only one setup run. If your hosts use different Node paths, point them to the same binary with `KIMI_PLUGIN_CC_NODE_BIN`.
 
 ## Manage sessions, models, and jobs
 
@@ -326,7 +326,7 @@ magpie library mcp add kimi /path/to/kimi-plugin-cc/scripts/companion.sh mcp age
 你也可以从 npm 安装 [`kimi-plugin-cc` 包](https://www.npmjs.com/package/kimi-plugin-cc) 到单独的包目录中。请将该目录与存放共享运行时数据的 `~/.local/share/kimi-plugin-cc` 分开：
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.0
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -397,7 +397,7 @@ Kimi 会收到每个会话主日志的路径，并按需读取内容。当你设
 
 全部 5 个宿主共享同一个数据目录（`<data-dir>`）和位于 `<data-dir>/hook/approval-hook.js` 的单一打包 PreToolUse 安全钩子。默认数据目录在 macOS 和 Linux 上为 `~/.local/share/kimi-plugin-cc`（或 `$XDG_DATA_HOME/kimi-plugin-cc`），在 Windows 上为 `%LOCALAPPDATA%\kimi-plugin-cc`。你可以用 `KIMI_PLUGIN_CC_DATA` 覆盖父级基础目录，使数据存放在 `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc` 下。
 
-运行一次 `setup` 即可发布打包好的安全钩子，并在 `~/.kimi-code/config.toml` 中写入单一的 `# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===` 配置块，同时自动合并 3.0 版本遗留的 `:<host-id>` 配置块。共享同一个 Node 二进制文件的宿主只需运行一次 `setup`。如果不同宿主解析到不同的 Node 路径，请通过 `KIMI_PLUGIN_CC_NODE_BIN` 将它们指向同一个 Node 可执行文件。
+运行一次 `setup` 即可发布打包好的安全钩子，并在 `~/.kimi-code/config.toml` 中写入单一的 `# === BEGIN kimi-plugin-cc-managed (v3.1.1) ===` 配置块，同时自动合并 3.0 版本遗留的 `:<host-id>` 配置块。共享同一个 Node 二进制文件的宿主只需运行一次 `setup`。如果不同宿主解析到不同的 Node 路径，请通过 `KIMI_PLUGIN_CC_NODE_BIN` 将它们指向同一个 Node 可执行文件。
 
 ## 管理会话、模型和任务
 
@@ -533,7 +533,7 @@ Exécutez ensuite `/path/to/kimi-plugin-cc/scripts/companion.sh setup` et `setup
 Vous pouvez aussi installer [`kimi-plugin-cc` depuis npm](https://www.npmjs.com/package/kimi-plugin-cc) dans un répertoire de paquet dédié. Gardez ce répertoire séparé de `~/.local/share/kimi-plugin-cc`, qui stocke les données d'exécution partagées :
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.0
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -604,7 +604,7 @@ Pour conserver les 7 opérations sur un binaire certifié partagé par tous les 
 
 Les 5 hôtes partagent un seul répertoire de données (`<data-dir>`) et un seul hook de sécurité PreToolUse empaqueté dans `<data-dir>/hook/approval-hook.js`. Le répertoire de données par défaut est `~/.local/share/kimi-plugin-cc` (ou `$XDG_DATA_HOME/kimi-plugin-cc`) sous macOS et Linux, et `%LOCALAPPDATA%\kimi-plugin-cc` sous Windows. Vous pouvez remplacer le répertoire parent avec `KIMI_PLUGIN_CC_DATA` pour stocker les données dans `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc`.
 
-Exécuter `setup` une seule fois publie le hook empaqueté et écrit un bloc unique `# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===` dans `~/.kimi-code/config.toml`. Cette commande remplace aussi automatiquement les anciens blocs `:<host-id>` de la version 3.0. Les hôtes qui partagent le même binaire Node n'ont besoin que d'une seule exécution de `setup`. Si vos hôtes utilisent des chemins Node différents, pointez-les vers le même binaire avec `KIMI_PLUGIN_CC_NODE_BIN`.
+Exécuter `setup` une seule fois publie le hook empaqueté et écrit un bloc unique `# === BEGIN kimi-plugin-cc-managed (v3.1.1) ===` dans `~/.kimi-code/config.toml`. Cette commande remplace aussi automatiquement les anciens blocs `:<host-id>` de la version 3.0. Les hôtes qui partagent le même binaire Node n'ont besoin que d'une seule exécution de `setup`. Si vos hôtes utilisent des chemins Node différents, pointez-les vers le même binaire avec `KIMI_PLUGIN_CC_NODE_BIN`.
 
 ## Gérer les sessions, les modèles et les tâches
 
@@ -740,7 +740,7 @@ magpie library mcp add kimi /path/to/kimi-plugin-cc/scripts/companion.sh mcp age
 専用のパッケージディレクトリに [npm から `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc) をインストールすることもできます。共有ランタイムデータを保存する `~/.local/share/kimi-plugin-cc` とは別のディレクトリを指定してください：
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.0
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -811,7 +811,7 @@ Kimi は各セッションのメインログへのパスを受け取り、必要
 
 全 5 ホストは、1 つのデータディレクトリ（`<data-dir>`）と `<data-dir>/hook/approval-hook.js` にある 1 つのバンドル済み PreToolUse 安全フックを共有します。既定のデータディレクトリは、macOS と Linux では `~/.local/share/kimi-plugin-cc`（または `$XDG_DATA_HOME/kimi-plugin-cc`）、Windows では `%LOCALAPPDATA%\kimi-plugin-cc` です。親ディレクトリを `KIMI_PLUGIN_CC_DATA` で上書きすると、データは `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc` に保存されます。
 
-`setup` を 1 回実行すると、バンドル済みフックが配置され、`~/.kimi-code/config.toml` に単一の `# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===` ブロックが書き込まれます。バージョン 3.0 の古い `:<host-id>` ブロックも自動的に統合されます。同じ Node バイナリを使うホスト間では、`setup` の実行は 1 回だけで十分です。ホストごとに異なる Node パスが解決される場合は、`KIMI_PLUGIN_CC_NODE_BIN` で同じ Node バイナリを指定してください。
+`setup` を 1 回実行すると、バンドル済みフックが配置され、`~/.kimi-code/config.toml` に単一の `# === BEGIN kimi-plugin-cc-managed (v3.1.1) ===` ブロックが書き込まれます。バージョン 3.0 の古い `:<host-id>` ブロックも自動的に統合されます。同じ Node バイナリを使うホスト間では、`setup` の実行は 1 回だけで十分です。ホストごとに異なる Node パスが解決される場合は、`KIMI_PLUGIN_CC_NODE_BIN` で同じ Node バイナリを指定してください。
 
 ## セッション、モデル、ジョブを管理する
 
