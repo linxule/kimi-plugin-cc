@@ -176,14 +176,7 @@ async function withFixture(
 }
 
 async function withBoundedFixture(run: (fixture: Fixture) => Promise<void>): Promise<void> {
-  const matrix = NATIVE_V2_CERTIFIED as Map<KimiOperationKind, readonly string[]>;
-  const previous = matrix.get("swarm")!;
-  matrix.set("swarm", [...new Set([...previous, "2.6.2"])]);
-  try {
-    await withFixture("ws-success", run);
-  } finally {
-    matrix.set("swarm", previous);
-  }
+  await withFixture("ws-success", run);
 }
 
 function makePlan(
@@ -215,7 +208,7 @@ function makeOptions(
     prefixArgs: [mockWebPath],
     executionPlan: makePlan(fixture, commandLabel),
     commandLabel,
-    expectedVersion: "2.3.2",
+    expectedVersion: "2.8.0",
     ...overrides,
   };
 }
@@ -303,20 +296,8 @@ describe("requiresSwarmPreactivation", () => {
   });
 
   test("matches only exact upstream versions with reviewed activation", () => {
-    expect(requiresSwarmPreactivation("2.3.2")).toBe(true);
-    expect(requiresSwarmPreactivation("2.3.3")).toBe(true);
-    expect(requiresSwarmPreactivation("2.4.0")).toBe(true);
-    expect(requiresSwarmPreactivation("2.4.1")).toBe(true);
-    expect(requiresSwarmPreactivation("2.5.0")).toBe(true);
-    expect(requiresSwarmPreactivation("2.5.1")).toBe(true);
-    expect(requiresSwarmPreactivation("2.5.2")).toBe(true);
-    expect(requiresSwarmPreactivation("2.5.3")).toBe(true);
-    expect(requiresSwarmPreactivation("2.6.0")).toBe(true);
-    expect(requiresSwarmPreactivation("2.6.2")).toBe(true);
-    expect(requiresSwarmPreactivation("2.6.3")).toBe(true);
-    expect(requiresSwarmPreactivation("2.7.2")).toBe(true);
-    expect(requiresSwarmPreactivation("2.7.3")).toBe(true);
-    for (const version of [null, "2.3.1", "2.3.4", "2.4.2", "2.5.4", "2.6.1", "2.6.4", "2.7.0", "2.7.1", "2.7.4", "2.7", "2.7.x", ">=2.7.2", "2.7.2-rc.1", "2.7.2+local", "2.5.2-beta.1", "2.4.0-beta.1", "2.5.0-beta.1", "2.3.3-beta.1", "v2.3.2", "2.3.2-beta.1", "kimi-code 2.3.2"]) {
+    expect(requiresSwarmPreactivation("2.8.0")).toBe(true);
+    for (const version of [null, "2.3.2", "2.5.3", "2.6.0", "2.6.2", "2.7.2", "2.7.3", "2.8.1", "2.8", "2.8.x", ">=2.8.0", "2.8.0-rc.1", "2.8.0+local", "v2.8.0", "kimi-code 2.8.0"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
   });
@@ -369,8 +350,8 @@ describe("swarm web lifecycle", () => {
       expect(requests(activationLog).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
         "GET /api/v1/meta",
         "POST /api/v1/sessions",
+        "GET /api/v1/sessions/session_mock/environment",
         "POST /api/v1/sessions/session_mock/profile",
-        "GET /api/v1/sessions/session_mock/status",
         "POST /api/v1/shutdown",
       ]);
       const profile = requests(activationLog).find((entry) => entry.path?.endsWith("/profile"));
@@ -379,7 +360,7 @@ describe("swarm web lifecycle", () => {
       });
       const spawn = spawns(activationLog)[0]!;
       expect(spawn.argv).toEqual([
-        "web", "--no-open", "--host", "127.0.0.1", "--port", "0", "--log-level", "error",
+        "web", "--json", "--host", "127.0.0.1", "--port", "0", "--log-level", "error",
       ]);
       expect(spawn.env).toMatchObject({
         KIMI_CODE_HOME: fixture.home,
@@ -398,11 +379,11 @@ describe("swarm web lifecycle", () => {
       expect(spawns(fullLog)[1]?.env).toEqual(spawn.env);
       expect(requests(fullLog).slice(5).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
         "GET /api/v1/meta",
+        "GET /api/v1/sessions/session_mock/environment",
         "POST /api/v1/sessions/session_mock/profile",
-        "GET /api/v1/sessions/session_mock/status",
         "POST /api/v1/shutdown",
       ]);
-      expect(requests(fullLog).at(-3)?.body).toEqual({
+      expect(requests(fullLog).at(-2)?.body).toEqual({
         agent_config: { swarm_mode: false, permission_mode: "auto" },
       });
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
@@ -486,59 +467,24 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test("text ready parsing skips lines without the server prefix", async () => {
-    await withFixture("success", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_READY_PRELUDE = "starting up\n\n{\"origin\":\"noise\"}\n";
-      const options = makeOptions(fixture);
-      const identity = await preactivateSwarmSession(options);
-      expect(identity.sessionId).toBe("session_mock");
-      expect(requests(await readLog(fixture))[0]?.path).toBe("/api/v1/meta");
-      await deactivateSwarmSession({ ...options, ...identity });
-    });
-  }, 15_000);
-
-  test.each([
-    "text-origin-host-ready",
-    "text-origin-port-ready",
-    "text-origin-credentials-ready",
-    "text-origin-scheme-ready",
-    "text-origin-path-ready",
-    "text-origin-query-ready",
-  ])("rejects a non-loopback-root text ready URL before any REST call: %s", async (scenario) => {
-    await withFixture(scenario, async (fixture) => {
-      let caught: unknown;
-      try {
-        await preactivateSwarmSession(makeOptions(fixture));
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught).toBeInstanceOf(RuntimeError);
-      expect((caught as RuntimeError).code).toBe("SWARM_ACTIVATION_FAILED");
-      expect((caught as RuntimeError).stage).toBe("swarm-activation.ready");
-      expect((caught as RuntimeError).message)
-        .toBe("The Kimi web ready line was not an authenticated loopback URL in the expected format.");
-      expect(requests(await readLog(fixture))).toEqual([]);
-    });
-  }, 15_000);
-
-  test("exact 2.7.2 JSON ready parsing skips blank lines", async () => {
+  test("exact 2.8.0 JSON ready parsing skips blank lines", async () => {
     await withFixture("ws-success", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       fixture.env.MOCK_KIMI_WEB_READY_PRELUDE = "\n   \n";
-      const options = makeOptions(fixture, { expectedVersion: "2.7.2", model: "chosen-model" });
+      const options = makeOptions(fixture, { expectedVersion: "2.8.0", model: "chosen-model" });
       const identity = await preactivateSwarmSession(options);
       expect(identity.sessionId).toBe("session_mock");
       await deactivateSwarmSession({ ...options, ...identity });
     });
   }, 15_000);
 
-  test("exact 2.7.2 JSON ready parsing rejects the first non-blank non-JSON line", async () => {
+  test("exact 2.8.0 JSON ready parsing rejects the first non-blank non-JSON line", async () => {
     await withFixture("ws-success", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       fixture.env.MOCK_KIMI_WEB_READY_PRELUDE = "starting up\n";
       let caught: unknown;
       try {
-        await preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }));
+        await preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.8.0" }));
       } catch (error) {
         caught = error;
       }
@@ -550,10 +496,10 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test("exact 2.7.2 rejects a token-less JSON ready line before any REST call", async () => {
+  test("exact 2.8.0 rejects a token-less JSON ready line before any REST call", async () => {
     await withFixture("json-tokenless-ready", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
-      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }))).rejects.toMatchObject({
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
+      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.8.0" }))).rejects.toMatchObject({
         code: "SWARM_ACTIVATION_FAILED",
         stage: "swarm-activation.ready",
       });
@@ -576,10 +522,10 @@ describe("swarm web lifecycle", () => {
     "json-origin-fragment-ready",
     "json-ws-path-ready",
     "json-ws-query-ready",
-  ])("exact 2.7.2 rejects an invalid JSON ready line before any REST call: %s", async (scenario) => {
+  ])("exact 2.8.0 rejects an invalid JSON ready line before any REST call: %s", async (scenario) => {
     await withFixture(scenario, async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
-      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }))).rejects.toMatchObject({
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
+      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.8.0" }))).rejects.toMatchObject({
         code: "SWARM_ACTIVATION_FAILED",
         stage: "swarm-activation.ready",
       });
@@ -589,12 +535,12 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test("exact 2.7.2 JSON ready failures never expose the token", async () => {
+  test("exact 2.8.0 JSON ready failures never expose the token", async () => {
     await withFixture("json-mismatched-ready", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       let caught: unknown;
       try {
-        await preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }));
+        await preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.8.0" }));
       } catch (error) {
         caught = error;
       }
@@ -607,22 +553,6 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["meta-version-mismatch", "meta-backend-mismatch", "dangerous-auth"])(
-    "refuses unsafe or inexact /meta: %s",
-    async (scenario) => {
-      await withFixture(scenario, async (fixture) => {
-        await expect(preactivateSwarmSession(makeOptions(fixture))).rejects.toMatchObject({
-          code: "SWARM_ACTIVATION_FAILED",
-          stage: "swarm-activation.meta",
-        });
-        const log = await readLog(fixture);
-        expect(requests(log).map((entry) => entry.path)).toEqual(["/api/v1/meta"]);
-        expect(spawns(log)).toHaveLength(1);
-      });
-    },
-    15_000,
-  );
-
   test.each([
     "meta-version-mismatch",
     "dangerous-auth",
@@ -631,10 +561,10 @@ describe("swarm web lifecycle", () => {
     "meta-websocket-missing",
     "meta-websocket-mismatch",
     "meta-unexpected-backend",
-  ])("exact 2.7.2 refuses unsafe or inexact KAP /meta: %s", async (scenario) => {
+  ])("exact 2.8.0 refuses unsafe or inexact KAP /meta: %s", async (scenario) => {
     await withFixture(scenario, async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.7.2";
-      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.7.2" }))).rejects.toMatchObject({
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
+      await expect(preactivateSwarmSession(makeOptions(fixture, { expectedVersion: "2.8.0" }))).rejects.toMatchObject({
         code: "SWARM_ACTIVATION_FAILED",
         stage: "swarm-activation.meta",
       });
@@ -659,7 +589,7 @@ describe("swarm web lifecycle", () => {
         await deactivateSwarmSession({ ...options, ...identity });
         const log = await readLog(fixture);
         expect(spawns(log)).toHaveLength(2);
-        expect(requests(log).at(-3)?.body.agent_config.swarm_mode).toBe(false);
+        expect(requests(log).at(-2)?.body.agent_config.swarm_mode).toBe(false);
         expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
       });
     },
@@ -703,7 +633,7 @@ describe("swarm web lifecycle", () => {
       await deactivateSwarmSession({ ...options, ...identity });
       const log = await readLog(fixture);
       expect(spawns(log)).toHaveLength(2);
-      expect(requests(log).at(-3)?.body.agent_config.swarm_mode).toBe(false);
+      expect(requests(log).at(-2)?.body.agent_config.swarm_mode).toBe(false);
     });
   }, 15_000);
 
@@ -1005,12 +935,12 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test("bounded 2.6.2 installs the native TaskStop restriction after web settlement", async () => {
+  test("bounded 2.8.0 installs the native TaskStop restriction after web settlement", async () => {
     await withBoundedFixture(async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       const options = makeOptions(fixture, {
-        expectedVersion: "2.6.2",
-        executionPlan: { ...makePlan(fixture, "swarm"), kimiVersion: "2.6.2", certification: "certified" },
+        expectedVersion: "2.8.0",
+        executionPlan: { ...makePlan(fixture, "swarm"), kimiVersion: "2.8.0", certification: "certified" },
         swarmMaxConcurrency: 2,
         model: "chosen-model",
       });
@@ -1027,9 +957,9 @@ describe("swarm web lifecycle", () => {
     });
   }, 20_000);
 
-  test("bounded 2.6.2 refuses unexpected native policy and preserves activation cleanup identity", async () => {
+  test("bounded 2.8.0 refuses unexpected native policy and preserves activation cleanup identity", async () => {
     await withBoundedFixture(async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       const identity = { sessionId: "session_mock", workspaceId: "wd_mock" };
       const policyDir = path.join(fixture.home, "sessions", identity.workspaceId, identity.sessionId, "tool-policy");
       await mkdir(policyDir, { recursive: true });
@@ -1037,8 +967,8 @@ describe("swarm web lifecycle", () => {
       const original = '{"disabledTools":["Read"]}\n';
       await writeFile(statePath, original);
       const options = makeOptions(fixture, {
-        expectedVersion: "2.6.2",
-        executionPlan: { ...makePlan(fixture, "swarm"), kimiVersion: "2.6.2", certification: "certified" },
+        expectedVersion: "2.8.0",
+        executionPlan: { ...makePlan(fixture, "swarm"), kimiVersion: "2.8.0", certification: "certified" },
         swarmMaxConcurrency: 2,
         model: "chosen-model",
       });
@@ -1058,17 +988,15 @@ describe("swarm web lifecycle", () => {
     });
   }, 20_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
+  test.each(["2.8.0"])("exact %s verifies activation and deactivation through authenticated agent state", async (version) => {
     await withFixture("ws-success", async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_VERSION = version;
       const options = makeOptions(fixture, { expectedVersion: version, model: "chosen-model" });
       const identity = await preactivateSwarmSession(options);
       const activationLog = await readLog(fixture);
-      if (["2.7.2", "2.7.3", "2.8.0"].includes(version)) {
-        expect(spawns(activationLog)[0]?.argv).toEqual([
-          "web", "--json", "--host", "127.0.0.1", "--port", "0", "--log-level", "error",
-        ]);
-      }
+      expect(spawns(activationLog)[0]?.argv).toEqual([
+        "web", "--json", "--host", "127.0.0.1", "--port", "0", "--log-level", "error",
+      ]);
       expect(requests(activationLog).map((entry) => `${entry.method} ${entry.path}`)).toEqual([
         "GET /api/v1/meta",
         "POST /api/v1/sessions",
@@ -1082,19 +1010,12 @@ describe("swarm web lifecycle", () => {
         environment_cwd: fixture.cwd,
       });
       const control = activationLog.filter((entry) => entry.kind === "ws-message");
-      expect(control.map((entry) => entry.frame.type)).toEqual(
-        ["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version) ? ["subscribe"] : ["client_hello", "subscribe_v2"],
-      );
-      if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version)) {
-        expect(control[0]?.frame).toMatchObject({
-          session_id: "session_mock",
-          agent_ids: ["main"],
-        });
-        expect(control[0]?.frame.request_id).toEqual(expect.any(String));
-      } else {
-        expect(control.find((entry) => entry.frame.type === "subscribe_v2")?.frame.payload)
-          .toEqual({ session_id: "session_mock", transcript: { main: "block" } });
-      }
+      expect(control.map((entry) => entry.frame.type)).toEqual(["subscribe"]);
+      expect(control[0]?.frame).toMatchObject({
+        session_id: "session_mock",
+        agent_ids: ["main"],
+      });
+      expect(control[0]?.frame.request_id).toEqual(expect.any(String));
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.enter" });
 
       await deactivateSwarmSession({ ...options, ...identity });
@@ -1106,63 +1027,12 @@ describe("swarm web lifecycle", () => {
         "POST /api/v1/shutdown",
       ]);
       expect(requests(fullLog).some((entry) => entry.path?.endsWith("/status"))).toBe(false);
-      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version) ? 2 : 4);
+      expect(fullLog.filter((entry) => entry.kind === "ws-message")).toHaveLength(2);
       expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
     });
   }, 15_000);
 
-  test.each([
-    "ws-auth-reject",
-    "ws-server-version",
-    "ws-hello-reject",
-    "ws-subscription-reject",
-    "ws-unacknowledged-state",
-    "ws-wrong-session",
-    "ws-wrong-agent",
-    "ws-malformed-json",
-    "ws-malformed-state",
-    "ws-swarm-mismatch",
-    "ws-plan-mismatch",
-    "ws-permission-mismatch",
-    "ws-model-mismatch",
-    "ws-tower-mismatch",
-    "ws-contradictory-state",
-    "ws-missing-model",
-    "ws-missing-permission",
-    "ws-wrong-hello-id",
-    "ws-wrong-subscribe-id",
-    "ws-no-server-hello",
-    "ws-missing-ack",
-    "ws-oversize-frame",
-    "ws-close-timeout",
-    "ws-close-before-ack",
-  ])("exact 2.5.0 refuses invalid agent-state proof and preserves cleanup: %s", async (scenario) => {
-    await withFixture(scenario, async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
-      const options = makeOptions(fixture, { expectedVersion: "2.5.0", model: "chosen-model" });
-      const identity = { sessionId: "session_mock", workspaceId: "wd_mock" };
-      const originalWebSocket = scenario === "ws-close-timeout" ? globalThis.WebSocket : undefined;
-      if (originalWebSocket !== undefined) {
-        globalThis.WebSocket = CloseTimeoutWebSocket as unknown as typeof WebSocket;
-      }
-      try {
-        await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
-          code: "SWARM_ACTIVATION_FAILED",
-          stage: "swarm-activation.status",
-          ...(scenario === "ws-close-timeout" ? { message: "Kimi web agent-state verification timed out." } : {}),
-          details: { session_id: identity.sessionId, workspace_id: identity.workspaceId },
-        });
-      } finally {
-        if (originalWebSocket !== undefined) globalThis.WebSocket = originalWebSocket;
-      }
-      expect(spawns(await readLog(fixture))).toHaveLength(1);
-      fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-success";
-      await deactivateSwarmSession({ ...options, ...identity });
-      expect((await readJournal(fixture, identity)).at(-1)).toMatchObject({ type: "swarm_mode.exit" });
-    });
-  }, 15_000);
-
-  test.each(["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].flatMap((version) => [
+  test.each(["2.8.0"].flatMap((version) => [
     "ws-auth-reject",
     "ws-subscription-reject",
     "ws-unacknowledged-state",
@@ -1209,7 +1079,7 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].flatMap((version) =>
+  test.each(["2.8.0"].flatMap((version) =>
     ["ws-environment-remote", "ws-environment-workspace", "ws-environment-cwd"].map((scenario) => [version, scenario] as const)))(
     "exact %s rejects an invalid local binding before profile mutation: %s",
     async (version, scenario) => {
@@ -1226,10 +1096,10 @@ describe("swarm web lifecycle", () => {
     15_000,
   );
 
-  test("exact 2.5.0 rejects an invalid local binding before deactivation mutation", async () => {
+  test("exact 2.8.0 rejects an invalid local binding before deactivation mutation", async () => {
     await withFixture("ws-success", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
-      const options = makeOptions(fixture, { expectedVersion: "2.5.0" });
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
+      const options = makeOptions(fixture, { expectedVersion: "2.8.0" });
       const identity = await preactivateSwarmSession(options);
       fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-environment-remote";
       await expect(deactivateSwarmSession({ ...options, ...identity })).rejects.toMatchObject({
@@ -1241,13 +1111,13 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test("exact 2.5.0 agent-state cancellation remains bounded and does not self-deactivate", async () => {
+  test("exact 2.8.0 agent-state cancellation remains bounded and does not self-deactivate", async () => {
     await withFixture("ws-no-state", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       const controller = new AbortController();
-      const options = makeOptions(fixture, { expectedVersion: "2.5.0", signal: controller.signal });
+      const options = makeOptions(fixture, { expectedVersion: "2.8.0", signal: controller.signal });
       const pending = preactivateSwarmSession(options);
-      await waitForLog(fixture, (entry) => entry.kind === "ws-message" && entry.frame.type === "subscribe_v2");
+      await waitForLog(fixture, (entry) => entry.kind === "ws-message" && entry.frame.type === "subscribe");
       controller.abort();
       await expect(pending).rejects.toMatchObject({
         code: "SWARM_ACTIVATION_FAILED",
@@ -1260,10 +1130,10 @@ describe("swarm web lifecycle", () => {
     });
   }, 15_000);
 
-  test("exact 2.5.0 deactivation refuses plan state after the swarm exit mutation", async () => {
+  test("exact 2.8.0 deactivation refuses plan state after the swarm exit mutation", async () => {
     await withFixture("ws-success", async (fixture) => {
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.5.0";
-      const options = makeOptions(fixture, { expectedVersion: "2.5.0" });
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
+      const options = makeOptions(fixture, { expectedVersion: "2.8.0" });
       const identity = await preactivateSwarmSession(options);
       fixture.env.MOCK_KIMI_WEB_SCENARIO = "ws-deactivation-plan-mismatch";
       await expect(deactivateSwarmSession({ ...options, ...identity })).rejects.toMatchObject({
@@ -1279,10 +1149,10 @@ describe("swarm web lifecycle", () => {
       const options = makeOptions(fixture, {
         executionPlan: {
           ...makePlan(fixture, "swarm"),
-          kimiVersion: "2.3.1",
+          kimiVersion: "2.8.0",
           certification: "certified",
         },
-        expectedVersion: "2.3.2",
+        expectedVersion: "2.8.1",
       });
       await expect(preactivateSwarmSession(options)).rejects.toMatchObject({
         code: "SWARM_ACTIVATION_FAILED",

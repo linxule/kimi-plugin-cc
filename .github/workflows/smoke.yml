@@ -1,18 +1,18 @@
 name: Real-binary smoke
 
-# The real-binary safety gate: spawns the ACTUAL `kimi -p` against a real
-# PreToolUse hook (with short-lived loopback web activation/deactivation on
-# versions that require it) and proves end-to-end that (1) read-only commands'
-# forced writes are denied, (2) autonomous goal mode (/kimi:pursue) is hook-gated
-# on EVERY continuation turn (zero files land across a multi-turn run), and (3)
-# distinct write-swarm children author edits only in the throwaway worktree
-# (user tree untouched) while out-of-root writes are denied (needs kimi >= 0.18.0).
+# The real-binary safety gate: spawns `kimi -p` against the bundled PreToolUse
+# hook (with short-lived loopback web activation and deactivation for parallel
+# swarms) and verifies end to end that (1) forced writes under read-only modes
+# are denied, (2) autonomous goal mode (`write --mode pursue` / `kimi_write`
+# `mode: "pursue"`) is hook-gated on every continuation turn, and (3) distinct
+# write-swarm children edit only inside the temporary worktree while out-of-root
+# writes are denied (requires certified kimi-code >= 2.8.0).
 # AgentSwarm call records, aggregate denials, or a coordinator patch alone do not
 # prove fan-out; swarm lanes require distinct child journals and assigned work.
 #
-# MANUAL-DISPATCH ONLY (no schedule) — a goal-mode + write-swarm run is a few
-# minutes of REAL model tokens (the model retries against the deny-wall for the
-# whole budget; write-swarm runs two real fan-outs), so this BILLS PER RUN.
+# Manual dispatch only (no schedule): a goal-mode and write-swarm run consumes a
+# few minutes of live model tokens because the model retries against denials and
+# write-swarm runs two parallel fan-outs.
 #
 # Local runs use authorized subscription or API authentication. The harness
 # copies selected seed-home files and symlinks OAuth credential stores when
@@ -20,23 +20,22 @@ name: Real-binary smoke
 # This optional Actions workflow remains manual and skips model calls unless
 # KIMI_MODEL_API_KEY is configured. Each run consumes model quota or API credit.
 #
-# Auth (only if you opt into CI) uses kimi-code's env-model channel (API key),
-# NOT the OAuth subscription — OAuth tokens expire and are brittle in CI. The key
-# lives in GitHub's ENCRYPTED SECRET STORE (Settings → Secrets), never in the
-# repo; the YAML below references only the secret NAME.
+# Auth in CI uses kimi-code's env-model channel (API key) rather than OAuth
+# tokens, which expire. Store the key in GitHub Actions encrypted secrets
+# (Settings -> Secrets and variables -> Actions), never in the repository.
 #
-# ── One-time setup (repo Settings → Secrets and variables → Actions) ──
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
 #   Secret  KIMI_MODEL_API_KEY   a pay-per-token API key (Moonshot / OpenAI / Anthropic)
-#   Secret  KIMI_MODEL_NAME      the model id to run (e.g. a kimi model)
-#   Variable (optional) KIMI_MODEL_PROVIDER_TYPE   one of: kimi | openai | anthropic  (default: kimi → api.moonshot.ai)
+#   Secret  KIMI_MODEL_NAME      the model id to run (for example a kimi model)
+#   Variable (optional) KIMI_MODEL_PROVIDER_TYPE   one of: kimi | openai | anthropic  (default: kimi -> api.moonshot.ai)
 #   Variable (optional) KIMI_MODEL_BASE_URL        override the provider base URL
-# This is a SEPARATE billing path from your kimi-code subscription. See docs/ci.md.
+# This is a separate billing path from your kimi-code subscription. See docs/ci.md.
 
 on:
   workflow_dispatch:
     inputs:
       kimi_version:
-        description: "Exact kimi-code version (default 2.8.0): native-v2 controls include resume/taint; 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 add bounded waves and single-worker swarm. 2.6.0 requires swarm refusals instead. Uncertified versions require the candidate seam; pinned <=0.41 runs legacy-v1 lanes."
+        description: "Exact kimi-code version (default 2.8.0, rolling floor >= 2.8.0): exact 2.8.0 runs all 7 operations including bounded-wave and single-worker swarm; unlisted 2.y.z > 2.8.0 requires the candidate certification seam for full-matrix checks."
         type: string
         default: "2.8.0"
       goal_budget_ms:
@@ -59,7 +58,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.5
 
       - name: Set up Node
         uses: actions/setup-node@v7

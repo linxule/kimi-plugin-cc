@@ -192,7 +192,7 @@ describe("classifyManagedCommandFailure", () => {
     expect(review.code).toBe("REVIEW_KIMI_MAX_STEPS_REACHED");
   });
 
-  test("ask, review, challenge, and review_gate default behavior is unchanged (preserveStage opt-in)", () => {
+  test("ask, review, and challenge default behavior is unchanged (preserveStage opt-in)", () => {
     const inner = new RuntimeError(
       "TIMEOUT",
       "initialize timed out.",
@@ -206,9 +206,6 @@ describe("classifyManagedCommandFailure", () => {
 
     const challengeResult = classifyManagedCommandFailure(inner, "challenge", "job-xyz");
     expect((challengeResult as RuntimeError).stage).toBe("challenge.runtime");
-
-    const gateResult = classifyManagedCommandFailure(inner, "review_gate", "job-xyz");
-    expect((gateResult as RuntimeError).stage).toBe("review_gate.runtime");
   });
 
   test("auth.login_required in the stderr tail maps to AUTH_UNAVAILABLE with a kimi-login next step", () => {
@@ -275,46 +272,46 @@ describe("summarizeKimiAvailabilityWarning", () => {
   test.each([
     {
       error: new Error("LLM is not set"),
-      expected: "Kimi review gate is not configured for model access; allowing stop.",
+      expected: "Kimi review is not configured for model access; allowing stop.",
     },
     {
       error: new RuntimeError(
         "CLI_NONZERO_EXIT",
         'kimi subprocess exited with code 1:\nerror: failed to run prompt: auth.login_required: OAuth provider "managed:kimi-code" requires login before it can be used.',
-        "review_gate.runtime",
+        "review.runtime",
       ),
-      expected: "Kimi review gate is not configured for model access; allowing stop.",
+      expected: "Kimi review is not configured for model access; allowing stop.",
     },
     {
       error: new RuntimeError("CLI_SPAWN_FAILED", "Failed to spawn kimi.", "cli-client.spawn"),
-      expected: "Kimi review gate could not find the Kimi CLI; allowing stop.",
+      expected: "Kimi review could not find the Kimi CLI; allowing stop.",
     },
     {
       error: new RuntimeError("CLI_NONZERO_EXIT", "exited", "cli-client.process"),
-      expected: "Kimi review gate could not start a usable Kimi subprocess; allowing stop.",
+      expected: "Kimi review could not start a usable Kimi subprocess; allowing stop.",
     },
     {
       error: new RuntimeError("STARTUP_TIMEOUT", "startup timed out", "cli-client.spawn"),
-      expected: "Kimi review gate did not respond during startup; allowing stop.",
+      expected: "Kimi review did not respond during startup; allowing stop.",
     },
     {
       error: new RuntimeError("INITIALIZE_TIMEOUT", "initialize timed out", "cli-client.initialize"),
-      expected: "Kimi review gate did not complete session initialization; allowing stop.",
+      expected: "Kimi review did not complete session initialization; allowing stop.",
     },
     {
       error: new RuntimeError("RESPONSE_TIMEOUT", "prompt timed out", "wire.prompt"),
-      expected: "Kimi review gate did not return a final response; allowing stop.",
+      expected: "Kimi review did not return a final response; allowing stop.",
     },
     {
       error: new RuntimeError("MAX_STEPS_REACHED", "max steps", "wire.prompt"),
-      expected: "Kimi review gate exhausted its step budget; allowing stop.",
+      expected: "Kimi review exhausted its step budget; allowing stop.",
     },
     {
       error: new Error("operation timed out"),
-      expected: "Kimi review gate timed out; allowing stop.",
+      expected: "Kimi review timed out; allowing stop.",
     },
   ])("returns an explicit warning for $expected", ({ error, expected }) => {
-    expect(summarizeKimiAvailabilityWarning(error, "review_gate")).toBe(expected);
+    expect(summarizeKimiAvailabilityWarning(error, "review")).toBe(expected);
   });
 });
 
@@ -341,7 +338,7 @@ test("source timeout advice is correct for consumers without managed-command con
   expect(source.nextStep).toContain("--budget <dur>");
   expect(source.nextStep).toContain("result <jobId>");
   expect(source.nextStep).not.toContain("--background");
-  for (const command of ["ask", "rescue", "review", "challenge", "review_gate"] as const) {
+  for (const command of ["ask", "rescue", "review", "challenge"] as const) {
     const classified = classifyManagedCommandFailure(error, command, "job") as RuntimeError;
     expect(classified.message).not.toContain("retry with --background");
     expect(classified.details.settled_post_abort).toBe(true);

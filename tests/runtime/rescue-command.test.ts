@@ -33,7 +33,7 @@ import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from 
 //   which puts it on the kimi env, which kimi forwards to the hook;
 //   the hook then routes to evaluateRescueHookRequest.
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 const RESCUE_SUCCESS_OUTPUT = [
   "Applied the requested change.",
   "",
@@ -72,7 +72,8 @@ function makeMockEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
@@ -130,11 +131,12 @@ describe("rescue command lifecycle", () => {
     const repoRoot = await createGitRepoFixture("rescue-preview-repo");
     const kimiHome = await createTestPluginDataRoot("rescue-preview-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "rescue-preview.jsonl");
-    const sessionId = "abababab-abab-4bab-8bab-abababababab";
+    const sessionId = "session_abababab-abab-4bab-8bab-abababababab";
     const env = {
       ...makeMockEnv(pluginDataRoot, "rescue-success", invocationPath),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+      KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1",
     };
     try {
       const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
@@ -159,11 +161,12 @@ describe("rescue command lifecycle", () => {
     const repoRoot = await createGitRepoFixture("rescue-foreground-repo");
     const kimiHome = await createTestPluginDataRoot("rescue-foreground-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "rescue-foreground.jsonl");
-    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const sessionId = "session_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const env = {
       ...makeMockEnv(pluginDataRoot, "rescue-success", invocationPath),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+      KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1",
     };
 
     try {

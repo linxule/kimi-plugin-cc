@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "kimi": {
+      "command": "${PLUGIN_ROOT}/scripts/companion.sh",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

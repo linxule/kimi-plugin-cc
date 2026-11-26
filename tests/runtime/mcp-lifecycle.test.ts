@@ -9,8 +9,8 @@ describe("MCP supervised job lifecycle", () => {
     try {
       client = await McpClient.modern(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Explain the job store" },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Explain the job store" },
         _meta: modernMeta(),
       });
       expect(started.resultType).toBe("task");
@@ -41,14 +41,14 @@ describe("MCP supervised job lifecycle", () => {
     }
   }, 60_000);
 
-  test("Codex ordinary start, workspace-free job control, and cancellation", async () => {
+  test("wait: false starts immediately with job_id and supports workspace-free kimi_job control", async () => {
     const fixture = await createMcpFixture("mcp-legacy-cancel", { delayMs: "30000" });
     let client: McpClient | undefined;
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Wait for cancellation", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Wait for cancellation", wait: false },
       });
       expect(started.resultType).toBeUndefined();
       expect(started.isError).toBe(false);
@@ -56,22 +56,22 @@ describe("MCP supervised job lifecycle", () => {
       const jobId = started.structuredContent.job_id as string;
 
       const status = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(status.structuredContent.status).toBe("running");
       expect(status.structuredContent.operation_kind).toBe("ask");
 
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(cancelled.isError).toBe(false);
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
 
       const result = await client.request("tools/call", {
-        name: "kimi_job_result",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "result", job_id: jobId },
       });
       expect(result.isError).toBe(true);
       expect(result.structuredContent.status).toBe("cancelled");
@@ -81,29 +81,61 @@ describe("MCP supervised job lifecycle", () => {
     }
   }, 60_000);
 
-  test("Codex ordinary start can return a settled artifact", async () => {
-    const fixture = await createMcpFixture("mcp-legacy-result", { delayMs: "100" });
+  test("wait: true default waits synchronously and returns the settled artifact directly", async () => {
+    const fixture = await createMcpFixture("mcp-legacy-sync", { delayMs: "200" });
     let client: McpClient | undefined;
     try {
       client = await McpClient.legacy(fixture);
-      const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Answer briefly", fresh: true },
+      const result = await client.request("tools/call", {
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Answer briefly" },
       });
-      const jobId = started.structuredContent.job_id as string;
-      let result: any;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        result = await client.request("tools/call", {
-          name: "kimi_job_result",
-          arguments: { job_id: jobId },
-        });
-        if (result.isError === false) break;
-        await Bun.sleep(100);
-      }
+      expect(result.resultType).toBeUndefined();
       expect(result.isError).toBe(false);
       expect(result.structuredContent.status).toBe("completed");
+      expect(result.structuredContent.operation_kind).toBe("ask");
       expect(result.content[0].text).toContain("Ask answer from mock Kimi.");
     } finally {
+      if (client) await client.close();
+      await fixture.cleanup();
+    }
+  }, 60_000);
+
+  test("wait_timeout_ms returns a running handle when exceeded while keeping the job alive", async () => {
+    const fixture = await createMcpFixture("mcp-legacy-wait-timeout", { delayMs: "30000" });
+    let client: McpClient | undefined;
+    let jobId: string | undefined;
+    try {
+      client = await McpClient.legacy(fixture);
+      const timedOut = await client.request("tools/call", {
+        name: "kimi_read",
+        arguments: {
+          workspace: fixture.repo,
+          mode: "ask",
+          prompt: "Exceed wait_timeout_ms",
+          wait_timeout_ms: 1_000,
+        },
+      });
+      expect(timedOut.isError).toBe(false);
+      expect(timedOut.structuredContent.status).toBe("running");
+      expect(timedOut.structuredContent.timed_out_waiting).toBe(true);
+      jobId = timedOut.structuredContent.job_id as string;
+      expect(jobId).toEqual(expect.any(String));
+
+      const cancelled = await client.request("tools/call", {
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
+      });
+      expect(cancelled.isError).toBe(false);
+      expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
+      jobId = undefined;
+    } finally {
+      if (client && jobId) {
+        await client.request("tools/call", {
+          name: "kimi_job",
+          arguments: { action: "cancel", job_id: jobId },
+        }).catch(() => undefined);
+      }
       if (client) await client.close();
       await fixture.cleanup();
     }

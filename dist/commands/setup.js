@@ -3,35 +3,23 @@ import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // Without it, `kimi -p` auto-approves tool calls, including from read-only
 // commands.
 //
-// Setup writes or refreshes a host-scoped BEGIN/END block containing the
-// canonical `'<absolute-node>' '<absolute-hook-script>'` command from
-// resolveNodeBinary/buildHookShellCommand. Both tokens are shell-quoted and the
-// absolute Node path avoids PATH dependence under sanitized launches. Setup
-// probes the hook directly with the Node binary parsed back from that command
-// and through `/bin/sh -c` using the exact installed command bytes. It also warns about broad permission
-// denies, repairs orphan marker comments, and refuses remaining
-// duplicate, orphaned, or malformed managed blocks.
-//
-// Subcommands: install (default), --check, --uninstall [--all],
-// --enable-review-gate/--disable-review-gate, and the explicit, network-using
-// --install-kimi [--json], which installs the highest certified kimi-code into
-// plugin data. Nothing else in setup or any job installs or downloads.
-//
-// Managed-block splicing is line-based and preserves user bytes outside owned
-// edits; whole-file validation and inline-hook normalization use the TOML parser.
+// Setup atomically publishes the bundled self-contained approval hook to
+// `<pluginRoot>/hook/approval-hook.js`, then writes or refreshes a single
+// canonical BEGIN/END block in ~/.kimi-code/config.toml containing
+// `'<absolute-node>' '<absolute-hook-script>'` from
+// resolveNodeBinary/buildHookShellCommand. Setup probes the hook directly with
+// the parsed Node binary and through `/bin/sh -c` using the exact installed bytes.
 import { spawn } from "node:child_process";
-import { access, mkdir, lstat, mkdtemp, open, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile, } from "node:fs/promises";
+import { access, chmod, mkdir, lstat, mkdtemp, open, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile, } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { readPluginConfig, writePluginConfig } from "../config.js";
 import { RuntimeError } from "../errors.js";
 import { HOOK_TIMEOUT_S } from "../hooks/hook-timing.js";
-import { olderHostHookWarnings } from "../hooks/install.js";
 import { normalizeTopLevelInlineHooks, validateKimiHookSetForEnvironment, withKimiConfigLock, } from "../hooks/config-safety.js";
-import { buildHookShellCommand, hostIdFromHookCommand, parseHookShellCommand, resolveHookScriptPath, resolveHostId, resolveNodeBinary, } from "../hooks/install-paths.js";
-import { decodeManagedCommandLine, describeHookTimeout, effectiveHost, evaluateInstalled, findShortHookTimeout, findUnmanagedApprovalHookBlocks, ORPHAN_MARKER_REMEDY, pairBlocks, parseManagedBlock, } from "../hooks/managed-block.js";
-import { formatVersionOutOfRangeWarning, probeKimiVersion, } from "../kimi-version-probe.js";
+import { buildHookShellCommand, parseHookShellCommand, resolveBundledHookSourcePath, resolveHookScriptPath, resolveNodeBinary, verifyManagedHookArtifact, } from "../hooks/install-paths.js";
+import { countCleanEntriesInFile, describeHookTimeout, evaluateInstalled, findShortHookTimeout, findUnmanagedApprovalHookBlocks, ORPHAN_MARKER_REMEDY, pairBlocks, parseManagedBlock, scanTomlLines, } from "../hooks/managed-block.js";
+import { formatVersionOutOfRangeWarning, KIMI_MINIMUM_CERTIFIED_VERSION, probeKimiVersion, } from "../kimi-version-probe.js";
 import { inspectPluginOwnedKimi, selectKimiBinary } from "../kimi-command.js";
 import { isNativeV2CertifiedVersion, NATIVE_V2_ANY_OPERATION_VERSIONS, NATIVE_V2_CERTIFIED_VERSIONS, NATIVE_V2_NON_SWARM_VERSIONS, } from "../kimi-engine.js";
 import { resolveKimiCodeConfigPath, resolveKimiHome } from "../kimi-home.js";
@@ -57,39 +45,21 @@ export async function runSetup(argv, context) {
     }
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
-    // Reconcile the review-gate flag first — it's independent of the
-    // kimi-code hook and we want the answer reflected in the result even
-    // if the rest of setup fails.
-    const existingConfig = await readPluginConfig(paths);
-    const reviewGateEnabled = parsed.enableReviewGate
-        ? true
-        : parsed.disableReviewGate
-            ? false
-            : existingConfig.reviewGateEnabled;
-    if (reviewGateEnabled !== existingConfig.reviewGateEnabled) {
-        await writePluginConfig(paths, { reviewGateEnabled });
-    }
     const configPath = resolveKimiCodeConfigPath(context.env);
     const hookScriptPath = resolveHookScriptPath(context.env);
     assertHookPathTomlSafe(hookScriptPath);
-    // Host id scopes each managed block so Claude Code and Codex can share one
-    // ~/.kimi-code/config.toml without clobbering each other.
-    const hostId = resolveHostId(context.env, hookScriptPath);
     const warnings = [];
     switch (parsed.mode) {
         case "uninstall":
-            return await runUninstall(configPath, hookScriptPath, hostId, parsed.removeAllHosts, reviewGateEnabled, warnings, context);
+            return await runUninstall(configPath, hookScriptPath, warnings, context);
         case "check":
-            return await runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context);
+            return await runCheck(configPath, hookScriptPath, warnings, context);
         case "install":
-            return await runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context);
+            return await runInstall(paths, configPath, hookScriptPath, warnings, context);
     }
 }
 function parseArgs(argv) {
     let mode = "install";
-    let enableReviewGate = false;
-    let disableReviewGate = false;
-    let removeAllHosts = false;
     let installKimi = false;
     let json = false;
     for (const token of argv) {
@@ -112,38 +82,149 @@ function parseArgs(argv) {
                 }
                 mode = "uninstall";
                 break;
-            case "--all":
-                removeAllHosts = true;
-                break;
-            case "--enable-review-gate":
-                enableReviewGate = true;
-                break;
-            case "--disable-review-gate":
-                disableReviewGate = true;
-                break;
             default:
                 throw new RuntimeError("INVALID_ARGS", `Unknown setup flag ${token}. Supported flags: ${SETUP_SUPPORTED_FLAGS}.`, "setup.parse");
         }
-    }
-    if (enableReviewGate && disableReviewGate) {
-        throw new RuntimeError("INVALID_ARGS", "setup accepts either --enable-review-gate or --disable-review-gate, not both.", "setup.parse");
-    }
-    if (removeAllHosts && mode !== "uninstall") {
-        throw new RuntimeError("INVALID_ARGS", "--all is only valid with --uninstall (it removes EVERY host's managed block).", "setup.parse");
     }
     if (installKimi) {
         if (argv.some((token) => token !== "--install-kimi" && token !== "--json")) {
             throw new RuntimeError("INVALID_ARGS", "--install-kimi does not combine with other setup flags except --json.", "setup.parse");
         }
-        return { mode: "install-kimi", json, enableReviewGate, disableReviewGate, removeAllHosts };
+        return { mode: "install-kimi", json };
     }
     if (json) {
         throw new RuntimeError("INVALID_ARGS", "--json is only valid with --install-kimi or --models.", "setup.parse");
     }
-    return { mode, json, enableReviewGate, disableReviewGate, removeAllHosts };
+    return { mode, json };
 }
-async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context) {
-    await assertHookScriptExists(hookScriptPath);
+async function assertNonSymlinkDirectory(target, label) {
+    let info;
+    try {
+        info = await lstat(target);
+    }
+    catch (err) {
+        throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Unable to inspect ${label} at ${target}: ${err.message}`, "setup.hook-script", err instanceof Error ? { cause: err, details: { target } } : { details: { target } });
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+        throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Refusing to publish hook into ${label} at ${target}: path is a symlink or not a directory.`, "setup.hook-script", { details: { target } });
+    }
+    return await realpath(target);
+}
+async function assertAbsentOrRegularFile(target, label) {
+    let info;
+    try {
+        info = await lstat(target);
+    }
+    catch (err) {
+        if (err.code === "ENOENT")
+            return;
+        throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Unable to inspect ${label} at ${target}: ${err.message}`, "setup.hook-script", err instanceof Error ? { cause: err, details: { target } } : { details: { target } });
+    }
+    if (info.isSymbolicLink() || !info.isFile()) {
+        throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Refusing to overwrite ${label} at ${target}: path is a symlink or not a regular file.`, "setup.hook-script", { details: { target } });
+    }
+}
+async function publishHookArtifactIfManaged(paths, hookScriptPath, env) {
+    if (env.KIMI_PLUGIN_CC_HOOK_SCRIPT && env.KIMI_PLUGIN_CC_HOOK_SCRIPT.length > 0) {
+        return;
+    }
+    const sourcePath = resolveBundledHookSourcePath();
+    let sourceBytes;
+    try {
+        sourceBytes = await readFile(sourcePath, "utf8");
+    }
+    catch (err) {
+        throw new RuntimeError("SETUP_HOOK_SCRIPT_MISSING", `Bundled hook script ${sourcePath} is missing or unreadable. Run \`bun run build\` or reinstall the plugin.`, "setup.hook-script", err instanceof Error ? { cause: err, details: { sourcePath } } : { details: { sourcePath } });
+    }
+    if (sourceBytes.trim().length === 0) {
+        throw new RuntimeError("SETUP_HOOK_SCRIPT_MISSING", `Bundled hook script ${sourcePath} is empty. Run \`bun run build\` or reinstall the plugin.`, "setup.hook-script", { details: { sourcePath } });
+    }
+    // Validate pluginRoot before acquiring the hook lock or creating hookDir.
+    const pluginRootReal = await assertNonSymlinkDirectory(paths.pluginRoot, "plugin data directory");
+    await withKimiConfigLock(path.join(paths.pluginRoot, "hook"), async () => {
+        let hookDirExisted = true;
+        try {
+            const info = await lstat(paths.hookDir);
+            if (info.isSymbolicLink() || !info.isDirectory()) {
+                throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Refusing to publish hook into ${paths.hookDir}: path is a symlink or not a directory.`, "setup.hook-script", { details: { hookDir: paths.hookDir } });
+            }
+        }
+        catch (err) {
+            if (err instanceof RuntimeError)
+                throw err;
+            if (err.code === "ENOENT") {
+                hookDirExisted = false;
+            }
+            else {
+                throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Unable to inspect hook directory ${paths.hookDir}: ${err.message}`, "setup.hook-script", err instanceof Error ? { cause: err, details: { hookDir: paths.hookDir } } : { details: { hookDir: paths.hookDir } });
+            }
+        }
+        if (!hookDirExisted) {
+            await mkdir(paths.hookDir, { mode: 0o700 });
+        }
+        const hookDirReal = await assertNonSymlinkDirectory(paths.hookDir, "hook directory");
+        const expectedHookDirReal = path.join(pluginRootReal, "hook");
+        if (hookDirReal !== expectedHookDirReal) {
+            throw new RuntimeError("SETUP_HOOK_PATH_UNSAFE", `Hook directory ${paths.hookDir} resolves to ${hookDirReal}, outside ${expectedHookDirReal}.`, "setup.hook-script", { details: { hookDir: paths.hookDir, hookDirReal, expectedHookDirReal } });
+        }
+        if (process.platform !== "win32") {
+            await chmod(paths.hookDir, 0o700);
+        }
+        const livePackageJsonPath = path.join(paths.hookDir, "package.json");
+        await assertAbsentOrRegularFile(livePackageJsonPath, "hook package.json");
+        await assertAbsentOrRegularFile(hookScriptPath, "hook script");
+        const stagingDir = await mkdtemp(path.join(paths.hookDir, ".staging-"));
+        try {
+            if (process.platform !== "win32") {
+                await chmod(stagingDir, 0o700);
+            }
+            const stagedPackageJsonPath = path.join(stagingDir, "package.json");
+            const stagedHookScriptPath = path.join(stagingDir, "approval-hook.js");
+            await writeFileAtomic(stagedPackageJsonPath, '{"type":"module"}\n', 0o644);
+            await writeFileAtomic(stagedHookScriptPath, sourceBytes, 0o644);
+            const stagedCommand = buildHookShellCommand(stagedHookScriptPath, env);
+            const stagedProbe = await probeHook(stagedHookScriptPath, stagedCommand, env);
+            if (!stagedProbe.ok) {
+                throw new RuntimeError("SETUP_HOOK_PROBE_FAILED", `Staged hook probe failed before activation (${stagedProbe.reason}). Existing live hook and kimi-code config were left unchanged.`, "setup.hook-probe", { details: { sourcePath, hookScriptPath, reason: stagedProbe.reason } });
+            }
+            // Re-check targets immediately before atomic swap from the same directory.
+            await assertAbsentOrRegularFile(livePackageJsonPath, "hook package.json");
+            await assertAbsentOrRegularFile(hookScriptPath, "hook script");
+            await rename(stagedPackageJsonPath, livePackageJsonPath);
+            await rename(stagedHookScriptPath, hookScriptPath);
+        }
+        finally {
+            await rm(stagingDir, { recursive: true, force: true });
+        }
+    });
+}
+function assertManagedBlocksSafeToReplace(contents, blocks, configPath, stage) {
+    if (blocks.length === 0)
+        return;
+    const lines = splitPreservingEnding(contents);
+    const { tables } = scanTomlLines(contents);
+    for (const block of blocks) {
+        let hooksTables = 0;
+        for (let lineNo = block.beginLine + 1; lineNo < block.endLine; lineNo += 1) {
+            if (!tables.has(lineNo))
+                continue;
+            const trimmed = lines[lineNo].trim();
+            if (/^\[\[hooks\]\]\s*(?:#.*)?$/.test(trimmed)) {
+                hooksTables += 1;
+                if (hooksTables > 1) {
+                    throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `kimi-code config at ${configPath} has a managed block (lines ${block.beginLine + 1}-${block.endLine + 1}) containing multiple [[hooks]] tables; refusing to overwrite or strip user content. Inspect and repair the block manually; the existing config was left unchanged.`, stage, { details: { configPath, beginLine: block.beginLine + 1, endLine: block.endLine + 1 } });
+                }
+            }
+            else {
+                throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `kimi-code config at ${configPath} has a managed block (lines ${block.beginLine + 1}-${block.endLine + 1}) containing a non-hooks TOML table at line ${lineNo + 1}; refusing to overwrite or strip user content. Inspect and repair the block manually; the existing config was left unchanged.`, stage, { details: { configPath, beginLine: block.beginLine + 1, endLine: block.endLine + 1, line: lineNo + 1 } });
+            }
+        }
+    }
+}
+async function runInstall(paths, configPath, hookScriptPath, warnings, context) {
+    if (context.env.KIMI_PLUGIN_CC_HOOK_SCRIPT && context.env.KIMI_PLUGIN_CC_HOOK_SCRIPT.length > 0) {
+        await assertHookScriptExists(hookScriptPath);
+    }
     const mutation = await withKimiConfigLock(configPath, async () => {
         const original = await readConfigSafe(configPath);
         const lineEnding = detectLineEnding(original);
@@ -167,66 +248,66 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
             }
             warnings.push(`Converted the top-level inline hooks array (${inlineHooks.entryCount} entr${inlineHooks.entryCount === 1 ? "y" : "ies"}) to canonical [[hooks]] tables before installing. Surrounding config bytes were preserved; formatting and comments inside that hooks assignment were normalized.`);
         }
-        // Prune only this host's orphaned marker-less entries before computing
-        // splice line numbers. Another host's marker-less table may be its live hook
-        // after a config rewrite strips comments, so it must remain untouched.
         const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
         const shortBefore = findShortHookTimeout(inlineHooks.contents, expectedCommand);
-        const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, hostId, expectedCommand);
+        const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, expectedCommand);
         const existing = pruned;
         if (prunedCount > 0) {
             const readorned = prunedCommands.includes(expectedCommand);
             warnings.push(readorned
                 ? shortBefore === null
-                    ? `Re-adorned this host's managed-block markers: kimi-code rewrites its config on login/settings changes and strips all comments (markers included), leaving the hook enforcing but unmarked. Replaced the bare hook table with a freshly marked block (${prunedCount} table(s) refreshed). Enforcement was never interrupted.`
-                    : `Re-adorned this host's managed-block markers: replaced the bare hook table with a freshly marked block (${prunedCount} table(s) refreshed).`
-                : `Pruned ${prunedCount} stale marker-less kimi-plugin-cc hook block(s) left by this host's earlier installs. This is a cleanup — your active hook is unaffected.`);
+                    ? `Re-adorned the managed-block markers: kimi-code rewrites its config on login/settings changes and strips all comments (markers included), leaving the hook enforcing but unmarked. Replaced ${prunedCount} bare hook table(s) with one freshly marked canonical block. Enforcement was never interrupted.`
+                    : `Re-adorned the managed-block markers: replaced ${prunedCount} bare hook table(s) with one freshly marked canonical block.`
+                : `Pruned ${prunedCount} stale marker-less kimi-plugin-cc hook block(s) left by earlier installs. This is a cleanup — your active hook is unaffected.`);
         }
-        const { state, blocks } = parseManagedBlock(existing, hostId);
+        const { state, blocks } = parseManagedBlock(existing);
         if (state.kind === "orphan") {
             throw new RuntimeError("SETUP_ORPHAN_MARKERS", [
                 `kimi-code config at ${configPath} contains an orphaned ${state.detail} marker.`,
                 "Inspect the managed marker comments and re-run setup.",
             ].join(" "), "setup.install", { details: { configPath, orphan: state.detail } });
         }
+        assertManagedBlocksSafeToReplace(existing, blocks, configPath, "setup.install");
+        const block = buildManagedBlock(expectedCommand, lineEnding);
+        let next;
         if (state.kind === "duplicate") {
-            throw new RuntimeError("SETUP_DUPLICATE_BLOCKS", [
-                `kimi-code config at ${configPath} contains ${state.beginLines.length} kimi-plugin-cc managed blocks for host ${hostId} (lines ${state.beginLines
-                    .map((line) => line + 1)
-                    .join(", ")}).`,
-                "This usually means two /kimi:setup runs raced. Run `/kimi:setup --uninstall` to clear them, then `/kimi:setup` again.",
-            ].join(" "), "setup.install", { details: { configPath, beginLines: state.beginLines } });
+            const hasLegacyBlock = blocks.some((entry) => entry.hostId !== null);
+            if (!hasLegacyBlock) {
+                throw new RuntimeError("SETUP_DUPLICATE_BLOCKS", [
+                    `kimi-code config at ${configPath} contains ${state.beginLines.length} kimi-plugin-cc managed blocks (lines ${state.beginLines
+                        .map((line) => line + 1)
+                        .join(", ")}).`,
+                    "Run `scripts/companion.sh setup --uninstall` to clear them, then re-run setup.",
+                ].join(" "), "setup.install", { details: { configPath, beginLines: state.beginLines } });
+            }
+            warnings.push(`Consolidated ${blocks.length} legacy host-scoped managed block(s) into one canonical block.`);
+            next = consolidateManagedBlocks(existing, blocks, block, lineEnding);
         }
-        // Non-blocking note: other hosts (e.g. Codex) manage their own block in the
-        // same shared config — surface so an operator understands the coexistence.
-        const otherHosts = [
-            ...new Set(blocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
-        ];
-        if (otherHosts.length > 0) {
-            warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")}. ` +
-                `They are left untouched — each host owns its own PreToolUse block.`);
+        else if (state.kind === "found") {
+            next = spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding);
         }
-        const block = buildManagedBlock(expectedCommand, lineEnding, hostId);
-        const next = state.kind === "found"
-            ? spliceBlock(existing, state.beginLine, state.endLine, block, lineEnding)
-            : insertBlockNearManagedBlocks(existing, blocks, block, lineEnding);
+        else {
+            next = appendBlock(existing, block, lineEnding);
+        }
         await assertKimiHookSetValid(next, configPath, "setup.install", context.env);
-        // Setup rewrites only its own block and prunable tables. Any other copy of
-        // this command (e.g. one with a matcher) can be the entry kimi-code runs.
         const shortAfter = findShortHookTimeout(next, expectedCommand);
         if (shortAfter !== null) {
-            throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `kimi-code config at ${configPath} has another [[hooks]] entry with this host's hook command and ${describeHookTimeout(shortAfter.timeout)}; kimi-code runs only one entry per command and reads a hook that runs past its timeout as allow. Remove that entry before rerunning /kimi:setup; the existing config was left unchanged.`, "setup.install", { details: { configPath, timeout: describeHookTimeout(shortAfter.timeout) } });
+            throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `kimi-code config at ${configPath} has another [[hooks]] entry with the hook command and ${describeHookTimeout(shortAfter.timeout)}; kimi-code runs only one entry per command and reads a hook that runs past its timeout as allow. Remove that entry before rerunning setup; the existing config was left unchanged.`, "setup.install", { details: { configPath, timeout: describeHookTimeout(shortAfter.timeout) } });
         }
         if (shortBefore !== null) {
-            warnings.push(`Rewrote this host's hook entry from ${describeHookTimeout(shortBefore.timeout)} to timeout = ${HOOK_TIMEOUT_S}: kimi-code reads a hook that runs past its timeout as allow, so the earlier entry did not reliably enforce.`);
+            warnings.push(`Rewrote hook entry from ${describeHookTimeout(shortBefore.timeout)} to timeout = ${HOOK_TIMEOUT_S}: kimi-code reads a hook that runs past its timeout as allow, so the earlier entry did not reliably enforce.`);
         }
+        // Stage, probe, and atomically publish the managed hook artifact under the
+        // config lock (and inner hook lock) before writing config.toml so a failed
+        // staged probe leaves both the live hook and config.toml untouched.
+        await publishHookArtifactIfManaged(paths, hookScriptPath, context.env);
+        await assertHookScriptExists(hookScriptPath);
         const blockWritten = next !== original;
         if (blockWritten)
             await writeConfigAtomic(configPath, next);
         return { blockWritten, next, expectedCommand };
     });
     const { blockWritten, next, expectedCommand } = mutation;
-    warnings.push(...await olderHostHookWarnings(next, hostId, expectedCommand));
     collectPermissionRuleWarnings(next, warnings);
     const kimiBinary = describeKimiBinary(context.env, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
@@ -247,22 +328,19 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
         probe: probe.ok ? "ok" : "failed",
         probeError: probe.ok ? undefined : probe.reason,
         warnings,
-        reviewGateEnabled,
         nextStep: probe.ok
-            ? "Run /kimi:task, /kimi:review, /kimi:pursue or /kimi:swarm. Codex users can invoke the matching $kimi-* skills."
-            : "Re-run /kimi:setup after installing kimi-code and Node. If the probe keeps failing, run /kimi:setup --uninstall and inspect ~/.kimi-code/config.toml manually.",
+            ? "Run `kimi_read` / `kimi_write` via MCP or `scripts/companion.sh read` / `write`."
+            : "Re-run setup after installing kimi-code and Node >=22.5. If the probe keeps failing, run `scripts/companion.sh setup --uninstall` and inspect ~/.kimi-code/config.toml manually.",
         details: buildDetails({
             configPath,
             hookScriptPath,
-            reviewGateEnabled,
             probe,
             warnings,
-            hostId,
             kimiBinary,
         }),
     };
 }
-async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, warnings, context) {
+async function runCheck(configPath, hookScriptPath, warnings, context) {
     const failedCheck = (result) => ({
         action: "check",
         summary: result.summary,
@@ -273,15 +351,12 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         probe: "failed",
         probeError: result.reason,
         warnings,
-        reviewGateEnabled,
         nextStep: result.nextStep,
         details: buildDetails({
             configPath,
             hookScriptPath,
-            reviewGateEnabled,
             probe: { ok: false, reason: result.detailReason ?? result.reason },
             warnings,
-            hostId: result.hostId,
             kimiBinary,
         }),
     });
@@ -293,49 +368,17 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         return failedCheck({
             summary: `kimi-code hook configuration is invalid; the configured hooks array will not load.`,
             reason: hookSet.reason ?? "configured hooks failed validation",
-            nextStep: "Repair or remove the invalid [[hooks]] entry named above, then run /kimi:setup --check again. No model call is required.",
-            hostId,
+            nextStep: "Repair or remove the invalid [[hooks]] entry named above, then run setup --check again. No model call is required.",
         });
     }
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-    // nodeExists refines mismatch prose into drift classification; hostId checks
-    // only this host's block in the shared config.
     const installedCheck = evaluateInstalled(existing, expectedCommand, {
-        hostId,
         nodeExists: (binPath) => existsSync(binPath),
     });
-    // Non-blocking coexistence + cruft notices.
-    const { blocks: allBlocks, foreignOrphans } = parseManagedBlock(existing, hostId);
-    for (const orphan of foreignOrphans) {
-        warnings.push(`Host "${orphan.hostId}" has an orphaned ${orphan.detail} managed marker at line ${orphan.line + 1}; that host's commands refuse until it is repaired. ${ORPHAN_MARKER_REMEDY}`);
-    }
-    const otherHosts = [
-        ...new Set(allBlocks.map((b) => effectiveHost(b, hostId)).filter((h) => h !== hostId)),
-    ];
-    if (otherHosts.length > 0) {
-        warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")} (coexisting, untouched).`);
-    }
-    warnings.push(...await olderHostHookWarnings(existing, hostId, expectedCommand));
-    // Config rewrites can strip markers while leaving each host's table enforcing.
-    // Our exact-command table is live; our stale table is prunable; another host's
-    // table is reported but left strictly alone.
     const bareTables = findUnmanagedApprovalHookBlocks(existing);
-    const ownStale = bareTables.filter((t) => hostIdFromHookCommand(t.command) === hostId && t.command !== expectedCommand);
-    const foreignHosts = [
-        ...new Set(bareTables
-            // Exact current command bytes identify this host even when a host-id
-            // override disagrees with the path-derived host.
-            .filter((t) => t.command !== expectedCommand)
-            .map((t) => hostIdFromHookCommand(t.command))
-            .filter((h) => h !== null && h !== hostId)),
-    ];
-    if (ownStale.length > 0) {
-        warnings.push(`Found ${ownStale.length} stale marker-less kimi-plugin-cc hook block(s) from this host's earlier installs. ` +
-            `Run /kimi:setup to refresh, or /kimi:setup --uninstall --all to clear everything.`);
-    }
-    for (const host of foreignHosts) {
-        warnings.push(`Host "${host}" has a marker-less kimi-plugin-cc hook block (kimi-code config rewrites strip comments). ` +
-            `It still enforces and is left untouched; run that host's setup to re-adorn its markers.`);
+    const staleBare = bareTables.filter((t) => t.command !== expectedCommand);
+    if (staleBare.length > 0) {
+        warnings.push(`Found ${staleBare.length} stale marker-less kimi-plugin-cc hook block(s) from earlier installs. Run setup to clean them up.`);
     }
     if (installedCheck.installed && installedCheck.note !== undefined) {
         warnings.push(`Note: ${installedCheck.note}`);
@@ -350,19 +393,38 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
             reason: installedCheck.reason ?? "managed block missing or invalid",
             detailReason: installedCheck.reason ?? "block missing/invalid",
             nextStep: installedCheck.timeoutTooShort === true
-                ? "Run /kimi:setup (without --check) to rewrite the hook timeout."
+                ? "Run setup (without --check) to rewrite the hook timeout."
                 : installedCheck.state.kind === "absent"
-                    ? "Run /kimi:setup (without --check) to install the managed block."
+                    ? "Run setup (without --check) to install the managed block."
                     : installedCheck.state.kind === "orphan"
                         ? ORPHAN_MARKER_REMEDY
-                        : "Run /kimi:setup --uninstall, then /kimi:setup to repair.",
+                        : installedCheck.state.kind === "duplicate" &&
+                            parseManagedBlock(existing).blocks.some((entry) => entry.hostId !== null)
+                            ? 'Run `kimi_setup` (action "install") or `scripts/companion.sh setup` to consolidate legacy host-scoped blocks into one canonical block.'
+                            : "Run setup --uninstall, then setup to repair.",
         });
     }
     collectPermissionRuleWarnings(existing, warnings);
     await collectKimiVersionWarnings(context.env, warnings);
     await collectInstalledKimiPluginsNotice(context.env, warnings);
-    // Block is structurally valid AND points at the resolved hook
-    // script — now confirm the script itself still loads and behaves.
+    const artifact = await verifyManagedHookArtifact(context.env, hookScriptPath);
+    if (!artifact.ok) {
+        return failedCheck({
+            summary: artifact.kind === "sha256-mismatch"
+                ? `Managed hook script ${hookScriptPath} does not match the bundled hook artifact (SHA-256 mismatch).`
+                : artifact.kind === "unsafe-path"
+                    ? `Managed hook path ${hookScriptPath} failed safety checks.`
+                    : artifact.kind === "bundle-missing"
+                        ? `Bundled hook artifact is missing or unreadable.`
+                        : `Managed block references ${hookScriptPath} but that path is unreadable.`,
+            reason: artifact.reason,
+            nextStep: artifact.kind === "unsafe-path"
+                ? "Remove or replace the unsafe symlink/non-regular path under the plugin hook directory, then re-run setup."
+                : artifact.kind === "bundle-missing"
+                    ? "Run `bun run build` or reinstall the plugin, then re-run setup."
+                    : "Run setup (without --check) to republish the hook script and refresh the managed block.",
+        });
+    }
     try {
         await assertHookScriptExists(hookScriptPath);
     }
@@ -370,7 +432,7 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         return failedCheck({
             summary: `Managed block references ${hookScriptPath} but that path is unreadable.`,
             reason: err instanceof Error ? err.message : String(err),
-            nextStep: "Reinstall the plugin so dist/hooks/approval-hook.js is present, or run /kimi:setup to refresh the managed block.",
+            nextStep: "Run setup (without --check) to republish the hook script and refresh the managed block.",
         });
     }
     const probe = await probeHook(hookScriptPath, expectedCommand, context.env);
@@ -386,26 +448,21 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         probe: probe.ok ? "ok" : "failed",
         probeError: probe.ok ? undefined : probe.reason,
         warnings,
-        reviewGateEnabled,
         nextStep: !probe.ok
-            ? "Run /kimi:setup to repair the managed block, or /kimi:setup --uninstall if you want to remove the integration."
+            ? "Run setup to repair the managed block, or setup --uninstall to remove the integration."
             : installedCheck.via === "bare-table"
-                // Enforcement remains active through the marker-less table, but recommend
-                // re-adorning rather than claiming no action is needed.
-                ? "Enforcement is active. Run /kimi:setup to re-adorn this host's managed-block markers — kimi-code stripped them on its last config write (comments are not preserved). Your hook keeps working meanwhile."
+                ? "Enforcement is active. Run setup to re-adorn the managed-block markers — kimi-code stripped comments on its last config write. Your hook keeps working meanwhile."
                 : "No action needed.",
         details: buildDetails({
             configPath,
             hookScriptPath,
-            reviewGateEnabled,
             probe,
             warnings,
-            hostId,
             kimiBinary,
         }),
     };
 }
-async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, reviewGateEnabled, warnings, context) {
+async function runUninstall(configPath, hookScriptPath, warnings, context) {
     return await withKimiConfigLock(configPath, async () => {
         const existing = await readConfigSafe(configPath);
         if (existing.length === 0) {
@@ -418,29 +475,38 @@ async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, 
                 blockRemoved: false,
                 probe: "skipped",
                 warnings,
-                reviewGateEnabled,
-                nextStep: "Run /kimi:setup to install the managed block again.",
+                nextStep: "Run setup to install the managed block again.",
                 details: buildDetails({
                     configPath,
                     hookScriptPath,
-                    reviewGateEnabled,
                     probe: { ok: true, reason: "no-op (config absent)" },
                     warnings,
                 }),
             };
         }
-        // Scoped uninstall removes only this host's marked and marker-less blocks;
-        // other hosts' blocks and live marker-less tables remain intact. `--all` is
-        // the explicit every-host sweep for all of this plugin's hook tables.
-        const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(existing, hostId, removeAllHosts);
-        // Exact current command bytes also identify this host's table when a host-id
-        // override disagrees with path derivation or a dev path is outside the strict
-        // ownership pattern.
+        const lineEnding = detectLineEnding(existing);
+        const inlineHooks = normalizeTopLevelInlineHooks(existing, lineEnding);
+        if (inlineHooks.found && !inlineHooks.converted) {
+            throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `Could not safely convert the top-level inline hooks assignment in ${configPath} during uninstall; the existing config was left unchanged.`, "setup.uninstall", { details: { configPath } });
+        }
+        const working = inlineHooks.contents;
+        const { blocks } = pairBlocks(splitPreservingEnding(working));
+        assertManagedBlocksSafeToReplace(working, blocks, configPath, "setup.uninstall");
+        const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(working);
         const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-        const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, removeAllHosts ? undefined : hostId, expectedCommand);
-        const changed = stripped !== existing;
+        const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, expectedCommand);
+        const removedAnything = removedBlocks > 0 || orphansLeft.length > 0 || prunedCount > 0;
+        const finalContents = removedAnything ? stripped : existing;
+        if (evaluateInstalled(finalContents, expectedCommand).installed ||
+            countCleanEntriesInFile(finalContents, expectedCommand) > 0) {
+            throw new RuntimeError("SETUP_UNINSTALL_INCOMPLETE", `Could not safely remove all kimi-plugin-cc hook entries from ${configPath}; an active hook entry for this plugin still remains. Inspect ${configPath} manually; the existing config was left unchanged.`, "setup.uninstall", { details: { configPath } });
+        }
+        const changed = removedAnything && finalContents !== existing;
         if (changed) {
-            await writeConfigAtomic(configPath, stripped);
+            if (inlineHooks.found) {
+                warnings.push(`Converted the top-level inline hooks array (${inlineHooks.entryCount} entr${inlineHooks.entryCount === 1 ? "y" : "ies"}) to canonical [[hooks]] tables while removing kimi-plugin-cc entries and preserving foreign hooks.`);
+            }
+            await writeConfigAtomic(configPath, finalContents);
         }
         if (orphansLeft.length > 0) {
             warnings.push(`Detected ${orphansLeft.length} orphan marker line(s) at ${orphansLeft
@@ -449,14 +515,6 @@ async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, 
         }
         if (prunedCount > 0) {
             warnings.push(`Pruned ${prunedCount} orphaned kimi-plugin-cc hook block(s) with no managed marker.`);
-        }
-        const { blocks: remainingBlocks } = parseManagedBlock(stripped, hostId);
-        const remainingHosts = [
-            ...new Set(remainingBlocks.map((b) => effectiveHost(b, hostId))),
-        ];
-        if (!removeAllHosts && remainingHosts.length > 0) {
-            warnings.push(`Left ${remainingHosts.length} other host block(s) in place: ${remainingHosts.join(", ")}. ` +
-                `Use \`/kimi:setup --uninstall --all\` to remove every host's block.`);
         }
         return {
             action: "uninstall",
@@ -469,14 +527,12 @@ async function runUninstall(configPath, hookScriptPath, hostId, removeAllHosts, 
             blockRemoved: changed,
             probe: "skipped",
             warnings,
-            reviewGateEnabled,
             nextStep: changed
-                ? "Run /kimi:setup again to reinstall the hook, or leave the plugin uninstalled."
-                : "Run /kimi:setup to install the hook.",
+                ? "Run setup again to reinstall the hook, or leave the plugin uninstalled."
+                : "Run setup to install the hook.",
             details: buildDetails({
                 configPath,
                 hookScriptPath,
-                reviewGateEnabled,
                 probe: { ok: true, reason: changed ? `removed ${removedBlocks} block(s)` : "no-op (no markers)" },
                 warnings,
             }),
@@ -494,39 +550,28 @@ async function readConfigSafe(configPath) {
         throw new RuntimeError("SETUP_CONFIG_READ_FAILED", `Failed to read kimi-code config at ${configPath}: ${err.message}`, "setup.read-config", err instanceof Error ? { cause: err, details: { configPath } } : { details: { configPath } });
     }
 }
-async function writeConfigAtomic(configPath, contents) {
-    // Write a unique sibling temp file and atomically rename it. O_EXCL prevents
-    // concurrent operations from sharing an intermediate path.
-    //
-    // Pass 0o600 at creation, not in a later chmod: the config can contain
-    // credentials, so the temp file must never exist with a wider umask-derived
-    // mode.
-    await mkdir(path.dirname(configPath), { recursive: true });
+async function writeFileAtomic(targetPath, contents, mode) {
+    await mkdir(path.dirname(targetPath), { recursive: true });
     const suffix = randomBytes(8).toString("hex");
-    const tmpPath = `${configPath}.kimi-plugin-cc.${process.pid}.${suffix}.tmp`;
+    const tmpPath = `${targetPath}.kimi-plugin-cc.${process.pid}.${suffix}.tmp`;
     const openFlags = fsConstants.O_WRONLY |
         fsConstants.O_CREAT |
         fsConstants.O_EXCL |
         (fsConstants.O_NOFOLLOW ?? 0);
     try {
-        const handle = await open(tmpPath, openFlags, 0o600);
+        const handle = await open(tmpPath, openFlags, mode);
         try {
             if (process.platform !== "win32") {
-                // Windows file modes are emulated; skip the chmod to avoid
-                // platform-specific noise. The threat model excludes Windows.
-                // Belt-and-suspenders alongside the create-time mode above,
-                // matching createPrivateLockFile's pattern.
-                await handle.chmod(0o600);
+                await handle.chmod(mode);
             }
             await handle.writeFile(contents, "utf8");
         }
         finally {
             await handle.close();
         }
-        await rename(tmpPath, configPath);
+        await rename(tmpPath, targetPath);
     }
     catch (err) {
-        // Best-effort cleanup so stale tmp files don't accumulate.
         try {
             await unlink(tmpPath);
         }
@@ -536,11 +581,15 @@ async function writeConfigAtomic(configPath, contents) {
         throw err;
     }
 }
+async function writeConfigAtomic(configPath, contents) {
+    // Pass 0o600 at creation so credentials in config.toml never exist with wider mode.
+    await writeFileAtomic(configPath, contents, 0o600);
+}
 async function assertKimiHookSetValid(contents, configPath, stage, env) {
     const validation = await validateKimiHookSetForEnvironment(contents, env);
     if (validation.valid)
         return;
-    throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `${validation.reason ?? "Configured hooks failed validation"} Repair or remove that [[hooks]] entry before rerunning /kimi:setup; the existing config was left unchanged.`, stage, {
+    throw new RuntimeError("SETUP_INVALID_HOOKS_CONFIG", `${validation.reason ?? "Configured hooks failed validation"} Repair or remove that [[hooks]] entry before rerunning setup; the existing config was left unchanged.`, stage, {
         details: {
             configPath,
             hookEntry: validation.entry,
@@ -631,44 +680,28 @@ function removeOrphanMarkers(contents) {
         ? { contents, count: 0 }
         : { contents: removeLines(contents, remove), count: remove.size };
 }
+function consolidateManagedBlocks(contents, blocks, replacement, lineEnding) {
+    const [first, ...rest] = blocks;
+    const spliced = spliceBlock(contents, first.beginLine, first.endLine, replacement, lineEnding);
+    const deltaLines = splitPreservingEnding(replacement).length - (first.endLine - first.beginLine + 1);
+    const remove = new Set();
+    for (const extra of rest) {
+        for (let i = extra.beginLine + deltaLines; i <= extra.endLine + deltaLines; i += 1) {
+            remove.add(i);
+        }
+    }
+    return removeLines(spliced, remove);
+}
 /**
- * Remove managed blocks owned by `currentHost`, or every host with `removeAll`.
- * Ownership comes from the marker suffix or a legacy command's derived host.
- * Orphan markers are removed individually so surrounding user content survives.
+ * Remove all managed blocks and orphan markers while preserving surrounding content.
  */
-function stripManagedBlocks(contents, currentHost, removeAll) {
+function stripManagedBlocks(contents) {
     const lines = splitPreservingEnding(contents);
     const { blocks, orphans } = pairBlocks(lines);
-    // Suffixed blocks belong only to the matching host. Complete legacy blocks
-    // use their command-derived host; an unattributable non-canonical command is
-    // ambiguous and only --all removes it. Orphan marker lines have no command
-    // and can be swept individually by a scoped uninstall.
-    const shouldRemove = (markerHost, commandPath, isOrphanMarker) => {
-        if (removeAll)
-            return true;
-        if (markerHost !== null)
-            return markerHost === currentHost;
-        if (isOrphanMarker)
-            return true;
-        const derived = commandPath !== null ? hostIdFromHookCommand(commandPath) : null;
-        if (derived === null)
-            return false;
-        return derived === currentHost;
-    };
-    const orphansLeft = orphans
-        .filter((orphan) => shouldRemove(orphan.hostId, null, true))
-        .map((orphan) => orphan.line);
+    const orphansLeft = orphans.map((orphan) => orphan.line);
     const remove = new Set(orphansLeft);
     let removedBlocks = 0;
     for (const block of blocks) {
-        // Attribute by the LAST command line in the body, even one after a line
-        // that makes the block invalid (unlike the validator's commandPath).
-        let blockCommand = null;
-        for (const line of lines.slice(block.beginLine + 1, block.endLine)) {
-            blockCommand = decodeManagedCommandLine(line.trim()) ?? blockCommand;
-        }
-        if (!shouldRemove(block.hostId, blockCommand, false))
-            continue;
         removedBlocks += 1;
         for (let i = block.beginLine; i <= block.endLine; i += 1)
             remove.add(i);
@@ -679,20 +712,12 @@ function removeLines(contents, remove) {
     return contents.split(/(?<=\n)/).filter((_, index) => !remove.has(index)).join("");
 }
 /**
- * Remove orphaned, marker-less `[[hooks]]` tables that are unambiguously this
- * plugin's approval hook (see `findUnmanagedApprovalHookBlocks`). Returns the
- * cleaned text, the count removed, and the decoded commands of the removed
- * tables (so install can distinguish "re-adorning this host's live hook after
- * a kimi-code comment strip" from "sweeping stale cruft"). A no-op (returns
- * the input unchanged) when there is nothing to prune, so callers can compare
- * identity cheaply.
- *
- * `ownedBy` restricts the prune to tables whose command path derives to that
- * host — REQUIRED for scoped install/uninstall so one host never disarms the
- * other's live (marker-stripped) hook. Omit only for `--uninstall --all`.
+ * Remove orphaned, marker-less `[[hooks]]` tables that belong to kimi-plugin-cc
+ * (see `findUnmanagedApprovalHookBlocks`). Returns the cleaned text, the count
+ * removed, and decoded commands so install can distinguish re-adorning from cleanup.
  */
-function pruneOrphanApprovalHooks(contents, ownedBy, alsoMatchCommand) {
-    const ranges = findUnmanagedApprovalHookBlocks(contents, ownedBy, alsoMatchCommand);
+function pruneOrphanApprovalHooks(contents, alsoMatchCommand) {
+    const ranges = findUnmanagedApprovalHookBlocks(contents, alsoMatchCommand);
     if (ranges.length === 0)
         return { pruned: contents, count: 0, commands: [] };
     const remove = new Set();
@@ -709,15 +734,11 @@ function pruneOrphanApprovalHooks(contents, ownedBy, alsoMatchCommand) {
     };
 }
 // ----- Block content -----------------------------------------------------
-function buildManagedBlock(shellCommand, lineEnding = "\n", hostId = "") {
+function buildManagedBlock(shellCommand, lineEnding = "\n") {
     const commandLine = `command = ${tomlBasicString(shellCommand)}`;
-    const suffix = hostId.length > 0 ? `:${hostId}` : "";
     return [
-        `${BEGIN_MARKER_PREFIX}${suffix} (v${KIMI_PLUGIN_CC_VERSION}) ===`,
-        `# DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.`,
-        `# Host: ${hostId.length > 0 ? hostId : "(legacy)"} — each host owns a separate block in this shared`,
-        `#   ~/.kimi-code/config.toml. Scoped setup/uninstall preserves other hosts;`,
-        `#   /kimi:setup --uninstall --all removes every host's block.`,
+        `${BEGIN_MARKER_PREFIX} (v${KIMI_PLUGIN_CC_VERSION}) ===`,
+        `# DO NOT EDIT — managed by kimi-plugin-cc setup. Run \`scripts/companion.sh setup --uninstall\` to remove.`,
         `# Purpose:`,
         `#   kimi-code's \`kimi -p\` mode hard-codes permission='auto' and`,
         `#   auto-approves every tool call. This hook enforces each managed command's`,
@@ -734,7 +755,7 @@ function buildManagedBlock(shellCommand, lineEnding = "\n", hostId = "") {
         `event = "PreToolUse"`,
         commandLine,
         `timeout = ${DEFAULT_HOOK_TIMEOUT_S}`,
-        `# === END kimi-plugin-cc-managed${suffix} ===`,
+        `# === END kimi-plugin-cc-managed ===`,
     ].join(lineEnding);
 }
 /**
@@ -957,8 +978,8 @@ async function runInstallKimi(json, context) {
                 `Jobs:             ${jobsLine}`,
             ],
             nextStep: jobsUseIt
-                ? "Run /kimi:setup --check to confirm the hook and the selected binary."
-                : "Unset KIMI_PLUGIN_CC_KIMI_BIN to use the plugin-owned binary, then run /kimi:setup --check.",
+                ? "Run setup --check to confirm the hook and the selected binary."
+                : "Unset KIMI_PLUGIN_CC_KIMI_BIN to use the plugin-owned binary, then run setup --check.",
             report: {
                 ok: true,
                 json,
@@ -1003,7 +1024,6 @@ function installKimiResult(args) {
         probe: args.failed ? "failed" : "skipped",
         probeError: args.probeError,
         warnings: [],
-        reviewGateEnabled: false,
         nextStep: args.nextStep,
         details: args.details,
         kimiInstall: args.report,
@@ -1275,13 +1295,11 @@ async function collectKimiVersionWarnings(env, warnings) {
         env,
     });
     if (probe.kind === "failed") {
-        // Don't warn about probe failure here — if kimi is genuinely
-        // missing/broken, the hook probe path will catch it with a much
-        // clearer message. Avoid double-noise.
+        warnings.push(`WARNING: could not verify the selected kimi-code binary version (${probe.reason}). Model-spawning operations will refuse until a working kimi-code >= ${KIMI_MINIMUM_CERTIFIED_VERSION} binary is available; run \`kimi_setup\` (action "install_kimi") or \`scripts/companion.sh setup --install-kimi\`, or check KIMI_PLUGIN_CC_KIMI_BIN.`);
         return;
     }
-    if (!probe.inTestedRange && !isNativeV2CertifiedVersion(probe.version)) {
-        warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION, NATIVE_V2_ANY_OPERATION_VERSIONS));
+    if (!isNativeV2CertifiedVersion(probe.version)) {
+        warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION, NATIVE_V2_ANY_OPERATION_VERSIONS, env));
         return;
     }
     if (kimiReleaseHas(probe.version, "bounded-swarm")) {
@@ -1332,10 +1350,10 @@ async function collectInstalledKimiPluginsNotice(env, warnings) {
     warnings.push([
         `NOTE: ${enabledIds.length} kimi-code plugin(s) installed and enabled: ${enabledIds.join(", ")}.`,
         "  kimi-code registers their tools (including MCP) on every session. Under kimi-plugin-cc's",
-        "  read-only commands (/kimi:task, /kimi:review and the review gate) the",
+        "  read-only operations (kimi_read and companion.sh read) the",
         "  PreToolUse hook denies every tool that is not on its read-only list, so calls to these plugins' tools",
         "  are blocked — safe, but they can waste model turns. This is expected; no action needed.",
-        "  (/kimi:task --write and /kimi:swarm apply their own allowlists.) To avoid the turn-waste, disable",
+        "  (kimi_write, companion.sh write, and swarm modes apply their own allowlists.) To avoid the turn-waste, disable",
         "  kimi-code plugins you don't need for delegated work in your kimi-code config.",
     ].join("\n"));
 }
@@ -1403,11 +1421,9 @@ function buildDetails(args) {
     const details = [
         `Companion runtime: Node ${process.version}`,
         `Plugin version:   ${KIMI_PLUGIN_CC_VERSION}`,
-        ...(args.hostId ? [`Host id:          ${args.hostId}`] : []),
         ...(args.kimiBinary ? [`Kimi binary:      ${args.kimiBinary}`] : []),
         `Config file:      ${args.configPath}`,
         `Hook script:      ${args.hookScriptPath}`,
-        `Review gate:      ${args.reviewGateEnabled ? "enabled" : "disabled"}`,
         `Probe:            ${args.probe.ok ? "ok" : "failed"} — ${args.probe.reason}`,
     ];
     if (args.warnings.length > 0) {
@@ -1428,7 +1444,6 @@ export function renderSetupResult(result) {
         `Block written:  ${result.blockWritten ? "yes" : "no"}`,
         `Block removed:  ${result.blockRemoved ? "yes" : "no"}`,
         `Probe:          ${result.probe}${result.probeError ? ` (${result.probeError})` : ""}`,
-        `Review gate:    ${result.reviewGateEnabled ? "enabled" : "disabled"}`,
         "",
         "Details:",
         ...result.details.map((detail) => `- ${detail}`),

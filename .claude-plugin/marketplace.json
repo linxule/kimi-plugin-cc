@@ -4,7 +4,7 @@
     "name": "linxule"
   },
   "metadata": {
-    "description": "Kimi for Claude Code: code questions, reviews, fixes, parallel tasks, and MCP tasks through the local Kimi Code CLI.",
+    "description": "Universal Kimi Code connector for Claude Code: 4-tool MCP, progressive kimi skill, and canonical PreToolUse safety hook.",
     "version": "3.1.0"
   },
   "plugins": [

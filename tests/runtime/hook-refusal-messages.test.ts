@@ -19,14 +19,14 @@ import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 const READ_ONLY_TAIL = [
-  "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
+  "Run `kimi_setup` (action \"install\") or `scripts/companion.sh setup` to install or repair the canonical managed block.",
   "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
 ];
 const WRITE_TAIL = [
-  "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+  "Repair by running `kimi_setup` (action \"install\") or `scripts/companion.sh setup`, then retry.",
   "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
 ];
 
@@ -67,7 +67,7 @@ const CASES: Case[] = [
   },
   {
     name: "pursue", warnLabel: "rescue", code: "PURSUE_HOOK_NOT_INSTALLED", stage: "pursue.hook-check",
-    intro: "/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook.", tail: WRITE_TAIL,
+    intro: "pursue refuses to run without the kimi-plugin-cc PreToolUse hook.", tail: WRITE_TAIL,
     run: (context) => runPursue(["Fix", "it"], context), persisted: false,
   },
 ];
@@ -79,7 +79,7 @@ describe("hook refusal messages", () => {
     const repoRoot = await createGitRepoFixture(`hook-refusal-${name}-repo`);
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      KIMI_PLUGIN_CC_DATA: pluginDataRoot,
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_KIMI_BIN: "bun",
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),

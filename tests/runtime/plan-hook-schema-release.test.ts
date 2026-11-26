@@ -65,28 +65,39 @@ async function makeCase(planRelease: string, otherRelease: string, hooks: string
 const INTERRUPT_HOOK = '[[hooks]]\nevent = "Interrupt"\ncommand = "foreign-hook"\n';
 
 describe.skipIf(process.platform === "win32")("plan-time hook-schema check uses the plan's exact probe", () => {
-  test("refuses when the release the job runs cannot load the hook set", async () => {
-    const c = await makeCase("0.13.0", "2.7.3", INTERRUPT_HOOK);
+  test("refuses when the uncertified release the job runs cannot load a version-sensitive hook", async () => {
+    const c = await makeCase("2.9.0", "2.8.0", INTERRUPT_HOOK);
     await expect(
       prepareKimiExecutionPlan({ operationKind: "review", cwd: c.project, env: c.env }),
     ).rejects.toMatchObject({
       code: "KIMI_HOOK_SET_INVALID",
       stage: "kimi-engine.plan",
-      details: { kimi_version: "0.13.0", retryable_after_setup: false },
+      details: { kimi_version: "2.9.0", retryable_after_setup: false },
     });
     expect(await c.calls()).toEqual([c.project]);
   });
 
-  test("accepts the hook set when the job's release supports it, with one probe", async () => {
-    const c = await makeCase("0.14.0", "0.13.0", INTERRUPT_HOOK);
+  test("accepts the hook set when the job's certified >= 2.8.0 release supports it, with one probe", async () => {
+    const c = await makeCase("2.8.0", "2.9.0", INTERRUPT_HOOK);
     const plan = await prepareKimiExecutionPlan({ operationKind: "review", cwd: c.project, env: c.env });
-    expect(plan.kimiVersion).toBe("0.14.0");
+    expect(plan.kimiVersion).toBe("2.8.0");
     expect(await c.calls()).toEqual([c.project]);
   });
 
   test("a hook set without version-sensitive events never adds a probe", async () => {
-    const c = await makeCase("0.13.0", "0.13.0", '[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n');
+    const c = await makeCase("2.8.0", "2.8.0", '[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n');
     await prepareKimiExecutionPlan({ operationKind: "review", cwd: c.project, env: c.env });
+    expect(await c.calls()).toEqual([c.project]);
+  });
+
+  test("releases below the 2.8.0 floor refuse capability before hook validation with one probe", async () => {
+    const c = await makeCase("2.7.3", "2.8.0", INTERRUPT_HOOK);
+    await expect(
+      prepareKimiExecutionPlan({ operationKind: "review", cwd: c.project, env: c.env }),
+    ).rejects.toMatchObject({
+      code: "KIMI_CAPABILITY_NOT_CERTIFIED",
+      stage: "kimi-engine.capability",
+    });
     expect(await c.calls()).toEqual([c.project]);
   });
 });

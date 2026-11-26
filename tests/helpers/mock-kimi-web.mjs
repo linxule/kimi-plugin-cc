@@ -16,8 +16,8 @@ if (!home || !path.isAbsolute(home)) {
 const token = process.env.MOCK_KIMI_WEB_TOKEN ?? "mock-ready-token";
 const configCanary = process.env.MOCK_KIMI_WEB_CONFIG_CANARY ?? "mock-config-canary";
 const scenario = process.env.MOCK_KIMI_WEB_SCENARIO ?? "success";
-const version = process.env.MOCK_KIMI_WEB_VERSION ?? "2.3.2";
-const jsonReady = ["2.7.2", "2.7.3", "2.8.0"].includes(version);
+const version = process.env.MOCK_KIMI_WEB_VERSION ?? "2.8.0";
+const jsonReady = true;
 const defaultModel = process.env.MOCK_KIMI_WEB_DEFAULT_MODEL ?? "configured-default";
 const readyDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_READY_DELAY_MS ?? "0", 10);
 const statusDelayMs = Number.parseInt(process.env.MOCK_KIMI_WEB_STATUS_DELAY_MS ?? "0", 10);
@@ -109,21 +109,15 @@ async function handle(req, res) {
 
   if (method === "GET" && url.pathname === "/api/v1/meta") {
     send(res, {
-      server_version: scenario === "meta-version-mismatch" ? "2.3.1" : version,
-      ...(jsonReady
-        ? {
-            kimi_agent_protocol_version: scenario === "meta-kap-missing"
-              ? undefined
-              : scenario === "meta-kap-mismatch" ? "2.0.0" : "1.0.0",
-            ...(scenario === "meta-unexpected-backend" ? { backend: "v2" } : {}),
-          }
-        : { backend: scenario === "meta-backend-mismatch" ? "v1" : "v2" }),
+      server_version: scenario === "meta-version-mismatch" ? "2.7.3" : version,
+      kimi_agent_protocol_version: scenario === "meta-kap-missing"
+        ? undefined
+        : scenario === "meta-kap-mismatch" ? "2.0.0" : "1.0.0",
+      ...(scenario === "meta-unexpected-backend" ? { backend: "v2" } : {}),
       dangerous_bypass_auth: scenario === "dangerous-auth",
-      capabilities: jsonReady
-        ? scenario === "meta-websocket-missing"
-          ? {}
-          : { websocket: scenario === "meta-websocket-mismatch" ? false : true }
-        : {},
+      capabilities: scenario === "meta-websocket-missing"
+        ? {}
+        : { websocket: scenario === "meta-websocket-mismatch" ? false : true },
       server_id: "mock-server",
       started_at: new Date().toISOString(),
       open_in_apps: [],
@@ -146,7 +140,7 @@ async function handle(req, res) {
       send(res, null, { code: 40001, msg: `cwd mismatch ${token}` });
       return;
     }
-    if (["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version) && (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd())) {
+    if (body?.environment_id !== "local" || body?.environment_cwd !== process.cwd()) {
       send(res, null, { code: 40001, msg: "missing local environment binding" });
       return;
     }
@@ -345,67 +339,16 @@ function readWsFrame(buffer) {
 
 function handleWsMessage(socket, frame) {
   void record({ kind: "ws-message", frame });
-  if (["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version)) {
-    handleWsMessageV26(socket, frame);
-    return;
-  }
-  if (frame.type === "client_hello") {
-    sendWsFrame(socket, {
-      type: "ack",
-      id: scenario === "ws-wrong-hello-id" ? "wrong-hello-id" : frame.id,
-      code: scenario === "ws-hello-reject" ? 40112 : 0,
-      msg: scenario === "ws-hello-reject" ? "unauthorized" : "success",
-      payload: {},
-    });
-    return;
-  }
-  if (frame.type !== "subscribe_v2") return;
-  if (scenario === "ws-malformed-json") {
-    sendWsFrame(socket, "{not-json");
-    return;
-  }
-  if (scenario === "ws-oversize-frame") {
-    sendWsFrame(socket, "x".repeat(1024 * 1024));
-  }
-  if (scenario !== "ws-no-state") {
-    const reportedSwarm = scenario === "ws-swarm-mismatch" && swarmMode ? false : swarmMode;
-    const planMode = (scenario === "ws-plan-mismatch" && swarmMode) ||
-      scenario === "ws-deactivation-plan-mismatch";
-    const agentFrame = {
-      type: "agent",
-      session_id: scenario === "ws-wrong-session" ? "session_other" : sessionId,
-      agent_id: scenario === "ws-wrong-agent" ? "agent-0" : "main",
-      event_created_at: new Date().toISOString(),
-      status: "idle",
-      model: scenario === "ws-missing-model" ? undefined : scenario === "ws-model-mismatch" && swarmMode ? "wrong-model" : model,
-      thinking: "medium",
-      permission_mode: scenario === "ws-missing-permission" ? undefined : scenario === "ws-permission-mismatch" ? "manual" : permission,
-      plan_mode: scenario === "ws-malformed-state" ? "false" : planMode,
-      swarm_mode: reportedSwarm,
-      tower_mode: scenario === "ws-tower-mismatch",
-    };
-    sendWsFrame(socket, agentFrame);
-    if (scenario === "ws-contradictory-state") {
-      sendWsFrame(socket, { ...agentFrame, swarm_mode: !reportedSwarm });
-    }
-  }
-  if (scenario === "ws-close-before-ack") {
-    socket.end();
-    return;
-  }
-  if (scenario === "ws-missing-ack") return;
-  const rejected = scenario === "ws-subscription-reject" || scenario === "ws-unacknowledged-state";
-  sendWsFrame(socket, {
-    type: "ack",
-    id: scenario === "ws-wrong-subscribe-id" ? "wrong-subscribe-id" : frame.id,
-    code: rejected ? 40401 : 0,
-    msg: rejected ? "not found" : "success",
-    payload: { accepted: rejected ? [] : [sessionId], not_found: rejected ? [sessionId] : [] },
-  });
+  void handleWsMessageV26(socket, frame);
 }
 
-function handleWsMessageV26(socket, frame) {
+async function handleWsMessageV26(socket, frame) {
   if (frame.type !== "subscribe") return;
+  const effectiveStatusDelayMs = swarmMode ? statusDelayMs : deactivateStatusDelayMs;
+  if (effectiveStatusDelayMs > 0) {
+    await sleep(effectiveStatusDelayMs);
+    if (socket.destroyed || stopping) return;
+  }
   if (scenario === "ws-malformed-json") {
     sendWsFrame(socket, "{not-json");
     return;
@@ -428,9 +371,9 @@ function handleWsMessageV26(socket, frame) {
     });
   }
   if (rejected || scenario === "ws-no-state") return;
-  const reportedSwarm = scenario === "ws-swarm-mismatch" && swarmMode ? false : swarmMode;
-  const planMode = (scenario === "ws-plan-mismatch" && swarmMode) ||
-    scenario === "ws-deactivation-plan-mismatch";
+  const reportedSwarm = (scenario === "ws-swarm-mismatch" || scenario === "status-swarm-mismatch") && swarmMode ? false : swarmMode;
+  const planMode = ((scenario === "ws-plan-mismatch" || scenario === "status-plan-mismatch" || scenario === "composite-failure") && swarmMode) ||
+    scenario === "ws-deactivation-plan-mismatch" || scenario === "deactivation-plan-mismatch";
   const agentFrame = {
     type: "agent",
     session_id: scenario === "ws-wrong-session" ? "session_other" : sessionId,
@@ -438,7 +381,9 @@ function handleWsMessageV26(socket, frame) {
     event_created_at: new Date().toISOString(),
     status: "idle",
     compacting: false,
-    model: scenario === "ws-missing-model" ? undefined : scenario === "ws-model-mismatch" && swarmMode ? "wrong-model" : model,
+    model: scenario === "ws-missing-model"
+      ? undefined
+      : (scenario === "ws-model-mismatch" || scenario === "status-model-mismatch") && swarmMode ? "wrong-model" : model,
     thinking: "medium",
     permission_mode: scenario === "ws-missing-permission" ? undefined : scenario === "ws-permission-mismatch" ? "manual" : permission,
     plan_mode: scenario === "ws-malformed-state" ? "false" : planMode,
@@ -500,18 +445,6 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
     }
   });
-  if (!["2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version) && scenario !== "ws-no-server-hello") {
-    sendWsFrame(socket, {
-      type: "server_hello",
-      timestamp: new Date().toISOString(),
-      payload: {
-        ws_connection_id: "mock-ws-connection",
-        protocol_version: scenario === "ws-server-version" ? 1 : 2,
-        heartbeat_ms: 10_000,
-        capabilities: { event_batching: false, compression: false },
-      },
-    });
-  }
 });
 
 let stopping = false;
@@ -573,7 +506,6 @@ server.listen(0, "127.0.0.1", async () => {
   if (readyDelayMs > 0) await sleep(readyDelayMs);
   if (stopping) return;
   if (scenario === "rest-failure") {
-    process.stdout.write(`diagnostic ${token} ${configCanary}\n`);
     process.stderr.write(`diagnostic ${token} ${configCanary}\n`);
   }
   const tokenless = scenario === "tokenless-ready" || scenario === "json-tokenless-ready" || scenario === "late-fork-after-parent-exit";
@@ -604,6 +536,9 @@ server.listen(0, "127.0.0.1", async () => {
       if (scenario === "json-ws-path-ready") ready.ws_url = `ws://127.0.0.1:${address.port}/api/v1/ws/`;
       if (scenario === "json-ws-query-ready") ready.ws_url = `ws://127.0.0.1:${address.port}/api/v1/ws?ready=1`;
       process.stdout.write(`${JSON.stringify(ready)}\n`);
+      if (scenario === "rest-failure") {
+        process.stdout.write(`diagnostic ${token} ${configCanary}\n`);
+      }
     }
   } else {
     const textOrigins = {

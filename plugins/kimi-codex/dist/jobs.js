@@ -1,7 +1,51 @@
+import { realpath } from "node:fs/promises";
+import path from "node:path";
 import { RuntimeError } from "./errors.js";
+import { readProcessIdentity } from "./process-tree.js";
 import { capitalize, formatBudgetDuration, renderTerminalJobArtifact, writeArtifact } from "./render.js";
 import { sleep } from "./util.js";
 export { sha256 as digestPrompt } from "./git.js";
+export async function serializedProcessIdentity(pid) {
+    const identity = await readProcessIdentity(pid);
+    return identity ? JSON.stringify(identity) : null;
+}
+export async function recordKimiSpawnIdentity(store, jobId, pid) {
+    store.updateRunningJob(jobId, { kimi_pid: pid });
+    const identity = await serializedProcessIdentity(pid);
+    if (identity) {
+        store.updateRunningJob(jobId, { kimi_identity: identity });
+    }
+}
+export async function canonicalizeMaybeDeletedPath(target) {
+    if (!path.isAbsolute(target))
+        return null;
+    let current = path.resolve(target);
+    const tail = [];
+    for (;;) {
+        try {
+            const resolved = await realpath(current);
+            return tail.length === 0 ? resolved : path.join(resolved, ...tail.reverse());
+        }
+        catch (error) {
+            const code = error.code;
+            if (code !== "ENOENT" && code !== "ENOTDIR")
+                return null;
+            const parent = path.dirname(current);
+            if (parent === current)
+                return null;
+            tail.push(path.basename(current));
+            current = parent;
+        }
+    }
+}
+export function isPathWithinCanonicalRoot(canonicalRoot, canonicalCandidate) {
+    const relative = path.relative(canonicalRoot, canonicalCandidate);
+    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+export async function isCwdWithinWorkspace(candidateCwd, canonicalWorkspaceCwd) {
+    const resolved = await canonicalizeMaybeDeletedPath(candidateCwd);
+    return resolved !== null && isPathWithinCanonicalRoot(canonicalWorkspaceCwd, resolved);
+}
 export function normalizeJobError(error) {
     if (error instanceof RuntimeError) {
         const normalized = {
@@ -78,8 +122,16 @@ export async function markJobCancelled(store, paths, job, summary, error, option
         ...(phase !== undefined ? { phase } : {}),
     }) ?? artifactJob);
 }
-export async function sweepStaleJobs(store, paths) {
+export async function sweepStaleJobs(store, paths, scope) {
+    const canonicalScopeCwd = scope?.workspaceCwd
+        ? await canonicalizeMaybeDeletedPath(scope.workspaceCwd)
+        : null;
     for (const job of store.listRunningJobsWithProcessHints()) {
+        if (scope?.repoId !== undefined && job.repo_id !== scope.repoId)
+            continue;
+        if (canonicalScopeCwd !== null && !(await isCwdWithinWorkspace(job.cwd, canonicalScopeCwd))) {
+            continue;
+        }
         if (store.getMcpTask(job.job_id))
             continue;
         // Recovery owns orphaned swarm resources; PID-only sweeping must not signal replacements.

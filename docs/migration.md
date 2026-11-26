@@ -1,262 +1,70 @@
 # Compatibility and upgrades
 
-The runtime certifies exact CLI releases per operation. Plugin 2.6.2 adds bounded swarm on exact stock CLI 2.6.2; see the [certification receipt](upstream-2.6.2-certification.md) for validation status. Plugin 2.6.3 additionally certifies exact CLI 2.6.3 with a separate [release receipt](upstream-2.6.3-certification.md); the immutable GitHub/npm release and fresh registry verification are complete. Plugin 2.7.2 certifies exact CLI 2.7.2 with separate [certification evidence](upstream-2.7.2-certification.md). Plugin 2.7.3 adds exact CLI 2.7.3 under the same construction with a separate [certification record](upstream-2.7.3-certification.md). Plugin 3.1.0 adds exact CLI 2.8.0 for all eight operations under the same construction with a separate [certification record](upstream-2.8.0-certification.md). Publication does not change the compatibility matrix. Exact 2.6.0 remains non-swarm-only. Older full-operation rows through 2.5.3 keep their inherited recovery limitation. `NATIVE_V2_CERTIFIED_VERSIONS` is the all-operation export, and `NATIVE_V2_ANY_OPERATION_VERSIONS` is the scoped union. Since plugin 3.0.0, another plain 2.x release above 2.0.0, including 2.6.1, 2.7.0 and 2.7.4, runs only the read-only operations (ask, review, challenge and the review gate) with a warning; rescue, pursue and both swarm modes refuse, and `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` refuses every operation. The npm channel does not change the compatibility matrix.
+Plugin 3.1.0 certifies exact Kimi Code CLI `2.8.0` for all 7 model operations: `ask`, `review`, `challenge`, `rescue`, `pursue`, `swarm`, and `swarm-write`. It introduces a rolling compatibility window starting at `2.8.0`. You can review the test evidence in [the 2.8.0 certification record](upstream-2.8.0-certification.md).
 
-Plugin 2.5.1 also adds DeepSeek Harness as a third host with all seven operations and a DSH-specific bundle, data root, and managed hook id. Existing Claude Code and Codex certification, job stores, and host-scoped hooks are unchanged; no migration is required for those hosts. New DSH installations follow the [README DSH section](../README.md#install-in-deepseek-harness), including `/kimi-setup` on that host.
+Unlisted plain `2.y.z` releases above `2.8.0` run read-only operations (`ask`, `review`, and `challenge`) with a warning and borrow only `--environment local`. The plugin refuses write and swarm operations, `--network`, pre-release or build suffixes, and other major versions before spawn (`KIMI_CAPABILITY_NOT_CERTIFIED`). Setting `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` also refuses all unlisted versions before spawn.
 
-Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS` (`runtime/kimi-version-probe.ts`), through 0.41.x, subject to each operation's minimum version. The [native-v2 release table](../runtime/kimi-releases.ts) is the authority for native-v2 versions.
+Plugin 3.1.0 removes Kimi Code releases below `2.8.0` and the `legacy-v1` engine (`0.1` to `0.41`). Those versions refuse before spawn. You can still read historical `legacy-v1` job rows through `job status`, `job result`, and `job replay`, but you cannot resume them. The [runtime release table](../runtime/kimi-releases.ts) is the single source of truth for certified versions.
 
-Use the [README installation and update steps](../README.md) for Claude Code or Codex. Model and provider choices are covered in the [model setup guide](./models.md). Do not change your host application's authentication to configure Kimi.
+See the [README](../README.md) for installation steps across Claude Code, Codex, Antigravity, DeepSeek Harness (DSH), and Magpie. See the [model setup guide](./models.md) for model aliases and provider login. Never alter your host application login to configure Kimi.
 
-## Plugin versions and upgrades
+## Plugin versions and compatibility
 
-Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Nearby version numbers do not imply compatibility or operation scope; the exact per-operation matrix is authoritative. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
+Plugin versions advance independently using semantic versioning and may match a certified CLI release number. Similar version numbers do not imply compatibility, so check the per-operation table in `runtime/kimi-releases.ts`. Published versions and Git tags never change.
 
-## Upgrading to 3.1
+## Upgrading from 3.0 to 3.1
 
-No action is required. Plugin 3.1.0 certifies exact Kimi Code CLI 2.8.0 for every operation; run `setup --install-kimi` to move the plugin-owned binary to it.
+Plugin 3.1.0 consolidates all 5 host integrations onto one shared architecture. Every host now uses 4 MCP tools, one `kimi` skill (`skill://kimi/SKILL.md`), 5 primary CLI subcommands, one shared data directory, and one PreToolUse hook block.
 
-Three behaviours change:
+### Surface and packaging changes
 
-- **Experimental settings on an uncertified release warn.** On an unlisted native-v2 release, `[experimental] tower`/`subagent_fork`, their per-flag variables and `KIMI_CODE_EXPERIMENTAL_FLAG` no longer refuse the launch. The job carries a warning naming every switched-on experimental setting. The plugin still starts Kimi with tower mode forced off and without the master flag. Certified releases already neutralized them silently.
-- **A session left in tower mode does not resume.** `-r`/`--resume` refuses with `KIMI_SESSION_TOWER_ACTIVE`. Turn tower mode off in that session with `/tower`, or start a fresh session.
-- **A new flag.** `--reference-session <job-id|session-id>` and MCP `referenced_sessions` point a task at an earlier session's log. See the [README](../README.md#point-a-task-at-an-earlier-session).
+| Area | Plugin 3.0.x | Plugin 3.1.0 |
+| --- | --- | --- |
+| Minimum Kimi Code CLI | Exact rows from `0.42.0` to `2.7.3` plus pinned `legacy-v1` (`<= 0.41.x`) | Rolling floor `>= 2.8.0`, exact `2.8.0` certified for all 7 operations, `< 2.8.0` and `legacy-v1` removed |
+| MCP tools | 9 tools (`kimi_ask`, `kimi_review`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm`, `kimi_swarm_write`, `kimi_job_status`, `kimi_job_result`, `kimi_job_cancel`) | 4 tools (`kimi_read`, `kimi_write`, `kimi_job`, `kimi_setup`) plus `SEP-2640` (`skills/list`, `skills/get`, `resources/list`, `resources/read` for `skill://kimi/SKILL.md` and `agents/openai.yaml`) |
+| Standard MCP `tools/call` | Returned a running handle unless already settled | Defaults to `wait: true` with a 50-second `wait_timeout_ms` (up to `86400000` ms), stops polling on disconnect without canceling the job, and returns a launch handle when `wait: false` |
+| Claude Code commands, agents, and Stop hook | 9 slash commands (`/kimi:*`), 4 agents (`kimi-*`), optional `review_gate` Stop hook (`--enable-review-gate`) | Removed in favor of the 4 MCP tools and `skills/kimi/SKILL.md` |
+| Codex skills | 9 shell-backed skills (`$kimi-task`, `$kimi-review`, `$kimi-setup`, and others) | One `$kimi` skill (`skills/kimi/SKILL.md` and `agents/openai.yaml`) plus the 4 MCP tools |
+| DeepSeek Harness (DSH) | Custom `plugins/kimi-dsh/` bundle with `runtime/dsh/` and 7 custom providers | Root `cordis.patch.yml` mounting `@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-skill-filesystem` |
+| Supported hosts | Claude Code, Codex, DSH | 5 hosts: Claude Code, Codex, Antigravity (`plugin.json`, `mcp_config.json`, `assets/logo.svg`), DSH, and Magpie (`magpie library mcp add`) |
+| Primary CLI subcommands | `ask`, `review`, `task`, `status`, `result`, `cancel`, `replay`, `setup`, `recover-swarm`, `repair-sessions`, `mcp` | 5 primary subcommands: `read`, `write`, `job`, `setup`, `mcp` (older names remain as compatibility aliases) |
+| Plugin data directory | Per-host `CLAUDE_PLUGIN_DATA`, `PLUGIN_DATA`, or `$DSH_HOME/plugin-data/kimi-plugin-cc` | One shared root: `~/.local/share/kimi-plugin-cc` (or `$XDG_DATA_HOME/kimi-plugin-cc`) on macOS and Linux, `%LOCALAPPDATA%\kimi-plugin-cc` on Windows, or `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc` |
+| Managed PreToolUse hook | Per-host `:<host-id>` blocks pointing at version-stamped `dist/hooks/approval-hook.js` paths and `--uninstall --all` | One bundled ESM `<pluginRoot>/hook/approval-hook.js` published by `setup` and one `# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===` block |
 
-## Upgrading to 3.0
+### Runtime behavior changes
 
-Plugin 3.0.0 replaces seven model commands with four. The operations behind them do not change, so existing jobs, sessions, hook labels and session-title prefixes carry over. Run setup on each host after updating, as for every release.
+Plugin 3.1.0 includes 5 runtime behavior updates:
 
-| Before 3.0.0 | From 3.0.0 |
-|---|---|
-| `/kimi:ask`, agent `kimi-ask`, Codex `$kimi-ask` | `/kimi:task`, agent `kimi-task`, Codex `$kimi-task` |
-| `/kimi:rescue`, agent `kimi-rescue`, Codex `$kimi-rescue` | `/kimi:task --write`, agent `kimi-task` with `--write`, Codex `$kimi-task` with `--write` |
-| `/kimi:challenge`, agent `kimi-challenge`, Codex `$kimi-challenge` | `/kimi:review --challenge`, agent `kimi-review` with `--challenge`, Codex `$kimi-review` with `--challenge` |
-| agent `kimi-swarm-write`, Codex `$kimi-swarm-write` | agent `kimi-swarm` with `--write`, Codex `$kimi-swarm` with `--write`; `/kimi:swarm --write` is unchanged |
-| MCP tool `kimi_challenge` | MCP tool `kimi_review` with `mode: "challenge"` |
+- session references allow `--reference-session <job-id|session-id>` and MCP `referenced_sessions` (up to 8) to attach earlier session paths without reading log content
+- tower-mode resume checks refuse sessions left in tower mode with `KIMI_SESSION_TOWER_ACTIVE` until you turn `/tower` off or start a new session
+- uncertified release checks warn on enabled `[experimental]` settings for unlisted `2.y.z > 2.8.0` builds while still forcing tower and subagent fork off
+- tool allowlists permit Kimi's `WaitFor` tool across every operation label so `pursue` and background tests avoid wasted denials
+- journal scans accept Kimi's 3 durable MCP bookkeeping records (`mcp.tools_discovered`, `mcp.server_failed`, `mcp.server_failure_resolved`) inside a canceled create-time plan-mode pair
 
-- `--write` and `--challenge` select the operation only as leading flags, before the first word of the prompt. The same text inside the prompt, or after `--`, keeps the read-only operation.
-- Scripts that call `companion.sh` directly keep working: `ask`, `task rescue`, `review`, `task challenge`, `task pursue`, `task swarm` and `task swarm --write` are unchanged.
-- Codex lists nine skills instead of twelve. `$kimi-task` is not implicitly invocable, so Codex no longer starts the read-only question skill on its own; name it when you want it. `$kimi-review` stays implicitly invocable.
-- Update the plugin on every host you use. Every installed hook checks every plugin job, so another host's older hook still applies its own rules and can deny what 3.0 allows; each job launch and each setup warns about it.
-- The MCP server lists six model tools and the three job tools. A client that called `kimi_challenge` must call `kimi_review` with `mode: "challenge"`. `kimi_ask`, `kimi_review` and `kimi_swarm` also accept `read_roots` and `network`.
-- DeepSeek Harness keeps all seven providers, including `kimi_challenge` and `kimi_swarm_write`.
+### Upgrade steps
 
-The same release stops refusing several Kimi settings it can neutralize, runs read-only operations on uncertified 2.x releases, adds `setup --install-kimi` and per-call read scope, and reports non-fatal conditions as warnings. See the [changelog](../CHANGELOG.md) and [safety guide](./safety.md).
+1. Update Kimi Code CLI to `2.8.0` or newer, or let the plugin install a dedicated copy in step 4.
+2. Update the plugin in each host you use. If you installed `plugins/kimi-dsh` in DSH, remove it and add the root package with `dsh plugin --profile web add kimi-plugin-cc`.
+3. Run setup once from any host with `kimi_setup({ action: "install" })` or `./scripts/companion.sh setup`. Setup rejects symlinks under `pluginRoot` and `hook/`, probes the staged hook before activating `<pluginRoot>/hook/approval-hook.js`, and merges legacy `:<host-id>` blocks in `~/.kimi-code/config.toml`. If 2 hosts use different Node binaries, set `KIMI_PLUGIN_CC_NODE_BIN` to the same absolute Node `22.5` or newer path in both hosts.
+4. Run `kimi_setup({ action: "install_kimi" })` or `./scripts/companion.sh setup --install-kimi` if you want a plugin-owned certified `2.8.0` binary shared across all hosts.
+5. Run `kimi_setup({ action: "check" })` or `./scripts/companion.sh setup --check` and confirm that the output shows `Probe: ok`.
 
-## Plugin 2.6.2 swarm behavior on exact CLI 2.6.2
+### Previous job databases
 
-Concurrency 1 uses one direct worker without native swarm activation or delegation. The default for write mode remains 1; its edits still produce an unapplied patch from a temporary worktree. Read mode defaults to 4 and uses guarded waves. At concurrency 2 or more, new and resumed entries share the wave limit; a model must divide larger tasks into successive waves. Fresh-only waves require at least two entries, so group odd target counts into disjoint entries or resume an own-session child for remaining work. `--cap` remains an advisory lifetime-total count.
+Plugin 3.1.0 does not move or delete your 3.0 per-host job databases (`plugins/data/.../kimi-plugin-cc/state.db` or `$DSH_HOME/plugin-data/kimi-plugin-cc/state.db`). New jobs write to the shared canonical data directory (`~/.local/share/kimi-plugin-cc` on POSIX, or `%LOCALAPPDATA%\kimi-plugin-cc` on Windows). To inspect or reuse a 3.0 database, set `KIMI_PLUGIN_CC_DATA` to the parent directory that contains `kimi-plugin-cc/`.
 
-The plugin overrides native swarm-child timeout, so a stuck child holds its wave until completion or finite whole-job stop. It disables native Bash backgrounding in owned parallel sessions and denies explicit background Bash. Both normal exit and cancellation settle verified owned processes before artifacts or patches are captured. Concurrency counts Kimi child-agent turns, not subprocesses started by allowed repository tests; individual Bash timeout does not prove those descendants stop between waves. No user timeout configuration change or patched CLI installation is needed. Older exact CLI versions keep their prior behavior. Update the active host plugin and run its setup/check so its canonical hook contains the new policy; re-pinning an older runtime does not add that policy.
+## Parallel swarm behavior
 
-Parallel Bash commands use the native 60-second default foreground timeout, with a 300-second maximum, and are killed on expiry. Use concurrency 1 for longer tests: automatic timeout-to-background remains available there, root-agent turns stay sequential, and result capture still waits for whole-job settlement. The parallel session's native TaskStop policy remains after deactivation; external interactive resume is outside the managed-job guarantee.
+The `--max-concurrency` flag defaults to `4` for read-only swarms and `1` for write swarms (`swarm_patch`). On exact `2.8.0`, concurrency `1` runs one direct worker in print mode without swarm activation or subagent delegation. Write mode at concurrency `1` still uses a temporary Git worktree and captures an unapplied patch.
 
-## Native parallel swarm activation
+At concurrency `2` or higher, `runSwarm` uses bounded waves and short-lived `kimi web --json` activation with a short-lived in-memory token.
 
-Upstream 2.3.2 removes model self-activation of `AgentSwarm` in fresh print sessions. On exact 2.3.2, 2.3.3, 2.4.0, 2.4.1 and 2.5.0/2.5.1/2.5.2/2.5.3, plus the exact-2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel paths, swarm commands and MCP calls use the same `runSwarm` lifecycle. The direct single-worker path skips it:
+1. Activation starts `kimi web --json` and validates the loopback origin, `/api/v1/ws`, exact server version, and KAP `1.0.0` metadata. It creates a session in the canonical execution root with `environment_id: "local"`, `permission_mode: "auto"`, and `swarm_mode: true`. It verifies the WebSocket subscription state, stops within 15 seconds, confirms `swarm_mode.enter`, and disables native `TaskStop` before print starts.
+2. One `kimi -p -r` runner executes the prompt with `kimi_session_id_source: "preactivated"`. Every coordinator and subagent tool call passes the PreToolUse hook, which enforces wave limits across `items` and `resume_agent_ids`. The hook also denies forks, fresh singleton waves, and explicit background Bash commands. Setting `KIMI_CODE_SWARM_TIMEOUT_MS=2147483647` keeps slow children active until they finish or hit the finite job budget.
+3. Deactivation runs a second bounded `kimi web --json` lifecycle to recheck the local binding, set `swarm_mode: false`, verify `swarm_mode.exit`, and shut down. Both normal exit and cancellation wait for verified process quiescence before capturing artifacts or patches.
 
-1. A short-lived `web --no-open --host 127.0.0.1 --port 0 --log-level error` process uses authenticated loopback routes to verify the exact v2 server, choose the explicit or configured default model, create a session, bind the model and auto permission, enable and verify `swarm_mode`, and shut down. Exact 2.7.2/2.7.3/2.8.0 instead uses `web --json` with an in-memory ephemeral token, a validated loopback origin and `/api/v1/ws`, and KAP 1.0.0/WebSocket meta proof without a legacy backend field. On exact 2.5.0/2.5.1/2.5.2/2.5.3 and the bounded 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 paths, creation explicitly selects the local environment and an authenticated `/environment` read proves its cwd before profile mutation; state verification uses protocol-v2 or direct-subscription WebSocket main-agent frames because `/status` was removed. The child environment sets `KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to disable ambient idle-session reclamation.
-2. One ordinary `kimi -p -r` prompt runner resumes that session. Its recorded session-id source is `preactivated`, and the returned print session must match it.
-3. A second short-lived web lifecycle rechecks the local binding on 2.5.0/2.5.1/2.5.2/2.5.3/2.6.2/2.6.3/2.7.2/2.7.3/2.8.0, disables swarm mode, verifies the version-appropriate state proof and the `swarm_mode.exit` journal record, and shuts down.
+Parallel Bash commands use Kimi's 60-second default and 300-second maximum foreground timeout. Use concurrency `1` for longer test runs, and see [swarm recovery](./swarm-recovery.md) to clean up interrupted runs.
 
-Activation is inside the job's finite budget. Graceful process close has a bounded 15-second allowance. `runSwarm` solely owns deactivation: normal cleanup uses the remaining budget, while failure recovery has a separate two-second cancellation-aware bound and is never retried. Print/session failures stay primary. The ready token stays in memory and out of logs, and success cannot complete if cleanup fails. Post-mutation identity or process/group uncertainty preserves diagnostics and, for write-swarm, the recovery worktree. Process groups are rechecked after teardown; unknown survivors are unverified and unproven groups are not signalled. Older certified versions still launch swarm directly with `kimi -p`. This narrow lifecycle is not a full RPC transport or a model-driven activation workaround; the managed hook and workspace boundaries still govern every tool call.
+## Earlier upgrades
 
-After updating the plugin, run Claude Code `/kimi:setup` or Codex `$kimi-setup`
-from that host's active install to re-pin its version-stamped hook path, then
-run setup with `--check`. This fixes path drift, not policy omissions in an older installed plugin. Older coexisting hooks still veto pursue goal-status tools; update each host only when authorized. Keep `default_plan_mode` absent or false if you use swarm or a CLI older than 2.4.0. Upgrades
-from pre-1.10 releases must also follow the historical native-v2 migration section below.
-
-## Historical migration instructions
-
-<details>
-<summary>Earlier migrations from the Python CLI and legacy engine</summary>
-
-These sections record earlier upgrades. Old tags, paths, and installation commands are historical examples, not the current installation procedure. Follow the current guidance above for the current release.
-
-## Migrating from v0.4 to v1.0
-
-v1.0 of kimi-plugin-cc targets the **kimi-code** Node.js binary (Moonshot's successor to Kimi CLI). The v0.4.x line targeted the Python **Kimi CLI** over its Wire JSON-RPC transport. kimi-code dropped the Wire transport from its first release, so v1.0 is a hard cut rather than a backwards-compatible upgrade.
-
-If you're already running v0.4.x with the Python Kimi CLI, you have a choice:
-
-- **Stay on v0.4** if you depend on `kimi --wire`. The [`v0.4.0`](https://github.com/linxule/kimi-plugin-cc/releases/tag/v0.4.0) tag is the stable reference point; a `v0.4-maintenance` branch is cut from that tag for ongoing fixes (once published, pin to it via `linxule/kimi-plugin-cc@v0.4-maintenance`).
-- **Upgrade to v1.0** if you've installed (or are willing to install) kimi-code. v1.0 gets the new safety story (PreToolUse hook), kimi-code's vis-server integration for free, and a leaner subprocess transport.
-
-## What changes between v0.4 and v1.0
-
-| | v0.4 | v1.0 |
-|---|---|---|
-| Backing CLI | Python [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) | [kimi-code](https://kimi.com/code/docs) (Node.js) |
-| Transport | `kimi --wire` (JSON-RPC over stdio) | `kimi -p --output-format stream-json` (subprocess + NDJSON) |
-| Per-command safety | YAML agent profiles (`exclude_tools`) shipped in the plugin | PreToolUse hook installed in `~/.kimi-code/config.toml` |
-| Session id | Client-assigned UUID, passed via `--session` | Server-minted, captured from kimi's stream-json `session.resume_hint` record (stderr announce fallback) |
-| Web UI integration | `kimi web` + PATCH `/api/sessions/{id}` for pre-run human-readable titles | Shared Desktop/Web session store, repaired prompt previews and replaceable fallback titles for native-v2 sessions |
-| Replay log format | Wire JSON-RPC events (`{direction, message}`) | cli-client NDJSON (`{event, record}`) |
-| Marketplace name | `kimi-marketplace` (plugin: `kimi`) — unchanged | same `kimi-marketplace` / `kimi` (v1 upgrades in place) |
-| Rescue allowlist | In-band approval policy on the Wire client | Out-of-band via the PreToolUse hook (same allowlist code) |
-
-The marketplace + plugin IDs are unchanged from v0.4, so an existing install can update in place — but only after kimi-code is installed locally. Without kimi-code the new transport has nothing to spawn, so the order matters: install kimi-code first, then update the plugin.
-
-## Upgrade procedure
-
-### 1. Install kimi-code
-
-Follow Moonshot's install steps at [kimi.com/code/docs](https://kimi.com/code/docs). Verify it works on its own:
-
-```
-kimi --version
-kimi -p "Reply READY"
-```
-
-### 2. Audit your kimi-plugin-cc env block
-
-If you set any of these env vars for v0.4, review them before continuing — v1.0 reads the same vars but with different effective semantics:
-
-| Env var | Notes |
-|---|---|
-| `KIMI_PLUGIN_CC_KIMI_BIN` | Path to the kimi binary. Was the Python `kimi` in v0.4; should now point at the kimi-code binary (typically `~/.kimi-code/bin/kimi`). Unset to use the kimi-code on `PATH`. |
-| `KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS` | JSON array of args prepended to every kimi spawn. Was a Wire-mode flag carrier in v0.4; in v1 it's still honored but the v0.4 contents (`--wire`, `--session`, `--agent-file`) are gone. Unset unless you have a specific override reason. |
-| `KIMI_PLUGIN_CC_NODE_BIN` | Absolute path to the Node binary used to run the companion AND the hook script. v1 setup hard-requires absolute. |
-| `KIMI_PLUGIN_CC_HOOK_SCRIPT` | Override for the hook script path written into `~/.kimi-code/config.toml`. Tests / advanced users only. |
-| `KIMI_CODE_HOME` | Override for the kimi-code config directory (default `~/.kimi-code`). New in v1.0 — recognized by setup, install verifier, and the hook itself. |
-| `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK` | Bypasses every hook-verification refusal gate (and the review-gate skip), restoring un-enforced `permission: auto` execution. Only set for tests or deliberate diagnostics. |
-| `CLAUDE_PLUGIN_DATA` | Plugin data root. Unchanged from v0.4. |
-
-### 3. Update the plugin in place
-
-From an existing v0.4 install:
-
-```
-/plugin marketplace update linxule
-# then in the /plugin UI: select kimi → "Update now"
-```
-
-Or fresh install on a machine that doesn't have v0.4:
-
-```
-/plugin marketplace add linxule/kimi-plugin-cc
-/plugin install kimi@kimi-marketplace
-```
-
-(v0.4 ALPHA NOTE: v1.0.0-alpha.1 was briefly tagged with renamed IDs `kimi-v1` / `kimi-marketplace-v1`. The rename was rolled back in v1.0.0-alpha.2. If you happened to install alpha.1 by those names, uninstall first: `/plugin uninstall kimi-v1`, `/plugin marketplace remove kimi-marketplace-v1`, then follow the procedure above.)
-
-### 4. Run setup
-
-```
-/kimi:setup
-```
-
-This writes the PreToolUse hook to `~/.kimi-code/config.toml` and runs a two-layer probe (direct + via `/bin/sh -c`) to verify the hook fires and denies as expected. If setup fails, look at the `Probe:` line in the output. Common failure codes (the runtime emits these as `SETUP_*` errors):
-
-- **Bad `KIMI_PLUGIN_CC_NODE_BIN` override** — v1 setup requires the override to be an absolute path; relative paths (`node`) are rejected with `SETUP_NODE_BIN_NOT_ABSOLUTE`.
-- **Orphan markers in `~/.kimi-code/config.toml`** from a manual edit or aborted earlier setup. Run `/kimi:setup --uninstall` to clean up, then `/kimi:setup` again. Code: `SETUP_ORPHAN_MARKERS`.
-- **Duplicate managed blocks** from two setup runs racing. Same fix: `/kimi:setup --uninstall` + `/kimi:setup`. Code: `SETUP_DUPLICATE_BLOCKS`.
-- **Hook script path contains characters TOML can't represent** (quotes, control chars). Reinstall to a path without these, or set `KIMI_PLUGIN_CC_HOOK_SCRIPT` to a safe path. Code: `SETUP_HOOK_PATH_UNSAFE`.
-- **Probe timed out** (5s budget). Usually means kimi-code or the Node binary is wedged on cold start. Re-run; if persistent, file an issue with `/kimi:setup --check` output.
-- **Hook script not found** — `dist/hooks/approval-hook.js` is missing. Reinstall the plugin or run `bun run build` if you're on a local clone. Code: `SETUP_HOOK_SCRIPT_MISSING`.
-
-### 5. Verify
-
-```
-/kimi:setup --check
-```
-
-Reports the install state without writing. Run `/kimi:review` against a small diff to confirm the round-trip works end-to-end.
-
-### Local-clone install upgrade
-
-If you're running the plugin via `claude --plugin-dir ~/kimi-plugin-cc` rather than the marketplace:
-
-```bash
-cd ~/kimi-plugin-cc
-git fetch --tags origin
-git checkout v1.0.0-alpha.2
-# Verify dist/ is in sync; if you previously deleted it locally, rebuild:
-ls dist/hooks/approval-hook.js >/dev/null || bun run build
-# Restart Claude Code so the new agents/ and dist/ register
-```
-
-Then run `/kimi:setup` in your Claude Code session. The local clone uses the same managed-block installer; no marketplace operations needed.
-
-### Using both Claude Code and Codex (v1.7.0+)
-
-Claude Code and Codex install the plugin to **different, version-stamped paths**
-but share one `~/.kimi-code/config.toml`. As of **v1.7.0** each host manages its
-**own** host-scoped PreToolUse block (`# === BEGIN kimi-plugin-cc-managed:claude-code …`
-vs `:codex`), so:
-
-- Run **`/kimi:setup` in Claude Code AND `$kimi-setup` in Codex** — once each.
-  They no longer clobber each other; both blocks coexist and each host verifies
-  its own. (Before v1.7.0 a single shared block was overwritten every time you
-  switched hosts, which is why setup seemed to "need redoing.")
-- **One-time cleanup on upgrade to v1.7.0:** update the plugin in *both* hosts,
-  then run setup in each. The first setup adopts your old un-suffixed block and
-  prunes orphaned hook entries left by earlier installs.
-- `/kimi:setup --uninstall` removes only the current host's block. Use
-  `/kimi:setup --uninstall --all` to remove *every* host's block from the shared
-  config (a deliberate full nuke — it clears blocks for **all** hosts, not just
-  this one).
-
-> **⚠️ Upgrade both hosts before re-running setup.** During the window where one
-> host is on v1.7.0+ and the other is still on ≤1.6.5, running setup on the OLD
-> host writes an un-suffixed block that can overwrite the block the new host just
-> migrated, re-creating the clobber (or leaving a duplicate the new host rejects
-> with `SETUP_DUPLICATE_BLOCKS`). Update **both** Claude Code and Codex to v1.7.0+
-> first, then run setup in each. If the config ever looks tangled, the clean-slate
-> escape hatch is `/kimi:setup --uninstall --all` followed by setup in each host.
-
-## Data and session continuity
-
-- **SQLite job rows** from v0.4 remain in `${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/state.db`. They're still visible to `/kimi:status` and `/kimi:result`, but `/kimi:replay` will report `REPLAY_LOG_UNREADABLE` on the v0.4 wire logs — v1.0's replay parser doesn't understand the Wire JSON-RPC shape. Archive or delete the database if you don't need v0.4 history.
-- **Kimi CLI sessions** under `~/.kimi/sessions/` are independent of kimi-code's `~/.kimi-code/sessions/`. v1.0's `--resume` will not see v0.4 sessions.
-- **Plugin config** (`${CLAUDE_PLUGIN_DATA}/kimi-plugin-cc/config.json` — only `reviewGateEnabled` lives here) carries over unchanged.
-
-## Rollback
-
-If something is wrong, the v0.4 install is one step away:
-
-```
-/kimi:setup --uninstall            # removes the v1.0 PreToolUse hook
-/plugin uninstall kimi
-/plugin marketplace remove kimi-marketplace
-# If the v0.4-maintenance branch is published:
-/plugin marketplace add linxule/kimi-plugin-cc@v0.4-maintenance
-# Otherwise, pin to the v0.4.0 tag:
-/plugin marketplace add linxule/kimi-plugin-cc@v0.4.0
-/plugin install kimi@kimi-marketplace
-```
-
-Claude Code's marketplace tooling uses `@ref` to pin a GitHub shorthand to a branch or tag. Your Python Kimi CLI install is untouched — v1.0 only edits `~/.kimi-code/config.toml`, never `~/.kimi/*`.
-
-## What's gone
-
-- The `--wire`, `--session`, and `--agent-file` invocation shape. v1.0 uses `kimi -p` only.
-- The YAML agent profiles in `runtime/agents/`. The plugin doesn't ship Kimi-side profiles in v1.0; per-command safety is enforced exclusively by the PreToolUse hook.
-- The Wire-protocol replay path. The runtime no longer parses JSON-RPC turn events.
-- The v0.4 pre-run `Kimi Task: ...` title assignment path through Kimi CLI / `kimi web`. v1 uses `kimi -p`, whose session id is minted only after the run, so the plugin cannot name the session before spawn. Instead, after Kimi announces the session id and the run settles, the runtime syncs a fallback title such as `Kimi Ask: ...`, repairs missing native-v2 prompt previews, and notifies the Desktop/Web index. Native-v2 fallback titles remain eligible for native generation; manual and already-generated titles are preserved. Internal `review_gate` Stop-hook sessions are intentionally excluded. See [session visibility and native titles](session-visibility.md) for generation limits and repair of older plugin sessions.
-
-## What's new
-
-- A two-layer setup probe that catches `node`-not-on-PATH failure modes before they become silent fail-opens.
-- Workspace-bound rescue safety enforced by a hook that the plugin sets `KIMI_PLUGIN_CC_CMD=rescue` for. The hook only enforces the allowlist when that env var is set — kimi-code invocations from outside the plugin (e.g., direct user `kimi -p` calls) keep kimi-code's default permission posture, unrestricted by the plugin. The allowlist's job is to scope plugin-driven rescue, not to police all uses of kimi-code on the system.
-- `/kimi:setup --check` and `/kimi:setup --uninstall` for state inspection and cleanup.
-- Stream-json logs are easier to grep than Wire JSON-RPC dumps when you need to debug a job after the fact.
-
-If you hit problems, file an issue with the output of `/kimi:setup --check` and the contents of the managed block in `~/.kimi-code/config.toml` (the block is between the BEGIN and END markers — don't paste the rest of your kimi-code config).
-
-## Upgrading to 1.10 (native agent-core-v2, kimi-code 0.42.0)
-
-This release changes behaviour that earlier 1.x users may depend on. Strictly by semver it is a major; it ships as 1.10.0 because the plugin is upgraded in place through the marketplace and its 1.x line has always advanced compat by minor releases.
-
-- **Certification is now per EXACT kimi-code version, not per minor.** Native v2 is certified at `0.42.0` only (v1.10.0; v1.10.3 adds `0.43.0` and `0.43.1`). When kimi-code publishes a newer version, every model-spawning command refuses with `KIMI_CAPABILITY_NOT_CERTIFIED` until a plugin release certifies it — before 1.10, a patch release inside a tested minor kept working. kimi-code self-upgrades in the background, so expect this on the next upstream patch; pin `KIMI_PLUGIN_CC_KIMI_BIN` to a certified binary if you need continuity, and watch for the next plugin release.
-- **Sessions created before 1.10 cannot be resumed on 0.42.0.** `ask --resume`, `ask -r`, `rescue --resume` and rescue's implicit latest-session reuse refuse (`KIMI_SESSION_LINEAGE_UNKNOWN` / `KIMI_SESSION_ENGINE_MISMATCH`) — the v1 engine no longer exists in the binary, so nothing could replay those sessions. Nothing is deleted; `/kimi:status`, `/kimi:result` and `/kimi:replay` still work on the old jobs. Start fresh sessions.
-- **`default_plan_mode = true` (any spelling) in `~/.kimi-code/config.toml` now blocks every command** (`CLI_V2_PLAN_MODE_CONFIGURED`). On the old forced-v1 path that setting was harmless; on native v2 it would arm the one code path that bypasses the safety hook. Set it to `false` or remove it. `/kimi:setup` cannot fix this one.
-- **`KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS` may no longer contain kimi flags** (`-r`, `-c`/`-C`, `-S`, `-p`, `-m`, `--plan`, `--yolo`, `--agent`, `--add-dir`, …) — `INVALID_ENV`. The prefix is a launcher shim only (e.g. `["--import","tsx",…]`).
-- **`[experimental] tower` / `subagent_fork` and `KIMI_CODE_EXPERIMENTAL_FLAG` refuse before spawn** (`CLI_V2_EXPERIMENTAL_UNSAFE` / `CLI_V2_HOOK_ORDER_UNSAFE`). Unset them for plugin-managed runs.
-- **Still on kimi-code ≤ 0.41.x?** Nothing changes for you: those versions route to the legacy-v1 engine exactly as before. But the plugin certifies them only for an explicitly pinned binary — kimi-code's auto-update will move you to 0.42.x, at which point the notes above apply.
-
-No action for the job store (one additive nullable column, migrated automatically) or the hook policy (unchanged allowlists). As with every release, run `/kimi:setup` (or `$kimi-setup`) after updating so the hook is re-pinned to the new install path — a `kimi login` also strips the managed-block markers, and setup restores them.
-
-None of these refusals is repaired by `/kimi:setup`; all of them carry `retryable_after_setup: false` explicitly from 1.10.1 (an absent field must still be treated as `false`). They are catalogued with remedies in [docs/safety.md § Refusal codes](./safety.md#refusal-codes-of-the-native-v2-contract-v1100).
-
-</details>
+Plugin 3.0.0 merged 7 Claude Code commands into 4, folded `kimi_challenge` into `kimi_review`, and added `--read-root`, `--network`, `setup --install-kimi`, and launch warnings. Plugin 3.1.0 replaces those host-specific command and skill layouts with the 4 MCP tools and one `kimi` skill described above. For upgrades from versions earlier than `3.0.0`, see [GitHub Releases](https://github.com/linxule/kimi-plugin-cc/releases) and the archived [`v3.0.0` migration guide](https://github.com/linxule/kimi-plugin-cc/blob/v3.0.0/docs/migration.md).

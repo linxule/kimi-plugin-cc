@@ -5,7 +5,7 @@ import { runCliPromptWithBudget } from "../cli-client.js";
 import { executionPlanFromPersisted, observedExecutionFields, persistedExecutionPlanFields, prepareKimiExecutionPlan, } from "../kimi-engine.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, recordKimiSpawnIdentity, serializedProcessIdentity, sweepStaleJobs, } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_PURSUE_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
@@ -139,6 +139,7 @@ export async function runPursue(argv, context) {
             budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
             pid: process.pid,
             kimi_pid: null,
+            companion_identity: await serializedProcessIdentity(process.pid),
             status: "running",
             kimi_session_id: null,
             ...persistedExecutionPlanFields(executionPlan),
@@ -219,7 +220,7 @@ async function executePursueJob(jobId, prompt, objective, budgetMs, context) {
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
             logPath: job.stream_log_path,
-            onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
+            onSpawn: async (pid) => { await recordKimiSpawnIdentity(store, job.job_id, pid); },
             signal: handlers.signal,
         }, budgetMs, "pursue.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));

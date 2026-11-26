@@ -71,7 +71,7 @@ export async function resolveSessionReferences(inputs, options) {
         return [];
     const refuse = (input, reason) => new RuntimeError("INVALID_ARGS", `--reference-session ${JSON.stringify(input)}: ${reason}.`, options.stage);
     if (options.plan.intendedEngine !== "native-v2") {
-        throw refuse(inputs[0], "session references need a native-v2 Kimi Code release; this run selected legacy-v1");
+        throw refuse(inputs[0], "session references require native-v2 Kimi Code (>= 2.8.0)");
     }
     const home = resolveKimiHome(options.env, options.spawnCwd);
     if (/\p{Cc}/u.test(home) || (process.platform !== "win32" && home.includes("\\"))) {

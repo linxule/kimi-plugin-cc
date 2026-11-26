@@ -52,7 +52,7 @@ describe("job-store column handling", () => {
   test("legacy migration appends columns in a fixed order", async () => {
     const root = await createTestPluginDataRoot("job-store-columns-legacy");
     try {
-      const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: root });
+      const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: root });
       await ensurePluginPaths(paths);
       const seed = new Database(paths.stateDbPath);
       seed.exec(LEGACY_SCHEMA);
@@ -70,7 +70,7 @@ describe("job-store column handling", () => {
         "thinking_effort TEXT", "hook_escapes TEXT", "operation_kind TEXT", "intended_engine TEXT",
         "observed_engine TEXT", "kimi_version TEXT", "system_version TEXT", "kimi_command TEXT",
         "kimi_prefix_args TEXT", "plan_certification TEXT", "resumed_from_job_id TEXT", "safety_profile TEXT",
-        "warnings TEXT", "read_scope TEXT",
+        "warnings TEXT", "read_scope TEXT", "companion_identity TEXT", "kimi_identity TEXT",
       ]);
       expect(columns(paths.stateDbPath, "mcp_tasks").at(-1)).toBe("kimi_identity TEXT");
     } finally {
@@ -81,7 +81,7 @@ describe("job-store column handling", () => {
   test("create, update and terminal marks store the same values", async () => {
     const root = await createTestPluginDataRoot("job-store-columns-rows");
     try {
-      const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: root });
+      const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: root });
       await ensurePluginPaths(paths);
       const store = new JobStore(paths);
       try {
@@ -95,7 +95,7 @@ describe("job-store column handling", () => {
           agent_profile: "<cli-client>", prompt_digest: "d", summary: "s", phase: "starting", budget_ms: 1000,
           final_output_path: null, stream_log_path: "/l", error: null, kimi_session_id_source: "announced",
           budget_source: "explicit", thinking_effort: "high", hook_escapes: null, warnings: null,
-          read_scope: null,
+          read_scope: null, companion_identity: null, kimi_identity: null,
         });
         // A warning-free row keeps its historical JobRecord shape.
         expect(Object.keys(store.getJob("job-full")!)).not.toContain("warnings");
@@ -138,7 +138,7 @@ describe("job-store column handling", () => {
   test("launch warnings persist as a JSON array and parse defensively", async () => {
     const root = await createTestPluginDataRoot("job-store-columns-warnings");
     try {
-      const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: root });
+      const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: root });
       await ensurePluginPaths(paths);
       const store = new JobStore(paths);
       try {

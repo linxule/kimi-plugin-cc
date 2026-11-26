@@ -5,7 +5,7 @@ import path from "node:path";
 import { RuntimeError } from "../errors.js";
 import { selectKimiBinary } from "../kimi-command.js";
 import { kimiReleaseHas } from "../kimi-releases.js";
-import { probeKimiVersion } from "../kimi-version-probe.js";
+import { KIMI_MINIMUM_CERTIFIED_VERSION, probeKimiVersion, } from "../kimi-version-probe.js";
 import { sleep, tomlErrorLocation } from "../util.js";
 import { extractValue } from "../vendor/smol-toml/extract.js";
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
@@ -17,8 +17,9 @@ const DEFAULT_LOCK_STALE_MS = 2_000;
 const DEFAULT_LOCK_RETRY_MS = 25;
 export const KIMI_CONFIG_LOCK_METADATA_MAX_BYTES = 4_096;
 const HOOK_FIELDS = new Set(["event", "matcher", "command", "timeout"]);
-// These events exist throughout the supported 0.x range. The remaining events
-// are additive and require a local version probe before they can be blessed.
+// Supported hook events for >= 2.8.0. Additive events (`PermissionRequest`,
+// `PermissionResult`, `Interrupt`) still require an exact certified `hook-schema`
+// release row.
 const BASE_HOOK_EVENTS = new Set([
     "PreToolUse",
     "PostToolUse",
@@ -34,10 +35,10 @@ const BASE_HOOK_EVENTS = new Set([
     "PostCompact",
     "Notification",
 ]);
-const VERSION_SENSITIVE_HOOK_EVENTS = new Map([
-    ["PermissionRequest", 8],
-    ["PermissionResult", 8],
-    ["Interrupt", 14],
+const VERSION_SENSITIVE_HOOK_EVENTS = new Set([
+    "PermissionRequest",
+    "PermissionResult",
+    "Interrupt",
 ]);
 export function kimiConfigLockPath(configPath) {
     return `${configPath}${LOCK_SUFFIX}`;
@@ -554,14 +555,13 @@ function validateHookEntry(entry, index, line, versionSensitiveEvents) {
         return invalidHookSet("missing required field `event`", index, line);
     if (typeof event !== "string")
         return invalidHookSet("`event` must be a string", index, line);
-    const minimumMinor = VERSION_SENSITIVE_HOOK_EVENTS.get(event);
-    if (!BASE_HOOK_EVENTS.has(event) && minimumMinor === undefined) {
+    const isVersionSensitive = VERSION_SENSITIVE_HOOK_EVENTS.has(event);
+    if (!BASE_HOOK_EVENTS.has(event) && !isVersionSensitive) {
         return invalidHookSet(`unsupported hook event ${JSON.stringify(event)}`, index, line);
     }
-    if (minimumMinor !== undefined) {
+    if (isVersionSensitive) {
         versionSensitiveEvents.push({
             event,
-            minimumMinor,
             entry: index,
             line,
         });
@@ -590,24 +590,15 @@ function validateVersionSensitiveEvents(events, version) {
     if (version === undefined) {
         return invalidHookSet(`version-sensitive event ${JSON.stringify(first.event)} requires a verified kimi-code version`, first.entry, first.line);
     }
-    // The additive events and HookDefSchema are unchanged at every release whose
-    // row in kimi-releases.ts carries "hook-schema" (each row names the reviewed
-    // commit). Schema acceptance does not certify operations.
-    // Require the full version string AND matching components; no inferred 2.x compatibility.
+    // Require the full version string AND matching components against a certified
+    // >= 2.8.0 `hook-schema` release row; no inferred compatibility.
     if (version.major === 2 &&
         version.version === `${version.major}.${version.minor}.${version.patch}` &&
         kimiReleaseHas(version.version, "hook-schema")) {
         return { valid: true };
     }
-    if (version.major !== 0) {
-        return invalidHookSet(`version-sensitive event ${JSON.stringify(first.event)} has no verified schema contract for kimi-code ${version.major}.${version.minor}`, first.entry, first.line);
-    }
-    for (const event of events) {
-        if (version.minor < event.minimumMinor) {
-            return invalidHookSet(`event ${JSON.stringify(event.event)} requires kimi-code >= 0.${event.minimumMinor}, but the installed version is 0.${version.minor}`, event.entry, event.line);
-        }
-    }
-    return { valid: true };
+    const observed = version.version ?? `${version.major}.${version.minor}`;
+    return invalidHookSet(`version-sensitive event ${JSON.stringify(first.event)} requires a certified kimi-code >= ${KIMI_MINIMUM_CERTIFIED_VERSION} release (got ${observed})`, first.entry, first.line);
 }
 function invalidHookSet(reason, entry, line, failureKind = "schema") {
     const location = entry > 0 ? `hooks[${entry - 1}] at line ${line}` : `hooks configuration at line ${line}`;

@@ -10,7 +10,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../../runtime/hooks/install.js";
-import { buildHookShellCommand, resolveHostId } from "../../runtime/hooks/install-paths.js";
+import { buildHookShellCommand } from "../../runtime/hooks/install-paths.js";
 import { evaluateInstalled } from "../../runtime/hooks/managed-block.js";
 import {
   HOOK_DECISION_DEADLINE_MS,
@@ -37,7 +37,7 @@ describe("verifyHookInstalled", () => {
   test("reports missing when KIMI_CODE_HOME directory has no config", async () => {
     const home = await createTestPluginDataRoot("hook-install-no-config");
     try {
-      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_DATA: home });
       expect(status.installed).toBe(false);
       expect(status.reason).toContain("does not exist");
       expect(status.configPath).toBe(path.join(home, "config.toml"));
@@ -55,7 +55,7 @@ describe("verifyHookInstalled", () => {
         `default_model = "kimi-for-coding"\n`,
         "utf8",
       );
-      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_DATA: home });
       expect(status.installed).toBe(false);
       expect(status.reason).toContain("managed block is not present");
     } finally {
@@ -76,7 +76,7 @@ describe("verifyHookInstalled", () => {
         "# notes: don't reinstall kimi-plugin-cc-managed approval-hook.js by hand\n",
         "utf8",
       );
-      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_DATA: home });
       expect(status.installed).toBe(false);
       expect(status.reason).toContain("managed block is not present");
     } finally {
@@ -97,7 +97,7 @@ describe("verifyHookInstalled", () => {
         `[[hooks]]\nevent = "PreToolUse"\ncommand = "node /elsewhere/approval-hook.js"\n`,
         "utf8",
       );
-      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_DATA: home });
       expect(status.installed).toBe(false);
       expect(status.reason).toContain("managed block is not present");
     } finally {
@@ -185,7 +185,7 @@ describe("verifyHookInstalled", () => {
       expect(status.installed).toBe(false);
       expect(status.reason).toContain(hookPath);
       expect(status.reason).toContain("missing or unreadable");
-      expect(status.reason).toContain("/kimi:setup");
+      expect(status.reason).toContain("kimi_setup");
     } finally {
       await cleanupTestPath(home);
     }
@@ -389,13 +389,15 @@ describe("verifyHookInstalled", () => {
     }
   });
 
-  test("checks additive hook events against the installed kimi-code minor", async () => {
+  test("checks additive hook events against the certified >= 2.8.0 release floor", async () => {
     if (process.platform === "win32") return;
     for (const testCase of [
-      { event: "PermissionRequest", version: "0.7.0", minimum: "0.8", installed: false },
-      { event: "PermissionRequest", version: "0.8.0", minimum: "0.8", installed: true },
-      { event: "Interrupt", version: "0.13.0", minimum: "0.14", installed: false },
-      { event: "Interrupt", version: "0.14.0", minimum: "0.14", installed: true },
+      { event: "PermissionRequest", version: "2.7.3", installed: false },
+      { event: "PermissionRequest", version: "2.8.0", installed: true },
+      { event: "PermissionRequest", version: "2.9.0", installed: false },
+      { event: "Interrupt", version: "0.14.0", installed: false },
+      { event: "Interrupt", version: "2.8.0", installed: true },
+      { event: "PermissionResult", version: "2.8.0", installed: true },
     ] as const) {
       const suffix = `${testCase.event.toLowerCase()}-${testCase.version.replaceAll(".", "-")}`;
       const home = await createTestPluginDataRoot(`hook-install-version-${suffix}`);
@@ -415,7 +417,7 @@ describe("verifyHookInstalled", () => {
         await writeFile(
           path.join(home, "config.toml"),
           [
-            "# === BEGIN kimi-plugin-cc-managed (v1.7.2) ===",
+            "# === BEGIN kimi-plugin-cc-managed (v3.1.0) ===",
             "[[hooks]]",
             'event = "PreToolUse"',
             `command = ${JSON.stringify(canonical)}`,
@@ -436,8 +438,8 @@ describe("verifyHookInstalled", () => {
         });
         expect(status.installed).toBe(testCase.installed);
         if (!testCase.installed) {
-          expect(status.reason).toContain(`requires kimi-code >= ${testCase.minimum}`);
-          expect(status.reason).toContain(`installed version is ${testCase.version.slice(0, -2)}`);
+          expect(status.reason).toContain("requires a certified kimi-code >= 2.8.0 release");
+          expect(status.reason).toContain(`got ${testCase.version}`);
         }
       } finally {
         await cleanupTestPath(home);
@@ -527,7 +529,7 @@ describe("verifyHookInstalled", () => {
         ].join("\n"),
         "utf8",
       );
-      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+      const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_DATA: home });
       expect(status.installed).toBe(false);
       expect(status.reason).toContain("matcher");
     } finally {
@@ -576,7 +578,7 @@ describe("verifyHookInstalled", () => {
       // actionable /kimi:setup fix, instead of the raw expected-vs-got dump.
       expect(status.reason).toContain("Hook script path drift");
       expect(status.reason).toContain(oldHookPath);
-      expect(status.reason).toContain("Run /kimi:setup");
+      expect(status.reason).toContain("Run `kimi_setup`");
       // The prose above is for humans; an LLM caller branches on this instead.
       expect(status.drift).toEqual({
         axis: "hook-script",
@@ -754,7 +756,7 @@ describe("verifyHookInstalled", () => {
           `default_model = "kimi-for-coding"\n`,
           "utf8",
         );
-        const status = await verifyHookInstalled({ KIMI_CODE_HOME: home });
+        const status = await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_DATA: home });
         expect(status.installed).toBe(false);
         expect(status.drift).toBeUndefined();
         expect(hookRefusalDetails(status)).not.toHaveProperty("retryable_after_setup");
@@ -826,7 +828,7 @@ describe("verifyHookInstalled", () => {
       expect(status.reason).toContain("Node binary drift");
       expect(status.reason).toContain(goneNode);
       expect(status.reason).toContain("no longer exists");
-      expect(status.reason).toContain("Run /kimi:setup");
+      expect(status.reason).toContain("Run `kimi_setup`");
       // Pure Node drift — the hook path matched, so don't mislabel it as path drift.
       expect(status.reason).not.toContain("Hook script path drift");
     } finally {
@@ -941,12 +943,12 @@ describe("formatHookMissingWarning", () => {
         configPath: "/home/u/.kimi-code/config.toml",
         reason: "no hook block",
       },
-      "review_gate",
+      "review",
     );
     expect(text).toContain("/home/u/.kimi-code/config.toml");
     expect(text).toContain("no hook block");
-    expect(text).toContain("review_gate");
-    expect(text).toContain("/kimi:setup");
+    expect(text).toContain("review");
+    expect(text).toContain("kimi_setup");
     expect(text).toContain("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK");
   });
 });
@@ -960,7 +962,7 @@ describe("G6: job-time tolerance for marker damage around an enforcing hook", ()
   async function withConfig(
     prefix: string,
     build: (command: string) => string[],
-    run: (status: Awaited<ReturnType<typeof verifyHookInstalled>>, raw: string, command: string, hookPath: string) => void,
+    run: (status: Awaited<ReturnType<typeof verifyHookInstalled>>, raw: string, command: string) => void,
   ): Promise<void> {
     const home = await createTestPluginDataRoot(prefix);
     try {
@@ -970,29 +972,29 @@ describe("G6: job-time tolerance for marker damage around an enforcing hook", ()
       const command = canonicalCommandFor(hookPath);
       const raw = build(command).join("\n");
       await writeFile(path.join(home, "config.toml"), raw, "utf8");
-      run(await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath }), raw, command, hookPath);
+      run(await verifyHookInstalled({ KIMI_CODE_HOME: home, KIMI_PLUGIN_CC_HOOK_SCRIPT: hookPath }), raw, command);
     } finally {
       await cleanupTestPath(home);
     }
   }
 
   test("duplicate managed blocks with a clean exact entry are installed with a setup warning", async () => {
-    await withConfig("hook-g6-duplicate", (command) => [BEGIN, ...table(command), END, BEGIN, ...table(command), END], (status, raw, command, hookPath) => {
+    await withConfig("hook-g6-duplicate", (command) => [BEGIN, ...table(command), END, BEGIN, ...table(command), END], (status, raw, command) => {
       expect(status.installed).toBe(true);
       expect(status.warnings).toHaveLength(1);
       expect(status.warnings![0]).toContain("installed and enforcing");
       expect(status.warnings![0]).toContain("duplicate managed blocks");
-      expect(status.warnings![0]).toContain("/kimi:setup");
+      expect(status.warnings![0]).toContain("scripts/companion.sh setup --uninstall");
       // setup and setup --check evaluate markers directly and keep failing.
-      expect(evaluateInstalled(raw, command, { hostId: resolveHostId({}, hookPath) }).installed).toBe(false);
+      expect(evaluateInstalled(raw, command).installed).toBe(false);
     });
   });
 
   test("an own orphan marker beside a clean exact entry is installed with a setup warning", async () => {
-    await withConfig("hook-g6-orphan", (command) => [BEGIN, ...table(command)], (status, raw, command, hookPath) => {
+    await withConfig("hook-g6-orphan", (command) => [BEGIN, ...table(command)], (status, raw, command) => {
       expect(status.installed).toBe(true);
       expect(status.warnings?.[0]).toContain("BEGIN-without-END");
-      expect(evaluateInstalled(raw, command, { hostId: resolveHostId({}, hookPath) }).installed).toBe(false);
+      expect(evaluateInstalled(raw, command).installed).toBe(false);
     });
   });
 
@@ -1023,10 +1025,9 @@ describe("H2-1: an entry enforces only when kimi-code waits for the hook's decis
   const END = "# === END kimi-plugin-cc-managed ===";
   const hookPath = "/opt/kimi-timeout-test/dist/hooks/approval-hook.js";
   const command = canonicalCommandFor(hookPath);
-  const hostId = resolveHostId({}, hookPath);
   const table = (extra: string[]) =>
     ["[[hooks]]", 'event = "PreToolUse"', `command = ${JSON.stringify(command)}`, ...extra];
-  const evaluate = (lines: string[]) => evaluateInstalled(lines.join("\n"), command, { hostId });
+  const evaluate = (lines: string[]) => evaluateInstalled(lines.join("\n"), command);
 
   test("the three timing numbers keep the deadline inside the timeout kimi-code applies", () => {
     expect(UPSTREAM_DEFAULT_HOOK_TIMEOUT_S).toBe(30);
@@ -1048,7 +1049,7 @@ describe("H2-1: an entry enforces only when kimi-code waits for the hook's decis
       if (!installed) {
         expect(result.reason).toContain(`timeout = ${extra[0]!.split("= ")[1]}`);
         expect(result.reason).toContain(`at least ${HOOK_TIMEOUT_S} seconds`);
-        expect(result.reason).toContain("Run /kimi:setup");
+        expect(result.reason).toContain("Run kimi_setup");
         expect(result.timeoutTooShort).toBe(true);
         expect(result.drift).toBeUndefined();
       }

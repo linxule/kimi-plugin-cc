@@ -1,98 +1,126 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { existsSync } from "node:fs";
 
+import { resolvePluginPaths } from "../../runtime/paths.js";
 import { resolvePluginDataRoot } from "../../runtime/plugin-data.js";
 
 let root: string;
-beforeAll(async () => { root = await mkdtemp(path.join(tmpdir(), "kimi-data-resolution-")); });
-afterAll(async () => { await rm(root, { recursive: true, force: true }); });
+beforeAll(async () => {
+  root = await mkdtemp(path.join(tmpdir(), "kimi-data-resolution-"));
+});
+afterAll(async () => {
+  await rm(root, { recursive: true, force: true });
+});
 
-async function install(host: "claude" | "codex", marketplace = "kimi-marketplace", version = "2.0.0") {
-  const plugins = path.join(root, host, "plugins");
-  const packageRoot = path.join(plugins, "cache", marketplace, "kimi", version);
-  const manifest = path.join(packageRoot, host === "claude" ? ".claude-plugin" : ".codex-plugin");
-  await mkdir(manifest, { recursive: true });
-  await writeFile(path.join(manifest, "plugin.json"), '{"name":"kimi"}');
-  return { packageRoot, expected: path.join(plugins, "data", host === "claude" ? `kimi-${marketplace}` : `${marketplace}-kimi`) };
-}
+describe("canonical plugin data root", () => {
+  test("KIMI_PLUGIN_CC_DATA override wins over XDG, HOME, legacy vars, and test fail-closed flag", () => {
+    const chosen = path.join(root, "chosen");
+    const unnormalized = path.join(root, "sub", "..", "chosen");
+    expect(
+      resolvePluginDataRoot({
+        KIMI_PLUGIN_CC_DATA: unnormalized,
+        KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA: "1",
+        XDG_DATA_HOME: path.join(root, "xdg"),
+        LOCALAPPDATA: path.join(root, "localappdata"),
+        HOME: path.join(root, "home"),
+        CLAUDE_PLUGIN_DATA: path.join(root, "claude-legacy"),
+        PLUGIN_DATA: path.join(root, "codex-legacy"),
+      }),
+    ).toBe(path.normalize(chosen));
+  });
 
-describe("plugin data ownership", () => {
-  for (const host of ["claude", "codex"] as const) {
-    test(`${host}: installed identity survives shared env pollution and version changes`, async () => {
-      const { packageRoot, expected } = await install(host);
-      expect(resolvePluginDataRoot({}, packageRoot)).toBe(expected);
-      expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: expected, PLUGIN_DATA: expected }, packageRoot)).toBe(expected);
-      expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: expected }, (await install(host, "kimi-marketplace", "2.1.0")).packageRoot)).toBe(expected);
-      for (const env of [
-        { CLAUDE_PLUGIN_DATA: path.join(root, "foreign") },
-        { PLUGIN_DATA: path.join(root, "foreign") },
-        { CLAUDE_PLUGIN_DATA: path.join(root, "foreign"), PLUGIN_DATA: expected },
-        { CLAUDE_PLUGIN_DATA: expected, PLUGIN_DATA: path.join(root, "foreign") },
-        { CLAUDE_PLUGIN_DATA: path.join(root, "foreign"), PLUGIN_DATA: path.join(root, "foreign") },
-      ]) {
-        expect(() => resolvePluginDataRoot(env, packageRoot)).toThrow("Shared plugin data variables");
-        expect(resolvePluginDataRoot({ ...env, KIMI_PLUGIN_CC_DATA: expected }, packageRoot)).toBe(expected);
+  test("invalid explicit KIMI_PLUGIN_CC_DATA fails closed instead of falling back", () => {
+    for (const value of ["", "relative/path", "./data"]) {
+      expect(() =>
+        resolvePluginDataRoot({
+          KIMI_PLUGIN_CC_DATA: value,
+          XDG_DATA_HOME: path.join(root, "xdg"),
+          HOME: path.join(root, "home"),
+        }),
+      ).toThrow(/absolute directory/);
+      try {
+        resolvePluginDataRoot({ KIMI_PLUGIN_CC_DATA: value });
+      } catch (err) {
+        expect(err).toMatchObject({ code: "INVALID_PLUGIN_DATA", stage: "paths" });
       }
-    });
-  }
-
-  test("loaded package selects ownership despite spoofed root/home variables", async () => {
-    const { packageRoot, expected } = await install("codex");
-    expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_ROOT: "/fake", PLUGIN_ROOT: "/fake", HOME: "/fake", CODEX_HOME: "/fake" }, packageRoot)).toBe(expected);
-  });
-
-  test("existing symlink aliases preserve the same installed data directory", async () => {
-    const { packageRoot, expected } = await install("claude");
-    await mkdir(expected, { recursive: true });
-    const alias = path.join(root, "data-alias");
-    await symlink(expected, alias);
-    expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: alias }, packageRoot)).toBe(expected);
-    expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: alias, PLUGIN_DATA: expected }, root)).toBe(alias);
-  });
-
-  test("first-run aliases resolve through existing ancestors without creating data", async () => {
-    const { packageRoot, expected } = await install("claude", "first-run-market");
-    const physical = path.join(root, "claude");
-    const alias = path.join(root, "first-run-home-alias");
-    await symlink(physical, alias);
-    const aliasedData = path.join(alias, "plugins/data/kimi-first-run-market");
-    expect(existsSync(expected)).toBe(false);
-    expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: aliasedData }, packageRoot)).toBe(expected);
-    expect(existsSync(expected)).toBe(false);
-    expect(() => resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: path.join(alias, "plugins/data/foreign") }, packageRoot)).toThrow("Shared plugin data variables");
-  });
-
-  test("dangling links and non-directory ancestors do not establish identity", async () => {
-    const { packageRoot, expected } = await install("claude", "broken-alias-market");
-    const dangling = path.join(root, "dangling-data");
-    await symlink(expected, dangling);
-    expect(() => resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: dangling }, packageRoot)).toThrow("Shared plugin data variables");
-    const file = path.join(root, "not-a-directory");
-    await writeFile(file, "fixture");
-    expect(() => resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: path.join(file, "child") }, packageRoot)).toThrow("Shared plugin data variables");
-  });
-
-  test("custom roots preserve unambiguous legacy paths and require a choice on conflict", () => {
-    expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: root }, root)).toBe(root);
-    expect(resolvePluginDataRoot({ PLUGIN_DATA: root }, root)).toBe(root);
-    expect(() => resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: root, PLUGIN_DATA: path.join(root, "other") }, root)).toThrow("disagree");
-    expect(resolvePluginDataRoot({ CLAUDE_PLUGIN_DATA: root, PLUGIN_DATA: "/other", KIMI_PLUGIN_CC_DATA: path.join(root, "chosen") }, root)).toBe(path.join(root, "chosen"));
-  });
-
-  test("invalid explicit choices fail instead of falling back", () => {
-    for (const value of ["", "relative/path"]) {
-      expect(() => resolvePluginDataRoot({ KIMI_PLUGIN_CC_DATA: value, CLAUDE_PLUGIN_DATA: root }, root)).toThrow("absolute directory");
     }
   });
 
-  test("custom shell launches retain the existing Codex fallback; direct callers need a path", () => {
-    expect(resolvePluginDataRoot({ KIMI_PLUGIN_CC_SHELL_LAUNCH: "1", CODEX_HOME: root }, root)).toBe(path.join(root, "plugins/data/kimi-marketplace-kimi"));
-    expect(resolvePluginDataRoot({ KIMI_PLUGIN_CC_SHELL_LAUNCH: "1", HOME: root }, root)).toBe(path.join(root, ".codex/plugins/data/kimi-marketplace-kimi"));
-    expect(() => resolvePluginDataRoot({ KIMI_PLUGIN_CC_SHELL_LAUNCH: "1" }, root)).toThrow("Set KIMI_PLUGIN_CC_DATA");
-    expect(resolvePluginDataRoot({ KIMI_PLUGIN_CC_SHELL_LAUNCH: "1", KIMI_PLUGIN_CC_DATA: root }, root)).toBe(root);
-    expect(() => resolvePluginDataRoot({}, root)).toThrow("Set KIMI_PLUGIN_CC_DATA");
+  test("KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA=1 fails closed with MISSING_PLUGIN_DATA", () => {
+    for (const env of [
+      { KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA: "1" },
+      {
+        KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA: "1",
+        XDG_DATA_HOME: path.join(root, "xdg"),
+        HOME: path.join(root, "home"),
+        CLAUDE_PLUGIN_DATA: path.join(root, "claude"),
+        PLUGIN_DATA: path.join(root, "codex"),
+      },
+    ]) {
+      expect(() => resolvePluginDataRoot(env)).toThrow("Set KIMI_PLUGIN_CC_DATA");
+      try {
+        resolvePluginDataRoot(env);
+      } catch (err) {
+        expect(err).toMatchObject({ code: "MISSING_PLUGIN_DATA", stage: "paths" });
+      }
+    }
+  });
+
+  test("ignores legacy CLAUDE_PLUGIN_DATA, PLUGIN_DATA, PLUGIN_ROOT, and CODEX_HOME", () => {
+    const xdg = path.join(root, "xdg-canonical");
+    const home = path.join(root, "home-canonical");
+    const env: NodeJS.ProcessEnv = {
+      CLAUDE_PLUGIN_DATA: path.join(root, "foreign-claude"),
+      PLUGIN_DATA: path.join(root, "foreign-codex"),
+      CLAUDE_PLUGIN_ROOT: "/fake/claude-root",
+      PLUGIN_ROOT: "/fake/codex-root",
+      CODEX_HOME: path.join(root, "codex-home"),
+      KIMI_PLUGIN_CC_SHELL_LAUNCH: "1",
+      HOME: home,
+    };
+    if (process.platform === "win32") {
+      expect(resolvePluginDataRoot({ ...env, LOCALAPPDATA: xdg })).toBe(path.normalize(xdg));
+      expect(resolvePluginDataRoot(env)).toBe(path.join(home, "AppData", "Local"));
+    } else {
+      expect(resolvePluginDataRoot({ ...env, XDG_DATA_HOME: xdg })).toBe(path.normalize(xdg));
+      expect(resolvePluginDataRoot(env)).toBe(path.join(home, ".local", "share"));
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("POSIX default uses XDG_DATA_HOME, then HOME/.local/share", () => {
+    const xdg = path.join(root, "xdg-share");
+    const home = path.join(root, "user-home");
+    expect(resolvePluginDataRoot({ XDG_DATA_HOME: xdg, HOME: home })).toBe(path.normalize(xdg));
+    expect(resolvePluginDataRoot({ XDG_DATA_HOME: "   ", HOME: home })).toBe(
+      path.join(home, ".local", "share"),
+    );
+    expect(resolvePluginDataRoot({ HOME: home })).toBe(path.join(home, ".local", "share"));
+    expect(resolvePluginDataRoot({ USERPROFILE: home })).toBe(path.join(home, ".local", "share"));
+
+    // Per XDG Base Directory spec, relative XDG_DATA_HOME is ignored in favor of ~/.local/share.
+    expect(resolvePluginDataRoot({ XDG_DATA_HOME: "relative/xdg", HOME: home })).toBe(
+      path.join(home, ".local", "share"),
+    );
+    expect(() => resolvePluginDataRoot({ HOME: "relative/home" })).toThrow(/absolute directory/);
+  });
+
+  test("resolvePluginPaths derives canonical shared paths including hook/approval-hook.js", () => {
+    const data = path.join(root, "paths-root");
+    const paths = resolvePluginPaths({ KIMI_PLUGIN_CC_DATA: data });
+    const pluginRoot = path.join(data, "kimi-plugin-cc");
+    expect(paths).toEqual({
+      dataRoot: data,
+      claudePluginData: data,
+      pluginRoot,
+      stateDbPath: path.join(pluginRoot, "state.db"),
+      logsDir: path.join(pluginRoot, "logs"),
+      artifactsDir: path.join(pluginRoot, "artifacts"),
+      hookDir: path.join(pluginRoot, "hook"),
+      hookScriptPath: path.join(pluginRoot, "hook", "approval-hook.js"),
+      worktreesDir: path.join(pluginRoot, "worktrees"),
+      configPath: path.join(pluginRoot, "config.json"),
+    });
   });
 });

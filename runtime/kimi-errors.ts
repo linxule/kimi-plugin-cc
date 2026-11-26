@@ -38,7 +38,7 @@ function budgetAdvice(budgetMs: number | undefined): string {
 
 export function classifyManagedCommandFailure(
   error: unknown,
-  commandType: ManagedCommandType | "review_gate",
+  commandType: ManagedCommandType,
   jobId: string,
   options?: { preserveStage?: boolean; background?: boolean; budgetMs?: number },
 ): Error {
@@ -47,7 +47,7 @@ export function classifyManagedCommandFailure(
     return error instanceof Error ? error : new Error(String(error));
   }
 
-  if (classification.kind === "response_timeout" && commandType !== "review_gate" && options?.background !== undefined) {
+  if (classification.kind === "response_timeout" && options?.background !== undefined) {
     const foregroundAdvice = !options?.background && (commandType === "ask" || commandType === "rescue")
       ? " Or run with --background so the caller's shell timeout is not the limit."
       : "";
@@ -250,7 +250,7 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
 
 function mapAvailabilityCode(
   kind: Exclude<AvailabilityKind, null>,
-  commandType: ManagedCommandType | "review_gate",
+  commandType: ManagedCommandType,
 ): string {
   return `${commandType.toUpperCase()}_KIMI_${kind.toUpperCase()}`;
 }

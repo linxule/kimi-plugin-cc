@@ -170,7 +170,7 @@ describe("replay command", () => {
     const pluginDataRoot = await createTestPluginDataRoot("replay-missing-log");
     const env = {
       ...process.env,
-      CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      KIMI_PLUGIN_CC_DATA: pluginDataRoot,
     };
 
     try {
@@ -181,7 +181,7 @@ describe("replay command", () => {
       const job = store.createJob({
         job_id: "job-missing-log",
         repo_id: repoIdentity.repoId,
-        command_type: "review_gate",
+        command_type: "review",
         cwd: process.cwd(),
         model: null,
         thinking: false,
@@ -198,9 +198,9 @@ describe("replay command", () => {
         final_output_path: null,
         stream_log_path: path.join(pluginDataRoot, "missing.jsonl"),
         error: {
-          code: "REVIEW_GATE_PARSE_FAILED",
+          code: "REVIEW_FAILED",
           message: "missing",
-          stage: "review_gate.parse",
+          stage: "review.runtime",
         },
       });
       store.close();
@@ -215,7 +215,7 @@ describe("replay command", () => {
     const pluginDataRoot = await createTestPluginDataRoot("replay-runreplay");
     const env = {
       ...process.env,
-      CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      KIMI_PLUGIN_CC_DATA: pluginDataRoot,
     };
     try {
       const repoIdentity = await resolveRepoIdentity(process.cwd());

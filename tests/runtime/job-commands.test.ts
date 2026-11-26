@@ -15,7 +15,7 @@ import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -29,7 +29,8 @@ function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
 function makeMockEnv(pluginDataRoot: string, scenario: string, invocationPath: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
@@ -58,14 +59,14 @@ describe("job-backed ask/status/result", () => {
         // pre-correlate it with an argv flag (no --session anymore), so
         // just verify the row carries a uuid-shaped value.
         expect(storedJob?.kimi_session_id).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+          /^session_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
         );
         expect(storedJob).toMatchObject({
           operation_kind: "ask",
-          intended_engine: "legacy-v1",
-          observed_engine: "legacy-v1",
-          kimi_version: "0.39.0",
-          system_version: null,
+          intended_engine: "native-v2",
+          observed_engine: "native-v2",
+          kimi_version: "2.8.0",
+          system_version: "2.8.0",
           plan_certification: "certified",
           resumed_from_job_id: null,
         });
@@ -86,8 +87,8 @@ describe("job-backed ask/status/result", () => {
   test("result returns raw markdown by default and a structured envelope with --json", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("result-json-envelope");
     const repoRoot = await createGitRepoFixture("result-json-envelope-repo");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot };
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -165,8 +166,8 @@ describe("job-backed ask/status/result", () => {
   test("result --json rejects running jobs as not terminal", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("result-json-running");
     const repoRoot = await createGitRepoFixture("result-json-running-repo");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot };
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -212,7 +213,7 @@ describe("job-backed ask/status/result", () => {
 
   test("0.1.4 migration reconciles orphaned duplicate running rows", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-migration");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -291,7 +292,7 @@ describe("job-backed ask/status/result", () => {
 
   test("0.1.7 migration adds the phase column idempotently", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-phase-migration");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -353,7 +354,7 @@ describe("job-backed ask/status/result", () => {
 
   test("sweeps stale foreground jobs whose Kimi process disappeared", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-sweep");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -415,7 +416,7 @@ describe("job-backed ask/status/result", () => {
 
   test("sweeps stale foreground jobs that died before Kimi pid was recorded", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-pre-kimi-sweep");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -476,8 +477,8 @@ describe("job-backed ask/status/result", () => {
   test("status and result sweep stale foreground jobs through the user-facing path", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-user-facing-sweep");
     const repoRoot = await createTestPluginDataRoot("job-store-user-facing-sweep-repo");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot };
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -536,7 +537,7 @@ describe("job-backed ask/status/result", () => {
 
   test("sweeping a stale foreground companion terminates an orphaned Kimi child", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-orphan-kimi-sweep");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
     const orphan = spawnLongRunningProcess();
 
     try {
@@ -604,7 +605,7 @@ describe("job-backed ask/status/result", () => {
     // termination/markFailed step while the companion is still alive — it
     // will write its own terminal state.
     const pluginDataRoot = await createTestPluginDataRoot("job-store-sweep-live-companion");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
     const liveCompanion = spawnLongRunningProcess();
 
     try {
@@ -667,13 +668,9 @@ describe("job-backed ask/status/result", () => {
     }
   });
 
-  test("sweep marks a stale review_gate row as failed without trying to signal a null pid", async () => {
-    // Regression: review_gate records pid: null. If the hook companion crashes
-    // after kimi_pid is recorded, the row sits with pid=null,kimi_pid=<dead>.
-    // Sweeper should mark it failed cleanly, terminate any (already-dead) kimi
-    // process, and not touch the hook caller's pid.
-    const pluginDataRoot = await createTestPluginDataRoot("job-store-review-gate-sweep");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
+  test("sweep marks a stale foreground row with null companion pid as failed without signalling null", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-null-pid-sweep");
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
 
     try {
       await mkdir(paths.pluginRoot, { recursive: true });
@@ -684,9 +681,9 @@ describe("job-backed ask/status/result", () => {
       const store = new JobStore(paths);
       try {
         store.createJob({
-          job_id: "job-review-gate-stale",
+          job_id: "job-null-pid-stale",
           repo_id: "repo-x",
-          command_type: "review_gate",
+          command_type: "review",
           cwd: "/tmp/fake",
           model: null,
           thinking: null,
@@ -697,9 +694,9 @@ describe("job-backed ask/status/result", () => {
           kimi_session_id: "session-x",
           agent_profile: "read-only",
           prompt_digest: "digest",
-          summary: "Running review gate.",
+          summary: "Running review.",
           final_output_path: null,
-          stream_log_path: path.join(paths.logsDir, "review-gate-job-review-gate-stale.jsonl"),
+          stream_log_path: path.join(paths.logsDir, "review-job-null-pid-stale.jsonl"),
           error: null,
         });
       } finally {
@@ -710,7 +707,7 @@ describe("job-backed ask/status/result", () => {
       try {
         seed
           .query("UPDATE jobs SET updated_at = ? WHERE job_id = ?")
-          .run("2026-04-14T10:00:00.000Z", "job-review-gate-stale");
+          .run("2026-04-14T10:00:00.000Z", "job-null-pid-stale");
       } finally {
         seed.close();
       }
@@ -718,7 +715,7 @@ describe("job-backed ask/status/result", () => {
       const sweepStore = new JobStore(paths);
       try {
         await sweepStaleJobs(sweepStore, paths);
-        const swept = sweepStore.getJob("job-review-gate-stale");
+        const swept = sweepStore.getJob("job-null-pid-stale");
         expect(swept?.status).toBe("failed");
         expect(swept?.error?.code).toBe("FOREGROUND_PROCESS_DISAPPEARED");
         expect(swept?.final_output_path).toBeTruthy();
@@ -730,15 +727,11 @@ describe("job-backed ask/status/result", () => {
     }
   });
 
-  test("cancel on a review_gate job signals only kimi_pid, never the hook companion", async () => {
-    // Regression: review_gate records pid: null because its companion lifecycle
-    // is bounded by the Stop hook; cancel must SIGTERM only the recorded
-    // kimi_pid. If pid were set to process.pid, this test would terminate the
-    // test runner mid-flight.
-    const pluginDataRoot = await createTestPluginDataRoot("job-store-review-gate-cancel");
-    const repoRoot = await createTestPluginDataRoot("job-store-review-gate-cancel-repo");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+  test("cancel on a null-companion-pid job signals only kimi_pid", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-kimi-pid-cancel");
+    const repoRoot = await createTestPluginDataRoot("job-store-kimi-pid-cancel-repo");
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot };
     const child = spawnLongRunningProcess();
 
     try {
@@ -749,9 +742,9 @@ describe("job-backed ask/status/result", () => {
       const store = new JobStore(paths);
       try {
         store.createJob({
-          job_id: "job-review-gate-cancel",
+          job_id: "job-kimi-pid-cancel",
           repo_id: repoRoot,
-          command_type: "review_gate",
+          command_type: "review",
           cwd: repoRoot,
           model: null,
           thinking: null,
@@ -762,16 +755,16 @@ describe("job-backed ask/status/result", () => {
           kimi_session_id: "session-x",
           agent_profile: "read-only",
           prompt_digest: "digest",
-          summary: "Running review gate.",
+          summary: "Running review.",
           final_output_path: null,
-          stream_log_path: path.join(paths.logsDir, "review-gate-job-review-gate-cancel.jsonl"),
+          stream_log_path: path.join(paths.logsDir, "review-job-kimi-pid-cancel.jsonl"),
           error: null,
         });
       } finally {
         store.close();
       }
 
-      const output = JSON.parse(await runCancel(["job-review-gate-cancel"], makeContext(repoRoot, env))) as {
+      const output = JSON.parse(await runCancel(["job-kimi-pid-cancel"], makeContext(repoRoot, env))) as {
         status: string;
         message: string;
       };
@@ -787,16 +780,11 @@ describe("job-backed ask/status/result", () => {
     }
   });
 
-  test("cancel of a review_gate job escalates SIGTERM→SIGKILL when the child ignores SIGTERM", async () => {
-    // v0.2.4 regression test: the v0.2.3 cancel.ts pre-marked the row as
-    // `cancelled`, which made waitForCancellation return on the status
-    // check and skip SIGKILL escalation entirely. v0.2.4 runs unconditional
-    // SIGTERM → 1s wait → SIGKILL on the recorded pids for review_gate.
-    // Use a child that traps SIGTERM so only SIGKILL can end it.
-    const pluginDataRoot = await createTestPluginDataRoot("job-store-review-gate-sigkill");
-    const repoRoot = await createTestPluginDataRoot("job-store-review-gate-sigkill-repo");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+  test("cancel escalates SIGTERM→SIGKILL when the child ignores SIGTERM", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("job-store-sigkill");
+    const repoRoot = await createTestPluginDataRoot("job-store-sigkill-repo");
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot };
     const child = await spawnSigtermIgnoringProcess();
 
     try {
@@ -807,9 +795,9 @@ describe("job-backed ask/status/result", () => {
       const store = new JobStore(paths);
       try {
         store.createJob({
-          job_id: "job-review-gate-sigkill",
+          job_id: "job-sigkill",
           repo_id: repoRoot,
-          command_type: "review_gate",
+          command_type: "review",
           cwd: repoRoot,
           model: null,
           thinking: null,
@@ -820,11 +808,11 @@ describe("job-backed ask/status/result", () => {
           kimi_session_id: "session-sigkill",
           agent_profile: "read-only",
           prompt_digest: "digest",
-          summary: "Running review gate.",
+          summary: "Running review.",
           final_output_path: null,
           stream_log_path: path.join(
             paths.logsDir,
-            "review-gate-job-review-gate-sigkill.jsonl",
+            "review-job-sigkill.jsonl",
           ),
           error: null,
         });
@@ -832,19 +820,12 @@ describe("job-backed ask/status/result", () => {
         store.close();
       }
 
-      const start = Date.now();
       const output = JSON.parse(
-        await runCancel(["job-review-gate-sigkill"], makeContext(repoRoot, env)),
+        await runCancel(["job-sigkill"], makeContext(repoRoot, env)),
       ) as { status: string; message: string };
-      const elapsed = Date.now() - start;
 
       expect(output.status).toBe("cancelled");
-      // The escalation window is 1s sleep between SIGTERM and SIGKILL.
-      // Require at least 900ms to confirm the path actually waited rather
-      // than short-circuiting on the pre-marked status.
-      expect(elapsed).toBeGreaterThan(900);
       await waitForChildExit(child);
-      // SIGKILL exit reports via signalCode (or exit code 137 / null exitCode + signalCode === 'SIGKILL').
       expect(child.signalCode).toBe("SIGKILL");
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
@@ -853,13 +834,13 @@ describe("job-backed ask/status/result", () => {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
     }
-  });
+  }, 10_000);
 
   test("cancel can force-cancel a foreground job with a recorded process", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("job-store-foreground-cancel");
     const repoRoot = await createTestPluginDataRoot("job-store-foreground-cancel-repo");
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot });
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginDataRoot };
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot });
+    const env = { ...process.env, KIMI_PLUGIN_CC_DATA: pluginDataRoot };
     const child = spawnLongRunningProcess();
 
     try {

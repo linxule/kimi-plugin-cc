@@ -1,0 +1,19 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "kimi",
+  "displayName": "Kimi",
+  "version": "3.1.0",
+  "description": "Delegate read-only repository questions, diff reviews, adversarial challenges, bounded workspace fixes, autonomous goals, and parallel swarms to the local Kimi Code CLI via MCP and skills.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Ask Kimi to review my current uncommitted diff for bugs and regressions",
+    "Use Kimi to challenge the architecture and tradeoffs of this module",
+    "Check Kimi hook readiness and list configured Kimi models"
+  ],
+  "author": {
+    "name": "Xule Lin",
+    "url": "https://github.com/linxule"
+  },
+  "homepage": "https://github.com/linxule/kimi-plugin-cc",
+  "repository": "https://github.com/linxule/kimi-plugin-cc"
+}

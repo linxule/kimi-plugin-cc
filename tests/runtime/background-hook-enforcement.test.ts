@@ -40,7 +40,7 @@ import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from 
 const REPO_ROOT = process.cwd();
 const COMPANION_ENTRY = path.join(REPO_ROOT, "runtime", "companion.ts");
 const NODE_PIN_HELPER = path.join(REPO_ROOT, "tests", "helpers", "print-node-pin.mjs");
-const MOCK_CLI = path.join(REPO_ROOT, "tests", "helpers", "mock-kimi-cli-v1.ts");
+const MOCK_CLI = path.join(REPO_ROOT, "tests", "helpers", "mock-kimi-cli.ts");
 const HOOK_SCRIPT = path.join(REPO_ROOT, "dist", "hooks", "approval-hook.js");
 
 function realNodeBinary(): string {
@@ -120,7 +120,7 @@ async function buildFixture(label: string): Promise<{
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
     KIMI_CODE_HOME: kimiHome,
     KIMI_PLUGIN_CC_HOOK_SCRIPT: HOOK_SCRIPT,
     // Mock Kimi so no network/binary is needed.

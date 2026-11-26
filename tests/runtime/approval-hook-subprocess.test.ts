@@ -93,7 +93,7 @@ describe("approval-hook entry script", () => {
     // the user was watching the prompt. PR 4 reviewers flagged that
     // /kimi:ask runs as a non-interactive subprocess and `ask` is
     // documented read-only in AGENTS.md. Ask now shares the read-only
-    // allowlist with review/challenge/review_gate.
+    // allowlist with review/challenge.
     const result = await invokeHook(
       { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } },
       { ...process.env, KIMI_PLUGIN_CC_CMD: "ask" },
@@ -103,7 +103,7 @@ describe("approval-hook entry script", () => {
     expect(result.stderr).toContain("Bash");
   });
 
-  test.each(["ask", "review", "challenge", "review_gate"])(
+  test.each(["ask", "review", "challenge"])(
     "%s label + Read → exit 0",
     async (label) => {
       const result = await invokeHook(
@@ -114,7 +114,7 @@ describe("approval-hook entry script", () => {
     },
   );
 
-  test.each(["ask", "review", "challenge", "review_gate"])(
+  test.each(["ask", "review", "challenge"])(
     "%s label + Bash → exit 2 + stderr reason",
     async (label) => {
       const result = await invokeHook(

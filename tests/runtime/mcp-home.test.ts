@@ -19,18 +19,12 @@ describe("MCP Kimi-home resolution", () => {
       });
       expect(setup.status).toBe(0);
       client = await McpClient.legacy(fixture);
-      const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Prove relative home resolution", fresh: true },
+      const result = await client.request("tools/call", {
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Prove relative home resolution" },
       });
-      const jobId = started.structuredContent.job_id as string;
-      let result: any;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        result = await client.request("tools/call", { name: "kimi_job_result", arguments: { job_id: jobId } });
-        if (result.structuredContent?.status && result.structuredContent.status !== "running") break;
-        await Bun.sleep(100);
-      }
       expect(result.isError).toBe(false);
+      expect(result.structuredContent.status).toBe("completed");
       const invocation = JSON.parse(await readFile(fixture.env.KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH, "utf8"));
       expect(invocation.env.KIMI_CODE_HOME).toBe(path.join(fixture.repo, "kimi-home"));
     } finally {

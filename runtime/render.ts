@@ -5,13 +5,11 @@ import { parseJobWarnings, type JobRecord } from "./job-store.js";
 import { describeReadScope, parseJobReadScope } from "./read-scope.js";
 import { getManagedCommandConfig } from "./commands/registry.js";
 import { RuntimeError } from "./errors.js";
-import type { ReviewGateOutput } from "./schemas/review-gate-output.js";
-import { parseReviewGateOutput } from "./schemas/review-gate-output.js";
 import type { PluginPaths } from "./paths.js";
 import type { ManagedCommandType } from "./types.js";
 
 export interface RenderedManagedOutput {
-  output: string | ReviewGateOutput | null;
+  output: string | null;
   rendered: string;
   summary: string;
 }
@@ -55,13 +53,26 @@ export function renderManagedJobOutput(job: JobRecord, finalText: string): Rende
   const decorate = (text: string) => withWarningsBlock(job, withScopeLine(job, text));
   return {
     ...rendered,
-    // review_gate's output is the parsed decision object; its warnings live in the artifact only.
     output: typeof rendered.output === "string" ? decorate(rendered.output) : rendered.output,
     rendered: decorate(rendered.rendered),
   };
 }
 
 function renderManagedJobOutputBody(job: JobRecord, finalText: string): RenderedManagedOutput {
+  // Historical v3.0 review_gate rows remain readable for replay/inspection
+  // without re-registering review_gate as a live managed command.
+  if ((job.command_type as string) === "review_gate") {
+    const trimmed = finalText.trim();
+    if (!trimmed) {
+      throw new RuntimeError("REVIEW_GATE_EMPTY_OUTPUT", "Historical review_gate job returned empty output.", "render");
+    }
+    return {
+      output: trimmed,
+      rendered: `${trimmed}\n`,
+      summary: firstMeaningfulLine(trimmed, "Historical review_gate output."),
+    };
+  }
+
   assertOutputModeConsistency(job.command_type, finalText);
 
   switch (job.command_type) {
@@ -93,14 +104,6 @@ function renderManagedJobOutputBody(job: JobRecord, finalText: string): Rendered
         summary: firstMeaningfulLine(trimmed),
       };
     }
-    case "review_gate": {
-      const output = parseReviewGateOutput(finalText.trim());
-      return {
-        output,
-        rendered: renderReviewGateArtifact(job, output),
-        summary: output.summary,
-      };
-    }
     case "rescue": {
       const trimmed = finalText.trim();
       if (!trimmed) {
@@ -123,18 +126,6 @@ export function assertOutputModeConsistency(commandType: ManagedCommandType, fin
 
   switch (outputMode) {
     case "passthrough":
-      return;
-    case "parsed":
-      try {
-        JSON.parse(finalText);
-      } catch (error) {
-        throw new RuntimeError(
-          `${commandType.toUpperCase()}_PARSE_FAILED`,
-          `${commandType} is configured for parsed output but returned malformed JSON: ${(error as Error).message}`,
-          `${commandType}.parse`,
-          error instanceof Error ? { cause: error } : undefined,
-        );
-      }
       return;
     default:
       return assertNever(outputMode);
@@ -163,30 +154,6 @@ export function firstMeaningfulLine(text: string, fallback: string = EMPTY_SUMMA
     .map((value) => value.trim())
     .find(Boolean);
   return line ?? fallback;
-}
-
-export function renderReviewGateArtifact(job: JobRecord, output: ReviewGateOutput): string {
-  const lines = [
-    "# Review Gate Result",
-    "",
-    `- Job: ${job.job_id}`,
-    `- Decision: ${output.decision}`,
-    `- Confidence: ${output.confidence}`,
-    `- Summary: ${output.summary}`,
-    ...(job.kimi_session_id ? [`- Kimi session: ${job.kimi_session_id}`] : []),
-  ];
-
-  if (output.issues.length === 0) {
-    lines.push("", "No issues.");
-    return `${lines.join("\n")}\n`;
-  }
-
-  lines.push("", "## Issues");
-  for (const issue of output.issues) {
-    lines.push("", `### ${issue.title}`, `- Severity: ${issue.severity}`, issue.body);
-  }
-
-  return `${lines.join("\n")}\n`;
 }
 
 export interface PartialJobOutput {

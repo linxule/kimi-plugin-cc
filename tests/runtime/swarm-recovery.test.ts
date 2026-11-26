@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { JobStore } from "../../runtime/job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import { probeProcessIdentity } from "../../runtime/process-tree.js";
@@ -15,20 +14,7 @@ const node = Bun.which("node")!;
 const companion = path.resolve("dist/companion.js");
 const mock = path.resolve("tests/helpers/mock-kimi-web.mjs");
 function launch(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
-  // Candidate admission stays inside this test process; no production flag
-  // bypasses certification before the reviewed version enters the matrix.
-  const candidate = env.MOCK_KIMI_WEB_VERSION === "2.6.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.2" || env.MOCK_KIMI_WEB_VERSION === "2.7.3" || env.MOCK_KIMI_WEB_VERSION === "2.8.0"
-    ? env.MOCK_KIMI_WEB_VERSION
-    : undefined;
-  const nodeArgs = candidate !== undefined ? ["--input-type=module", "-e", `
-    import { NATIVE_V2_CERTIFIED } from ${JSON.stringify(pathToFileURL(path.resolve("dist/kimi-engine.js")).href)};
-    for (const op of ['swarm', 'swarm-write']) {
-      NATIVE_V2_CERTIFIED.set(op, [...new Set([...NATIVE_V2_CERTIFIED.get(op), ${JSON.stringify(candidate)}])]);
-    }
-    process.argv = [process.execPath, ${JSON.stringify(companion)}, ...process.argv.slice(1)];
-    await import(${JSON.stringify(pathToFileURL(companion).href)});
-  `, ...args] : [companion, ...args];
-  const child = spawn(node, nodeArgs, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(node, [companion, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.on("data", (data) => { stdout += data; });
   child.stderr.on("data", (data) => { stderr += data; });
@@ -50,15 +36,10 @@ async function waitUntil<T>(read: () => Promise<T | undefined>): Promise<T> {
 
 describe("durable swarm recovery", () => {
   test.each([
-    { alreadyTerminal: false, version: "2.3.2" },
-    { alreadyTerminal: true, version: "2.3.2" },
-    { alreadyTerminal: false, version: "2.6.2" },
-    { alreadyTerminal: false, version: "2.6.3" },
-    { alreadyTerminal: false, version: "2.7.2" },
-    { alreadyTerminal: false, version: "2.7.3" },
     { alreadyTerminal: false, version: "2.8.0" },
+    { alreadyTerminal: true, version: "2.8.0" },
   ])("compiled hard-kill recovery preserves work and terminal outcomes %j", async ({ alreadyTerminal, version }) => {
-    const bounded = ["2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].includes(version);
+    const bounded = true;
     const root = await createTestPluginDataRoot("swarm-crash");
     const repo = await createGitRepoFixture("swarm-crash-repo");
     const home = path.join(root, "home");
@@ -168,12 +149,13 @@ describe("durable swarm recovery", () => {
     const env = { ...process.env, KIMI_PLUGIN_CC_DATA: alias, KIMI_CODE_HOME: home,
       KIMI_PLUGIN_CC_KIMI_BIN: node, KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mock]),
       KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", MOCK_KIMI_WEB_LOG: log,
-      MOCK_KIMI_WEB_VERSION: "2.5.3", MOCK_KIMI_WEB_TOKEN: "never-persist-this-token" };
+      MOCK_KIMI_WEB_VERSION: "2.8.0", MOCK_KIMI_WEB_SCENARIO: "ws-no-state",
+      MOCK_KIMI_WEB_TOKEN: "never-persist-this-token" };
     await mkdir(home, { recursive: true });
     const paths = resolvePluginPaths(env);
     await ensurePluginPaths(paths);
     const store = new JobStore(paths);
-    const running = launch(["task", "swarm", "--write", "--budget", "20s", "symlinked crash recovery fixture"], repo, env);
+    const running = launch(["task", "swarm", "--write", "--max-concurrency", "2", "--budget", "20s", "symlinked crash recovery fixture"], repo, env);
     let worktree: string | undefined;
     let orphanPid: number | undefined;
     try {
@@ -182,7 +164,7 @@ describe("durable swarm recovery", () => {
         const job = store.findLatestJob({ repoId });
         const recovery = job && store.getSwarmRecovery(job.job_id)?.record;
         const entries = (await readFile(log, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
-        if (!job || !recovery?.sessionDirty || !entries.some((entry) => entry.frame?.type === "subscribe_v2")) return;
+        if (!job || !recovery?.sessionDirty || !entries.some((entry) => entry.frame?.type === "subscribe")) return;
         return { job, recovery };
       });
       expect(recovery.launches[0]?.pending).toBe(false);
@@ -191,7 +173,7 @@ describe("durable swarm recovery", () => {
       await writeFile(path.join(worktree, "recovered.txt"), "keep this untracked work\n");
       running.child.kill("SIGKILL");
       await running.done;
-      const recovered = await launch(["recover-swarm", job.job_id, "--apply"], repo, env).done;
+      const recovered = await launch(["recover-swarm", job.job_id, "--apply"], repo, { ...env, MOCK_KIMI_WEB_SCENARIO: "success" }).done;
       expect(recovered.code, recovered.stderr).toBe(0);
       const output = JSON.parse(recovered.stdout);
       expect(output.recovery_complete).toBe(true);
@@ -219,7 +201,8 @@ describe("durable swarm recovery", () => {
     const log = path.join(root, "web.jsonl");
     const env = { ...process.env, KIMI_PLUGIN_CC_DATA: root, KIMI_CODE_HOME: home,
       KIMI_PLUGIN_CC_KIMI_BIN: node, KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mock]),
-      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", MOCK_KIMI_WEB_LOG: log, MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS: "5000" };
+      KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", MOCK_KIMI_WEB_LOG: log,
+      MOCK_KIMI_WEB_VERSION: "2.8.0", MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS: "5000" };
     await mkdir(home, { recursive: true });
     const paths = resolvePluginPaths(env);
     await ensurePluginPaths(paths);

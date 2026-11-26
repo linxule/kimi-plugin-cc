@@ -10,7 +10,7 @@ describe("job-store safety_profile column", () => {
   test("is added additively and leaves historical rows null", async () => {
     const root = await createTestPluginDataRoot("job-store-safety-profile");
     try {
-      const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: root });
+      const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: root });
       await ensurePluginPaths(paths);
 
       // Seed a pre-1.10 schema: every provenance column except safety_profile.
@@ -63,7 +63,7 @@ describe("job-store safety_profile column", () => {
           kimi_session_id: null,
           operation_kind: "ask",
           intended_engine: "native-v2",
-          kimi_version: "0.42.0",
+          kimi_version: "2.8.0",
           kimi_command: "/usr/bin/kimi",
           kimi_prefix_args: "[]",
           plan_certification: "certified",

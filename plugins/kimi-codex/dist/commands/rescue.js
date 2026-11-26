@@ -7,7 +7,7 @@ import { assertPersistedResumeLineage, executionPlanFromPersisted, observedExecu
 import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, recordKimiSpawnIdentity, serializedProcessIdentity, sweepStaleJobs, } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_RESCUE_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
@@ -80,6 +80,7 @@ export async function runRescue(argv, context) {
             ...resumeBudget("rescue", parsed.budgetMs, sessionResolution.sourceJob),
             pid: parsed.background ? null : process.pid,
             kimi_pid: null,
+            companion_identity: parsed.background ? null : await serializedProcessIdentity(process.pid),
             status: "running",
             kimi_session_id: sessionResolution.kimiSessionId,
             kimi_session_id_source: sessionResolution.sourceJob?.kimi_session_id_source ?? null,
@@ -162,7 +163,12 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             await assertPersistedResumeLineage(store, executionPlan, job.kimi_session_id, "rescue");
         }
         if (options?.workerPid) {
-            store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
+            const workerIdentity = await serializedProcessIdentity(options.workerPid);
+            store.updateRunningJob(job.job_id, {
+                pid: options.workerPid,
+                ...(workerIdentity ? { companion_identity: workerIdentity } : {}),
+                phase: "worker-running",
+            });
         }
         store.updateRunningJob(job.job_id, { phase: "turn-running" });
         const result = await runCliPromptWithBudget({
@@ -178,7 +184,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             thinkingEffort: job.thinking_effort ?? undefined,
             resumeSessionId: job.kimi_session_id ?? undefined,
             logPath: job.stream_log_path,
-            onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
+            onSpawn: async (pid) => { await recordKimiSpawnIdentity(store, job.job_id, pid); },
             signal: handlers.signal,
         }, job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));

@@ -445,10 +445,10 @@ describe("assertNativeV2Preflight", () => {
   test("G4: a fresh non-swarm launch of a certified local-environment row ignores environments.default", async () => {
     await withHome("assert-remote-default-g4", async (home) => {
       await writeConfig(home, '[environments]\ndefault = "build"\n[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
-      const certified = (operationKind: string, kimiVersion: string | null = "2.7.3") =>
+      const certified = (operationKind: string, kimiVersion: string | null = "2.8.0") =>
         ({ operationKind, kimiVersion, certification: "certified" as const });
-      for (const operationKind of ["ask", "review", "challenge", "review_gate", "rescue", "pursue"]) {
-        for (const version of ["2.5.0", "2.6.0", "2.7.3", "2.8.0"]) {
+      for (const operationKind of ["ask", "review", "challenge", "rescue", "pursue"]) {
+        for (const version of ["2.8.0"]) {
           await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified(operationKind, version) }))
             .resolves.toEqual({ warnings: [] });
         }
@@ -457,7 +457,7 @@ describe("assertNativeV2Preflight", () => {
       // Swarm (web-created sessions), rows without the local flag, uncertified and
       // test-bypass plans, and unlabeled callers keep the refusal.
       for (const release of [
-        certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"), certified("ask", "2.99.0"),
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.7.3"), certified("ask", "2.99.0"),
         { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
@@ -470,7 +470,7 @@ describe("assertNativeV2Preflight", () => {
   test("G4b: a resume ignores environments.default; the stored binding stays the gate", async () => {
     await withHome("assert-remote-default-g4b", async (home) => {
       await writeConfig(home, '[environments]\ndefault = "build"\n[environments.build]\ntype = "ssh"\nhost = "example.test"\ndefaultCwd = "/work"\n');
-      const certified = (operationKind: string, kimiVersion: string | null = "2.7.3") =>
+      const certified = (operationKind: string, kimiVersion: string | null = "2.8.0") =>
         ({ operationKind, kimiVersion, certification: "certified" as const });
       const resume = (sessionId: string, release?: Parameters<typeof assertNativeV2Preflight>[0]["release"]) =>
         assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, resumeSessionId: sessionId, expectedExecutionRoot: home, release });
@@ -486,8 +486,8 @@ describe("assertNativeV2Preflight", () => {
       await session("remote", { environmentId: "build", cwd: "/work" });
       await session("remote-state", { environmentId: "local", cwd: home }, { environmentId: "build", environmentCwd: "/work" });
       await session("wrong-root", { environmentId: "local", cwd: "/elsewhere" });
-      for (const operationKind of ["ask", "review", "rescue", "pursue", "review_gate"]) {
-        for (const version of ["2.5.0", "2.7.3", "2.8.0"]) {
+      for (const operationKind of ["ask", "review", "rescue", "pursue"]) {
+        for (const version of ["2.8.0"]) {
           await expect(resume("local", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
         }
       }
@@ -502,7 +502,7 @@ describe("assertNativeV2Preflight", () => {
       }
       const refused = { code: "CLI_V2_ENVIRONMENT_UNSAFE", details: { refusal_kind: "v2-environment-configured" } };
       for (const release of [
-        certified("swarm"), certified("swarm-write"), certified("ask", "2.4.1"),
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.7.3"),
         { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
@@ -518,7 +518,7 @@ describe("assertNativeV2Preflight", () => {
     await withHome("assert-remote-nontable-g4", async (home) => {
       await writeConfig(home, 'environments = "build"\n');
       await expect(assertNativeV2Preflight({
-        kimiHome: home, env: NO_ENV, release: { operationKind: "ask", kimiVersion: "2.7.3", certification: "certified" },
+        kimiHome: home, env: NO_ENV, release: { operationKind: "ask", kimiVersion: "2.8.0", certification: "certified" },
       })).rejects.toMatchObject({ code: "CLI_V2_ENVIRONMENT_UNSAFE", details: { refusal_kind: "v2-environment-configured" } });
     });
   });
@@ -641,7 +641,7 @@ describe("assertNativeV2Preflight", () => {
       });
       for (const certification of ["certified", "test-bypass"] as const) {
         await expect(assertNativeV2Preflight({
-          kimiHome: home, env, release: { operationKind: "ask", kimiVersion: "2.7.3", certification },
+          kimiHome: home, env, release: { operationKind: "ask", kimiVersion: "2.8.0", certification },
         })).resolves.toEqual({ warnings: [] });
       }
     });
@@ -876,7 +876,7 @@ describe("G3: child environment forces uncertified experimental features off", (
         env: { KIMI_CODE_HOME: "/isolated/kimi", KIMI_CODE_EXPERIMENTAL_TOWER: "1", KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK: "yes", KIMI_CODE_EXPERIMENTAL_FLAG: "1" },
         executionPlan: {
           schemaVersion: 1, operationKind, intendedEngine: "native-v2", command: "kimi", prefixArgs: [],
-          kimiVersion: "2.7.3", certification: "certified", resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1",
+          kimiVersion: "2.8.0", certification: "certified", resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1",
         },
         commandLabel: operationKind,
         ...(operationKind === "swarm" ? { swarmMaxConcurrency: 2 } : {}),
@@ -889,7 +889,7 @@ describe("G3: child environment forces uncertified experimental features off", (
 });
 
 describe("G2: print cancels a create-time default_plan_mode enter", () => {
-  const certified = (operationKind: string, kimiVersion = "2.7.3") =>
+  const certified = (operationKind: string, kimiVersion = "2.8.0") =>
     ({ operationKind, kimiVersion, certification: "certified" as const });
   const ENTER = JSON.stringify({ type: "plan_mode.enter", agentId: "main", id: "plan-1", time: 1 });
   const CANCEL = JSON.stringify({ type: "plan_mode.cancel", agentId: "main", time: 2 });
@@ -898,15 +898,15 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
   test("a fresh certified non-swarm launch on a cancelling row no longer refuses the setting", async () => {
     await withHome("g2-fresh", async (home) => {
       await writeConfig(home, "default_plan_mode = true\n");
-      for (const operationKind of ["ask", "review", "challenge", "review_gate", "rescue", "pursue"]) {
-        for (const version of ["2.4.0", "2.5.3", "2.6.0", "2.7.3", "2.8.0"]) {
+      for (const operationKind of ["ask", "review", "challenge", "rescue", "pursue"]) {
+        for (const version of ["2.8.0"]) {
           await expect(assertNativeV2Preflight({ kimiHome: home, env: NO_ENV, release: certified(operationKind, version) }))
             .resolves.toEqual({ warnings: [] });
         }
       }
       const refused = { code: "CLI_V2_PLAN_MODE_CONFIGURED", details: { refusal_kind: "v2-plan-mode-configured" } };
       for (const release of [
-        certified("swarm"), certified("swarm-write"), certified("ask", "2.3.3"), certified("ask", "0.42.0"),
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.7.3"), certified("ask", "0.42.0"),
         { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,
@@ -925,8 +925,8 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       await writeJournal(home, "ws1", "clean", "main", [TURN]);
       await writeJournal(home, "ws1", "active", "main", [ENTER, TURN]);
       await writeJournal(home, "ws1", "apart", "main", [ENTER, TURN, CANCEL]);
-      for (const operationKind of ["ask", "rescue", "pursue", "review_gate"]) {
-        for (const version of ["2.4.0", "2.7.3"]) {
+      for (const operationKind of ["ask", "rescue", "pursue"]) {
+        for (const version of ["2.8.0"]) {
           await expect(resume("folded", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
           await expect(resume("clean", certified(operationKind, version))).resolves.toEqual({ warnings: [] });
         }
@@ -938,7 +938,7 @@ describe("G2: print cancels a create-time default_plan_mode enter", () => {
       }
       const refused = { code: "CLI_V2_PLAN_MODE_CONFIGURED", details: { refusal_kind: "v2-plan-mode-configured" } };
       for (const release of [
-        certified("swarm"), certified("swarm-write"), certified("ask", "2.3.3"),
+        certified("swarm"), certified("swarm-write"), certified("ask", "2.7.3"),
         { operationKind: "ask", kimiVersion: "2.99.0", certification: "uncertified" as const },
         { operationKind: "ask", kimiVersion: null, certification: "test-bypass" as const },
         undefined,

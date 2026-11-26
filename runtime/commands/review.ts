@@ -11,7 +11,13 @@ import {
 } from "../kimi-engine.js";
 import { getManagedCommandConfig } from "./registry.js";
 import { collectReviewContext } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed } from "../jobs.js";
+import {
+  digestPrompt,
+  markJobCancelled,
+  markJobFailed,
+  recordKimiSpawnIdentity,
+  serializedProcessIdentity,
+} from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_REVIEW_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
@@ -94,6 +100,7 @@ export async function runReview(
     budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
     pid: process.pid,
     kimi_pid: null,
+    companion_identity: await serializedProcessIdentity(process.pid),
     status: "running",
     kimi_session_id: reviewSessionId,
     ...persistedExecutionPlanFields(executionPlan),
@@ -129,7 +136,7 @@ export async function runReview(
         thinkingEffort: parsed.thinkingEffort,
         readScope,
         logPath,
-        onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
+        onSpawn: async (pid) => { await recordKimiSpawnIdentity(store, job.job_id, pid); },
         signal: handlers.signal,
       },
       job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS,

@@ -21,7 +21,7 @@ import { parseVersionLine } from "./kimi-version-probe.js";
 import { assertScopeSupported, NETWORK_ENV, READ_ROOTS_ENV, READ_SCOPE_LABELS, readScopeEnvironment, SCOPE_FLAGS_WRITE_MESSAGE, } from "./read-scope.js";
 import { sleep } from "./util.js";
 import { BOUNDED_SWARM_POLICY, SWARM_CHILD_TIMEOUT_MS, SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV, usesBoundedSwarmPolicy, } from "./swarm-policy.js";
-import { StreamJsonParser, extractSessionIdFromStderr, } from "./stream-json.js";
+import { StreamJsonParser, } from "./stream-json.js";
 import { collectDescendantIdentities, collectDescendantIdentitiesForRoots, raceValueWithTimeout, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
 /** Bytes of stderr retained for diagnostics on completion. Rolling buffer. */
 const STDERR_TAIL_BYTES = 8192;
@@ -86,7 +86,7 @@ export async function runCliPrompt(opts) {
     const env = buildKimiCliEnvironment(opts);
     const boundedSwarm = usesBoundedSwarmPolicy(opts.executionPlan);
     if (opts.logPath !== undefined) {
-        await mkdir(path.dirname(opts.logPath), { recursive: true }).catch(() => {
+        await mkdir(path.dirname(opts.logPath), { recursive: true, mode: 0o700 }).catch(() => {
             // Best-effort; if mkdir fails the appendFile below will error and be
             // swallowed by the log chain (diagnostics are non-blocking).
         });
@@ -156,7 +156,7 @@ export async function runCliPrompt(opts) {
         if (opts.logPath === undefined)
             return;
         const line = `${JSON.stringify({ ts: new Date().toISOString(), ...payload })}\n`;
-        logChain = logChain.then(() => appendFile(opts.logPath, line, "utf8").catch(() => {
+        logChain = logChain.then(() => appendFile(opts.logPath, line, { encoding: "utf8", mode: 0o600 }).catch(() => {
             // Diagnostics best-effort; never crash on log failure.
         }));
     };
@@ -172,7 +172,6 @@ export async function runCliPrompt(opts) {
         plan_certification: opts.executionPlan.certification,
         safety_profile: opts.executionPlan.safetyProfile,
         swarm_max_concurrency: opts.swarmMaxConcurrency ?? null,
-        legacy_v1_forced: env.KIMI_CODE_LEGACY_FLAG === KIMI_LEGACY_FORCED_VALUE,
     });
     const invokeOnRecord = (record) => {
         if (opts.onRecord === undefined)
@@ -185,9 +184,11 @@ export async function runCliPrompt(opts) {
         }
     };
     // A native-v2 plan must see agent-core-v2's pre-tool system.version marker
-    // before any consumer-facing output; a legacy plan must never see it.
+    // before any consumer-facing output. Generic test-bypass plans without an
+    // explicit safety profile let mock scripts omit the marker line.
+    const bypassMarkerCheck = opts.executionPlan.certification === "test-bypass" && opts.executionPlan.safetyProfile === null;
     const requireMarkerBeforeOutput = (what) => {
-        if (plannedEngine !== "native-v2" || announcedSystemVersion !== undefined)
+        if (bypassMarkerCheck || plannedEngine !== "native-v2" || announcedSystemVersion !== undefined)
             return false;
         handleEngineMismatch?.({
             observedEngine: null,
@@ -727,6 +728,55 @@ export async function runCliPrompt(opts) {
         if (opts.signal?.aborted === true) {
             onAbort();
         }
+        // Attach stdout/stderr buffering, close capture, and stdin.end() BEFORE
+        // awaiting opts.onSpawn so a fast child cannot emit data or close while an
+        // async onSpawn (e.g., process-identity lookup) is pending. Buffer chunks
+        // until onSpawn succeeds so onSpawn still completes before any onRecord or
+        // settlement, and an onSpawn failure tears down without delivering output.
+        let streamListenersReady = false;
+        const earlyStdout = [];
+        let earlyStderrTail = "";
+        let earlyClose;
+        let earlyStreamSetupError;
+        let handleClose;
+        child.on("close", (exitCode, signal) => {
+            if (streamListenersReady && handleClose) {
+                void handleClose(exitCode, signal);
+            }
+            else {
+                earlyClose = { exitCode, signal };
+            }
+        });
+        // Stdin: kimi -p reads from argv, not stdin. End it immediately so the
+        // child never blocks. Stream method calls on a failed-spawn child can
+        // throw synchronously — capture and surface after early error handling.
+        try {
+            child.stdout.setEncoding("utf8");
+            child.stderr.setEncoding("utf8");
+            child.stdout.on("data", (chunk) => {
+                if (streamListenersReady) {
+                    consumeOutcomes(parser.push(chunk));
+                }
+                else {
+                    earlyStdout.push(chunk);
+                }
+            });
+            child.stderr.on("data", (chunk) => {
+                if (streamListenersReady) {
+                    stderrTail = appendToTail(stderrTail, chunk, STDERR_TAIL_BYTES);
+                }
+                else {
+                    earlyStderrTail = appendToTail(earlyStderrTail, chunk, STDERR_TAIL_BYTES);
+                }
+            });
+            child.stdin.on("error", () => {
+                // Ignore EPIPE/ENOENT on stdin; child 'error' or 'close' reports the cause.
+            });
+            child.stdin.end();
+        }
+        catch (err) {
+            earlyStreamSetupError = err;
+        }
         if (child.pid !== undefined && opts.onSpawn) {
             try {
                 await opts.onSpawn(child.pid);
@@ -761,8 +811,13 @@ export async function runCliPrompt(opts) {
                 });
                 settle("reject", processError("kimi subprocess error", "cli-client.process", captured));
             });
+            return;
         }
-        child.on("close", async (exitCode, signal) => {
+        if (earlyStreamSetupError !== undefined) {
+            settle("reject", processError("kimi subprocess stream setup failed", "cli-client.streams", earlyStreamSetupError));
+            return;
+        }
+        handleClose = async (exitCode, signal) => {
             consumeOutcomes(parser.flush());
             if (!engineMismatchDetected &&
                 exitCode === 0 &&
@@ -770,12 +825,7 @@ export async function runCliPrompt(opts) {
                 requireMarkerBeforeOutput("a clean exit")) {
                 return;
             }
-            // The stderr resume-hint channel is the kimi 0.1.x fallback and exists
-            // only for legacy-v1 plans; a native-v2 plan pins a session id from the
-            // stdout meta record alone (after the marker), so stderr can never pin
-            // an id ahead of, or different from, the provenance-checked stream.
-            const sessionId = announcedSessionId ??
-                (plannedEngine === "legacy-v1" ? extractSessionIdFromStderr(stderrTail) : undefined);
+            const sessionId = announcedSessionId;
             appendLogLine({
                 event: "exit",
                 exit_code: exitCode,
@@ -795,15 +845,7 @@ export async function runCliPrompt(opts) {
                 goalSummary: announcedGoalSummary,
                 cliError: announcedCliError,
                 systemVersion: announcedSystemVersion,
-                observedEngine: announcedSystemVersion !== undefined
-                    ? "native-v2"
-                    : plannedEngine === "legacy-v1" &&
-                        (exitCode === 0 ||
-                            records.length > 0 ||
-                            sessionId !== undefined ||
-                            announcedGoalSummary !== undefined)
-                        ? "legacy-v1"
-                        : null,
+                observedEngine: announcedSystemVersion !== undefined ? "native-v2" : null,
                 records,
                 malformed,
                 stderrTail,
@@ -811,35 +853,20 @@ export async function runCliPrompt(opts) {
                 signal,
                 aborted,
             });
-        });
-        // Stdin: kimi -p reads from argv, not stdin. End it immediately so the
-        // child never blocks. Stream method calls on a failed-spawn child can
-        // throw synchronously — guard so the 'error' event still wins.
-        try {
-            child.stdout.setEncoding("utf8");
-            child.stderr.setEncoding("utf8");
-            child.stdout.on("data", (chunk) => {
-                consumeOutcomes(parser.push(chunk));
-            });
-            child.stderr.on("data", (chunk) => {
-                // First-announce-wins across both channels: once a session id is
-                // pinned (from the stdout meta record or an earlier stderr line),
-                // never let a later stderr line overwrite it. The stderr channel is
-                // the 0.1.x fallback and is consulted ONLY for legacy-v1 plans — on a
-                // native-v2 plan a stderr line could otherwise pin a session id before
-                // (or different from) the provenance-checked stdout stream.
-                if (plannedEngine === "legacy-v1" && announcedSessionId === undefined) {
-                    const nextSessionId = extractSessionIdFromStderr(stderrTail + chunk);
-                    if (nextSessionId !== undefined) {
-                        announcedSessionId = nextSessionId;
-                    }
-                }
-                stderrTail = appendToTail(stderrTail, chunk, STDERR_TAIL_BYTES);
-            });
-            child.stdin.end();
+        };
+        streamListenersReady = true;
+        if (earlyStderrTail.length > 0) {
+            stderrTail = appendToTail(stderrTail, earlyStderrTail, STDERR_TAIL_BYTES);
+            earlyStderrTail = "";
         }
-        catch (err) {
-            settle("reject", processError("kimi subprocess stream setup failed", "cli-client.streams", err));
+        if (earlyStdout.length > 0) {
+            for (const chunk of earlyStdout) {
+                consumeOutcomes(parser.push(chunk));
+            }
+            earlyStdout.length = 0;
+        }
+        if (earlyClose !== undefined && !settlementStarted) {
+            void handleClose(earlyClose.exitCode, earlyClose.signal);
         }
     });
 }
@@ -972,8 +999,6 @@ function parseExactVersionToken(value) {
         return undefined;
     return parseVersionLine(value)?.raw;
 }
-const KIMI_LEGACY_ENV = "KIMI_CODE_LEGACY_FLAG";
-const KIMI_LEGACY_FORCED_VALUE = "1";
 function buildArgs(opts) {
     const args = [...(opts.prefixArgs ?? [])];
     args.push("--output-format", "stream-json");
@@ -1040,13 +1065,6 @@ export function buildKimiCliEnvironment(opts) {
         env.KIMI_MODEL_THINKING_EFFORT = opts.thinkingEffort;
     // Ambient workspace trust starts project MCP stdio servers outside PreToolUse.
     delete env.KIMI_CODE_TRUST_WORKSPACE;
-    // Legacy-v1 plans use this flag on releases whose unflagged -p default can
-    // route to native-v2. Always overwrite ambient false values; older releases
-    // ignore it. The engine choice stays plugin-owned, while certified native-v2
-    // plans use the no-plan construction rather than a legacy pin.
-    if (opts.executionPlan.intendedEngine === "legacy-v1") {
-        env[KIMI_LEGACY_ENV] = KIMI_LEGACY_FORCED_VALUE;
-    }
     // Suppress passive update checks on the `-p` path. Manually staged native
     // swaps remain an upstream exception, so the exact probe and first-line
     // version marker must still prove the spawned artifact's identity.

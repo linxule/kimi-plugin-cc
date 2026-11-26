@@ -5,7 +5,6 @@ import { JobStore, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import { revalidateProcessIdentities } from "../process-tree.js";
-import { getManagedCommandConfig } from "./registry.js";
 import { sleep } from "../util.js";
 export async function runCancel(argv, context) {
     const parsed = parseJobLookupArgs(argv);
@@ -14,7 +13,8 @@ export async function runCancel(argv, context) {
     const repoIdentity = await resolveRepoIdentity(context.cwd);
     const store = new JobStore(paths);
     try {
-        await sweepStaleJobs(store, paths);
+        const isMcpCancel = context.mcpCompanionIdentity !== undefined || context.mcpKimiIdentity !== undefined;
+        await sweepStaleJobs(store, paths, isMcpCancel ? { repoId: repoIdentity.repoId, workspaceCwd: context.cwd } : undefined);
         const job = parsed.jobId
             ? store.getJob(parsed.jobId)
             : store.findLatestJob({
@@ -34,7 +34,7 @@ export async function runCancel(argv, context) {
         }
         if (store.getMcpTask(job.job_id) &&
             (context.mcpCompanionIdentity === undefined || context.mcpKimiIdentity === undefined)) {
-            throw new RuntimeError("MCP_CANCEL_REQUIRES_BINDING", `MCP job ${job.job_id} requires MCP job-control cancellation with recorded identities; use tasks/cancel or kimi_job_cancel.`, "mcp.cancel");
+            throw new RuntimeError("MCP_CANCEL_REQUIRES_BINDING", `MCP job ${job.job_id} requires MCP job-control cancellation with recorded identities; use tasks/cancel or kimi_job (action: "cancel").`, "mcp.cancel");
         }
         const recovery = store.getSwarmRecovery(job.job_id)?.record;
         if (recovery) {
@@ -47,20 +47,11 @@ export async function runCancel(argv, context) {
         if (job.pid === null && job.kimi_pid === null) {
             throw new RuntimeError("CANCEL_NOT_SUPPORTED", `Job ${job.job_id} does not have a recorded process id to cancel.`, "cancel.runtime");
         }
-        // review_gate runs in a Stop hook. Pre-mark the row as cancelled before
-        // signaling so the subprocess close/result path cannot persist a failure
-        // over the user's intent; later updates are no-ops on a terminal row.
-        //
-        // The terminal row also makes waitForCancellation return before its own
-        // escalation, so this path always attempts SIGTERM after the pre-mark
-        // attempt, waits 1s, and sends SIGKILL only if a recorded process remains
-        // live. A pre-mark failure is rethrown only after termination is attempted.
         if (job.command_type === "review_gate") {
             let preMarkError;
             try {
                 await withJobStore(paths, async (preMarkStore) => {
-                    const reviewGateCancel = getManagedCommandConfig("review_gate").cancellation;
-                    await markJobCancelled(preMarkStore, paths, job, reviewGateCancel.cancelledSummary, new RuntimeError(reviewGateCancel.errorCodes.cancelled, reviewGateCancel.cancelMessages.default, "cancel.runtime"));
+                    await markJobCancelled(preMarkStore, paths, job, "review_gate cancelled by user request.", new RuntimeError("REVIEW_GATE_CANCELLED", "review_gate cancelled by user request.", "cancel.runtime"));
                 });
             }
             catch (error) {

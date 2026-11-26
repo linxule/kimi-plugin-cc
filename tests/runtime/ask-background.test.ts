@@ -17,7 +17,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 // Background --wait returns the artifact text as-is (includes writeArtifact trailing newline)
 const ASK_SUCCESS_BACKGROUND_OUTPUT = "Ask answer from mock Kimi.\n";
@@ -42,7 +42,8 @@ function makeMockEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
@@ -104,7 +105,8 @@ describe("ask background", () => {
     const chosen = path.join(root, "chosen");
     const foreign = path.join(root, "foreign");
     const env = {
-      ...makeMockEnv(foreign, "ask-success"),
+      ...makeMockEnv(chosen, "ask-success"),
+      CLAUDE_PLUGIN_DATA: foreign,
       PLUGIN_DATA: path.join(root, "other-host"),
       KIMI_PLUGIN_CC_DATA: chosen,
       KIMI_CODE_HOME: path.join(root, "test-kimi-home"),

@@ -1,7 +1,7 @@
 {
   "name": "kimi",
   "version": "3.1.0",
-  "description": "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP job controls through the local Kimi Code CLI.",
+  "description": "Universal Kimi Code connector for Codex: 4-tool MCP (kimi_read, kimi_write, kimi_job, kimi_setup), progressive kimi skill, and canonical PreToolUse safety hook.",
   "author": {
     "name": "linxule"
   },
@@ -22,8 +22,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Kimi",
-    "shortDescription": "Ask, review, and build with Kimi",
-    "longDescription": "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime, with MCP tools provided by the bundled server.",
+    "shortDescription": "Ask, review, challenge, and build with Kimi",
+    "longDescription": "Kimi Code workflows for Codex: read-only questions, diff reviews, adversarial challenges, parallel swarms, bounded workspace fixes, autonomous goals, and worktree patches through the 4-tool MCP server and progressive $kimi skill.",
     "developerName": "linxule",
     "category": "Developer Tools",
     "capabilities": [
@@ -33,9 +33,9 @@
     ],
     "websiteURL": "https://github.com/linxule/kimi-plugin-cc",
     "defaultPrompt": [
-      "Use $kimi-review to review my current diff.",
-      "Use $kimi-task to explain this repository flow.",
-      "Use $kimi-task with --write to delegate a bounded fix."
+      "Use $kimi to review my current uncommitted diff.",
+      "Use $kimi to challenge the design tradeoffs in this module.",
+      "Use $kimi to delegate a bounded fix with kimi_write."
     ],
     "brandColor": "#0F766E"
   }

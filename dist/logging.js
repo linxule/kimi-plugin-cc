@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
 export async function writeInvocationLogHeader(logPath, metadata) {
     const line = `${JSON.stringify({
@@ -6,17 +6,22 @@ export async function writeInvocationLogHeader(logPath, metadata) {
         direction: "meta",
         message: metadata,
     })}\n`;
-    await mkdir(path.dirname(logPath), { recursive: true });
+    const dir = path.dirname(logPath);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
     try {
-        await appendFile(logPath, line, "utf8");
+        await appendFile(logPath, line, { encoding: "utf8", mode: 0o600 });
     }
     catch (error) {
         if (error.code === "ENOENT") {
             // Directory vanished between mkdir and appendFile — recreate and retry once.
-            await mkdir(path.dirname(logPath), { recursive: true });
-            await appendFile(logPath, line, "utf8");
-            return;
+            await mkdir(dir, { recursive: true, mode: 0o700 });
+            await appendFile(logPath, line, { encoding: "utf8", mode: 0o600 });
         }
-        throw error;
+        else {
+            throw error;
+        }
+    }
+    if (process.platform !== "win32") {
+        await chmod(logPath, 0o600);
     }
 }

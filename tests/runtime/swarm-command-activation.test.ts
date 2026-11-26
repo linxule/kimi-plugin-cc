@@ -53,7 +53,7 @@ async function createFixture(scenario: string, write: boolean): Promise<Fixture>
     env: {
       HOME: stateRoot,
       PATH: process.env.PATH,
-      CLAUDE_PLUGIN_DATA: pluginData,
+      KIMI_PLUGIN_CC_DATA: pluginData,
       KIMI_CODE_HOME: home,
       KIMI_PLUGIN_CC_KIMI_BIN: nodeCommand,
       KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mockWebPath]),
@@ -189,7 +189,7 @@ async function runSwarmFault(
       cancelling: false,
       dispose() {},
     }),
-    executionPlanFromPersisted: () => ({ command: "fake", prefixArgs: [], kimiVersion: "2.3.2" }),
+    executionPlanFromPersisted: () => ({ command: "fake", prefixArgs: [], kimiVersion: "2.8.0" }),
     usesBoundedSwarmPolicy: () => false,
     requiresSwarmPreactivation: () => true,
     preactivateSwarmSession: async () => { throw activationError; },
@@ -222,14 +222,14 @@ async function runSwarmFault(
   return { result, retained, deactivations };
 }
 
-describe("runSwarm 2.3.2 preactivation orchestration", () => {
+describe("runSwarm 2.8.0 preactivation orchestration", () => {
   test("persists preactivated identity, resumes it, and keeps activation in turn-running", async () => {
     await withFixture("success", false, async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_PRINT_DELAY_MS = "200";
       const pending = runSwarm(["inspect", "activation"], context(fixture));
       const print = await waitForLog(fixture, (entry) => entry.kind === "print");
       const running = await latestJob(fixture);
-      expect(running.kimi_version).toBe("2.3.2");
+      expect(running.kimi_version).toBe("2.8.0");
       expect(running.kimi_session_id).toBe("session_mock");
       expect(running.kimi_session_id_source).toBe("preactivated");
       expect(running.phase).toBe("turn-running");
@@ -243,7 +243,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       const completed = await latestJob(fixture);
       expect(completed.status).toBe("completed");
       expect(completed.phase).toBe("done");
-      expect(completed.system_version).toBe("2.3.2");
+      expect(completed.system_version).toBe("2.8.0");
       expect(completed.observed_engine).toBe("native-v2");
       expect(completed.kimi_session_id).toBe("session_mock");
       expect(completed.kimi_session_id_source).toBe("preactivated");
@@ -260,9 +260,9 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       const alias = path.join(aliasRoot, "linked-data");
       await mkdir(target, { recursive: true });
       await symlink(target, alias);
-      fixture.env.CLAUDE_PLUGIN_DATA = alias;
+      fixture.env.KIMI_PLUGIN_CC_DATA = alias;
       try {
-        await expect(runSwarm(["--write", "--budget", "10s", "target"], context(fixture)))
+        await expect(runSwarm(["--write", "--max-concurrency", "2", "--budget", "10s", "target"], context(fixture)))
           .resolves.toContain(proseSentinel);
         const log = await readLog(fixture);
         const created = log.find((entry) => entry.kind === "request" && entry.path === "/api/v1/sessions");
@@ -289,7 +289,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       });
       expect(job.kimi_session_id).toBe("session_mock");
       expect(job.kimi_session_id_source).toBe("preactivated");
-      expect(job.system_version).toBe("2.3.2");
+      expect(job.system_version).toBe("2.8.0");
       const log = await readLog(fixture);
       expect(profileRequests(log, false)).toHaveLength(1);
       expect(printEntries(log)).toHaveLength(1);
@@ -300,7 +300,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
     await withFixture("deactivate-rest-failure", true, async (fixture) => {
       let caught: unknown;
       try {
-        await runSwarm(["--write", "preserve", "cleanup", "evidence"], context(fixture));
+        await runSwarm(["--write", "--max-concurrency", "2", "preserve", "cleanup", "evidence"], context(fixture));
       } catch (error) {
         caught = error;
       }
@@ -308,7 +308,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       expect((caught as RuntimeError).code).toBe("SWARM_SESSION_CLEANUP_FAILED");
       const job = await latestJob(fixture);
       expect(job.status).toBe("failed");
-      expect(job.system_version).toBe("2.3.2");
+      expect(job.system_version).toBe("2.8.0");
       expect(job.observed_engine).toBe("native-v2");
       expect(job.kimi_session_id).toBe("session_mock");
       expect(job.kimi_session_id_source).toBe("preactivated");
@@ -339,7 +339,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
       fixture.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS = "4500";
       let caught: unknown;
       try {
-        await runSwarm(["--write", "--budget", "6s", "bounded", "cleanup"], context(fixture));
+        await runSwarm(["--write", "--max-concurrency", "2", "--budget", "6s", "bounded", "cleanup"], context(fixture));
       } catch (error) {
         caught = error;
       }
@@ -403,7 +403,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
     await withFixture("deactivate-rest-failure", true, async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_STATUS_DELAY_MS = "5000";
       fixture.env.MOCK_KIMI_WEB_DEACTIVATE_STATUS_DELAY_MS = "0";
-      await expect(runSwarm(["--write", "--budget", "1s", "retain", "activation"], context(fixture)))
+      await expect(runSwarm(["--write", "--max-concurrency", "2", "--budget", "1s", "retain", "activation"], context(fixture)))
         .rejects.toMatchObject({ code: "RESCUE_KIMI_RESPONSE_TIMEOUT", stage: "swarm.activation" });
       const job = await latestJob(fixture);
       const worktreePath = job.error?.details?.worktreePath;
@@ -420,7 +420,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
 
   test("retains identity and the write worktree when rejected activation cleanup fails", async () => {
     await withFixture("composite-failure", true, async (fixture) => {
-      await expect(runSwarm(["--write", "activation", "cleanup", "failure"], context(fixture)))
+      await expect(runSwarm(["--write", "--max-concurrency", "2", "activation", "cleanup", "failure"], context(fixture)))
         .rejects.toMatchObject({ code: "SWARM_ACTIVATION_FAILED", stage: "swarm-activation.status" });
       const job = await latestJob(fixture);
       expect(job.kimi_session_id).toBe("session_mock");
@@ -444,7 +444,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
     await withFixture("success", true, async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_STATUS_DELAY_MS = "5000";
       const baseline = process.listeners("SIGTERM");
-      const pending = runSwarm(["--write", "cancel", "mutated", "activation"], context(fixture));
+      const pending = runSwarm(["--write", "--max-concurrency", "2", "cancel", "mutated", "activation"], context(fixture));
       await waitForLog(fixture, (entry) =>
         entry.kind === "request" && entry.path?.endsWith("/profile") === true &&
         entry.body?.agent_config?.swarm_mode === true);
@@ -470,7 +470,7 @@ describe("runSwarm 2.3.2 preactivation orchestration", () => {
   test("does not invent cleanup evidence when activation has no session identity", async () => {
     await withFixture("success", true, async (fixture) => {
       fixture.env.MOCK_KIMI_WEB_CREATE_SESSION_DELAY_MS = "5000";
-      await runSwarm(["--write", "--budget", "1s", "no", "identity"], context(fixture));
+      await runSwarm(["--write", "--max-concurrency", "2", "--budget", "1s", "no", "identity"], context(fixture));
       const job = await latestJob(fixture);
       expect(job.error).toMatchObject({ code: "RESCUE_KIMI_RESPONSE_TIMEOUT", stage: "swarm.activation" });
       expect(job.error?.details?.cleanup_error).toBeUndefined();

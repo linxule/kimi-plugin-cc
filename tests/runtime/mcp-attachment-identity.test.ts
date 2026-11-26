@@ -115,10 +115,10 @@ async function runSyntheticScenario(
     let calls = 0;
     try {
       const launched = await launchMcpOperation(
-        buildMcpOperationInvocation("kimi_ask", {
+        buildMcpOperationInvocation("kimi_read", {
           workspace: process.env.MCP_TEST_WORKSPACE,
+          mode: "ask",
           prompt: "Preserve identity through attachment races",
-          fresh: true,
         }),
         process.env,
         {
@@ -232,13 +232,13 @@ async function restoreAndCancel(fixture: McpFixture, jobId: string, pid: number)
   const client = await McpClient.legacy(fixture);
   try {
     const status = await client.request("tools/call", {
-      name: "kimi_job_status",
-      arguments: { job_id: jobId },
+      name: "kimi_job",
+      arguments: { action: "status", job_id: jobId },
     });
     expect(status.structuredContent.status).toBe("running");
     const cancelled = await client.request("tools/call", {
-      name: "kimi_job_cancel",
-      arguments: { job_id: jobId },
+      name: "kimi_job",
+      arguments: { action: "cancel", job_id: jobId },
     });
     if (cancelled.isError) throw new Error(JSON.stringify(cancelled));
     expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");

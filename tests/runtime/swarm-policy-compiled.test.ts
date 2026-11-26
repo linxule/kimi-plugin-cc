@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 
-const distributions = ["./dist", "./plugins/kimi-codex/dist", "./plugins/kimi-dsh/dist"];
+const distributions = ["./dist", "./plugins/kimi-codex/dist"];
 
 // Node resolves the emitted JavaScript, including the real hook entry point;
 // Bun's .js-to-.ts loader must not turn these into source-only regressions.
@@ -14,7 +14,7 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
     } from '${root}/swarm-policy.js';
     const plan = {
       schemaVersion: 1, operationKind: 'swarm', intendedEngine: 'native-v2',
-      command: process.execPath, prefixArgs: [], kimiVersion: '2.6.2',
+      command: process.execPath, prefixArgs: [], kimiVersion: '2.8.0',
       certification: 'certified', resumedFromJobId: null, safetyProfile: 'native-v2-no-plan/1',
     };
     const ambient = {
@@ -23,7 +23,7 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
       KIMI_CODE_SWARM_TIMEOUT_MS: '3', KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '9999',
       KIMI_PLUGIN_CC_OPERATION: 'rescue', KIMI_PLUGIN_CC_CMD: 'rescue',
     };
-    for (const kimiVersion of ['2.6.2', '2.7.2', '2.7.3', '2.8.0']) {
+    for (const kimiVersion of ['2.8.0']) {
       for (const operationKind of ['swarm', 'swarm-write']) {
         for (const concurrency of [1, 4]) {
           const env = buildKimiCliEnvironment({
@@ -56,16 +56,11 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
         error => error.code === 'SWARM_POLICY_INVALID');
     }
     for (const unboundedPlan of [
-      { ...plan, kimiVersion: '2.5.3' },
-      { ...plan, kimiVersion: '2.6.0' },
-      { ...plan, kimiVersion: '2.6.1' },
-      { ...plan, kimiVersion: '2.6.4' },
-      { ...plan, kimiVersion: '2.7.0' },
-      { ...plan, kimiVersion: '2.7.1' },
-      { ...plan, kimiVersion: '2.7.4' },
-      { ...plan, kimiVersion: '2.7.x' },
-      { ...plan, kimiVersion: '2.7.2-rc.1' },
-      { ...plan, kimiVersion: '2.6.2+build' },
+      { ...plan, kimiVersion: '2.7.3' },
+      { ...plan, kimiVersion: '2.8.1' },
+      { ...plan, kimiVersion: '2.8.x' },
+      { ...plan, kimiVersion: '2.8.0-rc.1' },
+      { ...plan, kimiVersion: '2.8.0+build' },
       { ...plan, intendedEngine: 'legacy-v1' },
       { ...plan, operationKind: 'rescue' },
     ]) {
@@ -93,7 +88,7 @@ test.each(distributions)("%s enforces bounded waves through the compiled hook pr
     import { SWARM_POLICY_ENV, SWARM_WAVE_SIZE_ENV } from '${root}/swarm-policy.js';
     const plan = {
       schemaVersion: 1, operationKind: 'swarm', intendedEngine: 'native-v2',
-      command: process.execPath, prefixArgs: [], kimiVersion: '2.6.2',
+      command: process.execPath, prefixArgs: [], kimiVersion: '2.8.0',
       certification: 'certified', resumedFromJobId: null, safetyProfile: 'native-v2-no-plan/1',
     };
     const makeEnv = (operationKind, width, kimiVersion = plan.kimiVersion) => buildKimiCliEnvironment({
@@ -147,16 +142,10 @@ test.each(distributions)("%s enforces bounded waves through the compiled hook pr
         assert.doesNotMatch(denial, /coordinator|fan out|subagents/);
       }
     }
-    for (const operationKind of ['swarm', 'swarm-write']) {
-      const env = makeEnv(operationKind, 4, '2.7.2');
-      invoke(env, 'AgentSwarm', four, 0);
-      invoke(env, 'AgentSwarm', { ...four, items: ['a', 'b', 'c'] }, 2, /exceeding the limit 4/);
-      invoke(makeEnv(operationKind, 1, '2.7.2'), 'AgentSwarm', four, 2, /one worker directly/);
-    }
-    // Missing both new overlays remains the explicitly older-version behavior.
+    // Missing both new overlays remains the uncertified/unbounded behavior.
     const oldEnv = buildKimiCliEnvironment({
       cwd: process.cwd(), env: { KIMI_CODE_HOME: process.cwd() },
-      executionPlan: { ...plan, kimiVersion: '2.5.3' }, commandLabel: 'swarm',
+      executionPlan: { ...plan, kimiVersion: '2.8.1' }, commandLabel: 'swarm',
       swarmMaxConcurrency: 4,
     });
     invoke(oldEnv, 'AgentSwarm', { ...four, items: ['a', 'b', 'c'] }, 0);
@@ -175,21 +164,18 @@ test.each(distributions)("%s forwards the exported wave policy into stream monit
     import os from 'node:os';
     import path from 'node:path';
     import { runCliPrompt } from '${root}/cli-client.js';
-    import { NATIVE_V2_CERTIFIED } from '${root}/kimi-engine.js';
     const home = await mkdtemp(path.join(os.tmpdir(), 'kimi-wave-monitor-'));
     const command = ${JSON.stringify(Bun.which("bun"))};
     const prefixArgs = ['run', path.resolve('tests/helpers/mock-kimi-stream.ts')];
-    // Isolated test-only candidate map: this test does not promote certification.
-    NATIVE_V2_CERTIFIED.set('swarm', [...new Set([...NATIVE_V2_CERTIFIED.get('swarm'), '2.6.2'])]);
     const executionPlan = {
       schemaVersion: 1, operationKind: 'swarm', intendedEngine: 'native-v2', command, prefixArgs,
-      kimiVersion: '2.6.2', certification: 'certified', resumedFromJobId: null,
+      kimiVersion: '2.8.0', certification: 'certified', resumedFromJobId: null,
       safetyProfile: 'native-v2-no-plan/1',
     };
     try {
       for (const content of [undefined, 'executed oversized wave']) {
         const records = [
-          { role: 'meta', type: 'system.version', version: '2.6.2' },
+          { role: 'meta', type: 'system.version', version: '2.8.0' },
           { role: 'assistant', tool_calls: [{ id: 'oversized', type: 'function', function: {
             name: 'AgentSwarm', arguments: JSON.stringify({ description: 'too many', items: ['one','two','three'] }),
           } }] },

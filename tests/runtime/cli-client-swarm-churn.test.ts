@@ -9,7 +9,7 @@ import { cleanupRecordedSwarmProcesses, readSwarmCleanupIdentities, waitForSwarm
 const runner = path.join(process.cwd(), "tests/helpers/swarm-churn-runner.mjs");
 const posixTest = process.platform === "win32" ? test.skip : test;
 
-for (const distribution of ["runtime", "dist", "plugins/kimi-codex/dist", "plugins/kimi-dsh/dist"]) {
+for (const distribution of ["runtime", "dist", "plugins/kimi-codex/dist"]) {
   posixTest(`${distribution} batches only live swarm anchors after 220-child churn`, async () => {
     const root = await createTestPluginDataRoot("swarm-churn");
     const source = distribution === "runtime";

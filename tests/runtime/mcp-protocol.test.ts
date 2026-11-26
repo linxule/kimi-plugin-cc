@@ -11,19 +11,18 @@ import { KIMI_PLUGIN_CC_VERSION } from "../../runtime/version.js";
 import { createMcpFixture, MCP_MODERN_VERSION, McpClient, modernMeta, type McpFixture } from "../helpers/mcp.js";
 
 const expectedToolNames = [
-  "kimi_ask",
-  "kimi_review",
-  "kimi_rescue",
-  "kimi_pursue",
-  "kimi_swarm",
-  "kimi_swarm_write",
-  "kimi_job_status",
-  "kimi_job_result",
-  "kimi_job_cancel",
+  "kimi_read",
+  "kimi_write",
+  "kimi_job",
+  "kimi_setup",
 ];
 
-const writeTools = new Set(["kimi_rescue", "kimi_pursue", "kimi_swarm_write", "kimi_job_cancel"]);
-const jobTools = new Set(["kimi_job_status", "kimi_job_result", "kimi_job_cancel"]);
+const expectedAnnotations: Record<string, Record<string, unknown>> = {
+  kimi_read: { title: "kimi read", readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  kimi_write: { title: "kimi write", readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  kimi_job: { title: "kimi job", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  kimi_setup: { title: "kimi setup", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+};
 
 interface FrameWaiter {
   resolve: (frame: any) => void;
@@ -163,23 +162,17 @@ function expectFrameError(frame: any, code: number, message?: string | RegExp): 
 
 function expectToolContract(tools: readonly any[]): void {
   expect(tools.map((tool) => tool.name)).toEqual(expectedToolNames);
-  expect(new Set(tools.map((tool) => tool.name)).size).toBe(9);
+  expect(new Set(tools.map((tool) => tool.name)).size).toBe(4);
   expect(tools).toEqual(MCP_TOOL_DEFINITIONS);
   for (const tool of tools) {
     expect(tool.inputSchema.type).toBe("object");
     expect(tool.inputSchema.additionalProperties).toBe(false);
-    expect(tool.annotations).toEqual({
-      title: tool.name.replaceAll("_", " "),
-      readOnlyHint: !writeTools.has(tool.name),
-      destructiveHint: writeTools.has(tool.name),
-      idempotentHint: jobTools.has(tool.name),
-      openWorldHint: !jobTools.has(tool.name),
-    });
+    expect(tool.annotations).toEqual(expectedAnnotations[tool.name]);
   }
 }
 
 describe("MCP protocol discovery and tool schemas", () => {
-  test("modern discovery and tools/list expose the complete deterministic contract", async () => {
+  test("modern discovery and tools/list expose the complete deterministic 4-tool + SEP-2640 contract", async () => {
     const fixture = await createMcpFixture("mcp-protocol-modern");
     const client = new McpClient(fixture);
     try {
@@ -187,7 +180,14 @@ describe("MCP protocol discovery and tool schemas", () => {
       expect(discovery).toEqual({
         resultType: "complete",
         supportedVersions: [MCP_MODERN_VERSION],
-        capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/tasks": {} } },
+        capabilities: {
+          tools: {},
+          resources: {},
+          extensions: {
+            "io.modelcontextprotocol/tasks": {},
+            "io.modelcontextprotocol/skills": {},
+          },
+        },
         instructions: MCP_SERVER_INSTRUCTIONS,
         _meta: {
           "io.modelcontextprotocol/serverInfo": { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
@@ -207,7 +207,7 @@ describe("MCP protocol discovery and tool schemas", () => {
     }
   }, 30_000);
 
-  test("legacy initialize and tools/list retain the legacy response shapes", async () => {
+  test("legacy initialize and tools/list retain the legacy response shapes with resources and skills", async () => {
     const fixture = await createMcpFixture("mcp-protocol-legacy");
     const client = new McpClient(fixture);
     try {
@@ -218,7 +218,7 @@ describe("MCP protocol discovery and tool schemas", () => {
       });
       expect(initialized).toEqual({
         protocolVersion: "2025-06-18",
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {}, experimental: { skills: {} } },
         serverInfo: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
         instructions: MCP_SERVER_INSTRUCTIONS,
       });
@@ -251,8 +251,8 @@ describe("MCP task negotiation and task errors", () => {
     try {
       client = await McpClient.modern(fixture);
       const capable = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Task-capable mock launch" },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Task-capable mock launch" },
         _meta: modernMeta(true),
       });
       expect(capable.resultType).toBe("task");
@@ -260,8 +260,8 @@ describe("MCP task negotiation and task errors", () => {
       capableTaskId = capable.taskId;
 
       const withoutCapability = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Ordinary mock launch" },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Ordinary mock launch", wait: false },
         _meta: modernMeta(false),
       });
       expect(withoutCapability.resultType).toBe("complete");
@@ -270,8 +270,8 @@ describe("MCP task negotiation and task errors", () => {
       ordinaryJobId = withoutCapability.structuredContent.job_id;
 
       const status = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: ordinaryJobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: ordinaryJobId },
         _meta: modernMeta(true),
       });
       expect(status.resultType).toBe("complete");
@@ -297,8 +297,8 @@ describe("MCP task negotiation and task errors", () => {
         }
         if (ordinaryJobId) {
           await client.request("tools/call", {
-            name: "kimi_job_cancel",
-            arguments: { job_id: ordinaryJobId },
+            name: "kimi_job",
+            arguments: { action: "cancel", job_id: ordinaryJobId },
             _meta: modernMeta(false),
           }).catch(() => undefined);
         }
@@ -397,6 +397,16 @@ describe("MCP JSON-RPC validation and stdout discipline", () => {
         -32_602,
         "Unknown tool: kimi_not_a_tool",
       );
+      expectFrameError(
+        await client.exchange({
+          jsonrpc: "2.0",
+          id: "removed-legacy-tool",
+          method: "tools/call",
+          params: { _meta: modernMeta(), name: "kimi_ask", arguments: { prompt: "x" } },
+        }),
+        -32_602,
+        "Unknown tool: kimi_ask",
+      );
 
       for (const [index, taskId] of ["", "has spaces", 7, "x".repeat(129)].entries()) {
         expectFrameError(
@@ -415,7 +425,7 @@ describe("MCP JSON-RPC validation and stdout discipline", () => {
         jsonrpc: "2.0",
         id: "invalid-tool-arguments",
         method: "tools/call",
-        params: { _meta: modernMeta(), name: "kimi_ask", arguments: null },
+        params: { _meta: modernMeta(), name: "kimi_read", arguments: null },
       });
       expect(invalidToolArguments.id).toBe("invalid-tool-arguments");
       expect(invalidToolArguments.error).toBeUndefined();
@@ -441,8 +451,8 @@ describe("MCP JSON-RPC validation and stdout discipline", () => {
         method: "tools/call",
         params: {
           _meta: modernMeta(),
-          name: "kimi_ask",
-          arguments: { workspace: fixture.repo, prompt: "This notification must not start a job" },
+          name: "kimi_read",
+          arguments: { workspace: fixture.repo, mode: "ask", prompt: "This notification must not start a job" },
         },
       });
       const ping = await client.request("ping", { _meta: modernMeta() });
@@ -484,19 +494,32 @@ describe("MCP server instructions", () => {
     }
   }, 60_000);
 
-  test("instructions name the write tools, the polling fallback, durability and warnings", () => {
+  test("instructions name the skill URI, 4 tools, wait semantics, setup, and warnings", () => {
     for (const phrase of [
-      "detached or long-running",
-      "task notification",
-      "kimi_job_status and kimi_job_result",
-      "keeps running if this connection drops",
-      "kimi_ask, kimi_review and kimi_swarm are read-only",
-      "kimi_rescue and kimi_pursue edit the workspace",
-      "kimi_swarm_write",
-      "warnings",
+      "skill://kimi/SKILL.md",
+      "resources/read",
+      "kimi_read",
+      "kimi_write",
+      "wait: false",
+      "kimi_job",
+      "kimi_setup",
+      "Warnings:",
     ]) {
       expect(MCP_SERVER_INSTRUCTIONS).toContain(phrase);
     }
-    expect(MCP_SERVER_INSTRUCTIONS).not.toContain("kimi_challenge");
+    for (const removed of [
+      "kimi_ask",
+      "kimi_review",
+      "kimi_challenge",
+      "kimi_rescue",
+      "kimi_pursue",
+      "kimi_swarm",
+      "kimi_swarm_write",
+      "kimi_job_status",
+      "kimi_job_result",
+      "kimi_job_cancel",
+    ]) {
+      expect(MCP_SERVER_INSTRUCTIONS).not.toContain(removed);
+    }
   });
 });

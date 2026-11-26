@@ -14,7 +14,7 @@ import {
   createTestPluginDataRoot,
 } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -32,7 +32,8 @@ function makeMockEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
@@ -115,7 +116,7 @@ describe("read-only command handlers", () => {
     },
   );
 
-  test("runAsk returns prose and forwards the v1 cli flags + command label", async () => {
+  test("runAsk returns prose and forwards the native-v2 cli flags + command label", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("ask-command");
     const kimiHome = await createTestPluginDataRoot("ask-command-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "ask-invocation.jsonl");
@@ -124,6 +125,7 @@ describe("read-only command handlers", () => {
       ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+      KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1",
     };
 
     try {
@@ -171,6 +173,7 @@ describe("read-only command handlers", () => {
       ...makeMockEnv(pluginDataRoot, `${commandType}-success`, invocationPath),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+      KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1",
     };
     try {
       const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
@@ -200,6 +203,7 @@ describe("read-only command handlers", () => {
       ...makeMockEnv(pluginDataRoot, "review-success", invocationPath),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+      KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1",
     };
 
     try {

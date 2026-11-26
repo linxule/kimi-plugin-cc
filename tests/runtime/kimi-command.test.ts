@@ -4,8 +4,8 @@ import { resolveKimiCliCommand } from "../../runtime/kimi-command.js";
 import { RuntimeError } from "../../runtime/errors.js";
 
 describe("resolveKimiCliCommand", () => {
-  test("returns 'kimi' with no prefix args when env is empty", () => {
-    expect(resolveKimiCliCommand({})).toEqual({ command: "kimi", prefixArgs: [] });
+  test("returns 'kimi' with no prefix args when env has no override or plugin-owned install", () => {
+    expect(resolveKimiCliCommand({ KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA: "1" })).toEqual({ command: "kimi", prefixArgs: [] });
   });
 
   test("honors KIMI_PLUGIN_CC_KIMI_BIN", () => {

@@ -90,7 +90,7 @@ import { readScopeEnvironment, resolveReadScope, type ReadScope } from "../../ru
 import { evaluateRescueHookRequest } from "../../runtime/rescue-approval.js";
 import { runRescue } from "../../runtime/commands/rescue.js";
 import { runSetup, type SetupResult } from "../../runtime/commands/setup.js";
-import { buildHookShellCommand, resolveHookScriptPath, resolveHostId } from "../../runtime/hooks/install-paths.js";
+import { buildHookShellCommand, resolveHookScriptPath } from "../../runtime/hooks/install-paths.js";
 import { findUnmanagedApprovalHookBlocks, parseManagedBlock } from "../../runtime/hooks/managed-block.js";
 import { resolveKimiCodeConfigPath } from "../../runtime/kimi-home.js";
 import { buildGoalPrompt } from "../../runtime/commands/pursue.js";
@@ -154,9 +154,9 @@ const SEED_ENTRIES = [
   "tui.toml",
 ] as const;
 
-// The four commands the plugin documents as read-only. Each must deny any
+// The three commands the plugin documents as read-only. Each must deny any
 // non-read tool via the hook.
-const READ_ONLY_LABELS = ["review", "challenge", "ask", "review_gate"] as const;
+const READ_ONLY_LABELS = ["review", "challenge", "ask"] as const;
 
 // Substring our hook always emits on deny (runtime/hooks/approval-policy.ts
 // denyReadOnlyMessage / rescue stub). Its presence in the run output proves
@@ -278,29 +278,15 @@ test("smoke plans satisfy the final spawn gate and retain exact native policy se
   for (const operation of ["review", "swarm", "swarm-write"] as const) {
     const previous = matrix.get(operation)!;
     try {
-      // Same test-only admission used by the live candidate entry point.
-      matrix.set(operation, [...new Set([...previous, "2.6.2"])]);
-      const plan = smokePlanForVersion("node", ["fixture.mjs"], operation, "2.6.2", true);
+      matrix.set(operation, [...new Set([...previous, "2.8.0"])]);
+      const plan = smokePlanForVersion("node", ["fixture.mjs"], operation, "2.8.0", true);
       expect(plan.certification).toBe("certified");
-      expect(plan.kimiVersion).toBe("2.6.2");
+      expect(plan.kimiVersion).toBe("2.8.0");
       expect(() => assertExecutionPlanMatchesSpawn(plan, "node", ["fixture.mjs"])).not.toThrow();
       expect(usesBoundedSwarmPolicy(plan)).toBe(operation !== "review");
       expect(() => assertExecutionPlanMatchesSpawn({ ...plan, certification: "test-bypass" }, "node", ["fixture.mjs"], {
         KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
       })).toThrow("test-bypass plans must have kimi_version=null");
-    } finally {
-      matrix.set(operation, previous);
-    }
-  }
-  for (const operation of ["review", "swarm", "swarm-write"] as const) {
-    const previous = matrix.get(operation)!;
-    try {
-      matrix.set(operation, [...new Set([...previous, "2.7.2"])]);
-      const plan = smokePlanForVersion("node", ["fixture.mjs"], operation, "2.7.2", true);
-      expect(plan.certification).toBe("certified");
-      expect(plan.kimiVersion).toBe("2.7.2");
-      expect(() => assertExecutionPlanMatchesSpawn(plan, "node", ["fixture.mjs"])).not.toThrow();
-      expect(usesBoundedSwarmPolicy(plan)).toBe(operation !== "review");
     } finally {
       matrix.set(operation, previous);
     }
@@ -312,10 +298,15 @@ test("smoke plans satisfy the final spawn gate and retain exact native policy se
       expect(requiresSwarmPreactivation(BINARY_VERSION ?? null)).toBe(true);
     }
   }
-  const legacy = smokePlanForVersion("node", ["fixture.mjs"], "review", "0.41.0", false);
-  expect(legacy.certification).toBe("test-bypass");
-  expect(legacy.kimiVersion).toBeNull();
-  expect(() => assertExecutionPlanMatchesSpawn(legacy, "node", ["fixture.mjs"], {
+  const bypass: KimiExecutionPlan = {
+    ...smokePlanForVersion("node", ["fixture.mjs"], "review", "2.8.0", true),
+    kimiVersion: null,
+    certification: "test-bypass",
+    safetyProfile: null,
+  };
+  expect(bypass.certification).toBe("test-bypass");
+  expect(bypass.kimiVersion).toBeNull();
+  expect(() => assertExecutionPlanMatchesSpawn(bypass, "node", ["fixture.mjs"], {
     KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
   })).not.toThrow();
 });
@@ -640,7 +631,7 @@ async function stripPluginHooksFromIsolatedConfig(kimiHome: string): Promise<voi
   expect((await lstat(configPath)).isFile(), "isolated config.toml must be a copy, never a link").toBe(true);
   const pluginData = await createTestPluginDataRoot("smoke-seed-strip");
   try {
-    await runSetup(["--uninstall", "--all"], makeContext(kimiHome, {
+    await runSetup(["--uninstall"], makeContext(kimiHome, {
       ...process.env,
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_DATA: pluginData,
@@ -658,7 +649,7 @@ async function runCheckoutSetup(argv: string[], context: CommandContext): Promis
   const result = await runSetup(argv, context);
   const contents = await readFile(resolveKimiCodeConfigPath(context.env), "utf8");
   const ownCommand = buildHookShellCommand(resolveHookScriptPath(context.env), context.env);
-  const { blocks } = parseManagedBlock(contents, resolveHostId(context.env));
+  const { blocks } = parseManagedBlock(contents);
   expect(blocks.map((block) => block.commandPath), "exactly one managed block, this checkout's").toEqual([ownCommand]);
   expect(findUnmanagedApprovalHookBlocks(contents), "no marker-less kimi-plugin-cc hook tables").toEqual([]);
   return result;
@@ -1078,7 +1069,7 @@ suite("real-binary smoke: read-only commands cannot write (H7)", () => {
           const setupEnv: NodeJS.ProcessEnv = {
             ...process.env,
             KIMI_CODE_HOME: kimiHome,
-            CLAUDE_PLUGIN_DATA: pluginData,
+            KIMI_PLUGIN_CC_DATA: pluginData,
             KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           };
           const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
@@ -1164,7 +1155,7 @@ suite("real-binary smoke: rescue writes only inside the workspace and confines B
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         KIMI_CODE_HOME: kimiHome,
-        CLAUDE_PLUGIN_DATA: pluginData,
+        KIMI_PLUGIN_CC_DATA: pluginData,
       };
       const setupResult = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
@@ -1230,7 +1221,7 @@ suite("real-binary smoke: rescue writes only inside the workspace and confines B
       const setupResult = await runCheckoutSetup([], makeContext(workspace, {
         ...process.env,
         KIMI_CODE_HOME: kimiHome,
-        CLAUDE_PLUGIN_DATA: pluginData,
+        KIMI_PLUGIN_CC_DATA: pluginData,
         KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
       }));
       expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
@@ -1305,7 +1296,7 @@ suite("real-binary smoke: the master experimental flag never reaches a model chi
         const setupEnv: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
         const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
@@ -1376,7 +1367,7 @@ suite("real-binary smoke: the master experimental flag never reaches a model chi
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: homes.kimiHome,
-          CLAUDE_PLUGIN_DATA: homes.pluginData,
+          KIMI_PLUGIN_CC_DATA: homes.pluginData,
           KIMI_CODE_EXPERIMENTAL_FLAG: "1",
           KIMI_CODE_EXPERIMENTAL_TOWER: "1",
           KIMI_CODE_EXPERIMENTAL_NOTIFY_USER: "1",
@@ -1450,7 +1441,7 @@ suite("real-binary smoke: default_plan_mode is cancelled or refused (v2) or pinn
         const setupEnv: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
         const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
@@ -1664,7 +1655,7 @@ resumeSuite("real-binary smoke: native-v2 resume re-proves provenance and refuse
         };
         const setupEnv: NodeJS.ProcessEnv = {
           ...baseEnv,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
         };
         const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
         expect(
@@ -1832,7 +1823,7 @@ goalSuite("real-binary smoke: autonomous goal mode denies writes across turns (p
           KIMI_MODEL_BASE_URL: `${provider.baseUrl}/v1`,
           KIMI_MODEL_CAPABILITIES: "tool_use",
         };
-        const setupResult = await runCheckoutSetup([], makeContext(workspace, { ...baseEnv, CLAUDE_PLUGIN_DATA: pluginData }));
+        const setupResult = await runCheckoutSetup([], makeContext(workspace, { ...baseEnv, KIMI_PLUGIN_CC_DATA: pluginData }));
         expect(
           setupResult.probe,
           `managed-block install probe failed: ${setupResult.probeError ?? ""}`,
@@ -1879,7 +1870,7 @@ goalSuite("real-binary smoke: autonomous goal mode denies writes across turns (p
         // Non-vacuous multi-turn evidence comes from the real main-agent journal:
         // actual Write/Edit calls must have same-call managed error denials in at
         // least two distinct turns. Aggregate marker text and turnsUsed prove neither.
-        const store = new JobStore(resolvePluginPaths({ ...baseEnv, CLAUDE_PLUGIN_DATA: pluginData }));
+        const store = new JobStore(resolvePluginPaths({ ...baseEnv, KIMI_PLUGIN_CC_DATA: pluginData }));
         let sessionId: string | undefined;
         try {
           const recovered = await recoverSessionIdFromStore({
@@ -2040,7 +2031,7 @@ swarmReadSuite("real-binary smoke: read-only swarm subagents cannot write (swarm
         const setupEnv: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
         const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
@@ -2119,7 +2110,7 @@ nonSwarmSuite("real-binary smoke: narrowed production certification refuses swar
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
         };
         const write = operationKind === "swarm-write";
         if (write) await initUserRepo(workspace);
@@ -2175,13 +2166,13 @@ suite("real-binary smoke: pursue can terminate its current goal", () => {
       try {
         await seedKimiHome(SEED_HOME, kimiHome);
         const env: NodeJS.ProcessEnv = {
-          ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData,
+          ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
         // Test this checkout's policy in the DISPOSABLE home. Older host hooks
         // also veto UpdateGoal; their coexistence intentionally remains deny-
         // winning. Never uninstall/rewrite them in the operator's real home.
-        await runSetup(["--uninstall", "--all"], makeContext(workspace, env));
+        await runSetup(["--uninstall"], makeContext(workspace, env));
         const setup = await runCheckoutSetup([], makeContext(workspace, env));
         expect(setup.probe).toBe("ok");
         const { command, prefixArgs } = resolveKimiCliCommand(process.env);
@@ -2393,7 +2384,7 @@ swarmWriteSuite("real-binary smoke: write-swarm edits land in the worktree, neve
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
         };
 
         // Install the managed hook into the throwaway KIMI_CODE_HOME via the real
@@ -2555,7 +2546,7 @@ swarmWriteSuite("real-binary smoke: write-swarm denies out-of-worktree writes (-
         const setupEnv: NodeJS.ProcessEnv = {
           ...process.env,
           KIMI_CODE_HOME: kimiHome,
-          CLAUDE_PLUGIN_DATA: pluginData,
+          KIMI_PLUGIN_CC_DATA: pluginData,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
         };
         const setupResult = await runCheckoutSetup([], makeContext(workspace, setupEnv));
@@ -2655,7 +2646,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       gitIn(workspace, ["add", "alpha.txt"]);
       gitIn(workspace, ["commit", "-q", "-m", "read fixture"]);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
-      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_DATA: pluginData };
       const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       const report = await runSwarm([
@@ -2692,7 +2683,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       await seedKimiHome(SEED_HOME, kimiHome);
       await initUserRepo(workspace);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
-      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_DATA: pluginData };
       const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       // Omit --max-concurrency deliberately: the write default must remain one.
@@ -2742,7 +2733,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       gitIn(workspace, ["add", "--", ...targets.slice(2)]);
       gitIn(workspace, ["commit", "-q", "-m", "wave fixtures"]);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
-      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_DATA: pluginData };
       const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       const objective = [
@@ -2836,7 +2827,7 @@ boundedSwarmSuite("real-binary smoke: bounded swarm single workers and wave comp
       gitIn(workspace, ["add", "--", ...targets.slice(2)]);
       gitIn(workspace, ["commit", "-q", "-m", "natural wave fixtures"]);
       const headBefore = gitIn(workspace, ["rev-parse", "HEAD"]).trim();
-      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_DATA: pluginData };
       const setup = await runCheckoutSetup([], makeContext(workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       // Only the user task is supplied here. The production prompt owns all
@@ -3225,7 +3216,7 @@ async function installSmokeHook(label: string, workspace: string): Promise<{ kim
   const setupResult = await runCheckoutSetup([], makeContext(workspace, {
     ...process.env,
     KIMI_CODE_HOME: kimiHome,
-    CLAUDE_PLUGIN_DATA: pluginData,
+    KIMI_PLUGIN_CC_DATA: pluginData,
     KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
   }));
   expect(setupResult.probe, `managed-block install probe failed: ${setupResult.probeError ?? ""}`).toBe("ok");
@@ -3797,7 +3788,7 @@ boundedSwarmSuite("real-binary smoke: swarm children inherit the read scope", ()
       for (const target of WRITE_TARGETS) await writeFile(path.join(f.workspace, target), `${workspaceToken}\n`, "utf8");
       gitIn(f.workspace, ["add", "--", ...WRITE_TARGETS]);
       gitIn(f.workspace, ["commit", "-q", "-m", "scope fixtures"]);
-      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, CLAUDE_PLUGIN_DATA: pluginData };
+      const env = { ...process.env, KIMI_CODE_HOME: kimiHome, KIMI_PLUGIN_CC_DATA: pluginData };
       const setup = await runCheckoutSetup([], makeContext(f.workspace, env));
       expect(setup.probe, setup.probeError ?? "managed hook setup failed").toBe("ok");
       const objective = [
@@ -3859,7 +3850,7 @@ scopeSuite("real-binary smoke: a referenced session's log is read (ask --referen
     let homes: { kimiHome: string; pluginData: string } | undefined;
     try {
       homes = await installSmokeHook("session-ref", workspace);
-      const env: NodeJS.ProcessEnv = { ...process.env, KIMI_CODE_HOME: homes.kimiHome, CLAUDE_PLUGIN_DATA: homes.pluginData };
+      const env: NodeJS.ProcessEnv = { ...process.env, KIMI_CODE_HOME: homes.kimiHome, KIMI_PLUGIN_CC_DATA: homes.pluginData };
       // The token reaches the first session only as a tool result, so it is in
       // that session's log and in nothing the second run is given: not the
       // session title (the first request), and the file is gone by then.

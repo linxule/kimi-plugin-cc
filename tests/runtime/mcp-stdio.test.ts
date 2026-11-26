@@ -132,8 +132,8 @@ describe("MCP stdio framing", () => {
         method: "tools/call",
         params: {
           _meta: modernMeta(),
-          name: "kimi_ask",
-          arguments: { workspace: fixture.repo, prompt: "A notification must never launch this" },
+          name: "kimi_read",
+          arguments: { workspace: fixture.repo, mode: "ask", prompt: "A notification must never launch this" },
         },
       };
       const handler = createMcpMessageHandler({

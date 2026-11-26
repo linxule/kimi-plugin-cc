@@ -1,0 +1,18 @@
+- insert:
+    - id: kimi-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: kimi
+        transport: stdio
+        command: !!js "(ctx.get('pluginPackages')?.packageOf('kimi-plugin-cc', ctx.baseUrl)?.dir ?? (ctx.get('profileContext')?.dir + '/node_modules/kimi-plugin-cc')) + '/scripts/companion.sh'"
+        args:
+          - mcp
+        cwd: !!js "ctx.get('profileContext')?.cwd ?? process.cwd()"
+        toolCallTimeoutMs: 86400000
+    - id: kimi-skill
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        providerName: kimi-plugin-cc
+        includeDefaultRoots: false
+        bundledSkillDir: !!js "(ctx.get('pluginPackages')?.packageOf('kimi-plugin-cc', ctx.baseUrl)?.dir ?? (ctx.get('profileContext')?.dir + '/node_modules/kimi-plugin-cc')) + '/skills'"
+        watch: false

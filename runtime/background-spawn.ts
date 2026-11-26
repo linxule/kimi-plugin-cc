@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { RuntimeError, formatError } from "./errors.js";
 import { preferStableNodePath } from "./hooks/install-paths.js";
-import { markJobFailed, waitForTerminalJob } from "./jobs.js";
+import { markJobFailed, serializedProcessIdentity, waitForTerminalJob } from "./jobs.js";
 import { JobStore, type JobRecord } from "./job-store.js";
 import { readArtifact } from "./render.js";
 import { type PluginPaths } from "./paths.js";
@@ -92,7 +92,7 @@ export async function startBackgroundJob(
       KIMI_PLUGIN_CC_WORKSPACE_CWD: context.cwd,
       [`KIMI_PLUGIN_CC_${stem}_PROMPT_B64`]: b64,
       // A worker must reopen the exact store its parent selected, regardless of cwd.
-      KIMI_PLUGIN_CC_DATA: path.resolve(paths.claudePluginData),
+      KIMI_PLUGIN_CC_DATA: path.resolve(paths.dataRoot),
     },
   });
 
@@ -147,10 +147,13 @@ export async function startBackgroundJob(
     throw spawnError;
   }
 
+  const companionIdentity =
+    child.pid !== undefined ? await serializedProcessIdentity(child.pid) : null;
   const store = new JobStore(paths);
   try {
     store.updateRunningJob(job.job_id, {
       pid: child.pid ?? null,
+      ...(companionIdentity ? { companion_identity: companionIdentity } : {}),
       phase: "worker-spawned",
     });
   } finally {

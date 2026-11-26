@@ -53,7 +53,7 @@ async function runFault(options: { kind: FaultKind; complete?: boolean; cancelli
 
   const job = { job_id: "settlement-probe", cwd: "/virtual/user-repo", status: "running", kimi_session_id: null,
     stream_log_path: "/virtual/log.jsonl", model: null, thinking_effort: null };
-  const plan = { intendedEngine: "native-v2", kimiVersion: "2.6.2", operationKind: "swarm-write",
+  const plan = { intendedEngine: "native-v2", kimiVersion: "2.8.0", operationKind: "swarm-write",
     command: "/virtual/kimi", prefixArgs: [] };
   const snapshots: SwarmRecoveryRecord[] = [];
   const captureCalls: string[] = [];

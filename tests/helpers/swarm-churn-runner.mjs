@@ -24,7 +24,7 @@ async function waitFor(read, timeoutMs = 8000) {
 async function fixture(root) {
   const paths = pathsFor(root);
   setTimeout(() => process.exit(90), 18_000).unref();
-  process.stdout.write(`${JSON.stringify({ role: "meta", type: "system.version", version: "2.6.2" })}\n`);
+  process.stdout.write(`${JSON.stringify({ role: "meta", type: "system.version", version: "2.8.0" })}\n`);
   const intermediary = spawn("/bin/sh", ["-c", [
     '"$CHURN_NODE" "$CHURN_FIXTURE" --leaf "$CHURN_ROOT" &',
     "remaining=750",
@@ -91,7 +91,7 @@ async function runner(runtimeRoot, extension, root) {
   let finalCheckpoint;
   let checkpointFailure;
   const oldRow = NATIVE_V2_CERTIFIED.get("swarm");
-  NATIVE_V2_CERTIFIED.set("swarm", [...new Set([...oldRow, "2.6.2"])]);
+  NATIVE_V2_CERTIFIED.set("swarm", [...new Set([...oldRow, "2.8.0"])]);
   let promise;
   const knownIdentities = () => [...new Map([
     ...[rootIdentity, shellIdentity, leaf].filter(Boolean), ...captured.values(),
@@ -103,7 +103,7 @@ async function runner(runtimeRoot, extension, root) {
       command: "node", prefixArgs: [filename, "--fixture", root],
       executionPlan: {
         schemaVersion: 1, operationKind: "swarm", intendedEngine: "native-v2",
-        command: "node", prefixArgs: [filename, "--fixture", root], kimiVersion: "2.6.2",
+        command: "node", prefixArgs: [filename, "--fixture", root], kimiVersion: "2.8.0",
         certification: "certified", resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1",
       },
       prompt: "Exercise bounded process-identity churn.", commandLabel: "swarm",

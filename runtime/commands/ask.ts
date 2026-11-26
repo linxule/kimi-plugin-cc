@@ -14,7 +14,14 @@ import {
 import { getManagedCommandConfig } from "./registry.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
+import {
+  digestPrompt,
+  markJobCancelled,
+  markJobFailed,
+  recordKimiSpawnIdentity,
+  serializedProcessIdentity,
+  sweepStaleJobs,
+} from "../jobs.js";
 import { JobStore, type JobRecord } from "../job-store.js";
 import { KIMI_ASK_PROMPT_TIMEOUT_MS } from "../kimi-timeouts.js";
 import { writeInvocationLogHeader } from "../logging.js";
@@ -108,6 +115,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       ...resumeBudget("ask", parsed.budgetMs, sessionResolution.sourceJob),
       pid: parsed.background ? null : process.pid,
       kimi_pid: null,
+      companion_identity: parsed.background ? null : await serializedProcessIdentity(process.pid),
       status: "running",
       kimi_session_id: sessionResolution.kimiSessionId,
       kimi_session_id_source: sessionResolution.sourceJob?.kimi_session_id_source ?? null,
@@ -199,7 +207,12 @@ export async function executeAskJob(
     }
 
     if (options?.workerPid) {
-      store.updateRunningJob(job.job_id, { pid: options.workerPid, phase: "worker-running" });
+      const workerIdentity = await serializedProcessIdentity(options.workerPid);
+      store.updateRunningJob(job.job_id, {
+        pid: options.workerPid,
+        ...(workerIdentity ? { companion_identity: workerIdentity } : {}),
+        phase: "worker-running",
+      });
     }
 
     const result = await runCliPromptWithBudget(
@@ -216,7 +229,7 @@ export async function executeAskJob(
         readScope,
         resumeSessionId: job.kimi_session_id ?? undefined,
         logPath: job.stream_log_path,
-        onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
+        onSpawn: async (pid) => { await recordKimiSpawnIdentity(store, job.job_id, pid); },
         signal: handlers.signal,
       },
       job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS,

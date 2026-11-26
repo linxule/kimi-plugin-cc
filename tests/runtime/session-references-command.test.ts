@@ -16,7 +16,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 const REF_WORKSPACE = "wd_other_0123456789ab";
 const REF_SESSION = "session_11111111-1111-4111-8111-111111111111";
 const NEW_SESSION = "session_22222222-2222-4222-8222-222222222222";
@@ -37,13 +37,13 @@ async function withFixture(scenario: string, run: (fixture: Fixture) => Promise<
   const invocationPath = path.join(root, "invocation.jsonl");
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: root,
+    KIMI_PLUGIN_CC_DATA: root,
     KIMI_CODE_HOME: home,
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
     KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocationPath,
-    KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3",
+    KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
     KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1",
     KIMI_PLUGIN_CC_MOCK_SESSION_ID: NEW_SESSION,
     KIMI_PLUGIN_CC_NODE_BIN: "node",
@@ -254,13 +254,13 @@ describe("session references in commands", () => {
     });
   }, 30_000);
 
-  test("legacy-v1 refuses before any job row", async () => {
+  test("below-floor kimi-code refuses before any job row", async () => {
     await withFixture("ask-success", async (fixture) => {
       await expect(runAsk(["--reference-session", REF_SESSION, "q"], context(fixture))).rejects.toMatchObject({
-        code: "INVALID_ARGS", stage: "ask.reference-session", message: expect.stringContaining("legacy-v1"),
+        code: "KIMI_CAPABILITY_NOT_CERTIFIED",
       });
       expect(await jobs(fixture.env)).toHaveLength(0);
-    }, { KIMI_PLUGIN_CC_MOCK_VERSION: "0.39.0", KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "" });
+    }, { KIMI_PLUGIN_CC_MOCK_VERSION: "2.7.3", KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "" });
   }, 30_000);
 
   test("a detached ask worker keeps the block out of the running summary and the preview", async () => {
@@ -296,7 +296,7 @@ describe("session references in commands", () => {
             job_id: "99999999-9999-4999-8999-999999999999", repo_id: (await resolveRepoIdentity(other)).repoId,
             command_type: "review", cwd: other, model: null, thinking: null, background: false, pid: null, kimi_pid: null,
             status: "completed", kimi_session_id: REF_SESSION, operation_kind: "review", intended_engine: "native-v2",
-            observed_engine: "native-v2", kimi_version: "2.7.3", system_version: "2.7.3", agent_profile: "<cli-client>",
+            observed_engine: "native-v2", kimi_version: "2.8.0", system_version: "2.8.0", agent_profile: "<cli-client>",
             prompt_digest: "digest", summary: "s", final_output_path: null, stream_log_path: "/dev/null", error: null,
           });
         } finally {
@@ -329,14 +329,14 @@ describe("session references in commands", () => {
 const workerStub = `
 import { appendFile } from 'node:fs/promises';
 const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('2.7.3'); process.exit(0); }
+if (args.includes('--version')) { console.log('2.8.0'); process.exit(0); }
 await appendFile(process.env.SWARM_REF_LOG, JSON.stringify({argv:args, home:process.env.KIMI_CODE_HOME ?? null})+'\\n');
-console.log(JSON.stringify({role:'meta', type:'system.version', version:'2.7.3'}));
+console.log(JSON.stringify({role:'meta', type:'system.version', version:'2.8.0'}));
 console.log(JSON.stringify({role:'assistant',content:'Swarm done.'}));
 console.log(JSON.stringify({role:'meta',type:'session.resume_hint',session_id:'swarm_ref_session',command:'kimi -r swarm_ref_session',content:'To resume this session: kimi -r swarm_ref_session'}));
 `;
 
-describe("session references in swarm (exact 2.7.3 direct worker)", () => {
+describe("session references in swarm (exact 2.8.0 direct worker)", () => {
   test.each([false, true])("write=%p appends the block to the coordinator prompt", async (write) => {
     const root = await createTestPluginDataRoot("session-references-swarm");
     const repo = await createGitRepoFixture("session-references-swarm-repo");

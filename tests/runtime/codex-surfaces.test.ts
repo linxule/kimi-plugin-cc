@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -12,10 +11,12 @@ import {
   verifyClaudeSurfaceHashes,
 } from "../../scripts/generate-surfaces.js";
 import {
+  CANONICAL_SKILL_FILES,
+  CANONICAL_SKILL_NAME,
   CODEX_MARKETPLACE,
+  CODEX_MCP_CONFIG,
   CODEX_PLUGIN_MANIFEST,
   CODEX_PLUGIN_SUBDIR,
-  CODEX_SKILLS,
   PLUGIN_VERSION,
 } from "../../scripts/surface-registry.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../../runtime/version.js";
@@ -32,8 +33,8 @@ async function exists(relPath: string): Promise<boolean> {
   }
 }
 
-describe("Codex sidecar surfaces", () => {
-  test("Claude surface gate matches the checked-in Claude plugin bytes", async () => {
+describe("Universal & Codex surfaces", () => {
+  test("root surface gate matches the checked-in manifests, MCP configs, and canonical skill", async () => {
     const result = await verifyClaudeSurfaceHashes(repoRoot);
     expect(result.messages).toEqual([]);
     expect(result.ok).toBe(true);
@@ -57,7 +58,7 @@ describe("Codex sidecar surfaces", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("Codex plugin manifest declares shell skills and the MCP launch config", async () => {
+  test("Codex plugin manifest declares the single canonical skill and MCP launch config", async () => {
     const manifest = JSON.parse(
       await readFile(path.join(repoRoot, CODEX_PLUGIN_SUBDIR, ".codex-plugin/plugin.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -85,17 +86,16 @@ describe("Codex sidecar surfaces", () => {
     });
   });
 
-  test("Codex MCP launch is plugin-relative and excludes dangerous environment variables", async () => {
+  test("Codex MCP launch is plugin-relative and excludes host-split and dangerous environment variables", async () => {
     const supportedEnvVars = [
       "KIMI_PLUGIN_CC_DATA",
-      "CLAUDE_PLUGIN_DATA",
-      "PLUGIN_DATA",
+      "XDG_DATA_HOME",
+      "LOCALAPPDATA",
       "KIMI_CODE_HOME",
       "KIMI_PLUGIN_CC_KIMI_BIN",
       "KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS",
       "KIMI_PLUGIN_CC_NODE_BIN",
       "KIMI_PLUGIN_CC_HOOK_SCRIPT",
-      "KIMI_PLUGIN_CC_HOST_ID",
       "KIMI_PLUGIN_CC_STRICT_VERSIONS",
       "KIMI_MODEL_NAME",
       "KIMI_MODEL_API_KEY",
@@ -117,19 +117,13 @@ describe("Codex sidecar surfaces", () => {
       };
     };
 
-    expect(mcp).toEqual({
-      mcpServers: {
-        kimi: {
-          type: "stdio",
-          command: "./scripts/companion.sh",
-          args: ["mcp"],
-          cwd: ".",
-          env_vars: supportedEnvVars,
-        },
-      },
-    });
+    expect(mcp).toEqual(JSON.parse(JSON.stringify(CODEX_MCP_CONFIG)));
+    expect(mcp.mcpServers.kimi.env_vars).toEqual(supportedEnvVars);
 
     for (const name of [
+      "CLAUDE_PLUGIN_DATA",
+      "PLUGIN_DATA",
+      "KIMI_PLUGIN_CC_HOST_ID",
       "CLAUDE_PLUGIN_ROOT",
       "PLUGIN_ROOT",
       "CLAUDE_PROJECT_DIR",
@@ -164,50 +158,46 @@ describe("Codex sidecar surfaces", () => {
     expect(marketplace.plugins[0].policy.authentication).toBe("ON_INSTALL");
   });
 
-  test("hook config is accepted by Codex's strict hook schema", async () => {
-    const hooks = JSON.parse(
-      await readFile(path.join(repoRoot, "hooks/hooks.json"), "utf8"),
-    ) as Record<string, unknown>;
+  test("canonical kimi skill is mirrored verbatim into plugins/kimi-codex", async () => {
+    const generated = generatedCodexSurfaceFiles(repoRoot);
+    const skillPath = `${CODEX_PLUGIN_SUBDIR}/skills/${CANONICAL_SKILL_NAME}/SKILL.md`;
+    const openAiPath = `${CODEX_PLUGIN_SUBDIR}/skills/${CANONICAL_SKILL_NAME}/agents/openai.yaml`;
+    const skillFile = generated.find((file) => file.path === skillPath);
+    const openAiFile = generated.find((file) => file.path === openAiPath);
 
-    expect(Object.keys(hooks)).toEqual(["hooks"]);
-    expect(hooks.hooks).toBeTruthy();
-  });
-
-  test("skill frontmatter and implicit-invocation policy are generated for every Codex skill", async () => {
-    const generated = generatedCodexSurfaceFiles();
-
-    for (const skill of CODEX_SKILLS) {
-      const skillFile = generated.find(
-        (file) => file.path === `${CODEX_PLUGIN_SUBDIR}/skills/${skill.name}/SKILL.md`,
-      );
-      const openAiFile = generated.find(
-        (file) => file.path === `${CODEX_PLUGIN_SUBDIR}/skills/${skill.name}/agents/openai.yaml`,
-      );
-
-      expect(skillFile?.content).toContain(`name: ${skill.name}`);
-      expect(skillFile?.content).toContain("Do not use MCP for this skill");
-      expect(skillFile?.content).toContain(`"<plugin-root>/scripts/companion.sh" ${skill.command}`);
-      expect(openAiFile?.content).toContain(
-        `allow_implicit_invocation: ${skill.implicit ? "true" : "false"}`,
-      );
+    expect(CANONICAL_SKILL_FILES).toEqual([
+      "skills/kimi/SKILL.md",
+      "skills/kimi/agents/openai.yaml",
+    ]);
+    expect(skillFile?.content).toContain("name: kimi");
+    for (const tool of ["kimi_read", "kimi_write", "kimi_job", "kimi_setup"]) {
+      expect(skillFile?.content).toContain(tool);
     }
+    expect(skillFile?.content).toContain("scripts/companion.sh");
+    expect(openAiFile?.content).toBe(
+      await readFile(path.join(repoRoot, "skills/kimi/agents/openai.yaml"), "utf8"),
+    );
   });
 });
 
-describe("Codex/Claude surface separation", () => {
-  test("repo root has NO skills/ dir (Claude Code must not auto-discover Codex skills)", async () => {
-    expect(await exists("skills")).toBe(false);
-  });
-
-  test("repo root has NO .codex-plugin/ (Codex plugin root is the subfolder)", async () => {
+describe("Universal packaging layout", () => {
+  test("repo root carries the canonical skills/kimi/ and Antigravity manifests, with legacy hooks removed", async () => {
+    expect(await exists("skills/kimi/SKILL.md")).toBe(true);
+    expect(await exists("skills/kimi/agents/openai.yaml")).toBe(true);
+    expect(await exists("plugin.json")).toBe(true);
+    expect(await exists("mcp_config.json")).toBe(true);
+    expect(await exists("assets/logo.svg")).toBe(true);
     expect(await exists(".codex-plugin")).toBe(false);
+    expect(await exists("hooks/hooks.json")).toBe(false);
+    expect(await exists("scripts/review-gate-hook.sh")).toBe(false);
   });
 
-  test("the self-contained Codex subfolder holds skills, manifest, scripts, and bundled dist", async () => {
-    expect(await exists(`${CODEX_PLUGIN_SUBDIR}/skills`)).toBe(true);
+  test("the self-contained Codex subfolder holds the canonical skill, manifest, companion.sh, and bundled dist", async () => {
+    expect(await exists(`${CODEX_PLUGIN_SUBDIR}/skills/kimi/SKILL.md`)).toBe(true);
     expect(await exists(`${CODEX_PLUGIN_SUBDIR}/.codex-plugin/plugin.json`)).toBe(true);
+    expect(await exists(`${CODEX_PLUGIN_SUBDIR}/.mcp.json`)).toBe(true);
     expect(await exists(`${CODEX_PLUGIN_SUBDIR}/scripts/companion.sh`)).toBe(true);
-    expect(await exists(`${CODEX_PLUGIN_SUBDIR}/scripts/review-gate-hook.sh`)).toBe(true);
+    expect(await exists(`${CODEX_PLUGIN_SUBDIR}/scripts/review-gate-hook.sh`)).toBe(false);
     expect(await exists(`${CODEX_PLUGIN_SUBDIR}/dist/companion.js`)).toBe(true);
   });
 
@@ -235,19 +225,25 @@ describe("version single-sourcing", () => {
   });
 });
 
-describe("plugin data dir precedence (Claude vs Codex env aliases)", () => {
-  test("conflicting host data variables require an explicit namespaced choice", () => {
-    const env = {
+describe("canonical shared plugin data root", () => {
+  test("KIMI_PLUGIN_CC_DATA is the sole env override and ignores legacy host variables", () => {
+    const resolved = resolvePluginPaths({
+      KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA: "1",
       CLAUDE_PLUGIN_DATA: "/tmp/claude-data",
       PLUGIN_DATA: "/tmp/codex-data",
-    };
-    expect(() => resolvePluginPaths(env)).toThrow("disagree");
-    const resolved = resolvePluginPaths({ ...env, KIMI_PLUGIN_CC_DATA: "/tmp/selected-kimi-data" });
+      KIMI_PLUGIN_CC_DATA: "/tmp/selected-kimi-data",
+    });
+    expect(resolved.dataRoot).toBe("/tmp/selected-kimi-data");
     expect(resolved.claudePluginData).toBe("/tmp/selected-kimi-data");
   });
 
-  test("PLUGIN_DATA is used as the Codex fallback when CLAUDE_PLUGIN_DATA is unset", () => {
-    const resolved = resolvePluginPaths({ PLUGIN_DATA: "/tmp/codex-data" } as NodeJS.ProcessEnv);
-    expect(resolved.claudePluginData).toBe("/tmp/codex-data");
+  test("legacy host data variables alone do not satisfy data-root resolution when default data is disabled", () => {
+    expect(() =>
+      resolvePluginPaths({
+        KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA: "1",
+        CLAUDE_PLUGIN_DATA: "/tmp/claude-data",
+        PLUGIN_DATA: "/tmp/codex-data",
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/KIMI_PLUGIN_CC_DATA|data/i);
   });
 });

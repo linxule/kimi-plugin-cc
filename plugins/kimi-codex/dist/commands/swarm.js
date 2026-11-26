@@ -10,7 +10,7 @@ import { deactivateSwarmSession, preactivateSwarmSession, requiresSwarmPreactiva
 import { executionPlanFromPersisted, observedExecutionFields, persistedExecutionPlanFields, prepareKimiExecutionPlan, } from "../kimi-engine.js";
 import { RuntimeError } from "../errors.js";
 import { captureWorktreePatch, createEphemeralWorktree, hasBornHead, isWorkingTreeDirty, removeWorktree, resolveRepoIdentity, } from "../git.js";
-import { digestPrompt, markJobCancelled, markJobFailed, sweepStaleJobs } from "../jobs.js";
+import { digestPrompt, markJobCancelled, markJobFailed, serializedProcessIdentity, sweepStaleJobs, } from "../jobs.js";
 import { JobStore } from "../job-store.js";
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { KIMI_SWARM_DEFAULT_BUDGET_MS } from "../kimi-timeouts.js";
@@ -373,6 +373,7 @@ async function createSwarmJob(store, paths, spec) {
         budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
         pid: process.pid,
         kimi_pid: null,
+        companion_identity: await serializedProcessIdentity(process.pid),
         status: "running",
         kimi_session_id: null,
         ...persistedExecutionPlanFields(spec.executionPlan),
@@ -612,8 +613,11 @@ writeMode, executionCwd) {
             logPath: job.stream_log_path,
             onSpawn: async (pid) => {
                 store.updateRunningJob(job.job_id, { kimi_pid: pid });
+                const probe = await probeProcessIdentity(pid);
+                if (probe.identity) {
+                    store.updateRunningJob(job.job_id, { kimi_identity: JSON.stringify(probe.identity) });
+                }
                 if (recovery) {
-                    const probe = await probeProcessIdentity(pid);
                     recordRecoveryEvent(store, recovery, { kind: "print-processes", identities: probe.identity ? [probe.identity] : [], complete: probe.complete });
                 }
             },

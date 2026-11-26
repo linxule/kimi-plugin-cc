@@ -1,6 +1,0 @@
-interface:
-  display_name: "Kimi Review"
-  short_description: "Run Kimi read-only review or challenge"
-  default_prompt: "Use $kimi-review to review the current working tree."
-policy:
-  allow_implicit_invocation: true

@@ -78,7 +78,7 @@ async function killObserved() {
 }
 
 async function main() {
-  const version = mode === "legacy" ? "2.5.3" : "2.6.2";
+  const version = mode === "legacy" ? "2.8.1" : "2.8.0";
   const exitCode = ["error-exit", "persistence-persistent"].includes(mode) ? 7 : 0;
   const oldRow = NATIVE_V2_CERTIFIED.get("swarm");
   NATIVE_V2_CERTIFIED.set("swarm", [...new Set([...oldRow, version])]);
@@ -249,7 +249,7 @@ async function main() {
     await waitFor(async () => printRoot);
     await writeFile(paths.identity, JSON.stringify(leaf));
     if (process.env.SWARM_TEST_PRECONDITION_FAILURE === "1") throw new Error("scripted fixture precondition failure");
-    if (version === "2.6.2") {
+    if (version === "2.8.0") {
       await waitFor(async () => captured.get(leaf.pid));
       assert.equal(captured.get(leaf.pid).startToken, leaf.startToken);
     }
@@ -322,7 +322,7 @@ async function main() {
       assert.equal(isObservedAlive(current.identity, leaf), false);
       assert.equal(await readFile(paths.writes, "utf8"), writesAtReturn);
     }
-    if (version === "2.6.2") {
+    if (version === "2.8.0") {
       assert.ok(collectorCalls > 0);
       assert.equal(teardownCalls, 1);
       if (!liveTailModes.includes(mode)) assert.ok((await readFile(paths.signals, "utf8")).trim().length > 0);

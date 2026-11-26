@@ -12,7 +12,7 @@ import { assertPersistedResumeLineage, executionPlanFromPersisted } from "../../
 
 const exec = promisify(execFile);
 const companion = path.resolve("dist/companion.js");
-const mockCli = path.resolve("tests/helpers/mock-kimi-cli-v1.ts");
+const mockCli = path.resolve("tests/helpers/mock-kimi-cli.ts");
 
 async function invoke(args: string[], env: NodeJS.ProcessEnv) {
   try {
@@ -35,7 +35,7 @@ function mockEnv(root: string, repo: string, scenario: string): NodeJS.ProcessEn
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCli]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
     KIMI_PLUGIN_CC_MOCK_POST_OUTPUT_DELAY_MS: "5000",
-    KIMI_PLUGIN_CC_MOCK_SESSION_ID: "26242650-d95f-4805-80d9-c947d309b2c6",
+    KIMI_PLUGIN_CC_MOCK_SESSION_ID: "session_26242650-d95f-4805-80d9-c947d309b2c6",
     KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", // transport integration, not a hook-enforcement test
     KIMI_PLUGIN_CC_NODE_BIN: "node",
   };
@@ -61,8 +61,8 @@ describe("compiled timeout artifacts", () => {
           expect(status.status).toBe("failed");
           expect(status.budget_ms).toBe(1000);
           expect(status.budget_source).toBe("explicit");
-          expect(status.kimi_session_id_source).toBe("announced");
-          expect(status.kimi_session_id).toBe("26242650-d95f-4805-80d9-c947d309b2c6");
+          expect(status.kimi_session_id_source).toBe("recovered_session_dir");
+          expect(status.kimi_session_id).toBe("session_26242650-d95f-4805-80d9-c947d309b2c6");
           expect(status.error.code).toBe(`${kind.toUpperCase()}_KIMI_RESPONSE_TIMEOUT`);
           expect(status.error.message).not.toContain("race");
           expect(status.error.message.includes("--background")).toBe(!background && (kind === "ask" || kind === "rescue"));
@@ -74,12 +74,12 @@ describe("compiled timeout artifacts", () => {
           expect(envelope.status).toBe("failed");
           expect(envelope.budget_ms).toBe(1000);
           expect(envelope.budget_source).toBe("explicit");
-          expect(envelope.kimi_session_id_source).toBe("announced");
-          expect(envelope.kimi_session_id).toBe("26242650-d95f-4805-80d9-c947d309b2c6");
+          expect(envelope.kimi_session_id_source).toBe("recovered_session_dir");
+          expect(envelope.kimi_session_id).toBe("session_26242650-d95f-4805-80d9-c947d309b2c6");
           expect(envelope.artifact_path).toBe(status.final_output_path);
           expect(envelope.body).toContain("## Partial output (budget exhausted after 1s — NOT a final answer)");
           expect(envelope.body).toContain(text);
-          expect(envelope.body).toContain("- Kimi session: 26242650-d95f-4805-80d9-c947d309b2c6");
+          expect(envelope.body).toContain("- Kimi session: session_26242650-d95f-4805-80d9-c947d309b2c6");
           expect(envelope.summary).toContain("partial output captured");
           expect((await invoke(["result", status.job_id], env)).stdout.trimEnd()).toBe(envelope.body.trimEnd());
           expect(await readFile(status.final_output_path, "utf8")).toBe(envelope.body);
@@ -196,7 +196,7 @@ for (const [kind, command, run, scenario] of [
   }, 20_000);
 }
 
-for (const [kind, flags, defaultBudget] of [["pursue", [], 2_700_000], ["swarm", [], 1_800_000], ["swarm-write", ["--write"], 1_800_000]] as const) {
+for (const [kind, flags, defaultBudget] of [["pursue", [], 2_700_000], ["swarm", ["--max-concurrency", "1"], 1_800_000], ["swarm-write", ["--write"], 1_800_000]] as const) {
   test(`compiled ${kind} stores its effective safety budget, including defaults`, async () => {
     const root = await createTestPluginDataRoot("safety-budget");
     const repo = await createGitRepoFixture("safety-budget-repo");
@@ -220,8 +220,8 @@ for (const [kind, flags, defaultBudget] of [["pursue", [], 2_700_000], ["swarm",
 test("compiled native-v2 ask: a same-window session whose journal opens with a different prompt is never adopted", async () => {
   const root = await createTestPluginDataRoot("v2-budget-digest");
   const repo = await createGitRepoFixture("v2-budget-digest-repo");
-  const env: NodeJS.ProcessEnv = { ...mockEnv(root, repo, "ask-success"), KIMI_PLUGIN_CC_MOCK_VERSION: "2.2.0",
-    KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1", KIMI_PLUGIN_CC_MOCK_SESSION_ID: "session_26242650-d95f-4805-80d9-c947d309b2c7",
+  const env: NodeJS.ProcessEnv = { ...mockEnv(root, repo, "ask-success"), KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+    KIMI_PLUGIN_CC_MOCK_SESSION_ID: "session_26242650-d95f-4805-80d9-c947d309b2c7",
     KIMI_PLUGIN_CC_MOCK_JOURNAL_PROMPT_OVERRIDE: "a prompt this job never sent" };
   try {
     await invoke(["ask", "--budget", "1s", "Inspect"], env);
@@ -245,8 +245,8 @@ for (const [kind, command, scenario] of [
     const root = await createTestPluginDataRoot("v2-budget-recovery");
     const repo = await createGitRepoFixture("v2-budget-repo");
     const sessionId = "session_26242650-d95f-4805-80d9-c947d309b2c6";
-    const env: NodeJS.ProcessEnv = { ...mockEnv(root, repo, scenario), KIMI_PLUGIN_CC_MOCK_VERSION: "2.2.0",
-      KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1", KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId };
+    const env: NodeJS.ProcessEnv = { ...mockEnv(root, repo, scenario), KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+      KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId };
     try {
       // Rescue exercises the detached-worker route; the other commands run foreground.
       await invoke([...command, "--budget", "1s", ...(kind === "rescue" ? ["--background", "--wait"] : []), "Inspect"], env);
@@ -285,8 +285,8 @@ for (const [kind, command, scenario] of [
 test("compiled native-v2 timeout reports why session recovery found none", async () => {
   const root = await createTestPluginDataRoot("v2-budget-no-session");
   const repo = await createGitRepoFixture("v2-budget-no-session-repo");
-  const env = { ...mockEnv(root, repo, "ask-success"), KIMI_PLUGIN_CC_MOCK_VERSION: "2.2.0",
-    KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1", KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1" };
+  const env = { ...mockEnv(root, repo, "ask-success"), KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
+    KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1" };
   try {
     await invoke(["ask", "--budget", "1s", "Inspect"], env);
     const result = JSON.parse((await invoke(["result", "--json"], env)).stdout);

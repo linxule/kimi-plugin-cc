@@ -5,7 +5,7 @@ import { runCliPrompt } from "../../runtime/cli-client.js";
 import { prepareKimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import { cleanupTestPath, createGitRepoFixture } from "../helpers/test-env.js";
 
-const mockCli = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCli = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 describe("spawn-time PID callback", () => {
   test("receives the real child PID before the result settles", async () => {

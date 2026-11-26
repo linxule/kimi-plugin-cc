@@ -21,7 +21,7 @@ describe("decideHookOutcome", () => {
   });
 
   test.each(
-    (["ask", "review", "challenge", "review_gate", "rescue", "swarm", "swarm-write"] as const).flatMap(
+    (["ask", "review", "challenge", "rescue", "swarm", "swarm-write"] as const).flatMap(
       (label) => [
         [label, "EnterPlanMode"],
         [label, "ExitPlanMode"],
@@ -45,7 +45,7 @@ describe("decideHookOutcome", () => {
     expect(evaluatorCalled).toBe(false);
   });
 
-  describe.each(["ask", "review", "challenge", "review_gate"] as const)("%s label", (label) => {
+  describe.each(["ask", "review", "challenge"] as const)("%s label", (label) => {
     test("allows read-only tools", async () => {
       for (const tool of ["Read", "Grep", "Glob"]) {
         const decision = await decideHookOutcome(
@@ -266,14 +266,16 @@ describe("decideHookOutcome", () => {
       }
     });
 
-    test("denies non-read tools with conservative default", async () => {
-      const decision = await decideHookOutcome(
-        { tool_name: "Bash", tool_input: {} },
-        { commandLabel: "future_cmd" },
-      );
-      expect(decision.decision).toBe("deny");
-      expect(decision.reason).toContain("unrecognized command label");
-      expect(decision.reason).toContain("future_cmd");
+    test("denies non-read tools with conservative default (including removed review_gate label)", async () => {
+      for (const label of ["future_cmd", "review_gate"]) {
+        const decision = await decideHookOutcome(
+          { tool_name: "Bash", tool_input: {} },
+          { commandLabel: label },
+        );
+        expect(decision.decision).toBe("deny");
+        expect(decision.reason).toContain("unrecognized command label");
+        expect(decision.reason).toContain(label);
+      }
     });
   });
 });
@@ -287,7 +289,7 @@ describe("pursue goal metadata", () => {
     ["UpdateGoal", { status: "blocked" }],
   ] as const)("allows exact terminal metadata %s %j only for pursue", async (tool_name, tool_input) => {
     expect(await decideHookOutcome({ tool_name, tool_input }, pursue)).toEqual({ decision: "allow" });
-    for (const commandLabel of ["ask", "review", "challenge", "review_gate", "swarm", "swarm-write", "unknown"]) {
+    for (const commandLabel of ["ask", "review", "challenge", "swarm", "swarm-write", "unknown"]) {
       expect((await decideHookOutcome({ tool_name, tool_input }, { ...pursue, commandLabel })).decision).toBe("deny");
     }
     for (const operationKind of [undefined, "", "rescue", "review", "swarm", "unknown"]) {
@@ -367,7 +369,7 @@ describe("pursue goal metadata", () => {
 test("WaitFor is a task-status tool every label allows; other feature tools stay denied", async () => {
   const { evaluateRescueHookRequest } = await import("../../runtime/rescue-approval.js");
   const contexts = [
-    { commandLabel: "ask" }, { commandLabel: "review" }, { commandLabel: "challenge" }, { commandLabel: "review_gate" },
+    { commandLabel: "ask" }, { commandLabel: "review" }, { commandLabel: "challenge" },
     { commandLabel: "swarm" }, { commandLabel: "unknown-label" },
     // A confined, web-enabled call: WaitFor names no path, so confinement does not apply to it.
     { commandLabel: "ask", readRoots: JSON.stringify(["/workspace"]), network: "1" },
@@ -391,7 +393,7 @@ test("WaitFor is a task-status tool every label allows; other feature tools stay
 
 test("pure policy plus evaluator matches async policy across the fixture matrix", async () => {
   const { decideHookOutcomePure, READ_ONLY_TOOLS } = await import("../../runtime/hooks/approval-policy.js");
-  for (const commandLabel of [undefined, "", "unknown", "ask", "review", "challenge", "review_gate", "swarm", "rescue", "swarm-write"]) {
+  for (const commandLabel of [undefined, "", "unknown", "ask", "review", "challenge", "swarm", "rescue", "swarm-write"]) {
     for (const operationKind of [undefined, "rescue", "pursue"]) {
       for (const trustedWorkspaceRoot of [undefined, "", "/workspace"]) {
         for (const tool_name of [undefined, ...READ_ONLY_TOOLS, "Write", "Edit", "Bash", "Agent", "AgentSwarm", "EnterPlanMode", "ExitPlanMode", "GetGoal", "UpdateGoal", "CreateGoal", "SetGoalBudget"]) {

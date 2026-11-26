@@ -2,45 +2,22 @@
 
 How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
 
-Use this routine for every new exact native-v2 version, including patches. The 2.6.2 record contains the published non-swarm baseline and the bounded-swarm release evidence; its validation status must be explicit. The 2.5.3 record covers older full-operation certification and 2.3.2 the original activation design. Earlier audits remain historical evidence; legacy-v1 minor-version rules do not apply to native v2.
+Use this routine for every new exact native-v2 version (`>= 2.8.0`), including patches. Historical pre-2.8.0 certification records are archived at tag `v3.0.0` (including the 2.6.2 bounded-swarm baseline, 2.5.3 full-operation baseline, and 2.3.2 activation design). Plugin 3.1.0 removed `legacy-v1` and all `< 2.8.0` runtime rows.
 
 ## Current checkout certification boundary (2026-11-26)
 
-The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.42.0`,
-`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1`, `2.3.2`, `2.3.3`, `2.4.0`, `2.4.1`, `2.5.0`, `2.5.1`, `2.5.2` and `2.5.3`**, and the current checkout adds **`2.6.2`, `2.6.3`, `2.7.2`, `2.7.3` and `2.8.0`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
-`ffa94fae854dedf594919acbea280d98cbe8e14e`, `75ac010bcb2050338444455de8328492d152c919`,
-`1b89e4b039f052d10f258464413b2047acca12ba`, `caf7d4e2fef06967280b325da06e44a4b0516eba`,
-`9d07f634be94ebeb1deba2f55d247807cf729315`,
-`52437299ff78de3d0aff7f38f054e5eb20c512e5`,
-`f67e6398fb3210ad8ace970e2dfd5bcc984ed61f`,
-`472192c34c1efad89a369870eff0da0b708ce9bb`,
-`b5e28fd6beac752a2cdcc0ff2f5fdf40e6494fbb`,
-`684bae9ea6a437f3bae98bba1dcb797a917d500b`,
-`b8dd3a134060c6e80ba4a1659335cd63b68483f2`,
-`ec495f0cb00f6db9a9118bf979112886f4264a41`,
-`f26e4d91ef8d5d233f6c20b42a150f96924d4f5e`,
-`2c73f3f50af4fa7f2540ca0d2e33b07a1408e3a7`,
-`41c341434ae24e45bfe0f2232ec11b80531ac717`,
-`1b02030d8c2c6b00131b23ebb67a231614877827`,
-`1c142a007c10e881602690def96057c23a2baa12` and
-`5af9942e9fb789b6a1530830575b3768499932e9`, `6a8493df3e1d796a63f7c7ca0de76c1e690cd943` and
-`b0de2fbd2de04d87689225aafd3912e5d193b62d`, `56145f849caa305d42acd09b67fb65d11146f887`, `a8f643ad2e7f197d6ec4409b7cdad8a544afad86` and
-`46d9085f37c1b145ccfc82a24387e26aa940e94f`)
-for all eight operations. Legacy-v1 remains supported through 0.41.x for an explicitly pinned binary.
-Exact 2.6.0 remains certified for review, challenge, ask, rescue, review_gate and pursue only. The published plugin 2.5.9 scope for exact 2.6.2 was equally narrow; plugin 2.6.2 certifies all eight operations using the bounded-swarm construction in its [certification record](upstream-2.6.2-certification.md). Do not treat the unchanged upstream scheduler as fixed.
-A previous full-operation worked example is the 2026-11-14 exact 2.6.2 certification: 31 source-scan tests / 393 assertions and 115 pins, 23 stock-binary controls / 138 assertions, and 30 live-provider tests / 386 assertions, with only the two inapplicable narrowed-refusal tests skipped. The final isolated repository gate passed 1,767 tests / 76 expected opt-in or platform skips / 23,008 assertions, 130 Linux-host tests / 832 assertions passed with one macOS-specific skip, and 340-file package and consumer-security checks passed. Final runtime is `b69a416d8588ed12239148ccc9f120e3dbfe0dcb`. The receipt identifies immutable runtime bytes and reused same-day no-plan/local controls; release CI passed and the GitHub release is published, while npm 2.6.2 is published with verified fresh installs and cryptographic signatures.
-The latest checkout example is exact 2.8.0; its [certification record](upstream-2.8.0-certification.md) holds the gate results. The previous checkout example is exact 2.7.3: 38 source tests / 533 assertions and 159 pins, 23 deterministic stock-binary controls / 138 assertions, and candidate plus production live matrices each with 30 passes / 402 assertions and only the two inapplicable narrowed-refusal skips. Its [receipt](upstream-2.7.3-certification.md) records the corrected candidate wiring, KAP/model-state review, final local gates and publication receipts separately. The 2.7.2 release remains the prior full published example; 2.6.2 remains the prior bounded-swarm release example.
-The [2.5.3 evidence](upstream-2.5.3-certification.md) remains a prior full-operation example: candidate and production matrices each passed 24 tests / 201 assertions without skips in 349.07 and 406.19 seconds, including real rescue confinement/provenance, same-call Bash.cwd denial and out-of-root swarm-write denial. The earlier plugin 2.5.9 scoped 2.6.2 audit passed 19 source tests / 216 assertions and a 24-test candidate matrix / 201 assertions in 327.41 seconds; that historical narrowed certification is retained separately in the 2.6.2 record.
-The [2.3.2 record](upstream-2.3.2-certification.md) retains its historical
-validation counts, published artifact hashes and CI runs; these are not evidence
-for another version or runtime revision.
-0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
-its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
+Plugin 3.1.0 uses a rolling compatibility window starting at `>= 2.8.0` and certifies native agent-core-v2 at exact `@moonshot-ai/kimi-code@2.8.0` (release commit `46d9085f37c1b145ccfc82a24387e26aa940e94f`) for all seven model operations (`ask`, `review`, `challenge`, `rescue`, `pursue`, `swarm`, `swarm-write`). Unlisted plain `2.y.z > 2.8.0` versions run read-only (`ask`, `review`, `challenge`) with a warning and `--environment local`; write, swarm, `--network`, pre-release/build suffixes, other majors, and all operations under `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` refuse before spawn. Releases `< 2.8.0` and `legacy-v1` are removed and refuse before spawn.
+
+The active checkout certification record is exact 2.8.0 ([certification record](upstream-2.8.0-certification.md)). Earlier pre-2.8.0 rows (`0.42.0` through `2.7.3`) were retired in 3.1.0; their historical records remain archived at immutable tag `v3.0.0` as prior worked examples and are not active runtime rows or evidence for another version or runtime revision:
+- [2.7.3 receipt](https://github.com/linxule/kimi-plugin-cc/blob/v3.0.0/docs/upstream-2.7.3-certification.md) (38 source tests / 533 assertions, 23 stock-binary controls / 138 assertions, candidate and production live matrices each 30 passes / 402 assertions).
+- [2.6.2 certification record](https://github.com/linxule/kimi-plugin-cc/blob/v3.0.0/docs/upstream-2.6.2-certification.md) (first bounded-swarm construction; do not treat the unchanged upstream scheduler as fixed).
+- [2.5.3 evidence](https://github.com/linxule/kimi-plugin-cc/blob/v3.0.0/docs/upstream-2.5.3-certification.md) (prior full-operation baseline before bounded-swarm).
+- [2.3.2 record](https://github.com/linxule/kimi-plugin-cc/blob/v3.0.0/docs/upstream-2.3.2-certification.md) (original host swarm activation design).
 
 The certification basis is the **no-plan construction** (see
-[`native-v2-certification-provenance.md` §2](native-v2-certification-provenance.md#2-native-v2-entry-gate)),
+[`invariants.md` §1](invariants.md#1-native-v2-safety-contract-the-version-headline)),
 not an upstream ordering guarantee. At every reviewed version through 2.7.3 the plan
-guard runs before the external hooks and its final allow lets a plan-file Write
+guard ran before the external hooks and its final allow let a plan-file Write
 bypass the hook (confirmed in `dist/main.mjs` at 0.42.0 and by the plan-ON live
 control on every audited binary). At 2.8.0 the external hook runs first: the plan
 guard is an ordinary `registerHook` hook in a later group, no production code calls
@@ -49,7 +26,7 @@ plan-file Write (fact 15). MoonshotAI/kimi-code#3431 is still open, so the fix i
 observed, not announced. Every no-plan closure stays on for every release,
 2.8.0 included; at 2.8.0 the closures are a second layer, not the basis. Certification is per EXACT
 version and per operation; a patch release is NOT certified until the three
-gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
+gates below pass and its version is added to `KIMI_V2_RELEASES`.
 
 **Re-verify each release (all three, in this order):**
 
@@ -123,13 +100,13 @@ gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
 
 Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. A compatible certification update takes the next unused plugin patch unless that alignment is intentional; state the exact CLI version separately and never reuse a published plugin version or tag. Version labels do not replace any certification gate.
 
-Do not extend `KIMI_TESTED_MINORS` (legacy table) past 0.41. Do not write a
+Do not reintroduce `legacy-v1` or `< 2.8.0` rows. Do not write a
 "plan-file write denied under plan mode" smoke — under the construction that
 path is never armed and a green result is the vacuous-precondition failure.
 
-## Bounded swarm certification on stock 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0
+## Bounded swarm certification on stock 2.8.0+
 
-The plugin may prove a hard concurrency bound by construction instead of requiring a particular upstream fix. For each exact 2.6.2, 2.6.3, 2.7.2, 2.7.3 or 2.8.0 row, re-establish all of these together:
+The plugin may prove a hard concurrency bound by construction instead of requiring a particular upstream fix. For exact `2.8.0` and each later certified `2.y.z` row, re-establish all of these together:
 
 1. The canonical hook counts fresh items plus resumed IDs, rejects oversized waves, malformed input, forks (2.8.0 removed `fork` from the schema, so Kimi rejects it before the hook) and fresh singleton waves, and uses an immutable per-spawn width. Unknown/missing bounded-policy state fails closed. Several distinct managed hooks can evaluate the predicate idempotently. The escape monitor receives the same policy/width; native mode-off denial at concurrency one may yield a harmless mismatch, not positive execution evidence.
 2. The subprocess environment forces `KIMI_CODE_SWARM_TIMEOUT_MS=2147483647`, overriding ambient and saved short child timeouts. Env zero is ignored. A real short-timeout control must reproduce overlapping retries; its protected counterpart must show no next wave and actual quiescence before test-provider teardown. A stuck child holds the wave until completion or finite whole-job stop.
@@ -146,7 +123,7 @@ The parallel bound counts simultaneous Kimi child-agent turns, excludes the coor
 
 - A new exact native-v2 `@moonshot-ai/kimi-code` version ships, including a patch
 - An adversarial finding in a different audit suggests a contract we depend on may have moved
-- The `/kimi:setup` version probe starts firing "outside tested range" warnings for a version users are actually running
+- `kimi_setup({ action: "check" })` or `scripts/companion.sh setup --check` starts reporting uncertified-version warnings for a `2.y.z > 2.8.0` version users are actually running
 - Quarterly even if none of the above triggered, just to catch silent drift
 
 > **kimi-code self-upgrades by default since 0.8.0** (PR #334, `autoInstall: true`). The installed binary is now *fluid* — a user's interactive TUI can silently move ahead of the verified range out-of-band (the plugin's own `-p` spawns never swap the binary, but they then run against whatever the TUI upgraded to). Expect this trigger to fire more often than the old "user manually updated" cadence. Don't assume `kimi --version` today is the same as last week. (Worked example of a 3-minor catch-up: the 2026-06-03 0.7→0.9 audit, reports 52-60.)
@@ -169,12 +146,11 @@ Before starting a new upstream audit or release catch-up:
 
 Monitor statuses are operational signals, not certifications:
 
-- `NO ACTION` means the exact native-v2 version is already certified for the required operations, or an explicitly pinned legacy version is within its tested range, and no new concern warrants action.
-- `PATCH CHECKUP` applies only to a newer patch inside an already-tested legacy-v1 minor. It cannot certify a native-v2 patch.
-- `CERTIFICATION NEEDED` means the exact native-v2 version is not certified, even if only its patch number changed. Run all three gates above before adding it to `NATIVE_V2_CERTIFIED`.
+- `NO ACTION` means the exact native-v2 version (`>= 2.8.0`) is already certified for the required operations and no new concern warrants action.
+- `CERTIFICATION NEEDED` means the exact native-v2 version is not certified, even if only its patch number changed. Run all three gates above before adding it to `KIMI_V2_RELEASES`.
 - `BLOCKER` means missing evidence, operator state, or a possible safety break prevents a conclusion.
 
-A monitor report cannot extend a certification table or authorize publication. The release gate requires a source audit, exact-binary controls and smoke, post-edit review, `bun run check`, and a reviewed diff. Do not extend the legacy `KIMI_TESTED_MINORS` table past 0.41.
+A monitor report cannot extend a certification table or authorize publication. The release gate requires a source audit, exact-binary controls and smoke, post-edit review, `bun run check`, and a reviewed diff. Do not reintroduce `legacy-v1` or `< 2.8.0` rows.
 
 Do not skip native-v2 certification because a changelog omits safety-related changes. Diff the source surfaces below and run all three gates for the exact release.
 
@@ -185,8 +161,8 @@ When the routine fires but **nothing new has shipped** — npm `latest`, GitHub 
 1. Generate the ten scoped diffs exactly as in Phase 0, but with `NEW='origin/main'` (after `git fetch`) and `PREV` = the last verified tag's referent.
 2. Read them yourself in the main thread (no agent dispatch). The same 0-byte signal applies: zero-byte diffs for the before-execute gates (`02`), hooks (`03`), and plan arming (`04`) show those files are unchanged. Bootstrap (`05`), tool/fan-out (`06`), swarm web activation (`07`), shared core execution (`08`), OS/remote/DI boundaries (`09`), and journals and MCP start-up (`10`) can still affect enforcement.
 3. Triage the non-empty diffs against the surface table below. Anything internal-only (record types not emitted to `-p` stdout, provider/model plumbing, internal abort-reason propagation) is benign for us; flag only changes to the stream-json **output shape**, argv, or the deny chain.
-4. Log a one-bullet entry in `ROADMAP-TO-GA.md`'s Post-GA audit log dated and explicitly marked **"forward-scan, not a triggered audit"**, with the scanned `main` SHA, the per-surface result, a provisional verdict, and the specific items to re-confirm with `bun run smoke:real` when the release actually lands.
-5. **No commit beyond the log bullet, no tag, no version bump** — the scanned code is unreleased and will change before shipping. (The 2026-06-01 entry is the worked example.)
+4. Record a short **forward-scan, not a triggered audit** note under the gitignored `.claude/kimi-code-research/` workspace with the scanned `main` SHA, the per-surface result, a provisional verdict, and the specific items to re-confirm with `bun run smoke:real` when the release actually lands.
+5. **No repository commit, no tag, no version bump** — the scanned code is unreleased and will change before shipping.
 
 The forward-scan is the lightweight discharge of the "quarterly drift" trigger above: it catches a contract moving *before* the release forces a turnaround, without spending the full ceremony on code that isn't final.
 
@@ -207,7 +183,7 @@ These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our
 | Tool input schemas the allowlist reads | `agent/tools/os/write/writeTool.ts`, `agent/tools/edit/editTool.ts` (`path`; Write also `mode`), `agent/tools/os/bash/bashTool.ts` (`command`, **`cwd`**, `timeout`, `run_in_background`; `effectiveCwd` asserts NO workspace membership, `:191`) | field names, and the fact that `Bash.cwd` is honoured without an upstream membership check while the hook payload's top-level `cwd` is the process cwd | `runtime/rescue-approval.ts` (`checkApprovedPath`, `checkApprovedDirectory` confines `tool_input.cwd` to the trusted root before the command string); tag scan asserts the field names |
 | AgentSwarm / subagents | `features/swarm/tools/agent-swarm/agentSwarmTool.ts`, `features/swarm/agent/swarmService.ts`, scheduler/retry/timeout services, plus `packages/core/src/loop/**` and `packages/core/src/llm/policy/**` | Every child has its own eager managed hook. Review the exact schema, new/resumed entry construction, fresh child swarm-off state, own-session resume and cancellation settlement. Stock recovery can exceed the native scheduler cap; exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 uses the plugin construction above. At 2.8.0 `Agent` and `AgentSwarm` have no `fork` parameter, so a call carrying it fails as invalid arguments before the hook, and a subagent resume that names a `model` is rejected upstream | `runtime/swarm-policy.ts`, canonical approval hook, `cli-client.ts`, `swarm.ts`; prove bounded parallel and direct-worker paths separately |
 | Swarm host activation (exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2, 2.5.3 and 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel paths) | Exact CLI `web` ready line and authenticated loopback `/meta`, `/config`, session create, `/environment`, `/profile`, `/shutdown`, plus `/status` through 2.4.1, protocol-v2 WebSocket agent state in 2.5.0/2.5.1/2.5.2/2.5.3, and authenticated direct `subscribe`/`response` state in 2.6.0/2.6.2/2.6.3/2.7.2/2.7.3/2.8.0. Exact 2.7.2/2.7.3/2.8.0 adds ephemeral-token JSON bootstrap and KAP 1.0.0/WebSocket meta proof without the legacy backend field. At 2.8.0 `/meta` also returns `agent_close`, `session_continue` and `home_dir`, and the environment response adds `environment_cwd`; the plugin reads named fields only and ignores them. Review their exact implementations on every new candidate | exact v2/version/auth-bypass checks, explicit or configured default model binding, local environment and expected cwd in 2.5.0/2.5.1/2.5.2/2.5.3/2.6.0/2.6.2/2.6.3/2.7.2/2.7.3/2.8.0, `permission_mode:auto`, plan off, `swarm_mode` enter/exit state and journal evidence, bounded token/response/process handling, `KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0` to disable ambient idle reclamation; no model self-activation substitute and no full RPC runner | `runtime/swarm-activation.ts`; `runtime/commands/swarm.ts` runs one ordinary `kimi -p -r` per swarm job between activation and deactivation, records `preactivated`, requires the same returned session id, includes activation in the finite budget, and refuses success if cleanup fails |
-| Experimental features | `packages/agent-core-v2/src/app/flag/` + each feature's `flag.ts` (the flag registry since 2.x; `apps/kimi-code/src/utils/experimental-features.ts` is the vestigial CLI-side shim) (`[experimental]` config table, per-flag `KIMI_CODE_EXPERIMENTAL_*` env, master `KIMI_CODE_EXPERIMENTAL_FLAG`; precedence env → config → master → default). The 2.8.0 registry has four flags: `tower` (default off), `notify_user` (off), `wait_for` (on) and `prompt_prediction` (off). 2.8.0 removed `subagent_fork` and `tool-select`, so `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK` is ignored there | `tower` (and `subagent_fork` through 2.7.3) are v2-only features plugin tasks run without; the master flag enables all of them; a per-flag env value outranks config and the master flag, and the master flag is read only from the process's own environment. Every tool a flag can add is denied by the managed hook under every label, because every label allows a fixed list of tool names | `buildKimiCliEnvironment` sets `KIMI_CODE_EXPERIMENTAL_TOWER=0`/`KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0` on every child and drops the master flag from native-v2 children, on certified and uncertified releases alike. On a certified release that is all, silently. On an uncertified native-v2 release `inspectExperimentalSelectors` finds the switched-on selectors and the launch carries a warning naming them, including the master flag. `CLI_V2_EXPERIMENTAL_UNSAFE` refuses only a launch with no plan, and `assertNoUnsafeExperimentalSelector` (`CLI_V2_HOOK_ORDER_UNSAFE`) refuses the master flag only on a legacy-v1 plan or a launch with no plan |
+| Experimental features | `packages/agent-core-v2/src/app/flag/` + each feature's `flag.ts` (the flag registry since 2.x; `apps/kimi-code/src/utils/experimental-features.ts` is the vestigial CLI-side shim) (`[experimental]` config table, per-flag `KIMI_CODE_EXPERIMENTAL_*` env, master `KIMI_CODE_EXPERIMENTAL_FLAG`; precedence env → config → master → default). The 2.8.0 registry has four flags: `tower` (default off), `notify_user` (off), `wait_for` (on) and `prompt_prediction` (off). 2.8.0 removed `subagent_fork` and `tool-select`, so `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK` is ignored there | `tower` is a v2-only feature plugin tasks run without; the master flag enables all experimental flags; a per-flag env value outranks config and the master flag, and the master flag is read only from the process's own environment. Every tool a flag can add is denied by the managed hook under every label, because every label allows a fixed list of tool names | `buildKimiCliEnvironment` sets `KIMI_CODE_EXPERIMENTAL_TOWER=0`/`KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0` on every child and drops the master flag from native-v2 children, on certified and uncertified releases alike. On a certified release that is all, silently. On an uncertified native-v2 release (`2.y.z > 2.8.0`) `inspectExperimentalSelectors` finds the switched-on selectors and the launch carries a warning naming them, including the master flag. `CLI_V2_EXPERIMENTAL_UNSAFE` and `CLI_V2_HOOK_ORDER_UNSAFE` refuse only a launch with no plan |
 | Execution environment selection | `app/sessionManager/sessionManagerService.ts` (session creation reads `[environments]` declarations only when no explicit local id is given) | an explicit `--environment local` on a fresh print wins over a configured `[environments] default`, and a resume applies the session's stored binding without reading the default | `inspectEnvironmentConfig` accepts `environments.default` only for fresh or resumed non-swarm launches of `local-environment` rows; the journal scan still requires a local, in-root stored binding |
 | `WaitFor` (allowed by name) | `agent/tools/task/task-wait/taskWaitTool.ts` and `task-wait.ts`; the task-service or tool-handler methods it calls; `features/goal/injection/goalInjection.ts` | The hook allows `WaitFor` under every label on the ground that it waits on tasks that already exist and cannot start or stop one. A release with a new tool source must be read whole before its hash is added; re-read the methods behind its calls, which are not pinned on older rows | `READ_ONLY_TOOLS` in `runtime/hooks/approval-policy.ts`; `WAIT_FOR_TOOL_SOURCES` and the per-release census in `tests/audit/v2-tag-scan.test.ts` |
 | Tools Kimi approves itself (read scope) | `agent/permissionPolicy/policies/default-tool-approve.ts`; input schemas of `Read`, `ReadMediaFile`, `Glob`, `Grep`, `WebSearch`, `FetchURL` | Kimi approves read and web tools without asking in every mode, so the managed hook is the only scope gate; each tool's argument keys and its handling of `~`, relative paths, `kimi-file://` references and the Glob/Grep search root must match what `runtime/read-scope.ts` checks. 2.8.0 adds `agent/permissionPolicy/policies/bash-read-only.ts`, which approves statically read-only Bash in Always Ask mode. It does not matter to the plugin: it runs in the `permitting` phase, after the hook, and print's auto mode never consults it | `SCOPED_READ_KEYS`, `evaluateScopedRead` and `isAllowedFetchUrl` in `runtime/read-scope.ts`; an unknown argument key denies under confinement |
@@ -419,7 +395,7 @@ Reviewer 3 — **CLI surface** (`general-purpose` agent)
 - Question: did our flags survive byte-identical? Any new flags affecting prompt mode? Is auto-approve still hard-coded?
 - Output: `reports/NN-upstream-<ver>-cli-surface.md`
 
-Reviewer 4 — **Adversarial** (`general-purpose` agent — the `kimi:kimi-review` subagent with `--challenge` (formerly `kimi:kimi-challenge`) is risky for this because its foreground job can disappear)
+Reviewer 4 — **Adversarial** (`general-purpose` agent — avoid delegating to a long-running foreground read call without durable job tracking if a host might drop the turn)
 - Brief: "Three other reviewers say COMPAT-PRESERVED. Attack the claim. Find the cases where it breaks. If you can't, earn the conclusion adversarially."
 - Output: `reports/NN-upstream-<ver>-adversarial.md`
 
@@ -445,9 +421,9 @@ KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE=<exact-version> \
 
 The candidate version must match the binary. Candidate mode does not bypass hook-schema review, hook installation, or the no-plan preflight. Review and represent a new major's hook schema before running it.
 
-For native v2, the smoke checks the first-line `system.version` marker against the probed version and exercises every operation in the declared certification scope. It covers hook denials, default-plan refusals, the master experimental flag kept from native-v2 children (refused on legacy-v1), native-v2 resume and tainted-journal refusal, `Bash.cwd` confinement, and write-swarm patch capture and cleanup where certified. The real `runRescue` lane must land a confined write and persist operation/version/session/artifact evidence; pursue and swarm-write lineage do not certify rescue. A separate deterministic Bash attempt with absolute out-of-root `cwd` must produce a same-call managed denial and no file. Pinned legacy binaries use the legacy lanes and must not emit the v2 provenance marker. Read the test results to confirm which lanes ran; skipped tests are not passing evidence. On exact 2.6.0, the three swarm execution lanes are explicitly outside its narrowed scope; both real production command paths must instead return `v2-swarm-not-certified` before creating a model session. Those refusal checks are required, and no other skip is accepted.
+For native v2 (`>= 2.8.0`), the smoke checks the first-line `system.version` marker against the probed version and exercises every operation in the declared certification scope. It covers hook denials, default-plan refusals, the master experimental flag kept from native-v2 children, native-v2 resume and tainted-journal refusal, `Bash.cwd` confinement, and write-swarm patch capture and cleanup where certified. The real `runRescue` lane must land a confined write and persist operation/version/session/artifact evidence; pursue and swarm-write lineage do not certify rescue. A separate deterministic Bash attempt with absolute out-of-root `cwd` must produce a same-call managed denial and no file. Read the test results to confirm which lanes ran; skipped tests are not passing evidence. On a deliberately narrowed non-swarm row, both swarm command paths must refuse with `v2-swarm-not-certified` before creating a model session, and no other skip is accepted.
 
-Every parallel swarm smoke must prove real children, not just `AgentSwarm` calls, aggregate denials, or a patch. Exact-2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 concurrency-1 controls instead require fresh direct print, no child journals or activation, managed delegation denial, main-agent confinement, patch provenance and cancellation:
+Every parallel swarm smoke must prove real children, not just `AgentSwarm` calls, aggregate denials, or a patch. Concurrency-1 controls on `2.8.0+` instead require fresh direct print, no child journals or activation, managed delegation denial, main-agent confinement, patch provenance and cancellation:
 
 - Parallel read-only lanes require distinct child journals, with each assigned Write attempt and its managed denial in that child's own journal and no probe file created.
 - Parallel write lanes require distinct child journals containing the assigned edits and a captured patch containing those child-authored changes; a coordinator-only patch fails the proof. Out-of-root lanes likewise require real child journals and the expected rescue denials.
@@ -472,13 +448,13 @@ A certification-table addition changes runtime routing even when upstream's hook
 
 ### Phase 3 — Edits
 
-After all candidate gates pass, add the release's row to `KIMI_V2_RELEASES` in `runtime/kimi-releases.ts`: its exact version, the upstream commit, its scope (`all` or `non-swarm`) and only the capabilities this audit re-proved for it. `NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts` and every version-gated branch derive from that row. Then update the per-capability lists in `tests/runtime/kimi-releases.test.ts` one capability at a time; that test is the deliberate second spelling, so a copied row cannot widen a gate unnoticed. The hash-pinned Claude surfaces that name the bounded-swarm releases (`commands/swarm.md`, `agents/kimi-swarm.md`) are edited by hand and re-pinned; the same test fails if one is missed. Keep the legacy table capped at 0.41. Update the exact-version source hashes and assertions in `tests/audit/v2-tag-scan.test.ts` only after reviewing their source changes.
+After all candidate gates pass, add the release's row to `KIMI_V2_RELEASES` in `runtime/kimi-releases.ts`: its exact version, the upstream commit, its scope (`all` or `non-swarm`) and only the capabilities this audit re-proved for it. `NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts` and every version-gated branch derive from that row. Then update the per-capability lists in `tests/runtime/kimi-releases.test.ts` one capability at a time; that test is the deliberate second spelling, so a copied row cannot widen a gate unnoticed. Update the exact-version source hashes and assertions in `tests/audit/v2-tag-scan.test.ts` only after reviewing their source changes.
 
-A deliberately narrowed certification must name its excluded operations in the table and contract. Exact 2.6.0 remains limited to review, challenge, ask, rescue, review_gate and pursue: both swarm modes refuse before spawn with `v2-swarm-not-certified`, including at the persisted-plan boundary, without legacy fallback. Its production matrix replaces the three excluded swarm execution lanes with real command-refusal checks and permits no other skips. The published plugin 2.5.9 scope for 2.6.2 was equally narrow. Expanding exact 2.6.2 requires the bounded construction above and fresh full-scope evidence; an upstream scheduler fix is not the only admissible proof. Keep `NATIVE_V2_CERTIFIED_VERSIONS` as the all-operation export for automatic full-swarm pins; use `NATIVE_V2_ANY_OPERATION_VERSIONS` for the scoped union and per-operation rows. No other 2.6.x patch is covered by implication.
+A deliberately narrowed certification must name its excluded operations in the table and contract: excluded swarm modes must refuse before spawn with `v2-swarm-not-certified`, including at the persisted-plan boundary, and its production matrix must replace excluded swarm execution lanes with real command-refusal checks and permit no other skips. Keep `NATIVE_V2_CERTIFIED_VERSIONS` as the all-operation export for automatic full-swarm pins; use `NATIVE_V2_ANY_OPERATION_VERSIONS` for the scoped union and per-operation rows. No unlisted patch is certified by implication.
 
-Update the current compatibility statements in `AGENTS.md`, `docs/invariants.md`, `docs/native-v2-status.md`, and this playbook. Record evidence and residual risks in the provenance guide and roadmap audit log. Follow the [release checklist](../AGENTS.md#releasing) for version metadata and the changelog.
+Update the current compatibility statements in `AGENTS.md`, `docs/invariants.md`, this playbook, and the active `docs/upstream-<version>-certification.md` record. Follow the [release checklist](../AGENTS.md#releasing) for version metadata and the changelog.
 
-Batch source and wording edits before running `bun run build` and `bun run generate:surfaces`. Stage the generated root and Codex distributions, then run `bun run check`. Never copy personal config or credential stores as an automatic troubleshooting step; use the authentication procedure in [CI and live smoke](ci.md).
+Batch source and wording edits before running `bun run build` and `bun run generate:surfaces`. Stage `dist/`, `plugins/kimi-codex/`, `cordis.patch.yml`, and `dsh/index.json`, then run `bun run check`. Never copy personal config or credential stores as an automatic troubleshooting step; use the authentication procedure in [CI and live smoke](ci.md).
 
 ### Phase 4 — Multi-reviewer pass on the audit commit
 
@@ -523,4 +499,3 @@ For a worked example see:
 - Commit: `b67263c` (`git show b67263c`)
 - Tag: `compat-verified-kimi-code-0.4.0` (`git show compat-verified-kimi-code-0.4.0`)
 - Reports (gitignored): `.claude/kimi-code-research/reports/31-upstream-04-hook-contract.md` ... `35-upstream-04-synthesis.md`
-- Roadmap audit log: `ROADMAP-TO-GA.md` § "Post-GA audit log"

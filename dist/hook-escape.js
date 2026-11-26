@@ -3,45 +3,20 @@ import { decideHookOutcomePure } from "./hooks/approval-policy.js";
 // (`agent/toolDedupe/toolDedupeService.ts`): the repeat breaker appends
 // `\n\n<system-reminder>…</system-reminder>` blocks from the 3rd identical
 // call (`appendReminder`, also for vetoed results — `finalizeToolResult` runs
-// the `onDidExecuteTool` hooks on every settled result). Through 2.5.3 a
-// twelfth identical call also starts a text-only handoff step, and every tool
-// call attempted in that step, whatever the tool, gets a fixed "not executed"
-// text (`HANDOFF_VETO_TEXT`) in place of its result. From 2.6.0 that phase and
-// its text are gone: the breaker appends reminders and then stops the turn.
-// Both shapes still mean the hook's veto stood. Re-verify each certification.
+// the `onDidExecuteTool` hooks on every settled result).
 const REMINDER_SUFFIX = /^(?:\n\n<system-reminder>[\s\S]*?<\/system-reminder>)+$/;
-const HANDOFF_VETO_PREFIX = "This turn was ended by the repeat breaker after the same tool call was issued ";
-/**
- * True when this kimi-code release can emit the handoff text: every release
- * before 2.6.0, and any version this cannot read (an unprobed binary), where
- * staying lenient avoids a false report.
- */
-export function emitsHandoffVeto(kimiVersion) {
-    const match = /^(\d+)\.(\d+)\.\d+$/.exec(kimiVersion ?? "");
-    if (match === null)
-        return true;
-    const major = Number(match[1]);
-    return major < 2 || (major === 2 && Number(match[2]) < 6);
-}
 /** True when `content` is the hook's denial, possibly carrying upstream's repeat-breaker decoration. */
-export function carriesDenial(content, reason, handoffVeto = true) {
+export function carriesDenial(content, reason) {
     if (content === reason)
         return true;
-    if (content.startsWith(reason) && REMINDER_SUFFIX.test(content.slice(reason.length)))
-        return true;
-    return handoffVeto && content.startsWith(HANDOFF_VETO_PREFIX);
+    return content.startsWith(reason) && REMINDER_SUFFIX.test(content.slice(reason.length));
 }
 /** Detection evidence, never enforcement. Results arrive after a tool may have
  * executed, and the stream carries no outcome field: a result other than the
  * managed denial is also what upstream emits for calls it rejected BEFORE the
- * hook ran (unknown tool, disabled tool, invalid args, sensitive path, per-tool
- * resolve errors) and what a coexisting hook or permission policy emits when it
- * blocks first. So an escape is reported — logged, persisted, shown — and the
- * run continues; failing the job needs positive execution evidence this stream
- * does not provide. Filesystem policy is never replayed here. */
+ * hook ran or what a coexisting hook emits when it blocks first. */
 export function createHookEscapeMonitor(ctx) {
     const pending = new Map();
-    const handoffVeto = emitsHandoffVeto(ctx.kimiVersion);
     return {
         observe(record) {
             if (!ctx.commandLabel)
@@ -70,7 +45,7 @@ export function createHookEscapeMonitor(ctx) {
                 const denied = pending.get(record.tool_call_id);
                 if (denied) {
                     pending.delete(record.tool_call_id);
-                    if (!carriesDenial(record.content, denied.reason, handoffVeto)) {
+                    if (!carriesDenial(record.content, denied.reason)) {
                         return { tool_call_id: record.tool_call_id, tool_name: denied.tool_name,
                             kind: "mismatch", content_excerpt: record.content.slice(0, 200) };
                     }

@@ -5,7 +5,7 @@ import { SCOPE_FLAGS_WRITE_MESSAGE } from "./read-scope.js";
  * Unknown flag-shaped tokens hard-fail instead of being absorbed into prose.
  * Parsing still switches to prose at the first non-flag token or after `--`.
  */
-function looksLikeFlag(token: string): boolean {
+export function looksLikeFlag(token: string): boolean {
   if (!token.startsWith("-")) {
     return false;
   }
@@ -25,9 +25,9 @@ export const RESCUE_SUPPORTED_FLAGS =
 export const ASK_SUPPORTED_FLAGS = `${RESCUE_SUPPORTED_FLAGS}, ${SCOPE_SUPPORTED_FLAGS}`;
 
 export const REVIEW_SUPPORTED_FLAGS = `--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, ${SCOPE_SUPPORTED_FLAGS}, ${REFERENCE_SUPPORTED_FLAG}`;
-export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
+export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|ask>, --json";
 
-export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags), --install-kimi [--json] (without other setup flags)";
+export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --models [--json] (without other setup flags), --install-kimi [--json] (without other setup flags), --repair-sessions [--apply] [--all] (without other setup flags)";
 export const RECOVER_SWARM_SUPPORTED_FLAGS = "--apply";
 export const REPAIR_SESSIONS_SUPPORTED_FLAGS = "--apply, --all";
 export const REPLAY_SUPPORTED_FLAGS = "none (one job-id required)";
@@ -445,7 +445,7 @@ export interface JobLookupArgs {
   json: boolean;
 }
 
-const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type", "--read-root", "--reference-session"]);
+const VALUE_TAKING_FLAGS = new Set(["--mode", "--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type", "--read-root", "--reference-session"]);
 
 /**
  * `--help` / `-h` counts only inside the leading flag region: before `--`
@@ -457,10 +457,10 @@ const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "
  */
 export function hasHelpFlag(argv: string[]): boolean {
   for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
+    const token = argv[index]!;
     if (token === "--") return false;
     if (token === "--help" || token === "-h") return true;
-    if (!token.startsWith("-")) return false;
+    if (!looksLikeFlag(token)) return false;
     if (VALUE_TAKING_FLAGS.has(token)) {
       const value = argv[index + 1];
       if (value === "--help" || value === "-h") return true;
@@ -665,7 +665,7 @@ export function parseJobLookupArgs(argv: string[]): JobLookupArgs {
       if (!value || !isManagedCommandType(value)) {
         throw new RuntimeError(
           "INVALID_ARGS",
-          "--type requires one of review, challenge, rescue, review_gate, ask.",
+          "--type requires one of review, challenge, rescue, ask.",
           "args.parse",
         );
       }
@@ -721,7 +721,6 @@ function isManagedCommandType(value: string): value is import("./types.js").Mana
     value === "review" ||
     value === "challenge" ||
     value === "rescue" ||
-    value === "review_gate" ||
     value === "ask"
   );
 }

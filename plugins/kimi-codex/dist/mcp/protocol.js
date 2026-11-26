@@ -1,9 +1,10 @@
 import { formatError, RuntimeError } from "../errors.js";
 import { isRecord } from "../util.js";
 import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
-import { cancelMcpJob, getMcpJobResult, getMcpJobStatus, getMcpTaskView, taskView } from "./job-control.js";
+import { awaitMcpJob, cancelMcpJob, getMcpJobResult, getMcpTaskView, handleMcpJobTool, handleMcpSetupTool, taskView, } from "./job-control.js";
 import { launchMcpOperation } from "./launcher.js";
 import { buildMcpOperationInvocation, isMcpModelToolName, MCP_TOOL_DEFINITIONS, } from "./operations.js";
+import { getMcpSkill, listMcpResources, listMcpSkills, readMcpResource } from "./skills.js";
 import { textResult } from "./tool-result.js";
 const MODERN_VERSION = "2026-07-28";
 const LEGACY_VERSIONS = new Set(["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]);
@@ -11,28 +12,55 @@ const PROTOCOL_VERSION_META = "io.modelcontextprotocol/protocolVersion";
 const CLIENT_INFO_META = "io.modelcontextprotocol/clientInfo";
 const CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities";
 const TASKS_EXTENSION = "io.modelcontextprotocol/tasks";
+const SKILLS_EXTENSION = "io.modelcontextprotocol/skills";
 const SERVER_INFO_META = "io.modelcontextprotocol/serverInfo";
-// Every supported version permits `instructions`: InitializeResult since 2024-11-05, DiscoverResult in 2026-07-28.
 export const MCP_SERVER_INSTRUCTIONS = [
-    "Prefer these tools for detached or long-running Kimi work.",
-    "Each model tool starts a durable job that keeps running if this connection drops; reconnect and look it up by job_id.",
-    "Where the host supports MCP tasks, completion arrives as a task notification; otherwise poll kimi_job_status and kimi_job_result with the returned job_id, and stop a job with kimi_job_cancel.",
-    "kimi_ask, kimi_review and kimi_swarm are read-only. kimi_rescue and kimi_pursue edit the workspace, never git; kimi_swarm_write edits a disposable worktree and returns a patch it never applies.",
-    "Use a write tool only when the user asked for edits, and kimi_pursue only for an explicitly autonomous objective.",
-    "A result may carry warnings, such as an uncertified Kimi release or workspace trust being off; relay them to the user.",
+    "Read the `kimi` skill (`skill://kimi/SKILL.md`) via resources/read before complex Kimi orchestration.",
+    "Use `kimi_read` (ask, review, challenge, swarm) for read-only analysis and `kimi_write` (rescue, pursue, swarm_patch) for workspace-confined edits or worktree patches; never mutates Git.",
+    "Standard `kimi_read` and `kimi_write` calls wait for completion by default; pass `wait: false` for parallel fan-out and inspect/await/cancel via `kimi_job`.",
+    "Run `kimi_setup` to verify or repair the Kimi PreToolUse safety hook (`check` / `install`), list model aliases (`models`), install a certified Kimi CLI (`install_kimi`), or repair session titles (`repair_sessions`).",
+    "If a result includes a `Warnings:` block (such as uncertified releases or disabled trust), relay those warnings to the user.",
 ].join(" ");
+function requestAbortKey(id) {
+    return typeof id === "number" ? `n:${id}` : `s:${id}`;
+}
 export function createMcpMessageHandler(env) {
     let mode;
-    return async (message) => {
+    const inFlight = new Map();
+    return async (message, transportSignal) => {
+        // Handle notifications/cancelled before parseRequest drops notifications.
+        // Cancelling an MCP request aborts in-flight wait polling without cancelling
+        // any durable Kimi job.
+        if (isRecord(message) &&
+            message.jsonrpc === "2.0" &&
+            message.method === "notifications/cancelled" &&
+            !("id" in message)) {
+            const params = isRecord(message.params) ? message.params : undefined;
+            const cancelledId = params?.requestId;
+            if (typeof cancelledId === "string" ||
+                (typeof cancelledId === "number" && Number.isFinite(cancelledId))) {
+                inFlight.get(requestAbortKey(cancelledId))?.abort();
+            }
+            return undefined;
+        }
         let requestId = isRecord(message) && "id" in message &&
             (typeof message.id === "string" || typeof message.id === "number" || message.id === null)
             ? message.id
             : null;
+        let trackedKey;
+        const requestAbort = new AbortController();
+        const callSignal = transportSignal
+            ? AbortSignal.any([transportSignal, requestAbort.signal])
+            : requestAbort.signal;
         try {
             const request = parseRequest(message);
             if (!request)
                 return undefined;
             requestId = request.id;
+            if (request.id !== null) {
+                trackedKey = requestAbortKey(request.id);
+                inFlight.set(trackedKey, requestAbort);
+            }
             const { id, method, params } = request;
             if (method === "server/discover") {
                 requireModernMetadata(params);
@@ -40,7 +68,11 @@ export function createMcpMessageHandler(env) {
                 return response(id, {
                     resultType: "complete",
                     supportedVersions: [MODERN_VERSION],
-                    capabilities: { tools: {}, extensions: { [TASKS_EXTENSION]: {} } },
+                    capabilities: {
+                        tools: {},
+                        resources: {},
+                        extensions: { [TASKS_EXTENSION]: {}, [SKILLS_EXTENSION]: {} },
+                    },
                     instructions: MCP_SERVER_INSTRUCTIONS,
                     _meta: { [SERVER_INFO_META]: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION } },
                     ttlMs: 0,
@@ -55,7 +87,7 @@ export function createMcpMessageHandler(env) {
                 mode = "legacy";
                 return response(id, {
                     protocolVersion: requested,
-                    capabilities: { tools: {} },
+                    capabilities: { tools: {}, resources: {}, experimental: { skills: {} } },
                     serverInfo: { name: "kimi-plugin-cc", version: KIMI_PLUGIN_CC_VERSION },
                     instructions: MCP_SERVER_INSTRUCTIONS,
                 });
@@ -77,8 +109,40 @@ export function createMcpMessageHandler(env) {
                     return response(id, modern
                         ? { resultType: "complete", tools: MCP_TOOL_DEFINITIONS, ttlMs: 0, cacheScope: "private" }
                         : { tools: MCP_TOOL_DEFINITIONS });
-                case "tools/call":
-                    return response(id, await callTool(env, params, modern, capabilities));
+                case "tools/call": {
+                    const toolResult = await callTool(env, params, modern, capabilities, callSignal);
+                    if (toolResult === undefined)
+                        return undefined;
+                    return response(id, toolResult);
+                }
+                case "resources/list": {
+                    const list = await listMcpResources();
+                    return response(id, modern ? { resultType: "complete", ...list, ttlMs: 0, cacheScope: "private" } : list);
+                }
+                case "resources/read": {
+                    if (typeof params.uri !== "string" || params.uri.length === 0) {
+                        throw rpcError(-32_602, "resources/read requires a non-empty string uri");
+                    }
+                    const content = await readMcpResource(params.uri);
+                    if (!content) {
+                        throw rpcError(-32_602, `Unknown resource URI: ${params.uri}`);
+                    }
+                    return response(id, modern ? { resultType: "complete", ...content, ttlMs: 0, cacheScope: "private" } : content);
+                }
+                case "skills/list": {
+                    const skills = await listMcpSkills();
+                    return response(id, modern ? { resultType: "complete", ...skills, ttlMs: 0, cacheScope: "private" } : skills);
+                }
+                case "skills/get": {
+                    if (typeof params.uri !== "string" || params.uri.length === 0) {
+                        throw rpcError(-32_602, "skills/get requires a non-empty string uri");
+                    }
+                    const skill = await getMcpSkill(params.uri);
+                    if (!skill) {
+                        throw rpcError(-32_602, `Unknown skill URI: ${params.uri}`);
+                    }
+                    return response(id, modern ? { resultType: "complete", ...skill, ttlMs: 0, cacheScope: "private" } : skill);
+                }
                 case "tasks/get": {
                     requireModern(method, modern);
                     requireTasksCapability(method, capabilities);
@@ -99,7 +163,7 @@ export function createMcpMessageHandler(env) {
                     requireTasksCapability(method, capabilities);
                     const taskId = requiredTaskId(params);
                     try {
-                        await cancelMcpJob(env, { job_id: taskId });
+                        await cancelMcpJob(env, { job_id: taskId }, { requireMcpTask: true });
                         return response(id, { resultType: "complete" });
                     }
                     catch (error) {
@@ -121,32 +185,57 @@ export function createMcpMessageHandler(env) {
             }
             return response(requestId, undefined, rpcError(-32_603, error instanceof Error ? error.message : String(error)));
         }
+        finally {
+            if (trackedKey !== undefined && inFlight.get(trackedKey) === requestAbort) {
+                inFlight.delete(trackedKey);
+            }
+        }
     };
 }
-async function callTool(env, params, modern, capabilities) {
+async function callTool(env, params, modern, capabilities, signal) {
     const name = params.name;
     if (typeof name !== "string")
         throw rpcError(-32_602, "tools/call requires a tool name");
     try {
         let result;
         if (isMcpModelToolName(name)) {
-            const launched = await launchMcpOperation(buildMcpOperationInvocation(name, params.arguments), env);
+            const invocation = buildMcpOperationInvocation(name, params.arguments);
+            const launched = await launchMcpOperation(invocation, env);
             if (modern && hasTasksCapability(capabilities))
                 return taskHandle(launched);
-            result = launched.job.status === "running"
-                ? launchResult(launched)
-                : await getMcpJobResult(env, { job_id: launched.task.task_id });
+            if (!invocation.wait) {
+                result = launchResult(launched);
+            }
+            else if (launched.job.status === "running") {
+                if (signal?.aborted)
+                    return undefined;
+                result = await awaitMcpJob(env, {
+                    jobId: launched.task.task_id,
+                    workspace: launched.task.workspace_cwd,
+                    waitTimeoutMs: invocation.waitTimeoutMs,
+                    signal,
+                });
+                if (signal?.aborted && result.structuredContent?.wait_aborted === true) {
+                    return undefined;
+                }
+            }
+            else {
+                result = await getMcpJobResult(env, {
+                    job_id: launched.task.task_id,
+                    workspace: launched.task.workspace_cwd,
+                });
+            }
         }
         else {
             switch (name) {
-                case "kimi_job_status":
-                    result = await getMcpJobStatus(env, params.arguments);
+                case "kimi_job":
+                    result = await handleMcpJobTool(env, params.arguments, signal);
+                    if (signal?.aborted && result.structuredContent?.wait_aborted === true) {
+                        return undefined;
+                    }
                     break;
-                case "kimi_job_result":
-                    result = await getMcpJobResult(env, params.arguments);
-                    break;
-                case "kimi_job_cancel":
-                    result = await cancelMcpJob(env, params.arguments);
+                case "kimi_setup":
+                    result = await handleMcpSetupTool(env, params.arguments);
                     break;
                 default:
                     throw rpcError(-32_602, `Unknown tool: ${name}`);
@@ -176,7 +265,7 @@ function launchResult(launched) {
         phase: job.phase,
         created_at: task.created_at,
     };
-    return textResult(`Started ${task.operation_kind} job ${task.task_id}. This is a launch handle, not the finished answer. Use kimi_job_status and kimi_job_result with this job_id until the job is terminal; use kimi_job_cancel to stop it.`, metadata);
+    return textResult(`Started ${task.operation_kind} job ${task.task_id}. Use kimi_job({ action: "wait", job_id: ${JSON.stringify(task.task_id)} }) or action="result" when terminal, and action="cancel" to stop it.`, metadata);
 }
 function taskHandle({ task, job }) {
     const status = job.status === "running" ? "working" : job.status === "cancelled" ? "cancelled" : "completed";

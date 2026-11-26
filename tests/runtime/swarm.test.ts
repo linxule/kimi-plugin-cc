@@ -24,7 +24,7 @@ import { resolvePluginPaths, type PluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -43,7 +43,7 @@ function makeMockEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
     KIMI_CODE_HOME: kimiHome,
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
@@ -192,7 +192,7 @@ describe("resolveSwarmWriteMaxConcurrency", () => {
 });
 
 describe("runSwarm hook gate", () => {
-  test("refuses without the hook and names Claude Code and Codex repair commands", async () => {
+  test("refuses without the hook and names MCP and CLI repair commands", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("swarm-hook-gate-data");
     const workspace = await createTestPluginDataRoot("swarm-hook-gate-ws");
     const kimiHome = await createTestPluginDataRoot("swarm-hook-gate-home");
@@ -207,7 +207,7 @@ describe("runSwarm hook gate", () => {
         ["review", "two", "targets"],
         makeContext(workspace, {
           ...process.env,
-          CLAUDE_PLUGIN_DATA: pluginDataRoot,
+          KIMI_PLUGIN_CC_DATA: pluginDataRoot,
           KIMI_CODE_HOME: kimiHome,
           KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
           KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
@@ -215,8 +215,8 @@ describe("runSwarm hook gate", () => {
       ).then(() => undefined, (caught: unknown) => caught as RuntimeError);
 
       expect(error?.code).toBe("SWARM_HOOK_NOT_INSTALLED");
-      expect(error?.message).toContain("Claude Code /kimi:setup");
-      expect(error?.message).toContain("Codex $kimi-setup");
+      expect(error?.message).toContain("kimi_setup");
+      expect(error?.message).toContain("scripts/companion.sh setup");
       expect(error?.message).not.toContain("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK");
     } finally {
       await cleanupTestPath(pluginDataRoot);
@@ -243,7 +243,7 @@ describe("runSwarm certified execution-plan gate", () => {
           ["--write", "edit", "every", "handler"],
           makeContext(workspace, {
             ...process.env,
-            CLAUDE_PLUGIN_DATA: pluginDataRoot,
+            KIMI_PLUGIN_CC_DATA: pluginDataRoot,
             KIMI_CODE_HOME: kimiHome,
             KIMI_PLUGIN_CC_KIMI_BIN: BROKEN_KIMI,
             KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
@@ -274,7 +274,7 @@ describe("runSwarm certified execution-plan gate", () => {
           ["review", "two", "targets"],
           makeContext(workspace, {
             ...process.env,
-            CLAUDE_PLUGIN_DATA: pluginDataRoot,
+            KIMI_PLUGIN_CC_DATA: pluginDataRoot,
             KIMI_CODE_HOME: kimiHome,
             KIMI_PLUGIN_CC_KIMI_BIN: BROKEN_KIMI,
             KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "",
@@ -288,10 +288,13 @@ describe("runSwarm certified execution-plan gate", () => {
     }
   });
 
-  test.each(["2.6.0"].flatMap((version) => [
+  test.each([
+    { version: "2.7.3", refusalKind: "legacy-v1-unsupported" },
+    { version: "2.8.1", refusalKind: "v2-version-not-certified" },
+  ].flatMap(({ version, refusalKind }) => [
     { label: "swarm", args: ["review", "two", "targets"] },
     { label: "swarm-write", args: ["--write", "edit", "two", "targets"] },
-  ].map((entry) => ({ ...entry, version }))))("$version refuses $label before model invocation", async ({ label, args, version }) => {
+  ].map((entry) => ({ ...entry, version, refusalKind }))))("$version refuses $label before model invocation", async ({ label, args, version, refusalKind }) => {
     const pluginDataRoot = await createTestPluginDataRoot(`swarm-scoped-${label}-data`);
     const workspace = await createGitRepoFixture(`swarm-scoped-${label}-repo`);
     const kimiHome = await createTestPluginDataRoot(`swarm-scoped-${label}-home`);
@@ -305,10 +308,8 @@ describe("runSwarm certified execution-plan gate", () => {
       const worktreesBefore = execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: workspace, encoding: "utf8" });
       await expect(runSwarm([...args], makeContext(workspace, env))).rejects.toMatchObject({
         code: "KIMI_CAPABILITY_NOT_CERTIFIED",
-        message: expect.stringContaining("non-swarm"),
         details: {
-          refusal_kind: "v2-swarm-not-certified",
-          certification_scope: "non-swarm",
+          refusal_kind: refusalKind,
           operation_kind: label,
           kimi_version: version,
         },
@@ -523,7 +524,7 @@ describe("swarm job creation and log header", () => {
   const modes = [
     {
       name: "read",
-      argv: ["inspect", "the", "header"],
+      argv: ["--max-concurrency", "1", "inspect", "the", "header"],
       logPrefix: "swarm",
       commandType: "review",
       agentProfile: "<swarm>",

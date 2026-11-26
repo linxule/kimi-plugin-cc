@@ -25,3 +25,6 @@ for (const name of [
 ]) {
   delete process.env[name];
 }
+
+// Fail closed when a test omits KIMI_PLUGIN_CC_DATA instead of mutating ~/.local/share/kimi-plugin-cc.
+process.env.KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA = "1";

@@ -35,7 +35,7 @@ afterAll(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
-const READ_ONLY_LABELS = ["ask", "review", "challenge", "review_gate", "swarm"] as const;
+const READ_ONLY_LABELS = ["ask", "review", "challenge", "swarm"] as const;
 const confined = (roots: string[] = [workspace], network?: "1"): Partial<PolicyContext> => ({
   readRoots: JSON.stringify(roots),
   ...(network ? { network } : {}),
@@ -237,7 +237,7 @@ describe("hook-escape monitor follows the same scope", () => {
 describe("child environment", () => {
   const plan = (operationKind: string) => ({
     schemaVersion: 1 as const, operationKind, intendedEngine: "native-v2" as const, command: "kimi", prefixArgs: [],
-    kimiVersion: "2.7.3", certification: "certified" as const, resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1" as const,
+    kimiVersion: "2.8.0", certification: "certified" as const, resumedFromJobId: null, safetyProfile: "native-v2-no-plan/1" as const,
   });
   const ambient = { KIMI_CODE_HOME: "/isolated/kimi", KIMI_PLUGIN_CC_NETWORK: "1", KIMI_PLUGIN_CC_READ_ROOTS: "[\"/\"]" };
 
@@ -259,7 +259,7 @@ describe("child environment", () => {
   });
 
   test("write labels refuse a non-default scope", () => {
-    for (const commandLabel of ["rescue", "swarm-write", "review_gate", undefined]) {
+    for (const commandLabel of ["rescue", "swarm-write", "pursue", undefined]) {
       expect(() => buildKimiCliEnvironment({ cwd: workspace, env: {}, executionPlan: plan("rescue") as never,
         commandLabel, readScope: { readRoots: [], network: true } })).toThrow(/read-only operations/);
     }

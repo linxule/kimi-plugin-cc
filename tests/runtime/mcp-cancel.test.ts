@@ -22,8 +22,8 @@ describe("MCP cancellation and process lifetime", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Continue after reconnect", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Continue after reconnect", wait: false },
       });
       jobId = started.structuredContent.job_id;
       await client.close();
@@ -31,13 +31,13 @@ describe("MCP cancellation and process lifetime", () => {
 
       client = await McpClient.legacy(fixture);
       const status = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(status.structuredContent.status).toBe("running");
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
     } finally {
@@ -53,8 +53,8 @@ describe("MCP cancellation and process lifetime", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Verify process identity", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Verify process identity", wait: false },
       });
       jobId = started.structuredContent.job_id;
       const store = new JobStore(resolvePluginPaths(fixture.env));
@@ -69,14 +69,14 @@ describe("MCP cancellation and process lifetime", () => {
       }
 
       const refused = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(refused.isError).toBe(true);
       expect(refused.structuredContent.error.code).toBe("MCP_PROCESS_IDENTITY_MISMATCH");
       const running = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(running.structuredContent.status).toBe("running");
 
@@ -87,8 +87,8 @@ describe("MCP cancellation and process lifetime", () => {
         restore.close();
       }
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
     } finally {
@@ -108,13 +108,16 @@ describe("MCP cancellation and process lifetime", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Verify Kimi process identity", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Verify Kimi process identity", wait: false },
       });
       jobId = started.structuredContent.job_id;
       store = new JobStore(resolvePluginPaths(fixture.env));
       for (let attempt = 0; attempt < 40; attempt += 1) {
-        await client.request("tools/call", { name: "kimi_job_status", arguments: { job_id: jobId } });
+        await client.request("tools/call", {
+          name: "kimi_job",
+          arguments: { action: "status", job_id: jobId },
+        });
         const task = store.getMcpTask(jobId)!;
         originalIdentity = task.kimi_identity;
         originalPid = store.getJob(jobId)!.kimi_pid;
@@ -125,8 +128,8 @@ describe("MCP cancellation and process lifetime", () => {
       const forged = JSON.stringify({ ...JSON.parse(originalIdentity!), startToken: "forged-kimi-start" });
       store.updateMcpTask(jobId, { kimi_identity: forged });
       const mismatched = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(mismatched.isError).toBe(true);
       expect(mismatched.structuredContent.error.code).toBe("MCP_PROCESS_IDENTITY_MISMATCH");
@@ -135,8 +138,8 @@ describe("MCP cancellation and process lifetime", () => {
       store.updateMcpTask(jobId, { kimi_identity: null });
       store.updateRunningJob(jobId, { kimi_pid: 999_999_999 });
       const missing = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(missing.isError).toBe(true);
       expect(missing.structuredContent.error.code).toBe("CANCEL_NOT_SUPPORTED");
@@ -145,8 +148,8 @@ describe("MCP cancellation and process lifetime", () => {
       store.updateRunningJob(jobId, { kimi_pid: originalPid });
       store.updateMcpTask(jobId, { kimi_identity: originalIdentity });
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
       terminal = true;
@@ -158,8 +161,8 @@ describe("MCP cancellation and process lifetime", () => {
       if (client && jobId && !terminal) {
         try {
           await client.request("tools/call", {
-            name: "kimi_job_cancel",
-            arguments: { job_id: jobId },
+            name: "kimi_job",
+            arguments: { action: "cancel", job_id: jobId },
           });
         } catch {}
       }
@@ -182,13 +185,21 @@ describe("MCP cancellation and process lifetime", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Verify MCP ownership at generic cancellation boundaries", fresh: true },
+        name: "kimi_read",
+        arguments: {
+          workspace: fixture.repo,
+          mode: "ask",
+          prompt: "Verify MCP ownership at generic cancellation boundaries",
+          wait: false,
+        },
       });
       jobId = started.structuredContent.job_id;
       store = new JobStore(resolvePluginPaths(fixture.env));
       for (let attempt = 0; attempt < 40; attempt += 1) {
-        await client.request("tools/call", { name: "kimi_job_status", arguments: { job_id: jobId } });
+        await client.request("tools/call", {
+          name: "kimi_job",
+          arguments: { action: "status", job_id: jobId },
+        });
         if (store.getMcpTask(jobId)!.kimi_identity !== null) break;
         if (attempt === 39) throw new Error("Kimi descendant identity was not captured");
         await Bun.sleep(100);
@@ -224,8 +235,8 @@ describe("MCP cancellation and process lifetime", () => {
 
       store.updateRunningJob(jobId, { pid: originalCompanionPid, kimi_pid: originalKimiPid });
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
       terminal = true;
@@ -236,8 +247,8 @@ describe("MCP cancellation and process lifetime", () => {
       if (client && jobId && !terminal) {
         try {
           await client.request("tools/call", {
-            name: "kimi_job_cancel",
-            arguments: { job_id: jobId },
+            name: "kimi_job",
+            arguments: { action: "cancel", job_id: jobId },
           });
         } catch {}
       }
@@ -263,8 +274,8 @@ describe("MCP cancellation and process lifetime", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Force a companion crash", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Force a companion crash", wait: false },
       });
       const jobId = started.structuredContent.job_id as string;
       const running = new JobStore(resolvePluginPaths(fixture.env));
@@ -275,7 +286,10 @@ describe("MCP cancellation and process lifetime", () => {
       }
       expect(companionPid).not.toBeNull();
       for (let attempt = 0; attempt < 40; attempt += 1) {
-        await client.request("tools/call", { name: "kimi_job_status", arguments: { job_id: jobId } });
+        await client.request("tools/call", {
+          name: "kimi_job",
+          arguments: { action: "status", job_id: jobId },
+        });
         const attached = new JobStore(resolvePluginPaths(fixture.env));
         let captured: string | null;
         try {
@@ -293,14 +307,14 @@ describe("MCP cancellation and process lifetime", () => {
       await Bun.sleep(15_200);
 
       const status = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(status.structuredContent.status).toBe("failed");
       expect(status.structuredContent.error.code).toBe("MCP_COMPANION_DISAPPEARED");
       const result = await client.request("tools/call", {
-        name: "kimi_job_result",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "result", job_id: jobId },
       });
       expect(result.isError).toBe(true);
       expect(result.structuredContent.error.code).toBe("MCP_COMPANION_DISAPPEARED");

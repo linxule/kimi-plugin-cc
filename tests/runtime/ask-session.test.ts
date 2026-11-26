@@ -15,7 +15,7 @@ import {
   createTestPluginDataRoot,
 } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -36,7 +36,8 @@ function makeMockEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: scenario,
@@ -220,10 +221,10 @@ describe("ask session resume", () => {
     }
   });
 
-  test("refuses a session proven native-v2 instead of silently resuming it under forced v1", async () => {
-    const pluginDataRoot = await createTestPluginDataRoot("ask-resume-v2-refusal");
-    const repoRoot = await createGitRepoFixture("ask-resume-v2-refusal-repo");
-    const invocationPath = path.join(pluginDataRoot, "ask-resume-v2-refusal.jsonl");
+  test("refuses a session proven legacy-v1 instead of silently resuming it under native-v2", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-resume-v1-refusal");
+    const repoRoot = await createGitRepoFixture("ask-resume-v1-refusal-repo");
+    const invocationPath = path.join(pluginDataRoot, "ask-resume-v1-refusal.jsonl");
     const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
     const repoId = await getRepoId(repoRoot);
     const paths = resolvePluginPaths(env);
@@ -231,7 +232,7 @@ describe("ask session resume", () => {
     const store = new JobStore(paths);
     try {
       store.createJob({
-        job_id: "native-v2-source",
+        job_id: "legacy-v1-source",
         repo_id: repoId,
         command_type: "ask",
         cwd: repoRoot,
@@ -241,17 +242,17 @@ describe("ask session resume", () => {
         pid: null,
         kimi_pid: null,
         status: "completed",
-        kimi_session_id: "session_native_v2",
+        kimi_session_id: "session_legacy_v1",
         operation_kind: "ask",
-        intended_engine: "native-v2",
-        observed_engine: "native-v2",
+        intended_engine: "legacy-v1",
+        observed_engine: "legacy-v1",
         kimi_version: "0.39.0",
-        system_version: "0.39.0",
+        system_version: null,
         agent_profile: "<cli-client>",
         prompt_digest: "digest",
-        summary: "native v2 source",
+        summary: "legacy v1 source",
         final_output_path: null,
-        stream_log_path: path.join(pluginDataRoot, "missing-v2-log.jsonl"),
+        stream_log_path: path.join(pluginDataRoot, "missing-v1-log.jsonl"),
         error: null,
       });
     } finally {
@@ -260,12 +261,12 @@ describe("ask session resume", () => {
 
     try {
       await expect(
-        runAsk(["--resume", "native-v2-source"], makeContext(repoRoot, env)),
+        runAsk(["--resume", "legacy-v1-source"], makeContext(repoRoot, env)),
       ).rejects.toMatchObject({
         code: "KIMI_SESSION_ENGINE_MISMATCH",
         details: {
-          source_engine: "native-v2",
-          target_engine: "legacy-v1",
+          source_engine: "legacy-v1",
+          target_engine: "native-v2",
         },
       });
     } finally {
@@ -306,7 +307,7 @@ describe("ask session resume", () => {
     const pluginDataRoot = await createTestPluginDataRoot("ask-resume-running");
     const repoRoot = await createGitRepoFixture("ask-resume-running-repo");
     const invocationPath = path.join(pluginDataRoot, "ask-resume-running.jsonl");
-    const env = makeMockEnv(pluginDataRoot, "review-gate-allow", invocationPath, { delayMs: 250 });
+    const env = makeMockEnv(pluginDataRoot, "ask-success", invocationPath, { delayMs: 250 });
     const repoId = await getRepoId(repoRoot);
 
     try {
@@ -332,7 +333,7 @@ describe("ask session resume", () => {
     const repoRoot = await createGitRepoFixture("ask-resume-race-repo");
     const invocationPath = path.join(pluginDataRoot, "ask-resume-race.jsonl");
     const seedEnv = makeMockEnv(pluginDataRoot, "ask-success", invocationPath);
-    const raceEnv = makeMockEnv(pluginDataRoot, "review-gate-allow", invocationPath, { delayMs: 250 });
+    const raceEnv = makeMockEnv(pluginDataRoot, "ask-success", invocationPath, { delayMs: 250 });
     const repoId = await getRepoId(repoRoot);
 
     try {
@@ -394,11 +395,12 @@ describe("ask session resume", () => {
     const repoRoot = await createGitRepoFixture("ask-resume-metadata-repo");
     const kimiHome = await createTestPluginDataRoot("ask-resume-metadata-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "ask-resume-metadata.jsonl");
-    const sessionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const sessionId = "session_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const env = {
       ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath, { delayMs: 5000 }),
       KIMI_CODE_HOME: kimiHome,
       KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+      KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE: "1",
     };
     const repoId = await getRepoId(repoRoot);
     const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
@@ -441,7 +443,12 @@ async function getRepoId(repoRoot: string): Promise<string> {
 
 async function seedKimiSession(kimiHome: string, sessionId: string, workDir: string): Promise<string> {
   const sessionDir = path.join(kimiHome, "sessions", "wd_repo_123", sessionId);
-  await mkdir(sessionDir, { recursive: true });
+  await mkdir(path.join(sessionDir, "agents", "main"), { recursive: true });
+  await writeFile(
+    path.join(sessionDir, "agents", "main", "wire.jsonl"),
+    `${JSON.stringify({ type: "metadata", protocol_version: "2" })}\n`,
+    "utf8",
+  );
   await writeFile(
     path.join(kimiHome, "session_index.jsonl"),
     `${JSON.stringify({ sessionId, sessionDir, workDir })}\n`,

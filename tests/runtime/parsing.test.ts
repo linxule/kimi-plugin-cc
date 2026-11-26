@@ -240,7 +240,7 @@ describe("argument parsing", () => {
 
   test("parseJobLookupArgs unknown flag error includes supported flags", () => {
     expect(() => parseJobLookupArgs(["--kind", "rescue"])).toThrow(
-      "Unknown flag --kind. Supported flags: --type <review|challenge|rescue|review_gate|ask>, --json.",
+      "Unknown flag --kind. Supported flags: --type <review|challenge|rescue|ask>, --json.",
     );
   });
 });

@@ -22,6 +22,7 @@ export interface ReplayResult {
   rendered: string;
   output: ReturnType<typeof renderManagedJobOutput>["output"];
   summary: string;
+  partial: boolean;
 }
 
 const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
@@ -92,17 +93,18 @@ export async function replayJob(job: JobRecord): Promise<ReplayResult> {
     );
   }
 
-  const finalText = await replayFinalText(job.stream_log_path);
-  const rendered = renderManagedJobOutput(job, finalText);
+  const replayed = await replayFinalText(job.stream_log_path);
+  const rendered = renderManagedJobOutput(job, replayed.text);
 
   return {
     rendered: rendered.rendered,
     output: rendered.output,
     summary: rendered.summary,
+    partial: replayed.partial,
   };
 }
 
-async function replayFinalText(logPath: string): Promise<string> {
+async function replayFinalText(logPath: string): Promise<{ text: string; partial: boolean }> {
   const contents = await readFile(logPath, "utf8");
   const rawLines = contents.split("\n");
   let sawSpawn = false;
@@ -205,5 +207,5 @@ async function replayFinalText(logPath: string): Promise<string> {
     );
   }
 
-  return assistantContent;
+  return { text: assistantContent, partial: !sawExit };
 }

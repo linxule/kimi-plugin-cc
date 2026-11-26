@@ -1,21 +1,17 @@
-// Shared parser for the kimi-plugin-cc managed block in
+// Shared parser for the canonical kimi-plugin-cc managed block in
 // ~/.kimi-code/config.toml. Setup and the verifier use this one grammar;
 // install-paths.ts separately owns the canonical command bytes and drift
 // classification used here after a mismatch.
 //
-// Claude Code and Codex share the config but install to different paths. The
-// marker's `:<host-id>` suffix makes each host own and verify only its block.
-// An un-suffixed legacy block can be adopted by the current host on install.
-//
 // A valid block has this line-oriented shape:
 //
-//   # === BEGIN kimi-plugin-cc-managed:<host-id> (vX.Y.Z) ===
+//   # === BEGIN kimi-plugin-cc-managed (vX.Y.Z) ===
 //   ... optional comments ...
 //   [[hooks]]
 //   event = "PreToolUse"
 //   command = "'/abs/path/to/node' '/abs/path/to/approval-hook.js'"
 //   timeout = <integer>
-//   # === END kimi-plugin-cc-managed:<host-id> ===
+//   # === END kimi-plugin-cc-managed ===
 //
 // Critical rules:
 //
@@ -30,7 +26,6 @@ import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 import {
   classifyHookCommandDrift,
   describeHookCommandDrift,
-  hostIdFromHookCommand,
   isOurApprovalHookCommand,
 } from "./install-paths.js";
 import { HOOK_TIMEOUT_S, hookTimeoutEnforces } from "./hook-timing.js";
@@ -41,7 +36,7 @@ export type ManagedBlockState =
       kind: "found";
       beginLine: number;
       endLine: number;
-      /** Host id parsed from the marker suffix; `null` for a legacy block. */
+      /** Legacy host suffix parsed from an older block, or `null` for the canonical block. */
       hostId: string | null;
       /** The path referenced by `command = "..."`. May be empty if malformed. */
       commandPath: string;
@@ -52,14 +47,14 @@ export type ManagedBlockState =
     }
   | {
       kind: "duplicate";
-      /** Line numbers of every BEGIN we found for the resolved host. */
+      /** Line numbers of every BEGIN we found. */
       beginLines: number[];
     }
   | { kind: "orphan"; detail: "BEGIN-without-END" | "END-without-BEGIN" };
 
-/** One well-formed BEGIN/END pair, tagged with its host id. */
+/** One well-formed BEGIN/END pair (canonical or legacy suffixed). */
 export interface ManagedBlockEntry {
-  /** Host id from the marker suffix; `null` for a legacy un-suffixed block. */
+  /** Legacy host suffix; `null` for the canonical un-suffixed block. */
   hostId: string | null;
   beginLine: number;
   endLine: number;
@@ -70,13 +65,8 @@ export interface ManagedBlockEntry {
 
 const MARKER_TAG = "kimi-plugin-cc-managed";
 
-/**
- * Plain install removes unpaired marker comments for every host and leaves each
- * host's hook table in place. A scoped uninstall removes only this host's
- * markers, so it would disarm a healthy block and keep another host's orphan.
- */
 export const ORPHAN_MARKER_REMEDY =
-  "Run /kimi:setup (without --uninstall or --check) to repair: install removes orphaned managed marker comments for every host and keeps each host's hook table. A scoped --uninstall does not remove another host's orphan marker. Another tool rewriting ~/.kimi-code/config.toml usually causes this.";
+  "Run `kimi_setup` (with action \"install\") or `scripts/companion.sh setup` (without --uninstall or --check) to repair orphaned managed marker comments while preserving existing hook tables.";
 
 /**
  * Strict BEGIN matcher. Accepts `# === BEGIN kimi-plugin-cc-managed`
@@ -103,12 +93,12 @@ const HOOKS_TABLE_RE = /^\[\[hooks\]\]\s*$/;
 
 export interface ParsedManagedBlock {
   state: ManagedBlockState;
-  /** Every well-formed BEGIN/END pair in the file (all hosts). */
+  /** Every well-formed BEGIN/END pair in the file. */
   blocks: ManagedBlockEntry[];
   /** Lines with only a trailing CR removed, used for parsing and debugging. */
   lines: string[];
-  /** Unpaired markers suffixed for other hosts; advisory for this host. */
-  foreignOrphans: OrphanMarker[];
+  /** Unpaired managed marker comments. */
+  orphans: OrphanMarker[];
 }
 
 interface MarkerHit {
@@ -119,7 +109,7 @@ interface MarkerHit {
 
 // Recognize comment lines lexically, not text inside TOML string values.
 // Whole-document parsing remains the authority for TOML validity.
-function scanTomlLines(contents: string): { markers: Set<number>; tables: Set<number> } {
+export function scanTomlLines(contents: string): { markers: Set<number>; tables: Set<number> } {
   const markers = new Set<number>();
   const tables = new Set<number>();
   let state: "plain" | "basic" | "literal" | "multibasic" | "multiliteral" = "plain";
@@ -266,12 +256,12 @@ function validateBlockBody(rawBody: string[]): {
       // canonical command). Binding the block to exactly one [[hooks]] table
       // keeps the verifier from blessing a command-less hook.
       invalidReason =
-        "block contains an unexpected TOML table — only a single [[hooks]] table is allowed. Reinstall with /kimi:setup to repair.";
+        "block contains an unexpected TOML table — only a single [[hooks]] table is allowed. Reinstall with setup to repair.";
       break;
     }
     if (MATCHER_LINE_RE.test(line)) {
       invalidReason =
-        'block contains a `matcher = ...` line — kimi-code compiles matchers as JS regex (`new RegExp("*")` throws and disables the hook). Reinstall with /kimi:setup to repair.';
+        'block contains a `matcher = ...` line — kimi-code compiles matchers as JS regex (`new RegExp("*")` throws and disables the hook). Reinstall with setup to repair.';
       break;
     }
     if (EVENT_LINE_RE.test(line)) {
@@ -323,11 +313,11 @@ function validateBlockBody(rawBody: string[]): {
         );
       if (hasMatcher) {
         invalidReason =
-          "block contains a `matcher` key (in a quoted or dotted spelling the line scanner misses) — kimi-code compiles matchers as JS regex and disables the hook. Reinstall with /kimi:setup to repair.";
+          "block contains a `matcher` key (in a quoted or dotted spelling the line scanner misses) — kimi-code compiles matchers as JS regex and disables the hook. Reinstall with setup to repair.";
       }
     } catch {
       invalidReason =
-        "block body is not valid TOML in isolation — cannot confirm it carries no hook-disabling matcher. Reinstall with /kimi:setup to repair.";
+        "block body is not valid TOML in isolation — cannot confirm it carries no hook-disabling matcher. Reinstall with setup to repair.";
     }
   }
 
@@ -335,50 +325,31 @@ function validateBlockBody(rawBody: string[]): {
 }
 
 /**
- * Parse the supplied kimi-code config text and resolve the managed-block
- * state FOR A SPECIFIC HOST.
- *
- * Host resolution: the current host's own suffixed block is authoritative if
- * present; otherwise a lone LEGACY (un-suffixed) block is adoptable and is
- * returned as the found block (the current host will convert it on install).
- * Other hosts' suffixed blocks are ignored for this host's state (that is the
- * whole point of host scoping — they coexist).
- *
- * Only a trailing `\r` is removed from each line for CRLF safety; other line
- * whitespace is preserved here and trimmed only by the relevant matchers.
+ * Parse the supplied kimi-code config text and resolve the canonical
+ * managed-block state (accepting either the canonical un-suffixed block or a
+ * single legacy `:<host-id>` block from an older install).
  */
-export function parseManagedBlock(contents: string, hostId: string): ParsedManagedBlock {
+export function parseManagedBlock(contents: string, _hostId?: string): ParsedManagedBlock {
   const rawLines = contents.split("\n");
   const lines = rawLines.map((line) => line.replace(/\r$/, ""));
 
   const { blocks, orphans } = pairBlocks(lines);
-  // An orphan suffixed for ANOTHER host cannot be part of this host's block:
-  // this host's verdict still rests on its own well-formed pair, the whole-file
-  // hook-set validation, and the real-parser cleanliness check. Legacy and own
-  // orphans stay fail-closed because they may be this host's damaged block.
-  const ownOrphan = orphans.find((o) => o.hostId === null || o.hostId === hostId);
-  const foreignOrphans = orphans.filter((o) => o.hostId !== null && o.hostId !== hostId);
-  if (ownOrphan !== undefined) {
-    return { state: { kind: "orphan", detail: ownOrphan.detail }, blocks: [], lines, foreignOrphans };
+  if (orphans.length > 0) {
+    return { state: { kind: "orphan", detail: orphans[0]!.detail }, blocks: [], lines, orphans };
   }
 
-  // A block belongs to this host when its marker suffix matches or, for a
-  // legacy un-suffixed block, its command derives to this host. An unattributable
-  // legacy command is claimable by the next installer; a command attributed to
-  // another host is ignored so its block remains untouched.
-  const relevant = blocks.filter((b) => effectiveHost(b, hostId) === hostId);
-  if (relevant.length === 0) {
-    return { state: { kind: "absent" }, blocks, lines, foreignOrphans };
+  if (blocks.length === 0) {
+    return { state: { kind: "absent" }, blocks, lines, orphans };
   }
-  if (relevant.length > 1) {
+  if (blocks.length > 1) {
     return {
-      state: { kind: "duplicate", beginLines: relevant.map((b) => b.beginLine) },
+      state: { kind: "duplicate", beginLines: blocks.map((b) => b.beginLine) },
       blocks,
       lines,
-      foreignOrphans,
+      orphans,
     };
   }
-  const block = relevant[0]!;
+  const block = blocks[0]!;
   return {
     state: {
       kind: "found",
@@ -391,19 +362,8 @@ export function parseManagedBlock(contents: string, hostId: string): ParsedManag
     },
     blocks,
     lines,
-    foreignOrphans,
+    orphans,
   };
-}
-
-/**
- * The host a managed block belongs to: its marker suffix when present,
- * otherwise the host derived from its command path (a legacy un-suffixed
- * block), falling back to `currentHost` when the command can't be attributed
- * (a stale/bare legacy command — claimable by whoever installs next).
- */
-export function effectiveHost(block: ManagedBlockEntry, currentHost: string): string {
-  if (block.hostId !== null) return block.hostId;
-  return hostIdFromHookCommand(block.commandPath) ?? currentHost;
 }
 
 /**
@@ -466,11 +426,8 @@ export interface HookCommandDrift {
 }
 
 export interface EvaluateInstalledOptions {
-  /**
-   * Host id from `resolveHostId`; selects this host's block. A lone legacy
-   * un-suffixed block is the backward-compatibility fallback.
-   */
-  hostId: string;
+  /** Retained as optional no-op for caller compatibility. */
+  hostId?: string;
   /**
    * Optional filesystem predicate used only to refine a mismatch reason through
    * `describeHookCommandDrift`. It never changes the installed decision.
@@ -551,7 +508,7 @@ export function describeHookTimeout(timeout: unknown): string {
 }
 
 export function hookTimeoutReason(timeout: unknown): string {
-  return `this host's hook entry has ${describeHookTimeout(timeout)}; kimi-code reads a hook that runs past its timeout as allow, so the entry needs a timeout of at least ${HOOK_TIMEOUT_S} seconds. Run /kimi:setup to rewrite it; setup leaves the config unchanged and names any copy it cannot rewrite.`;
+  return `the managed hook entry has ${describeHookTimeout(timeout)}; kimi-code reads a hook that runs past its timeout as allow, so the entry needs a timeout of at least ${HOOK_TIMEOUT_S} seconds. Run kimi_setup (or scripts/companion.sh setup) to rewrite it; setup leaves the config unchanged and names any copy it cannot rewrite.`;
 }
 
 /**
@@ -593,9 +550,9 @@ function foundHookEntryIsClean(contents: string, expectedCommand: string): boole
 export function evaluateInstalled(
   contents: string,
   expectedCommand: string,
-  opts: EvaluateInstalledOptions,
+  opts: EvaluateInstalledOptions = {},
 ): InstalledCheck {
-  const { state } = parseManagedBlock(contents, opts.hostId);
+  const { state, blocks } = parseManagedBlock(contents);
   const shortTimeout = findShortHookTimeout(contents, expectedCommand);
   const timeoutRefusal = (): InstalledCheck => ({
     installed: false,
@@ -606,26 +563,20 @@ export function evaluateInstalled(
   if (state.kind === "absent") {
     if (shortTimeout !== null) return timeoutRefusal();
     // kimi-code config rewrites drop comments but leave hook tables intact. In
-    // the absent state only, accept a marker-less table that is exactly this
-    // host's clean enforcing hook: markers are not the security boundary, the
-    // byte-exact command is. The real TOML parser sees matchers and foreign keys
-    // across blank lines, quoted spellings, and multiline values.
+    // the absent state only, accept a marker-less table that is exactly our
+    // clean enforcing hook: markers are not the security boundary, the
+    // byte-exact command is.
     if (hasCleanEnforcingHookEntry(contents, expectedCommand)) {
       return {
         installed: true,
         via: "bare-table",
         note:
-          "this host's managed-block markers are missing (kimi-code rewrites its config on login/settings changes and strips all comments), but the hook table with the exact canonical command is present and enforcing. Run /kimi:setup to re-adorn the markers.",
+          "managed-block markers are missing (kimi-code rewrites its config on login/settings changes and strips all comments), but the hook table with the exact canonical command is present and enforcing. Run `kimi_setup` or `scripts/companion.sh setup` to re-adorn the markers.",
         state,
       };
     }
-    // If no exact bare table remains, classify drift only from this host's own
-    // stale table so the caller gets an actionable axis.
     const staleOwn = findBareApprovalHookTables(contents).find(
-      (table) =>
-        table.command !== expectedCommand &&
-        isOurApprovalHookCommand(table.command) &&
-        hostIdFromHookCommand(table.command) === opts.hostId,
+      (table) => table.command !== expectedCommand && isOurApprovalHookCommand(table.command),
     );
     return {
       installed: false,
@@ -637,11 +588,16 @@ export function evaluateInstalled(
     };
   }
   if (state.kind === "duplicate") {
+    const hasLegacyBlock = blocks.some((entry) => entry.hostId !== null);
     return {
       installed: false,
-      reason: `duplicate managed blocks detected at lines ${state.beginLines
-        .map((line) => line + 1)
-        .join(", ")}. Run /kimi:setup --uninstall, then /kimi:setup.`,
+      reason: hasLegacyBlock
+        ? `duplicate managed blocks detected at lines ${state.beginLines
+            .map((line) => line + 1)
+            .join(", ")} (including legacy host-scoped block(s)). Run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to consolidate them into one canonical block.`
+        : `duplicate managed blocks detected at lines ${state.beginLines
+            .map((line) => line + 1)
+            .join(", ")}. Run \`scripts/companion.sh setup --uninstall\`, then setup again.`,
       state,
     };
   }
@@ -668,7 +624,7 @@ export function evaluateInstalled(
       installed: false,
       reason:
         classified ??
-        `installed block's command does not match the canonical command this companion would write. Run /kimi:setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
+        `installed block's command does not match the canonical command this companion would write. Run setup to refresh. expected ${expectedCommand}; got ${state.commandPath}.`,
       state,
       drift: classifyHookCommandDrift(state.commandPath, expectedCommand),
     };
@@ -678,7 +634,7 @@ export function evaluateInstalled(
     return {
       installed: false,
       reason:
-        "the managed block's hook table carries a matcher or an unexpected key OUTSIDE the marked body (e.g. after the END marker) — kimi-code would load it and disable the hook. Run /kimi:setup --uninstall, then /kimi:setup to repair.",
+        "the managed block's hook table carries a matcher or an unexpected key OUTSIDE the marked body (e.g. after the END marker) — kimi-code would load it and disable the hook. Run `scripts/companion.sh setup --uninstall`, then setup to repair.",
       state,
     };
   }
@@ -790,26 +746,15 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
 
 /**
  * Find marker-less canonical approval-hook tables outside managed blocks.
- * `ownedBy` restricts results to the host derived from each command and is
- * required for scoped pruning: another host's marker-less table may be its live
- * hook after a config rewrite. Omit `ownedBy` only for the explicit every-host
- * `/kimi:setup --uninstall --all` sweep. Non-canonical and hand-rolled hooks are
- * not claimed.
+ * Non-canonical and hand-rolled hooks are never matched.
  */
 export function findUnmanagedApprovalHookBlocks(
   contents: string,
-  ownedBy?: string,
   alsoMatchCommand?: string,
 ): BareHookTable[] {
   return findBareApprovalHookTables(contents).filter((table) => {
-    // Exact current command bytes are the strongest ownership signal and win
-    // even when a host-id override disagrees with path derivation. This does
-    // not widen the prune: another host's or a hand-rolled hook has different
-    // command bytes.
     if (alsoMatchCommand !== undefined && table.command === alsoMatchCommand) return true;
-    if (!isOurApprovalHookCommand(table.command)) return false;
-    if (ownedBy === undefined) return true;
-    return hostIdFromHookCommand(table.command) === ownedBy;
+    return isOurApprovalHookCommand(table.command);
   });
 }
 

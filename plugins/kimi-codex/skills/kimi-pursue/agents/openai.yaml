@@ -1,6 +1,0 @@
-interface:
-  display_name: "Kimi Pursue"
-  short_description: "Run autonomous Kimi goal mode"
-  default_prompt: "Use $kimi-pursue to let Kimi pursue this objective with a budget."
-policy:
-  allow_implicit_invocation: false

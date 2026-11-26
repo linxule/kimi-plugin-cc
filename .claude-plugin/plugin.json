@@ -1,6 +1,6 @@
 {
   "name": "kimi",
-  "description": "Kimi for Claude Code: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP tasks through the local Kimi Code CLI, with PreToolUse safety hooks.",
+  "description": "Universal Kimi Code connector for Claude Code: 4-tool MCP (`kimi_read`, `kimi_write`, `kimi_job`, `kimi_setup`), progressive `kimi` skill, and canonical PreToolUse safety hook.",
   "version": "3.1.0",
   "homepage": "https://github.com/linxule/kimi-plugin-cc",
   "repository": "https://github.com/linxule/kimi-plugin-cc",
@@ -17,16 +17,5 @@
   ],
   "author": {
     "name": "linxule"
-  },
-  "commands": [
-    "./commands/cancel.md",
-    "./commands/pursue.md",
-    "./commands/replay.md",
-    "./commands/result.md",
-    "./commands/review.md",
-    "./commands/setup.md",
-    "./commands/status.md",
-    "./commands/swarm.md",
-    "./commands/task.md"
-  ]
+  }
 }

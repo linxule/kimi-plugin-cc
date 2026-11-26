@@ -123,14 +123,14 @@ describe("safe model inventory", () => {
     try {
       const invoke = (args: string[]) => spawnSync(process.execPath, [path.join(process.cwd(), "runtime/companion.ts"), "setup", ...args], {
         cwd: root,
-        env: { ...process.env, KIMI_CODE_HOME: "home", KIMI_MODEL_NAME: undefined, CLAUDE_PLUGIN_DATA: path.join(root, "plugin-data"), KIMI_PLUGIN_CC_WORKSPACE_CWD: root },
+        env: { ...process.env, KIMI_CODE_HOME: "home", KIMI_MODEL_NAME: undefined, KIMI_PLUGIN_CC_DATA: path.join(root, "plugin-data"), KIMI_PLUGIN_CC_WORKSPACE_CWD: root },
         encoding: "utf8",
       });
       const success = invoke(["--models", "--json"]);
       expect(success.status).toBe(0);
       expect(JSON.parse(success.stdout).models).toEqual([]);
       expect(success.stderr).toBe("");
-      for (const args of [["--models", "--enable-review-gate"], ["--uninstall", "--models"], ["--models", "--models"], ["--models", "FAKE_ARG_SECRET"]]) {
+      for (const args of [["--models", "--check"], ["--uninstall", "--models"], ["--models", "--models"], ["--models", "FAKE_ARG_SECRET"]]) {
         const failure = invoke(args);
         expect(failure.status).toBe(1);
         expect(failure.stderr).toContain("INVALID_ARGS");

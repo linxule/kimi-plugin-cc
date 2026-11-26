@@ -3,225 +3,133 @@ import path from "node:path";
 
 import {
   formatVersionOutOfRangeWarning,
-  isInTestedRange,
-  KIMI_TESTED_MINORS,
-  maxTestedMinor,
+  KIMI_MINIMUM_CERTIFIED_VERSION,
   parseVersionLine,
   probeKimiVersion,
 } from "../../runtime/kimi-version-probe.js";
 
 describe("parseVersionLine", () => {
-  test("parses a bare 0.2.0", () => {
-    expect(parseVersionLine("0.2.0\n")).toEqual({
-      raw: "0.2.0",
-      major: 0,
-      minor: 2,
+  test("parses a bare 2.8.0", () => {
+    expect(parseVersionLine("2.8.0\n")).toEqual({
+      raw: "2.8.0",
+      major: 2,
+      minor: 8,
       patch: 0,
     });
   });
 
   test("strips leading v prefix", () => {
-    expect(parseVersionLine("v1.2.3\n")?.raw).toBe("1.2.3");
+    expect(parseVersionLine("v2.8.0\n")?.raw).toBe("2.8.0");
   });
 
   test("preserves pre-release suffix in raw but takes only the leading numerics", () => {
-    expect(parseVersionLine("0.3.0-beta.1\n")).toEqual({
-      raw: "0.3.0-beta.1",
-      major: 0,
-      minor: 3,
+    expect(parseVersionLine("2.9.0-beta.1\n")).toEqual({
+      raw: "2.9.0-beta.1",
+      major: 2,
+      minor: 9,
       patch: 0,
     });
   });
 
   test("tolerates trailing whitespace", () => {
-    expect(parseVersionLine("0.2.0   \n   ")?.raw).toBe("0.2.0");
+    expect(parseVersionLine("2.8.0   \n   ")?.raw).toBe("2.8.0");
   });
 
   test("uses only the first non-empty line", () => {
-    // kimi --version emits a single line, but if a future build splatters
-    // build metadata on subsequent lines we should still find the version.
-    expect(parseVersionLine("\n\n0.4.7\n(node v22)\n")?.raw).toBe("0.4.7");
+    expect(parseVersionLine("\n\n2.8.1\n(node v22)\n")?.raw).toBe("2.8.1");
   });
 
   test("returns undefined for garbage", () => {
     expect(parseVersionLine("not a version\n")).toBeUndefined();
     expect(parseVersionLine("")).toBeUndefined();
-    expect(parseVersionLine("0.2\n")).toBeUndefined();
+    expect(parseVersionLine("2.8\n")).toBeUndefined();
   });
 });
 
-describe("isInTestedRange", () => {
-  test("returns true for any patch within a known minor", () => {
-    expect(isInTestedRange(0, 1)).toBe(true);
-    expect(isInTestedRange(0, 2)).toBe(true);
-    expect(isInTestedRange(0, 3)).toBe(true);
-    expect(isInTestedRange(0, 4)).toBe(true);
-    expect(isInTestedRange(0, 5)).toBe(true);
-    expect(isInTestedRange(0, 6)).toBe(true);
-    expect(isInTestedRange(0, 7)).toBe(true);
-    expect(isInTestedRange(0, 8)).toBe(true);
-    expect(isInTestedRange(0, 9)).toBe(true);
-    expect(isInTestedRange(0, 10)).toBe(true);
-    expect(isInTestedRange(0, 11)).toBe(true);
-    expect(isInTestedRange(0, 12)).toBe(true);
-    expect(isInTestedRange(0, 13)).toBe(true);
-    expect(isInTestedRange(0, 14)).toBe(true);
-    expect(isInTestedRange(0, 15)).toBe(true);
-    expect(isInTestedRange(0, 16)).toBe(true);
-    expect(isInTestedRange(0, 17)).toBe(true);
-    expect(isInTestedRange(0, 18)).toBe(true);
-    expect(isInTestedRange(0, 19)).toBe(true);
-    expect(isInTestedRange(0, 20)).toBe(true);
-    expect(isInTestedRange(0, 21)).toBe(true);
-    expect(isInTestedRange(0, 22)).toBe(true);
-    expect(isInTestedRange(0, 23)).toBe(true);
-    expect(isInTestedRange(0, 24)).toBe(true);
-    expect(isInTestedRange(0, 25)).toBe(true);
-    expect(isInTestedRange(0, 26)).toBe(true);
-    expect(isInTestedRange(0, 27)).toBe(true);
-    expect(isInTestedRange(0, 28)).toBe(true);
-    expect(isInTestedRange(0, 29)).toBe(true);
-    expect(isInTestedRange(0, 30)).toBe(true);
-    expect(isInTestedRange(0, 31)).toBe(true);
-    expect(isInTestedRange(0, 32)).toBe(true);
-    expect(isInTestedRange(0, 33)).toBe(true);
-    expect(isInTestedRange(0, 34)).toBe(true);
-    expect(isInTestedRange(0, 35)).toBe(true);
-    expect(isInTestedRange(0, 36)).toBe(true);
-    expect(isInTestedRange(0, 37)).toBe(true);
-    expect(isInTestedRange(0, 38)).toBe(true);
-    expect(isInTestedRange(0, 39)).toBe(true);
-    expect(isInTestedRange(0, 40)).toBe(true);
-    expect(isInTestedRange(0, 41)).toBe(true);
-  });
-
-  test("returns false for an unknown minor", () => {
-    const max = maxTestedMinor();
-    expect(isInTestedRange(max.major, max.minor + 1)).toBe(false);
-    expect(isInTestedRange(0, 99)).toBe(false);
-  });
-
-  test("returns false for a different major", () => {
-    expect(isInTestedRange(1, 0)).toBe(false);
-    expect(isInTestedRange(2, 1)).toBe(false);
-  });
-
-  test("KIMI_TESTED_MINORS is non-empty and well-formed", () => {
-    // Catch the easy mistake of clearing the array during a future
-    // refactor — an empty tested-range list would silently disable
-    // the warning surface.
-    expect(KIMI_TESTED_MINORS.length).toBeGreaterThan(0);
-    for (const entry of KIMI_TESTED_MINORS) {
-      expect(Number.isInteger(entry.major)).toBe(true);
-      expect(Number.isInteger(entry.minor)).toBe(true);
-      expect(entry.major).toBeGreaterThanOrEqual(0);
-      expect(entry.minor).toBeGreaterThanOrEqual(0);
-    }
+describe("KIMI_MINIMUM_CERTIFIED_VERSION", () => {
+  test("pins the >= 2.8.0 rolling compatibility floor", () => {
+    expect(KIMI_MINIMUM_CERTIFIED_VERSION).toBe("2.8.0");
   });
 });
 
 describe("formatVersionOutOfRangeWarning", () => {
-  test("includes the observed version, the tested range, and the plugin version", () => {
+  test("flags a version below the 2.8.0 floor as legacy/unsupported", () => {
     const text = formatVersionOutOfRangeWarning(
       {
         kind: "ok",
-        version: "0.3.5",
-        major: 0,
-        minor: 3,
-        patch: 5,
-        inTestedRange: false,
+        version: "2.7.3",
+        major: 2,
+        minor: 7,
+        patch: 3,
       },
-      "1.0.0-test",
+      "3.1.0-test",
+      ["2.8.0"],
     );
-    expect(text).toContain("0.3.5");
-    expect(text).toContain("1.0.0-test");
-    expect(text).toContain("0.1.x");
-    expect(text).toContain("0.2.x");
-    expect(text).toContain("model-spawning commands will refuse");
+    expect(text).toContain("2.7.3");
+    expect(text).toContain("3.1.0-test");
+    expect(text).toContain("OLDER than the supported floor (2.8.0)");
+    expect(text).toContain("model-spawning operations will refuse");
+    expect(text).toContain("setup --install-kimi");
     expect(text).toContain("not a production compatibility override");
-  });
-
-  test("H9: flags a version NEWER than the tested max with an above-bound note", () => {
-    const max = maxTestedMinor();
-    const text = formatVersionOutOfRangeWarning(
-      {
-        kind: "ok",
-        version: `${max.major}.${max.minor + 5}.0`,
-        major: max.major,
-        minor: max.minor + 5,
-        patch: 0,
-        inTestedRange: false,
-      },
-      "1.2.1-test",
-    );
-    expect(text).toContain("NEWER than the newest certified version");
-    expect(text).toContain(`${max.major}.${max.minor}.x`);
-  });
-
-  test("an uncertified 2.x says read-only commands run and names setup --install-kimi", () => {
-    const text = formatVersionOutOfRangeWarning(
-      { kind: "ok", version: "2.99.0", major: 2, minor: 99, patch: 0, inTestedRange: false },
-      "3.0.0-test",
-      ["2.7.2", "2.7.3"],
-    );
-    expect(text).toContain("Read-only commands (ask, review, challenge, review gate) run on it with a warning");
-    expect(text).toContain("rescue, pursue and swarm refuse");
-    expect(text).toContain("setup --install-kimi");
-    expect(text).not.toContain("model-spawning commands will refuse");
-  });
-
-  test("a pre-2.x version outside the range still says every model command refuses", () => {
-    const text = formatVersionOutOfRangeWarning(
-      { kind: "ok", version: "0.3.5", major: 0, minor: 3, patch: 5, inTestedRange: false },
-      "3.0.0-test",
-      ["2.7.2", "2.7.3"],
-    );
-    expect(text).toContain("model-spawning commands will refuse");
-    expect(text).toContain("setup --install-kimi");
-  });
-
-  test("H9: a version BELOW the tested max does not get the above-bound note", () => {
-    const text = formatVersionOutOfRangeWarning(
-      { kind: "ok", version: "0.0.9", major: 0, minor: 0, patch: 9, inTestedRange: false },
-      "1.2.1-test",
-    );
     expect(text).not.toContain("NEWER than the newest certified version");
   });
-});
 
-describe("maxTestedMinor", () => {
-  test("returns the highest {major, minor} in the tested set", () => {
-    const max = maxTestedMinor();
-    for (const entry of KIMI_TESTED_MINORS) {
-      const notNewer =
-        entry.major < max.major || (entry.major === max.major && entry.minor <= max.minor);
-      expect(notNewer).toBe(true);
-    }
+  test("an uncertified 2.x strictly above 2.8.0 says read-only operations run and names setup --install-kimi", () => {
+    const text = formatVersionOutOfRangeWarning(
+      { kind: "ok", version: "2.99.0", major: 2, minor: 99, patch: 0 },
+      "3.1.0-test",
+      ["2.8.0"],
+    );
+    expect(text).toContain("NEWER than the newest certified version (2.8.0)");
+    expect(text).toContain("Read-only operations (ask, review, challenge) run on it with a warning");
+    expect(text).toContain("rescue, pursue and swarm refuse");
+    expect(text).toContain("setup --install-kimi");
+    expect(text).not.toContain("model-spawning operations will refuse");
+  });
+
+  test("a pre-2.8 version refuses every model-spawning operation", () => {
+    const text = formatVersionOutOfRangeWarning(
+      { kind: "ok", version: "0.39.0", major: 0, minor: 39, patch: 0 },
+      "3.1.0-test",
+      ["2.8.0"],
+    );
+    expect(text).toContain("OLDER than the supported floor (2.8.0)");
+    expect(text).toContain("model-spawning operations will refuse");
+    expect(text).toContain("setup --install-kimi");
+  });
+
+  test("a major-3 version outside the 2.x rolling window refuses every model-spawning operation", () => {
+    const text = formatVersionOutOfRangeWarning(
+      { kind: "ok", version: "3.0.0", major: 3, minor: 0, patch: 0 },
+      "3.1.0-test",
+      ["2.8.0"],
+    );
+    expect(text).toContain("NEWER than the newest certified version (2.8.0)");
+    expect(text).toContain("model-spawning operations will refuse");
+  });
+
+  test("an uncertified gap between certified rows gets no NEWER note", () => {
+    const probe = { kind: "ok" as const, version: "2.8.5", major: 2, minor: 8, patch: 5 };
+    const text = formatVersionOutOfRangeWarning(probe, "9.9.9-test", ["2.8.0", "2.9.0"]);
+    expect(text).not.toContain("NEWER than");
+    expect(text).not.toContain("OLDER than");
+    expect(text).toContain("Read-only operations (ask, review, challenge) run on it with a warning");
   });
 });
 
 describe("probeKimiVersion", () => {
-  test("captures and parses an in-range version emitted by a mock binary", async () => {
-    const mockBin = path.join(process.cwd(), "tests/helpers/mock-kimi-version.ts");
+  test("captures and parses a version emitted by a real subprocess", async () => {
     const result = await probeKimiVersion({
       kimiBin: "bun",
-      env: { ...process.env, KIMI_MOCK_VERSION: "0.2.0" },
+      env: process.env,
       timeoutMs: 5_000,
     });
-    // We invoked `bun --version`, not the mock — verify the framework
-    // works even when the version is bun's own (which is in some
-    // multi-decimal range outside our tested set). What we're really
-    // exercising here is the spawn + parse pipeline.
     expect(result.kind).toBe("ok");
     if (result.kind === "ok") {
       expect(typeof result.major).toBe("number");
       expect(typeof result.minor).toBe("number");
       expect(typeof result.patch).toBe("number");
     }
-    // mockBin path is computed for clarity but bun --version is the
-    // actual spawn target here — keeps the test hermetic without a
-    // helper script.
-    expect(mockBin).toBeDefined();
   });
 
   test("reports failed when the binary does not exist", async () => {
@@ -237,10 +145,6 @@ describe("probeKimiVersion", () => {
   });
 
   test("reports failed with 'timed out' when the binary blocks past the timeout", async () => {
-    // The mock script ignores --version and sleeps for 10s; the probe's
-    // 100ms budget should fire, SIGTERM the child, and resolve with the
-    // canonical "timed out" reason. Mock is shebang-executable so spawn
-    // honors `#!/usr/bin/env -S node --import tsx` directly.
     const slowMock = path.join(process.cwd(), "tests/helpers/mock-slow-kimi.ts");
     const result = await probeKimiVersion({
       kimiBin: slowMock,
@@ -254,8 +158,6 @@ describe("probeKimiVersion", () => {
   });
 
   test("reports failed when the binary exits non-zero with stderr detail", async () => {
-    // `false` exits 1 with no output; the failure reason should still
-    // surface the exit code rather than throwing or hanging.
     const result = await probeKimiVersion({
       kimiBin: "false",
       env: process.env,
@@ -265,21 +167,5 @@ describe("probeKimiVersion", () => {
     if (result.kind === "failed") {
       expect(result.reason).toContain("exit");
     }
-  });
-});
-
-describe("formatVersionOutOfRangeWarning with the native-v2 table", () => {
-  test("names native-v2 versions and measures NEWER against the newest exact one", () => {
-    const probe = { kind: "ok" as const, version: "2.5.2", major: 2, minor: 5, patch: 2, inTestedRange: false };
-    const text = formatVersionOutOfRangeWarning(probe, "9.9.9-test", ["2.4.1", "2.5.0", "2.5.1"]);
-    expect(text).toContain("native-v2 exact 2.4.1, 2.5.0, 2.5.1");
-    expect(text).toContain("NEWER than the newest certified version (2.5.1)");
-    expect(text).not.toContain("0.41.x) and is not yet certified");
-  });
-
-  test("an uncertified gap below the newest native-v2 version gets no NEWER note", () => {
-    const probe = { kind: "ok" as const, version: "2.4.5", major: 2, minor: 4, patch: 5, inTestedRange: false };
-    const text = formatVersionOutOfRangeWarning(probe, "9.9.9-test", ["2.4.1", "2.5.1"]);
-    expect(text).not.toContain("NEWER than");
   });
 });

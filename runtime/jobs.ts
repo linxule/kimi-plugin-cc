@@ -1,11 +1,61 @@
+import { realpath } from "node:fs/promises";
+import path from "node:path";
+
 import { RuntimeError } from "./errors.js";
 import type { JobRecord, JobStore } from "./job-store.js";
 import type { PluginPaths } from "./paths.js";
+import { readProcessIdentity } from "./process-tree.js";
 import { capitalize, formatBudgetDuration, type PartialJobOutput, renderTerminalJobArtifact, writeArtifact } from "./render.js";
 import type { JobError } from "./types.js";
 import { sleep } from "./util.js";
 
 export { sha256 as digestPrompt } from "./git.js";
+
+export async function serializedProcessIdentity(pid: number): Promise<string | null> {
+  const identity = await readProcessIdentity(pid);
+  return identity ? JSON.stringify(identity) : null;
+}
+
+export async function recordKimiSpawnIdentity(
+  store: JobStore,
+  jobId: string,
+  pid: number,
+): Promise<void> {
+  store.updateRunningJob(jobId, { kimi_pid: pid });
+  const identity = await serializedProcessIdentity(pid);
+  if (identity) {
+    store.updateRunningJob(jobId, { kimi_identity: identity });
+  }
+}
+
+export async function canonicalizeMaybeDeletedPath(target: string): Promise<string | null> {
+  if (!path.isAbsolute(target)) return null;
+  let current = path.resolve(target);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const resolved = await realpath(current);
+      return tail.length === 0 ? resolved : path.join(resolved, ...tail.reverse());
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+export function isPathWithinCanonicalRoot(canonicalRoot: string, canonicalCandidate: string): boolean {
+  const relative = path.relative(canonicalRoot, canonicalCandidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+export async function isCwdWithinWorkspace(candidateCwd: string, canonicalWorkspaceCwd: string): Promise<boolean> {
+  const resolved = await canonicalizeMaybeDeletedPath(candidateCwd);
+  return resolved !== null && isPathWithinCanonicalRoot(canonicalWorkspaceCwd, resolved);
+}
 
 export function normalizeJobError(error: unknown): JobError {
   if (error instanceof RuntimeError) {
@@ -106,8 +156,24 @@ export async function markJobCancelled(
   );
 }
 
-export async function sweepStaleJobs(store: JobStore, paths: PluginPaths): Promise<void> {
+export interface SweepStaleJobsScope {
+  repoId?: string;
+  workspaceCwd?: string;
+}
+
+export async function sweepStaleJobs(
+  store: JobStore,
+  paths: PluginPaths,
+  scope?: SweepStaleJobsScope,
+): Promise<void> {
+  const canonicalScopeCwd = scope?.workspaceCwd
+    ? await canonicalizeMaybeDeletedPath(scope.workspaceCwd)
+    : null;
   for (const job of store.listRunningJobsWithProcessHints()) {
+    if (scope?.repoId !== undefined && job.repo_id !== scope.repoId) continue;
+    if (canonicalScopeCwd !== null && !(await isCwdWithinWorkspace(job.cwd, canonicalScopeCwd))) {
+      continue;
+    }
     if (store.getMcpTask(job.job_id)) continue;
     // Recovery owns orphaned swarm resources; PID-only sweeping must not signal replacements.
     if (store.getSwarmRecovery(job.job_id)) continue;

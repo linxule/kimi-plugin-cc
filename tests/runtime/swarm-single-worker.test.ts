@@ -40,7 +40,7 @@ interface Fixture {
 const workerStub = `
 import { appendFile, writeFile } from 'node:fs/promises';
 const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('2.6.2'); process.exit(0); }
+if (args.includes('--version')) { console.log('2.8.0'); process.exit(0); }
 const env = Object.fromEntries([
   'KIMI_PLUGIN_CC_OPERATION', 'KIMI_PLUGIN_CC_CMD', 'KIMI_PLUGIN_CC_WORKSPACE_ROOT',
   'KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY', 'KIMI_CODE_SWARM_TIMEOUT_MS'
@@ -49,7 +49,7 @@ if (!args.includes('-p') || args.includes('-r')) {
   await appendFile(process.env.SINGLE_WORKER_TEST_LOG, JSON.stringify({pid:process.pid,kind:'unexpected',argv:args,cwd:process.cwd(),env})+'\\n');
   process.exit(91);
 }
-console.log(JSON.stringify({role:'meta', type:'system.version', version:'2.6.2'}));
+console.log(JSON.stringify({role:'meta', type:'system.version', version:'2.8.0'}));
 if (process.env.SINGLE_WORKER_TEST_WRITE === '1') await writeFile('single-worker.ts', ${JSON.stringify(edit)});
 await appendFile(process.env.SINGLE_WORKER_TEST_LOG, JSON.stringify({pid:process.pid,kind:'print',argv:args,cwd:process.cwd(),env})+'\\n');
 await new Promise(resolve => setTimeout(resolve, Number(process.env.SINGLE_WORKER_TEST_HOLD_MS ?? 0)));
@@ -87,7 +87,7 @@ async function withFixture(write: boolean, run: (fixture: Fixture) => Promise<vo
   const matrix = NATIVE_V2_CERTIFIED as Map<KimiOperationKind, readonly string[]>;
   const operation = write ? "swarm-write" : "swarm";
   const previous = matrix.get(operation)!;
-  matrix.set(operation, [...new Set([...previous, "2.6.2"])]);
+  matrix.set(operation, [...new Set([...previous, "2.8.0"])]);
   try {
     await run({ root, repo, env, logPath, write,
       initialStatus: git(repo, ["status", "--porcelain", "--untracked-files=all"]),
@@ -179,7 +179,7 @@ async function assertPatchAndUserTree(fixture: Fixture, job: JobRecord, invocati
   expect(git(fixture.repo, ["worktree", "list", "--porcelain"])).toBe(fixture.initialWorktrees);
 }
 
-describe("exact 2.6.2 single-worker swarm orchestration", () => {
+describe("exact 2.8.0 single-worker swarm orchestration", () => {
   test("read concurrency one starts fresh and preserves swarm provenance", async () => {
     await withFixture(false, async (fixture) => {
       const output = await runSwarm(["--max-concurrency", "1", "inspect one target"], context(fixture));
@@ -188,7 +188,7 @@ describe("exact 2.6.2 single-worker swarm orchestration", () => {
       expect(invocation.cwd).toBe(await realpath(fixture.repo));
       const job = await latestJob(fixture);
       expect(job).toMatchObject({ status: "completed", operation_kind: "swarm", intended_engine: "native-v2",
-        observed_engine: "native-v2", kimi_version: "2.6.2", system_version: "2.6.2",
+        observed_engine: "native-v2", kimi_version: "2.8.0", system_version: "2.8.0",
         kimi_session_id: "single_worker_session", kimi_session_id_source: "announced" });
     });
   }, 15_000);
@@ -241,7 +241,7 @@ describe("exact 2.6.2 single-worker swarm orchestration", () => {
   test("concurrency two still activates and resumes a native swarm session", async () => {
     await withFixture(false, async (fixture) => {
       fixture.env.KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS = JSON.stringify([path.join(process.cwd(), "tests/helpers/mock-kimi-web.mjs")]);
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       fixture.env.MOCK_KIMI_WEB_LOG = fixture.logPath;
       fixture.env.MOCK_KIMI_WEB_PRINT_PROSE = prose;
       const output = await runSwarm(["--max-concurrency", "2", "inspect several targets"], context(fixture));
@@ -268,7 +268,7 @@ describe("exact 2.6.2 single-worker swarm orchestration", () => {
   test("concurrency two refuses an unexpected native policy before print and deactivates the session", async () => {
     await withFixture(false, async (fixture) => {
       fixture.env.KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS = JSON.stringify([path.join(process.cwd(), "tests/helpers/mock-kimi-web.mjs")]);
-      fixture.env.MOCK_KIMI_WEB_VERSION = "2.6.2";
+      fixture.env.MOCK_KIMI_WEB_VERSION = "2.8.0";
       fixture.env.MOCK_KIMI_WEB_LOG = fixture.logPath;
       fixture.env.MOCK_KIMI_WEB_PRINT_PROSE = prose;
       const policyPath = path.join(fixture.env.KIMI_CODE_HOME!, "sessions", "wd_mock", "session_mock", "tool-policy", "state.json");

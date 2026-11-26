@@ -158,7 +158,7 @@ describe("assertGoalRunProvenance", () => {
     expect(() =>
       assertGoalRunProvenance(
         { intendedEngine: "native-v2" },
-        { ...base, observedEngine: "native-v2", systemVersion: "0.42.0" },
+        { ...base, observedEngine: "native-v2", systemVersion: "2.8.0" },
       ),
     ).not.toThrow();
   });

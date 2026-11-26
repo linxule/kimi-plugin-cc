@@ -9,7 +9,7 @@ import { companionHelp } from "../../runtime/help.js";
 
 const exec = promisify(execFile);
 const companion = path.resolve("dist/companion.js");
-const commands = [[], ["setup"], ["review"], ["ask"], ["task"], ["task", "rescue"], ["task", "challenge"], ["task", "pursue"], ["task", "swarm"], ["status"], ["result"], ["cancel"], ["replay"], ["repair-sessions"], ["recover-swarm"], ["worker"]];
+const commands = [[], ["read"], ["write"], ["job"], ["setup"], ["mcp"], ["review"], ["ask"], ["task"], ["task", "rescue"], ["task", "challenge"], ["task", "pursue"], ["task", "swarm"], ["status"], ["result"], ["cancel"], ["replay"], ["repair-sessions"], ["recover-swarm"], ["worker"]];
 for (const command of commands) {
   for (const flag of ["--help", "-h"]) {
     test(`compiled ${command.join(" ")} ${flag} is side-effect-free stdout`, async () => {

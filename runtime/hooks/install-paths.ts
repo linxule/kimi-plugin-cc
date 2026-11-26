@@ -8,10 +8,12 @@
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { RuntimeError } from "../errors.js";
+import { resolvePluginPaths } from "../paths.js";
 
 /**
  * Prefer a stable, non-version-stamped path to the SAME Node binary.
@@ -74,8 +76,7 @@ export function resolveNodeBinary(env: NodeJS.ProcessEnv): string {
  * Build the exact shell command string that `/bin/sh -c "<command>"`
  * needs to spawn the hook. Single source of truth for:
  *
- *   - what `/kimi:setup` writes into kimi-code's config
- *     (`command = "..."` inside [[hooks]])
+ *   - what setup writes into kimi-code's config (`command = "..."` inside [[hooks]])
  *   - what the shell probe runs via `spawn("/bin/sh", ["-c", ...])`
  *   - what the verifier (`evaluateInstalled`) equality-checks the
  *     installed `command = "..."` against on every command spawn
@@ -102,24 +103,37 @@ export function shellSingleQuote(value: string): string {
 }
 
 /**
- * Resolve the absolute path to the compiled hook script.
+ * Locate the compiled, self-contained ESM hook artifact bundled with this
+ * package (`<packageRoot>/dist/hooks/approval-hook.js`). Setup copies this
+ * file into `<pluginRoot>/hook/approval-hook.js`.
+ */
+export function resolveBundledHookSourcePath(): string {
+  const here = fileURLToPath(import.meta.url);
+  const parts = here.split(path.sep);
+  if (parts.length < 3) {
+    throw resolveHookFailure(here);
+  }
+  const tailParent = parts[parts.length - 2];
+  const tailGrandparent = parts[parts.length - 3];
+  if (tailParent !== "hooks" || (tailGrandparent !== "runtime" && tailGrandparent !== "dist")) {
+    throw resolveHookFailure(here);
+  }
+  const packageRoot = parts.slice(0, parts.length - 3).join(path.sep) || path.sep;
+  return path.join(packageRoot, "dist", "hooks", "approval-hook.js");
+}
+
+/**
+ * Resolve the absolute path to the installed hook script.
  *
  * Resolution order:
- *
  *   1. `KIMI_PLUGIN_CC_HOOK_SCRIPT` override — tests / advanced users.
- *   2. Sibling resolution from this file's URL. This module lives at
- *      `<root>/{runtime,dist}/hooks/install-paths.{ts,js}`. The hook
- *      artifact lives at `<root>/dist/hooks/approval-hook.js`. Walk up
- *      to `<root>` and append the canonical hook artifact path.
+ *   2. Canonical shared plugin hook path: `<pluginRoot>/hook/approval-hook.js`
+ *      (e.g. `~/.local/share/kimi-plugin-cc/hook/approval-hook.js`).
  */
 export function resolveHookScriptPath(env: NodeJS.ProcessEnv): string {
   const override = env.KIMI_PLUGIN_CC_HOOK_SCRIPT;
   if (override !== undefined && override.length > 0) {
     if (!path.isAbsolute(override)) {
-      // The hook shell's cwd can differ from the companion's. Require an
-      // absolute override so installation, verification, and the runtime spawn
-      // all refer to the same file rather than blessing a relative path that
-      // resolves elsewhere when kimi-code executes it.
       throw new RuntimeError(
         "SETUP_HOOK_SCRIPT_NOT_ABSOLUTE",
         [
@@ -133,21 +147,7 @@ export function resolveHookScriptPath(env: NodeJS.ProcessEnv): string {
     }
     return override;
   }
-  const here = fileURLToPath(import.meta.url);
-  const parts = here.split(path.sep);
-  // Pin to the canonical suffix `{runtime|dist}/hooks/install-paths.{ts,js}`
-  // — anchoring to a specific tail keeps ancestor directories named
-  // "runtime" or "dist" from confusing the lookup.
-  if (parts.length < 3) {
-    throw resolveHookFailure(here);
-  }
-  const tailParent = parts[parts.length - 2];
-  const tailGrandparent = parts[parts.length - 3];
-  if (tailParent !== "hooks" || (tailGrandparent !== "runtime" && tailGrandparent !== "dist")) {
-    throw resolveHookFailure(here);
-  }
-  const pluginRoot = parts.slice(0, parts.length - 3).join(path.sep) || path.sep;
-  return path.join(pluginRoot, "dist", "hooks", "approval-hook.js");
+  return resolvePluginPaths(env).hookScriptPath;
 }
 
 function resolveHookFailure(here: string): RuntimeError {
@@ -340,7 +340,7 @@ export function describeHookCommandDrift(
         `hook is ${expected.hookScript} (likely a plugin update or move — the install path is version-stamped).`,
     );
   }
-  parts.push("Run /kimi:setup to re-pin the managed block to this companion's current paths.");
+  parts.push("Run `kimi_setup` (action \"install\") or `scripts/companion.sh setup` to re-pin the managed block to this companion's current paths.");
   return parts.join(" ");
 }
 
@@ -398,95 +398,178 @@ export function tryBuildExpectedHookCommand(
   }
 }
 
-// ----- Host identity -----------------------------------------------------
-//
-// Claude Code and Codex install this plugin to DIFFERENT, version-stamped,
-// host-specific paths but SHARE one `~/.kimi-code/config.toml`:
-//
-//   Claude: ~/.claude/plugins/cache/kimi-marketplace/kimi/<ver>/dist/hooks/approval-hook.js
-//   Codex:  ~/.codex/plugins/cache/kimi-marketplace/kimi/<ver>/dist/hooks/approval-hook.js
-//
-// The managed block is host-scoped (marker suffix `:<host-id>`) so each host
-// owns and verifies its OWN PreToolUse block without clobbering the other's.
-// The host id must be VERSION-INDEPENDENT so a plugin upgrade REFRESHES the
-// same host's block instead of accumulating one block per version.
+const OWNED_APPROVAL_HOOK_PATTERNS: readonly RegExp[] = [
+  /\/kimi-plugin-cc\/hook\/approval-hook\.js$/,
+  /\/kimi-plugin-cc\/(?:dist|runtime)\/hooks\/approval-hook\.js$/,
+  /\/plugins\/kimi-codex\/dist\/hooks\/approval-hook\.js$/,
+  /\/dsh-kimi-plugin-cc\/dist\/hooks\/approval-hook\.js$/,
+  /\/kimi-marketplace\/[^/]+\/[^/]+\/(?:dist|runtime)\/hooks\/approval-hook\.js$/,
+  /\/\.gemini\/config\/plugins\/kimi\/(?:dist|runtime)\/hooks\/approval-hook\.js$/,
+];
 
 /**
- * Resolve a stable, version-independent host id for the managed-block marker.
- *
- * Order: an explicit `KIMI_PLUGIN_CC_HOST_ID` override (slugified) wins — used
- * by tests and the live-repair path. Otherwise derive from the resolved hook
- * script path. Pass the already-resolved `hookScriptPath` when you have it
- * (the verifier + setup do) so we don't re-resolve and risk a second throw.
- */
-export function resolveHostId(
-  env: NodeJS.ProcessEnv,
-  hookScriptPath?: string,
-): string {
-  const override = env.KIMI_PLUGIN_CC_HOST_ID;
-  if (override !== undefined && override.trim().length > 0) {
-    return slugifyHostId(override);
-  }
-  const resolved = hookScriptPath ?? resolveHookScriptPath(env);
-  return hostIdFromHookScript(resolved);
-}
-
-/**
- * Derive a host id from a hook-script path. `~/.claude/...` → `claude-code`,
- * `~/.codex/...` → `codex` (both literal + version-independent), else a stable
- * `host-<sha1(hookDir)[:16]>` for dev checkouts / unrecognized layouts.
- */
-export function hostIdFromHookScript(hookScriptPath: string): string {
-  const norm = hookScriptPath.split(path.sep).join("/");
-  if (norm.includes("/.claude/")) return "claude-code";
-  if (norm.includes("/.codex/")) return "codex";
-  // Hashing the hook directory is stable for dev checkouts. Sixteen hex chars
-  // avoid the collision risk of a 32-bit prefix, which could make one root
-  // treat another root's managed block as its own.
-  const digest = createHash("sha1").update(path.dirname(hookScriptPath)).digest("hex");
-  return `host-${digest.slice(0, 16)}`;
-}
-
-/**
- * Normalize an arbitrary host-id override into the `[a-z0-9-]+` slug the
- * marker regex accepts. Empty results fall back to `host` so the marker is
- * always well-formed.
- */
-export function slugifyHostId(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return slug.length > 0 ? slug : "host";
-}
-
-/**
- * Derive the owning host id from a canonical hook command's script path.
- * Returns `null` for a non-canonical command whose owner cannot be determined;
- * scoped cleanup treats that as ambiguous rather than claiming another host's
- * block.
- */
-export function hostIdFromHookCommand(command: string): string | null {
-  const parsed = parseHookShellCommand(command);
-  if (parsed === null) return null;
-  return hostIdFromHookScript(parsed.hookScript);
-}
-
-/**
- * True only for a canonical two-single-quoted-token command whose script is
- * `approval-hook.js` under a kimi-plugin-cc/dsh-kimi-plugin-cc/kimi-marketplace install tree.
+ * True only for a canonical two-single-quoted-token command whose script
+ * matches an exact kimi-plugin-cc install/published approval-hook path.
  * This strict ownership test protects hand-rolled and non-canonical user hooks
  * from orphan pruning.
  */
 export function isOurApprovalHookCommand(decodedCommand: string): boolean {
   const parsed = parseHookShellCommand(decodedCommand);
   if (parsed === null) return false;
-  const script = parsed.hookScript.split(/[\\/]/);
-  if (script[script.length - 1] !== "approval-hook.js") return false;
   const normalized = parsed.hookScript.replace(/\\/g, "/");
-  // Require a real path segment, not an arbitrary substring, so a user hook in
-  // a similarly named wrapper directory is never misclassified and pruned.
-  return normalized.includes("/kimi-plugin-cc/") || normalized.includes("/dsh-kimi-plugin-cc/") || normalized.includes("/kimi-marketplace/");
+  return OWNED_APPROVAL_HOOK_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export type ManagedHookArtifactCheck =
+  | { ok: true }
+  | { ok: false; kind: "unsafe-path" | "missing" | "bundle-missing" | "sha256-mismatch"; reason: string };
+
+/**
+ * Verify the managed `<pluginRoot>/hook/approval-hook.js` artifact on disk:
+ * - Reject symlinks or non-directory/non-regular files along `pluginRoot`, `hookDir`,
+ *   and `hookScriptPath`, and require canonical containment under `pluginRoot/hook`.
+ * - Require SHA-256 byte equality against the bundled `dist/hooks/approval-hook.js`.
+ * Skipped when `KIMI_PLUGIN_CC_HOOK_SCRIPT` explicitly overrides the script path.
+ */
+export async function verifyManagedHookArtifact(
+  env: NodeJS.ProcessEnv,
+  hookScriptPath: string,
+): Promise<ManagedHookArtifactCheck> {
+  if (env.KIMI_PLUGIN_CC_HOOK_SCRIPT && env.KIMI_PLUGIN_CC_HOOK_SCRIPT.length > 0) {
+    return { ok: true };
+  }
+
+  const paths = resolvePluginPaths(env);
+
+  let pluginRootReal: string;
+  try {
+    const info = await lstat(paths.pluginRoot);
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      return {
+        ok: false,
+        kind: "unsafe-path",
+        reason: `plugin data directory ${paths.pluginRoot} is a symlink or not a directory; refusing to trust managed hook`,
+      };
+    }
+    pluginRootReal = await realpath(paths.pluginRoot);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        ok: false,
+        kind: "missing",
+        reason: `hook script ${hookScriptPath} is missing or unreadable — run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to reinstall`,
+      };
+    }
+    return {
+      ok: false,
+      kind: "unsafe-path",
+      reason: `unable to inspect plugin data directory ${paths.pluginRoot}: ${(err as Error).message}`,
+    };
+  }
+
+  let hookDirReal: string;
+  try {
+    const info = await lstat(paths.hookDir);
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      return {
+        ok: false,
+        kind: "unsafe-path",
+        reason: `hook directory ${paths.hookDir} is a symlink or not a directory; refusing to trust managed hook`,
+      };
+    }
+    hookDirReal = await realpath(paths.hookDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        ok: false,
+        kind: "missing",
+        reason: `hook script ${hookScriptPath} is missing or unreadable — run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to reinstall`,
+      };
+    }
+    return {
+      ok: false,
+      kind: "unsafe-path",
+      reason: `unable to inspect hook directory ${paths.hookDir}: ${(err as Error).message}`,
+    };
+  }
+
+  const expectedHookDirReal = path.join(pluginRootReal, "hook");
+  if (hookDirReal !== expectedHookDirReal) {
+    return {
+      ok: false,
+      kind: "unsafe-path",
+      reason: `hook directory ${paths.hookDir} resolves to ${hookDirReal}, outside ${expectedHookDirReal}; refusing to trust managed hook`,
+    };
+  }
+
+  try {
+    const info = await lstat(hookScriptPath);
+    if (info.isSymbolicLink() || !info.isFile()) {
+      return {
+        ok: false,
+        kind: "unsafe-path",
+        reason: `hook script ${hookScriptPath} is a symlink or not a regular file; refusing to execute managed hook`,
+      };
+    }
+    const scriptReal = await realpath(hookScriptPath);
+    const expectedScriptReal = path.join(hookDirReal, path.basename(hookScriptPath));
+    if (scriptReal !== expectedScriptReal) {
+      return {
+        ok: false,
+        kind: "unsafe-path",
+        reason: `hook script ${hookScriptPath} resolves to ${scriptReal}, outside ${hookDirReal}; refusing to execute managed hook`,
+      };
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        ok: false,
+        kind: "missing",
+        reason: `hook script ${hookScriptPath} is missing or unreadable — run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to reinstall`,
+      };
+    }
+    return {
+      ok: false,
+      kind: "unsafe-path",
+      reason: `unable to inspect hook script ${hookScriptPath}: ${(err as Error).message}`,
+    };
+  }
+
+  let installedBytes: Buffer;
+  try {
+    installedBytes = await readFile(hookScriptPath);
+  } catch {
+    return {
+      ok: false,
+      kind: "missing",
+      reason: `hook script ${hookScriptPath} is missing or unreadable — run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to reinstall`,
+    };
+  }
+
+  let sourcePath: string;
+  let bundledBytes: Buffer;
+  try {
+    sourcePath = resolveBundledHookSourcePath();
+    bundledBytes = await readFile(sourcePath);
+  } catch (err) {
+    return {
+      ok: false,
+      kind: "bundle-missing",
+      reason: `bundled hook source is missing or unreadable (${(err as Error).message}); run \`bun run build\` or reinstall the plugin`,
+    };
+  }
+
+  const installedHash = createHash("sha256").update(installedBytes).digest("hex");
+  const bundledHash = createHash("sha256").update(bundledBytes).digest("hex");
+  if (installedHash !== bundledHash) {
+    return {
+      ok: false,
+      kind: "sha256-mismatch",
+      reason:
+        `installed hook script ${hookScriptPath} does not match the bundled hook artifact (${sourcePath}, SHA-256 mismatch — likely after a plugin update). ` +
+        `Run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to republish it.`,
+    };
+  }
+
+  return { ok: true };
 }

@@ -224,7 +224,7 @@ function sanitizedChildEnv(env, paths, workspace) {
         ...env,
         KIMI_PLUGIN_CC_WORKSPACE_CWD: workspace,
         KIMI_PLUGIN_CC_MCP_WORKSPACE: workspace,
-        KIMI_PLUGIN_CC_DATA: path.resolve(paths.claudePluginData),
+        KIMI_PLUGIN_CC_DATA: path.resolve(paths.dataRoot),
         KIMI_CODE_HOME: resolveKimiHome(env, workspace),
         KIMI_PLUGIN_CC_WORKSPACE_ROOT: undefined,
         KIMI_PLUGIN_CC_CMD: undefined,

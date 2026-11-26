@@ -5,7 +5,7 @@ import path from "node:path";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "./test-env.js";
 
 const repoRoot = process.cwd();
-const mockCli = path.join(repoRoot, "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCli = path.join(repoRoot, "tests/helpers/mock-kimi-cli.ts");
 export const MCP_MODERN_VERSION = "2026-07-28";
 
 export interface McpFixture {
@@ -19,7 +19,13 @@ export interface McpFixture {
 
 export async function createMcpFixture(
   prefix: string,
-  options: { pluginRoot?: string; delayMs?: string; scenario?: string } = {},
+  options: {
+    pluginRoot?: string;
+    delayMs?: string;
+    scenario?: string;
+    skipSetup?: boolean;
+    extraEnv?: NodeJS.ProcessEnv;
+  } = {},
 ): Promise<McpFixture> {
   const data = await createTestPluginDataRoot(prefix);
   const repo = await createGitRepoFixture(`${prefix}-repo`);
@@ -28,8 +34,6 @@ export async function createMcpFixture(
   await mkdir(kimiHome, { recursive: true });
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    CLAUDE_PLUGIN_ROOT: pluginRoot,
-    PLUGIN_ROOT: pluginRoot,
     KIMI_PLUGIN_CC_DATA: data,
     KIMI_CODE_HOME: kimiHome,
     KIMI_PLUGIN_CC_DISABLE_WEB_ANNOUNCE: "1",
@@ -37,18 +41,21 @@ export async function createMcpFixture(
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCli]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: options.scenario ?? "ask-success",
     KIMI_PLUGIN_CC_MOCK_DELAY_MS: options.delayMs ?? "0",
+    ...options.extraEnv,
   };
   delete env.KIMI_PLUGIN_CC_NODE_BIN;
   delete env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK;
-  const setup = spawnSync(path.join(pluginRoot, "scripts/companion.sh"), ["setup"], {
-    cwd: repo,
-    env,
-    encoding: "utf8",
-  });
-  if (setup.status !== 0) {
-    await cleanupTestPath(data);
-    await cleanupTestPath(repo);
-    throw new Error(`MCP fixture setup failed: ${setup.stdout}\n${setup.stderr}`);
+  if (!options.skipSetup) {
+    const setup = spawnSync(path.join(pluginRoot, "scripts/companion.sh"), ["setup"], {
+      cwd: repo,
+      env,
+      encoding: "utf8",
+    });
+    if (setup.status !== 0) {
+      await cleanupTestPath(data);
+      await cleanupTestPath(repo);
+      throw new Error(`MCP fixture setup failed: ${setup.stdout}\n${setup.stderr}`);
+    }
   }
   return {
     data,

@@ -98,7 +98,7 @@ describe("assertCliResultSuccess", () => {
       exitCode: 0,
       signal: null,
       aborted: false,
-      observedEngine: "legacy-v1",
+      observedEngine: "native-v2",
       ...overrides,
     };
   }
@@ -182,7 +182,7 @@ describe("warnIfSessionIdMissing", () => {
       exitCode: 0,
       signal: null,
       aborted: false,
-      observedEngine: "legacy-v1",
+      observedEngine: "native-v2",
       ...overrides,
     };
   }

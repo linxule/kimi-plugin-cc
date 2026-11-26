@@ -29,7 +29,7 @@ function jobInput(over: Partial<CreateJobInput> & Pick<CreateJobInput, "job_id">
     operation_kind: "ask",
     intended_engine: "native-v2",
     observed_engine: "native-v2",
-    kimi_version: "0.42.0",
+    kimi_version: "2.8.0",
     kimi_command: "/usr/bin/kimi",
     kimi_prefix_args: "[]",
     plan_certification: "certified",
@@ -47,7 +47,7 @@ function jobInput(over: Partial<CreateJobInput> & Pick<CreateJobInput, "job_id">
 async function withStore(run: (store: JobStore) => Promise<void>): Promise<void> {
   const root = await createTestPluginDataRoot("persisted-resume-lineage");
   try {
-    const paths = resolvePluginPaths({ ...process.env, CLAUDE_PLUGIN_DATA: root });
+    const paths = resolvePluginPaths({ ...process.env, KIMI_PLUGIN_CC_DATA: root });
     await ensurePluginPaths(paths);
     const store = new JobStore(paths);
     try {

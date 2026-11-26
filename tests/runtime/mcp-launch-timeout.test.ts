@@ -21,7 +21,11 @@ describe("MCP attachment timeout", () => {
       import { launchMcpOperation } from ${JSON.stringify(launcherUrl)};
       import { buildMcpOperationInvocation } from ${JSON.stringify(operationsUrl)};
       await launchMcpOperation(
-        buildMcpOperationInvocation("kimi_review", { workspace: process.env.MCP_TEST_WORKSPACE, focus: "stall" }),
+        buildMcpOperationInvocation("kimi_read", {
+          workspace: process.env.MCP_TEST_WORKSPACE,
+          mode: "review",
+          prompt: "stall",
+        }),
         process.env,
         { attachTimeoutMs: 100 },
       );
@@ -63,10 +67,10 @@ describe("MCP attachment timeout", () => {
       let companionPid;
       try {
         await launchMcpOperation(
-          buildMcpOperationInvocation("kimi_ask", {
+          buildMcpOperationInvocation("kimi_read", {
             workspace: process.env.MCP_TEST_WORKSPACE,
+            mode: "ask",
             prompt: "Recover after an identity-less timeout",
-            fresh: true,
           }),
           process.env,
           {
@@ -150,10 +154,10 @@ describe("MCP attachment timeout", () => {
       let companionPid;
       let inserted = false;
       const launched = await launchMcpOperation(
-        buildMcpOperationInvocation("kimi_ask", {
+        buildMcpOperationInvocation("kimi_read", {
           workspace: process.env.MCP_TEST_WORKSPACE,
+          mode: "ask",
           prompt: "Keep an existing job reachable after timeout",
-          fresh: true,
         }),
         process.env,
         {
@@ -237,14 +241,14 @@ describe("MCP attachment timeout", () => {
 
       client = await McpClient.legacy(fixture);
       const status = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: output.jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: output.jobId },
       });
       expect(status.structuredContent.status).toBe("running");
       expect(store.getMcpTask(output.jobId)?.launch_state).toBe("attached");
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: output.jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: output.jobId },
       });
       if (cancelled.isError) throw new Error(JSON.stringify(cancelled));
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");

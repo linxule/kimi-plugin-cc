@@ -1,21 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Entry point for slash commands. Launches the compiled Node runtime from the plugin root so
-# that runtime dependencies resolve against the plugin's node_modules, while preserving the
-# user's working directory via KIMI_PLUGIN_CC_WORKSPACE_CWD.
-#
-# Required env: CLAUDE_PLUGIN_ROOT (set by Claude Code when the plugin is installed).
-# Codex plugin hosts may provide PLUGIN_ROOT/PLUGIN_DATA instead; accept those as aliases.
-# When running from the repo checkout, both root env vars may be unset — default to the
-# script's parent directory so `bun run` style local invocation still works.
+# Entry point for CLI and host invocations. Runs the compiled Node runtime from the
+# package root while preserving the caller's working directory via KIMI_PLUGIN_CC_WORKSPACE_CWD.
 
-: "${CLAUDE_PLUGIN_ROOT:=${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
-export CLAUDE_PLUGIN_ROOT
-export PLUGIN_ROOT="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}"
-# Data-root selection lives in the runtime so commands, workers, and Stop agree.
-# Preserve shared variables verbatim: conflicting values must not be hidden.
-export KIMI_PLUGIN_CC_SHELL_LAUNCH=1
+PACKAGE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export KIMI_PLUGIN_CC_WORKSPACE_CWD="${KIMI_PLUGIN_CC_WORKSPACE_CWD:-$PWD}"
 
 NODE_BIN="${KIMI_PLUGIN_CC_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
@@ -33,5 +22,5 @@ if [ -z "${NODE_MAJOR}" ] || [ -z "${NODE_MINOR}" ] || [ "${NODE_MAJOR}" -lt 22 
   exit 127
 fi
 
-cd "${CLAUDE_PLUGIN_ROOT}"
+cd "${PACKAGE_ROOT}"
 exec "${NODE_BIN}" dist/companion.js "$@"

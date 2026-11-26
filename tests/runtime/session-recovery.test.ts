@@ -202,7 +202,7 @@ describe("bounded native-v2 session recovery", () => {
     try {
       const timeout = new ResponseTimeoutError(1000, "ask.prompt", "ask", {
         spawnedAt, settledAt: spawnedAt + 100, records: [{ role: "assistant", content: "partial" }],
-        observedEngine: "native-v2", systemVersion: "2.2.0", malformed: [], stderrTail: "",
+        observedEngine: "native-v2", systemVersion: "2.8.0", malformed: [], stderrTail: "",
         exitCode: -1, signal: "SIGTERM", aborted: true,
       });
       const classified = new RuntimeError("ASK_KIMI_RESPONSE_TIMEOUT", "timed out", "ask.runtime", { cause: timeout });

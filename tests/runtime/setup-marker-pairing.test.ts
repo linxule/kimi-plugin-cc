@@ -6,8 +6,9 @@ import path from "node:path";
 import { runSetup } from "../../runtime/commands/setup.js";
 import type { CommandContext } from "../../runtime/types.js";
 
-// Pins how install (orphan-marker repair) and uninstall (block stripping) pair
-// BEGIN/END markers: nested BEGINs, mismatched hosts, legacy markers, CRLF.
+// Pins how install (orphan-marker repair + legacy host-block consolidation) and
+// uninstall (full canonical/legacy block + orphan stripping) pair BEGIN/END
+// markers: nested BEGINs, mismatched hosts, legacy markers, CRLF.
 
 const begin = (host?: string) => `# === BEGIN kimi-plugin-cc-managed${host ? `:${host}` : ""} (v0.9.0) ===`;
 const end = (host?: string) => `# === END kimi-plugin-cc-managed${host ? `:${host}` : ""} ===`;
@@ -33,8 +34,7 @@ async function makeCase(name: string) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     KIMI_CODE_HOME: home,
-    CLAUDE_PLUGIN_DATA: data,
-    KIMI_PLUGIN_CC_HOST_ID: "codex",
+    KIMI_PLUGIN_CC_DATA: data,
     KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
   };
   const context: CommandContext = { cwd: process.cwd(), env, stdout: process.stdout, stderr: process.stderr };
@@ -43,11 +43,9 @@ async function makeCase(name: string) {
 
 // Marker pairing (line: marker):
 //   1 E(codex) orphan        2 B(claude-code) orphan, next is a BEGIN
-//   3-8 codex block          9-14 legacy block whose command derives to claude-code
+//   3-8 codex block          9-14 canonical/legacy un-suffixed block
 //   15 B(legacy) orphan      16 E(other) orphan, host differs from line 15
-//   17-21 legacy block; the matcher stops the validator at the first command,
-//         but uninstall attributes the block by its LAST command, which is not
-//         canonical, so a scoped uninstall keeps it.
+//   17-21 un-suffixed block with non-canonical command
 const uninstallSeed = [
   "keep_top = 1",
   end("codex"),
@@ -74,27 +72,11 @@ const uninstallSeed = [
   "tail_key = 2",
 ];
 
-function keep(lines: string[], removed: number[], eol: string): string {
-  return lines.filter((_, index) => !removed.includes(index)).map((line) => `${line}${eol}`).join("");
-}
-
 describe("setup marker pairing", () => {
-  test.each(["\n", "\r\n"])("scoped uninstall pairs markers and attributes legacy blocks (eol %j)", async (eol) => {
-    const { context, configPath } = await makeCase(`scoped-${eol.length}`);
+  test.each(["\n", "\r\n"])("uninstall removes every canonical and legacy block plus all orphan markers (eol %j)", async (eol) => {
+    const { context, configPath } = await makeCase(`uninstall-${eol.length}`);
     await writeFile(configPath, uninstallSeed.map((line) => `${line}${eol}`).join(""), "utf8");
     const result = await runSetup(["--uninstall"], context);
-    expect(await readFile(configPath, "utf8")).toBe(keep(uninstallSeed, [1, 3, 4, 5, 6, 7, 8, 15], eol));
-    expect(result.summary).toBe(`Removed 1 managed block(s) from ${configPath}.`);
-    expect(result.warnings).toEqual([
-      "Detected 2 orphan marker line(s) at line 2, line 16. Removed the marker line(s) but preserved surrounding user content — verify the config visually.",
-      "Left 2 other host block(s) in place: claude-code, codex. Use `/kimi:setup --uninstall --all` to remove every host's block.",
-    ]);
-  });
-
-  test.each(["\n", "\r\n"])("--all uninstall removes every block and orphan marker (eol %j)", async (eol) => {
-    const { context, configPath } = await makeCase(`all-${eol.length}`);
-    await writeFile(configPath, uninstallSeed.map((line) => `${line}${eol}`).join(""), "utf8");
-    const result = await runSetup(["--uninstall", "--all"], context);
     expect(await readFile(configPath, "utf8")).toBe(`keep_top = 1${eol}tail_key = 2${eol}`);
     expect(result.summary).toBe(`Removed 3 managed block(s) from ${configPath}.`);
     expect(result.warnings).toEqual([
@@ -102,19 +84,33 @@ describe("setup marker pairing", () => {
     ]);
   });
 
-  test("uninstall without a trailing newline keeps the last line intact", async () => {
+  test("--uninstall --all is rejected as INVALID_ARGS (plain --uninstall already removes everything)", async () => {
+    const { context } = await makeCase("uninstall-all-rejected");
+    await expect(runSetup(["--uninstall", "--all"], context)).rejects.toMatchObject({
+      code: "INVALID_ARGS",
+      stage: "setup.parse",
+    });
+  });
+
+  test("uninstall without a trailing newline strips orphans and keeps user lines intact", async () => {
     const { context, configPath } = await makeCase("no-trailing-newline");
     await writeFile(configPath, `${begin("codex")}\nuser = true\n${end("other")}`, "utf8");
     const result = await runSetup(["--uninstall"], context);
-    expect(await readFile(configPath, "utf8")).toBe(`user = true\n${end("other")}`);
-    expect(result.warnings[0]).toStartWith("Detected 1 orphan marker line(s) at line 1.");
+    expect(await readFile(configPath, "utf8")).toBe("user = true\n");
+    expect(result.warnings[0]).toStartWith("Detected 2 orphan marker line(s) at line 1, line 3.");
+
+    // User line with no trailing newline is preserved verbatim.
+    await writeFile(configPath, `${begin("codex")}\nuser = true`, "utf8");
+    const result2 = await runSetup(["--uninstall"], context);
+    expect(await readFile(configPath, "utf8")).toBe("user = true");
+    expect(result2.warnings[0]).toStartWith("Detected 1 orphan marker line(s) at line 1.");
   });
 
-  test.each(["\n", "\r\n"])("install repairs nested, mismatched and legacy orphans (eol %j)", async (eol) => {
+  test.each(["\n", "\r\n"])("install repairs nested, mismatched and legacy orphans and migrates a single legacy block in place (eol %j)", async (eol) => {
     const { context, configPath } = await makeCase(`install-${eol.length}`);
     // 1 E(other) orphan; 2 B(other) + 3 E(codex) mismatched, both orphan;
     // 4 B(legacy) and 5 B(claude-code) orphan, each followed by a BEGIN;
-    // 6-11 claude-code block.
+    // 6-11 claude-code legacy block (migrated in place to the canonical un-suffixed block).
     const seed = [
       "user_setting = true",
       end("other"),
@@ -133,7 +129,46 @@ describe("setup marker pairing", () => {
     const result = await runSetup([], context);
     expect(result.probe).toBe("ok");
     expect(result.warnings).toContain("Removed 5 orphaned managed marker comment(s); surrounding config was preserved.");
-    const repaired = keep(seed, [1, 2, 3, 4, 5], eol);
-    expect(await readFile(configPath, "utf8")).toStartWith(`${repaired}${eol}# === BEGIN kimi-plugin-cc-managed:codex (v`);
+    const after = await readFile(configPath, "utf8");
+    expect(after).toStartWith(`user_setting = true${eol}# === BEGIN kimi-plugin-cc-managed (v`);
+    expect(after).not.toContain(":claude-code");
+    expect(after).not.toContain(":codex");
+    expect(after).not.toContain(":other");
+    expect((await runSetup(["--check"], context)).probe).toBe("ok");
+  });
+
+  test.each(["\n", "\r\n"])("install consolidates multiple legacy host-scoped blocks into one canonical block (eol %j)", async (eol) => {
+    const { context, configPath } = await makeCase(`consolidate-${eol.length}`);
+    const seed = [
+      "user_setting = true",
+      begin("claude-code"),
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${claudeHook}'"`,
+      "timeout = 15",
+      end("claude-code"),
+      "[middle]",
+      "middle_setting = 42",
+      begin("codex"),
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${codexHook}'"`,
+      "timeout = 15",
+      end("codex"),
+      "[tail]",
+      "tail_setting = true",
+    ];
+    await writeFile(configPath, seed.map((line) => `${line}${eol}`).join(""), "utf8");
+    const result = await runSetup([], context);
+    expect(result.probe).toBe("ok");
+    expect(result.warnings).toContain("Consolidated 2 legacy host-scoped managed block(s) into one canonical block.");
+    const after = await readFile(configPath, "utf8");
+    expect(after.match(/BEGIN kimi-plugin-cc-managed/g)).toHaveLength(1);
+    expect(after).not.toContain(":claude-code");
+    expect(after).not.toContain(":codex");
+    expect(after).toContain(`user_setting = true${eol}`);
+    expect(after).toContain(`[middle]${eol}middle_setting = 42${eol}`);
+    expect(after).toContain(`[tail]${eol}tail_setting = true${eol}`);
+    expect((await runSetup(["--check"], context)).probe).toBe("ok");
   });
 });

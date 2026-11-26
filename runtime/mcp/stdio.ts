@@ -3,13 +3,21 @@ const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export async function serveMcpStdio(
   input: NodeJS.ReadableStream,
   output: NodeJS.WritableStream,
-  handle: (message: unknown) => Promise<unknown | undefined>,
+  handle: (message: unknown, transportSignal?: AbortSignal) => Promise<unknown | undefined>,
 ): Promise<void> {
   let buffer = Buffer.alloc(0);
   let writeTail = Promise.resolve();
   let writeError: unknown;
   const pending = new Set<Promise<void>>();
-  output.on("error", (error) => { writeError ??= error; });
+  const transportAbort = new AbortController();
+  const abortTransport = () => {
+    if (!transportAbort.signal.aborted) transportAbort.abort();
+  };
+  output.on("error", (error) => {
+    writeError ??= error;
+    abortTransport();
+  });
+  output.on("close", abortTransport);
 
   const write = (message: unknown): Promise<void> => {
     if (writeError) return Promise.reject(writeError);
@@ -50,7 +58,7 @@ export async function serveMcpStdio(
         }
         track((async () => {
           try {
-            const response = await handle(parsed);
+            const response = await handle(parsed, transportAbort.signal);
             if (response !== undefined) await write(response);
           } catch (error) {
             await write({
@@ -66,6 +74,10 @@ export async function serveMcpStdio(
   } catch (error) {
     await write({ jsonrpc: "2.0", id: null, error: { code: -32_700, message: error instanceof Error ? error.message : String(error) } });
   } finally {
+    // Stdin reached EOF or errored: abort active sync-wait pollers immediately
+    // without cancelling any durable background Kimi jobs.
+    abortTransport();
+    output.off("close", abortTransport);
     await Promise.all(pending);
     await writeTail;
     if (writeError) throw writeError;

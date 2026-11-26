@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { assertPromptFitsCommandLine, windowsCommandLineLength } from '../../dist/prompt-size.js';
 import { runCliPrompt } from '../../dist/cli-client.js';
 
@@ -29,9 +31,10 @@ test('a short real Node process preserves Windows quoting', () => {
 test('production compiled client refuses 103KB before a Windows spawn', { skip: process.platform !== 'win32' }, async () => {
   let spawned = false;
   const command = process.execPath;
-  const executionPlan = { schemaVersion: 1, operationKind: 'review', intendedEngine: 'legacy-v1', command,
-    prefixArgs: [], kimiVersion: '0.41.0', certification: 'certified', resumedFromJobId: null, safetyProfile: null };
-  await assert.rejects(runCliPrompt({ cwd: process.cwd(), command, executionPlan, env: {}, prompt: 'x'.repeat(103000),
+  const executionPlan = { schemaVersion: 1, operationKind: 'review', intendedEngine: 'native-v2', command,
+    prefixArgs: [], kimiVersion: null, certification: 'test-bypass', resumedFromJobId: null, safetyProfile: null };
+  const env = { KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: '1', KIMI_CODE_HOME: path.join(os.tmpdir(), 'kimi-plugin-cc-win-preflight-absent') };
+  await assert.rejects(runCliPrompt({ cwd: process.cwd(), command, executionPlan, env, prompt: 'x'.repeat(103000),
     onSpawn: () => { spawned = true; } }), { code: 'CLI_COMMAND_LINE_TOO_LONG' });
   assert.equal(spawned, false);
 });

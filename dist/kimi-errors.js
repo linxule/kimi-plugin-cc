@@ -24,7 +24,7 @@ export function classifyManagedCommandFailure(error, commandType, jobId, options
     if (!classification) {
         return error instanceof Error ? error : new Error(String(error));
     }
-    if (classification.kind === "response_timeout" && commandType !== "review_gate" && options?.background !== undefined) {
+    if (classification.kind === "response_timeout" && options?.background !== undefined) {
         const foregroundAdvice = !options?.background && (commandType === "ask" || commandType === "rescue")
             ? " Or run with --background so the caller's shell timeout is not the limit."
             : "";

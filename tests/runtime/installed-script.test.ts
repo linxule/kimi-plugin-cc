@@ -1,17 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-// Smoke tests for the installed-plugin entry scripts (scripts/*.sh). These exercise the
-// production launch path — shell wrapper → `node dist/...` — under a sanitized PATH so that
-// regressions like hardcoding bare `node` or skipping the dist build are caught in CI
-// before they ship. The scripts must honor KIMI_PLUGIN_CC_NODE_BIN for locked-down PATH.
+// Smoke tests for the installed-plugin entry script (scripts/companion.sh). These exercise
+// the production launch path — shell wrapper → `node dist/companion.js` — under a sanitized
+// PATH so regressions like hardcoding bare `node` or skipping the dist build are caught in CI
+// before they ship. The script must honor KIMI_PLUGIN_CC_NODE_BIN for locked-down PATH.
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..");
 const companionScript = path.join(repoRoot, "scripts", "companion.sh");
-const reviewGateScript = path.join(repoRoot, "scripts", "review-gate-hook.sh");
 const SANITIZED_PATH = "/usr/bin:/bin";
 const nodeExecPath = resolveNodeExecPath();
 
@@ -28,15 +28,10 @@ beforeAll(async () => {
         return true;
       }
       const parts = relative.split(path.sep);
-      // Exclude node_modules/.git (irrelevant to the companion wrapper) and
-      // `.claude` — the gitignored local audit workspace (upstream clones,
-      // handoff packets) that can grow to hundreds of MB on a dev machine and
-      // has nothing to do with this test. Copying it made the setup hook time
-      // out. `.tmp` is scratch build/test output, also irrelevant.
       return (
         !parts.some((part) => part.startsWith("node_modules")) &&
         !parts.includes(".git") &&
-        !parts.includes(".claude") &&
+        !parts.some((part) => part.startsWith(".claude")) &&
         !parts.includes(".tmp")
       );
     },
@@ -58,9 +53,6 @@ beforeAll(async () => {
     "utf8",
   );
   await chmod(fakeNode20Path, 0o755);
-  // Generous timeout: the setup recursively copies the repo (minus the excluded
-  // dirs) to a temp dir, which is legitimately slow on a synced/slow disk and
-  // can exceed bun's 5s default hook timeout under parallel test load.
 }, 60_000);
 
 afterAll(async () => {
@@ -75,14 +67,11 @@ describe("installed-plugin script wrappers", () => {
       env: {
         PATH: SANITIZED_PATH,
         KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
-        CLAUDE_PLUGIN_ROOT: repoRoot,
-        CLAUDE_PLUGIN_DATA: path.join(repoRoot, ".tmp", "installed-smoke-data"),
+        KIMI_PLUGIN_CC_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
       },
       encoding: "utf8",
     });
 
-    // Should have launched dist/companion.js successfully — the runtime will error on the
-    // unknown subcommand, which proves both node-resolution and dist-entrypoint are wired.
     const combined = `${result.stdout}\n${result.stderr}`;
     expect(result.status).not.toBe(0);
     expect(combined).toContain("setup-bogus-subcommand");
@@ -91,13 +80,9 @@ describe("installed-plugin script wrappers", () => {
   });
 
   test("companion.sh fails with actionable error when node cannot be resolved", () => {
-    // SANITIZED_PATH contains bash (so the shebang resolves) but not node (node lives under
-    // /opt/homebrew/bin or /usr/local/bin on dev hosts). Leaving KIMI_PLUGIN_CC_NODE_BIN
-    // unset forces the fallback path and exercises the actionable-error branch.
     const result = spawnSync(companionScript, ["setup"], {
       env: {
         PATH: SANITIZED_PATH,
-        CLAUDE_PLUGIN_ROOT: repoRoot,
       },
       encoding: "utf8",
     });
@@ -107,46 +92,15 @@ describe("installed-plugin script wrappers", () => {
     expect(result.stderr).toContain("KIMI_PLUGIN_CC_NODE_BIN");
   });
 
-  test("review-gate-hook.sh launches dist/hooks/review-gate-stop.js under sanitized PATH", () => {
-    const result = spawnSync(reviewGateScript, [], {
-      input: JSON.stringify({
-        session_id: "test",
-        transcript_path: "/nonexistent/transcript.jsonl",
-        cwd: repoRoot,
-        stop_hook_active: false,
-        hook_event_name: "Stop",
-      }),
-      env: {
-        PATH: SANITIZED_PATH,
-        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
-        CLAUDE_PLUGIN_ROOT: repoRoot,
-        CLAUDE_PLUGIN_DATA: path.join(repoRoot, ".tmp", "installed-smoke-data"),
-      },
-      encoding: "utf8",
-    });
-
-    // The hook fail-opens on missing transcript or disabled review gate, so exit 0 is the
-    // expected success signal. What we care about is that node was located and the script
-    // dispatched at all — no shell-level "node: not found" error.
-    const combined = `${result.stdout}\n${result.stderr}`;
-    expect(combined).not.toContain("node: not found");
-    expect(combined).not.toContain("unable to locate 'node'");
-  });
-
-  test("clean installed copy runs setup without repo-root node_modules", () => {
-    // v1.0 setup writes a managed block to ~/.kimi-code/config.toml and
-    // probes the installed hook script directly. We isolate the test from
-    // the developer's real kimi-code config via KIMI_CODE_HOME → a temp
-    // dir under the clean copy. The probe never spawns kimi-code itself,
-    // so the kimi mock is no longer needed here.
+  test("clean installed copy runs setup without repo-root node_modules and publishes the bundled hook", () => {
     const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home");
+    const dataRoot = path.join(cleanCopyRoot, ".tmp", "installed-smoke-data");
     const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
       env: {
         PATH: SANITIZED_PATH,
         KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
         KIMI_CODE_HOME: kimiCodeHome,
-        CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
-        CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
+        KIMI_PLUGIN_CC_DATA: dataRoot,
       },
       encoding: "utf8",
     });
@@ -156,6 +110,7 @@ describe("installed-plugin script wrappers", () => {
     expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
     expect(combined).toContain("Probe:          ok");
     expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
+    expect(existsSync(path.join(dataRoot, "kimi-plugin-cc", "hook", "approval-hook.js"))).toBe(true);
   });
 
   test("clean installed copy resolves relative KIMI_CODE_HOME against the captured workspace cwd", async () => {
@@ -169,8 +124,7 @@ describe("installed-plugin script wrappers", () => {
         PATH: SANITIZED_PATH,
         KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
         KIMI_CODE_HOME: "relative-kimi-home",
-        CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
-        CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data-relative-home"),
+        KIMI_PLUGIN_CC_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data-relative-home"),
       },
       encoding: "utf8",
     });
@@ -181,55 +135,65 @@ describe("installed-plugin script wrappers", () => {
     expect(combined).toContain(path.join(workspaceRoot, "relative-kimi-home", "config.toml"));
   });
 
-  test("clean installed copy accepts Codex PLUGIN_ROOT and PLUGIN_DATA aliases", () => {
-    const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home-codex");
-    const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
-      env: {
-        PATH: SANITIZED_PATH,
-        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
-        KIMI_CODE_HOME: kimiCodeHome,
-        PLUGIN_ROOT: cleanCopyRoot,
-        PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data-codex"),
-      },
-      encoding: "utf8",
-    });
+  test.skipIf(process.platform === "win32")(
+    "clean installed copy uses XDG_DATA_HOME when KIMI_PLUGIN_CC_DATA is omitted",
+    () => {
+      const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home-xdg");
+      const xdgDataHome = path.join(cleanCopyRoot, ".tmp", "xdg-data-home");
+      const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
+        env: {
+          PATH: SANITIZED_PATH,
+          XDG_DATA_HOME: xdgDataHome,
+          KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
+          KIMI_CODE_HOME: kimiCodeHome,
+        },
+        encoding: "utf8",
+      });
 
-    const combined = `${result.stdout}\n${result.stderr}`;
-    expect(result.status).toBe(0);
-    expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
-    expect(combined).toContain("Probe:          ok");
-    expect(combined).not.toContain("MISSING_PLUGIN_DATA");
-    expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
-  });
+      const combined = `${result.stdout}\n${result.stderr}`;
+      expect(result.status).toBe(0);
+      expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
+      expect(combined).toContain("Probe:          ok");
+      expect(combined).not.toContain("MISSING_PLUGIN_DATA");
+      expect(combined).not.toContain("ERR_MODULE_NOT_FOUND");
+      expect(existsSync(path.join(xdgDataHome, "kimi-plugin-cc", "hook", "approval-hook.js"))).toBe(
+        true,
+      );
+    },
+  );
 
-  test("clean installed copy defaults Codex plugin data when the host omits PLUGIN_DATA", () => {
-    const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home-codex-default-data");
-    const codexHome = path.join(cleanCopyRoot, ".tmp", "codex-home");
-    const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
-      env: {
-        PATH: SANITIZED_PATH,
-        CODEX_HOME: codexHome,
-        KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
-        KIMI_CODE_HOME: kimiCodeHome,
-        PLUGIN_ROOT: cleanCopyRoot,
-      },
-      encoding: "utf8",
-    });
+  test.skipIf(process.platform === "win32")(
+    "clean installed copy falls back to HOME/.local/share when XDG_DATA_HOME and KIMI_PLUGIN_CC_DATA are omitted",
+    () => {
+      const kimiCodeHome = path.join(cleanCopyRoot, ".tmp", "kimi-code-home-home-default");
+      const fakeHome = path.join(cleanCopyRoot, ".tmp", "fake-home");
+      const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
+        env: {
+          PATH: SANITIZED_PATH,
+          HOME: fakeHome,
+          KIMI_PLUGIN_CC_NODE_BIN: nodeExecPath,
+          KIMI_CODE_HOME: kimiCodeHome,
+        },
+        encoding: "utf8",
+      });
 
-    const combined = `${result.stdout}\n${result.stderr}`;
-    expect(result.status).toBe(0);
-    expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
-    expect(combined).toContain("Probe:          ok");
-    expect(combined).not.toContain("MISSING_PLUGIN_DATA");
-  });
+      const combined = `${result.stdout}\n${result.stderr}`;
+      expect(result.status).toBe(0);
+      expect(combined).toContain("Installed kimi-plugin-cc PreToolUse hook");
+      expect(combined).toContain("Probe:          ok");
+      expect(combined).not.toContain("MISSING_PLUGIN_DATA");
+      expect(
+        existsSync(path.join(fakeHome, ".local", "share", "kimi-plugin-cc", "hook", "approval-hook.js")),
+      ).toBe(true);
+    },
+  );
 
   test("companion.sh rejects Node versions below 22.5 before launching the runtime", () => {
     const result = spawnSync(path.join(cleanCopyRoot, "scripts", "companion.sh"), ["setup"], {
       env: {
         PATH: SANITIZED_PATH,
         KIMI_PLUGIN_CC_NODE_BIN: fakeNode20Path,
-        CLAUDE_PLUGIN_ROOT: cleanCopyRoot,
-        CLAUDE_PLUGIN_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
+        KIMI_PLUGIN_CC_DATA: path.join(cleanCopyRoot, ".tmp", "installed-smoke-data"),
       },
       encoding: "utf8",
     });

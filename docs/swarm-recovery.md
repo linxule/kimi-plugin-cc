@@ -1,37 +1,43 @@
 # Recovering an interrupted swarm
 
-Normal stop: use `scripts/companion.sh cancel` for a shell-owned run, or the MCP job cancel tool for an MCP-owned run. A hard kill cannot execute cleanup. Cancellation still starts no fresh cleanup server.
+To stop a running swarm normally, run `scripts/companion.sh job cancel <job-id>` in your terminal or call `kimi_job({ action: "cancel", job_id: "..." })` over MCP. The compatibility alias `scripts/companion.sh cancel <job-id>` also works. Normal cancellation stops the active processes without starting a new cleanup server, while a hard `SIGKILL` skips cleanup entirely.
 
-For exact CLI 2.3.2, 2.3.3, 2.4.0, 2.4.1 and 2.5.0/2.5.1/2.5.2/2.5.3 swarm runs, plus exact-2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel runs, status includes a durable `swarm_recovery` record. It contains the resolved home/workspace, companion identity, launch intent, verified process identities and session identity. It never contains web authentication tokens, credentials, prompts or config contents. Session identity is committed before enabling swarm mode. The exact-2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 concurrency-1 path starts a direct worker without a mutable swarm session, so it does not create an activation-recovery record; normal cancellation and patch capture still apply.
+For certified `2.8.0` and newer parallel swarms (`--max-concurrency` of `2` or more), job status includes a durable `swarm_recovery` record. This record stores the resolved home and workspace, companion identity, launch intent, verified process identities, and session identity. It never stores web tokens, credentials, prompts, or config contents, and it commits the session ID before enabling swarm mode. When `--max-concurrency` is `1`, the plugin runs one direct worker without swarm activation, so normal cancellation and patch capture handle cleanup.
 
-Exact-2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel sessions retain their native `TaskStop`-disabled policy after normal deactivation or recovery. Recovery does not remove it. The bounded construction covers the managed job; resuming that historical session interactively through another client is outside its certification.
+Parallel sessions on `2.8.0` and newer keep their `TaskStop`-disabled policy after normal deactivation or recovery. Recovery does not remove that policy. Certification covers the managed job lifecycle rather than interactive resumption of historical swarm sessions in another client.
 
-The exact 2.6.0 swarm integration is candidate-only: the narrowed 2.6.0 non-swarm certification excludes both swarm operations and does not certify this recovery path. Recovery canonicalizes `record.cwd` only for session deactivation through symlinked execution parents. Ownership, workspace, and patch checks continue to use the original recorded alias.
+Recovery resolves the real path of `record.cwd` only when deactivating a session through symlinked parent directories. Ownership, workspace, and patch checks still enforce the original recorded path alias.
 
-## Preview, then recover
+## Preview and apply recovery
 
-Run from the original repository with its original plugin data root and Kimi home:
+Run recovery from the original repository using the same plugin data root and Kimi home:
 
 ```sh
-scripts/companion.sh recover-swarm <job-id>
-scripts/companion.sh recover-swarm <job-id> --apply
+scripts/companion.sh job recover-swarm <job-id>
+scripts/companion.sh job recover-swarm <job-id> --apply
 ```
 
-Preview does not signal processes, modify sessions, or capture patches. Apply:
+Over MCP, call `kimi_job({ action: "recover_swarm", job_id: "..." })` to preview, then add `apply: true` to execute recovery. The CLI compatibility alias `scripts/companion.sh recover-swarm <job-id> [--apply]` also works.
 
-1. Requires the original companion to be gone and acquires an identity-checked recovery claim. A second recovery cannot race the first; a dead recovery owner can be reclaimed by compare-and-swap.
-2. Revalidates recorded processes and groups. It stops only verified individual identities, never a guessed PID or unproven group. An unknown surviving group member, changed group, incomplete probe or unrecorded launch refuses recovery.
-3. If session cleanup is pending, requires the selected exact certified CLI and valid managed hook. It starts one bounded authenticated web lifecycle, disables the recorded session's swarm mode, verifies the version-appropriate state proof and exit journal, then verifies process quiescence. On 2.5.0/2.5.1/2.5.2/2.5.3 this includes the local environment binding and protocol-v2 WebSocket main-agent state rather than `/status`. On exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel sessions it uses authenticated direct-subscription state proof and the same local binding checks. It does not resume a prompt, generate model output, install hooks or retry failed cleanup automatically. New recovery web launches are themselves journaled. Deactivation uses the realpath of `record.cwd`; the original recorded alias remains the ownership, workspace, and patch-check boundary.
-4. Captures a binary patch from a retained write worktree. It does not apply the patch or delete the tree. The result names both paths for inspection.
+Preview mode never signals processes, edits sessions, or captures patches. When you pass `--apply` or `apply: true`, recovery follows 4 steps in order.
 
-The recovery attempt has a 30-second cancellation signal, with bounded identity probes and normal teardown. Interrupting recovery retains its journal. An already-recovered record is an idempotent no-op. Failed/cancelled/completed job outcomes are immutable; a previously running abandoned job becomes failed, never completed. Recovery status is separate from task success.
+1. It confirms that the original companion process has exited and acquires an atomic, identity-checked recovery claim. A second recovery cannot race an active one, and a later recovery replaces a crashed owner through compare-and-swap.
+2. It revalidates recorded processes and process groups, stopping only verified identities and never signaling a guessed PID or unverified group. If it finds an unknown surviving group member, a changed group, an incomplete probe, or an unrecorded launch, it refuses recovery.
+3. If session deactivation is pending, it verifies the exact certified CLI and managed PreToolUse hook, then starts one bounded `kimi web --json` lifecycle. It sets `swarm_mode: false`, verifies the WebSocket subscription state, local environment binding, and `swarm_mode.exit` journal entry, and confirms process quiescence. It never resumes a prompt, calls a model, installs hooks, or retries failed cleanup automatically.
+4. For a retained write-swarm worktree, it captures an untruncated binary patch without applying the patch or deleting the worktree. The recovery output prints both the patch path and worktree path so you can inspect them.
+
+Each recovery run uses a 30-second cancellation timeout with bounded identity probes and normal teardown. Interrupting recovery preserves its recovery journal, and running recovery again on an already recovered job succeeds as a no-op. Terminal job outcomes (`failed`, `cancelled`, or `completed`) never change, while an abandoned `running` job moves to `failed`. The plugin tracks recovery status separately from job success.
 
 ## Limits and manual inspection
 
-- SIGKILL between process creation and durable identity capture leaves an explicit pending launch. Apply refuses to guess ownership. A supervisor/OS-owned launch primitive would be required to eliminate this remaining crash window; the journal does not claim that guarantee.
-- No recovery record means no automatic recovery: older runs, or a failure before the record was created, require inspection. Recovery is not general-purpose process or native-session cleanup.
-- Windows does not currently provide the required durable process-identity proof. Preview is available; apply refuses. This does not change existing Windows direct-child cancellation limits.
-- A changed home, missing/redirected worktree, CLI mismatch, invalid hook or uncertain identity leaves evidence intact and reports failure. A CLI mismatch includes a change of the selected binary: after `setup --install-kimi` repoints the plugin-owned `current`, or `KIMI_PLUGIN_CC_KIMI_BIN` changes, recovery refuses until the binary the job recorded is selected again. Do not repair this by bypassing the hook or killing processes by name.
-- Abandoned worktrees are no longer age-deleted. Inspect and recover them before explicitly removing them. This also protects legacy orphaned trees without a recovery record.
+Keep 5 boundaries in mind when inspecting or recovering an interrupted swarm:
 
-The trust boundary is the same local, host-owned plugin database used for execution plans. Recovery does not make an attacker-modified database trustworthy. Internal Git capture retains the repository-configuration trust boundary documented in [safety.md](safety.md).
+- a hard kill between process spawn and identity capture leaves an unrecorded launch that `--apply` refuses to guess
+- jobs without a recovery record (such as concurrency `1` runs or failures before activation) cannot use automatic recovery
+- Windows supports preview mode only and refuses `--apply` because it lacks durable process-identity verification
+- a changed Kimi home, missing worktree, invalid hook, uncertain process identity, or changed selected CLI binary causes recovery to refuse and preserve evidence
+- the plugin never deletes abandoned worktrees by age, so you can inspect and recover them before removing them manually
+
+If `setup --install-kimi` or `KIMI_PLUGIN_CC_KIMI_BIN` changes the selected Kimi binary after launch, select the job's recorded binary again before running `--apply`. Never bypass the hook or kill processes by name to force recovery.
+
+Recovery relies on the same local, host-owned SQLite database used for execution plans. It does not protect against an untrusted local database, and Git patch capture retains the repository trust boundary in [the safety guide](safety.md).

@@ -32,9 +32,9 @@ test("compiled distributions preserve the stdout-only CLI refusal", () => {
 });
 
 
-// Execute full and narrowed operation scopes through all three emitted runtimes.
-test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 and retain the 2.6.0 non-swarm scope", () => {
-  for (const root of ["./dist", "./plugins/kimi-codex/dist", "./plugins/kimi-dsh/dist"]) {
+// Execute certified operation scopes through both emitted runtimes.
+test("compiled distributions certify exact 2.8.0 under the >= 2.8.0 rolling floor", () => {
+  for (const root of ["./dist", "./plugins/kimi-codex/dist"]) {
     const script = `
       import assert from 'node:assert/strict';
       import {
@@ -46,64 +46,42 @@ test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 and ret
         selectIntendedEngine,
       } from '${root}/kimi-engine.js';
       import { usesBoundedSwarmPolicy } from '${root}/swarm-policy.js';
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.6.0'), false);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.6.2'), true);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.6.3'), true);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.7.2'), true);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.7.3'), true);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.includes('2.8.0'), true);
-      assert.equal(NATIVE_V2_CERTIFIED_VERSIONS.at(-1), '2.8.0');
+      assert.deepEqual([...NATIVE_V2_CERTIFIED_VERSIONS], ['2.8.0']);
+      assert.deepEqual([...NATIVE_V2_ANY_OPERATION_VERSIONS], ['2.8.0']);
       for (const operationKind of ['swarm', 'swarm-write']) {
-        const versions = NATIVE_V2_CERTIFIED.get(operationKind).filter(
-          version => version.localeCompare('2.5.3', 'en', { numeric: true }) > 0,
-        );
-        assert.ok(versions.length > 0);
+        const versions = NATIVE_V2_CERTIFIED.get(operationKind);
+        assert.deepEqual([...versions], ['2.8.0']);
         for (const kimiVersion of versions) {
           assert.equal(usesBoundedSwarmPolicy({
             operationKind, intendedEngine: 'native-v2', kimiVersion,
           }), true, operationKind + ' ' + kimiVersion + ' must use the bounded execution policy');
         }
       }
-      for (const version of ['2.6.0', '2.6.2', '2.6.3', '2.7.2', '2.7.3', '2.8.0']) {
-        assert.equal(NATIVE_V2_ANY_OPERATION_VERSIONS.includes(version), true);
-        const base = {
-          schemaVersion: 1,
-          operationKind: 'ask',
-          intendedEngine: 'native-v2',
-          command: process.execPath,
-          prefixArgs: [],
-          kimiVersion: version,
-          certification: 'certified',
-          resumedFromJobId: null,
-          safetyProfile: NATIVE_V2_SAFETY_PROFILE,
-        };
-        for (const operationKind of ['review', 'challenge', 'ask', 'rescue', 'review_gate', 'pursue']) {
-          assert.doesNotThrow(() => assertExecutionPlanMatchesSpawn(
-            { ...base, operationKind }, process.execPath, [],
-          ));
-        }
-        for (const operationKind of ['swarm', 'swarm-write']) {
-          assert.equal(selectIntendedEngine(operationKind, { version }), 'native-v2');
-          if (version === '2.6.2' || version === '2.6.3' || version === '2.7.2' || version === '2.7.3' || version === '2.8.0') {
-            assert.doesNotThrow(() => assertExecutionPlanMatchesSpawn(
-              { ...base, operationKind }, process.execPath, [],
-            ));
-            continue;
-          }
-          assert.throws(
-            () => assertExecutionPlanMatchesSpawn({ ...base, operationKind }, process.execPath, []),
-            error => {
-              assert.equal(error.code, 'KIMI_CAPABILITY_NOT_CERTIFIED');
-              assert.equal(error.details.refusal_kind, 'v2-swarm-not-certified');
-              assert.equal(error.details.certification_scope, 'non-swarm');
-              assert.ok(error.message.includes('Select exact kimi-code 2.6.2'));
-              assert.equal(error.details.kimi_version, version);
-              return true;
-            },
-          );
-        }
+      const base = {
+        schemaVersion: 1,
+        operationKind: 'ask',
+        intendedEngine: 'native-v2',
+        command: process.execPath,
+        prefixArgs: [],
+        kimiVersion: '2.8.0',
+        certification: 'certified',
+        resumedFromJobId: null,
+        safetyProfile: NATIVE_V2_SAFETY_PROFILE,
+      };
+      for (const operationKind of ['review', 'challenge', 'ask', 'rescue', 'pursue', 'swarm', 'swarm-write']) {
+        assert.equal(selectIntendedEngine(operationKind, { version: '2.8.0' }), 'native-v2');
+        assert.doesNotThrow(() => assertExecutionPlanMatchesSpawn(
+          { ...base, operationKind }, process.execPath, [],
+        ));
       }
-      for (const version of ['2.6.1', '2.6.4', '2.6.2-rc.1', '2.6.2+unreviewed', '2.6.3-rc.1', '2.6.3+unreviewed', '2.7.0', '2.7.1', '2.7.4', '2.7.2-rc.1', '2.7.2+unreviewed']) {
+      for (const [version, expectedRefusalKind] of [
+        ['2.6.0', 'legacy-v1-unsupported'],
+        ['2.6.2', 'legacy-v1-unsupported'],
+        ['2.7.3', 'legacy-v1-unsupported'],
+        ['2.8.1', 'v2-version-not-certified'],
+        ['2.8.0-rc.1', 'v2-version-not-certified'],
+        ['2.8.0+unreviewed', 'v2-version-not-certified'],
+      ]) {
         assert.equal(NATIVE_V2_ANY_OPERATION_VERSIONS.includes(version), false);
         for (const operationKind of NATIVE_V2_CERTIFIED.keys()) {
           assert.throws(() => assertExecutionPlanMatchesSpawn({
@@ -113,7 +91,7 @@ test("compiled distributions certify exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 and ret
             safetyProfile: NATIVE_V2_SAFETY_PROFILE,
           }, process.execPath, []), error => {
             assert.equal(error.code, 'KIMI_CAPABILITY_NOT_CERTIFIED');
-            assert.equal(error.details.refusal_kind, 'v2-version-not-certified');
+            assert.equal(error.details.refusal_kind, expectedRefusalKind);
             return true;
           });
         }

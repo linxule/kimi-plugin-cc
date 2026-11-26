@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { carriesDenial, createHookEscapeMonitor, emitsHandoffVeto } from "../../runtime/hook-escape.js";
+import { carriesDenial, createHookEscapeMonitor } from "../../runtime/hook-escape.js";
 import { decideHookOutcomePure } from "../../runtime/hooks/approval-policy.js";
 import { BOUNDED_SWARM_POLICY } from "../../runtime/swarm-policy.js";
 import type { AssistantRecord } from "../../runtime/stream-json.js";
@@ -22,39 +22,27 @@ const denialFor = (toolName: string, label = "ask") => {
 const REMINDER_1 = "\n\n<system-reminder>\nThe same tool call has been repeated several times in a row. Before making your next call, write one sentence stating what new information you expect it to produce. Then act on that sentence: if it names something this result does not already give you, choose the action that best provides it; otherwise, continue with the evidence you already have.\n</system-reminder>";
 const HANDOFF = "This turn was ended by the repeat breaker after the same tool call was issued 12 times in a row. This step accepts a text response only, so the tool call was not executed. Reply in text: the current blocker, what you tried, and what you need.";
 
-test("byte-exact denial, repeat-breaker decorated denial and handoff veto all count as the hook's denial", () => {
+test("byte-exact denial and repeat-breaker decorated denial count as the hook's denial; legacy handoff text does not", () => {
   const reason = denialFor("Write");
   expect(carriesDenial(reason, reason)).toBe(true);
   expect(carriesDenial(reason + REMINDER_1, reason)).toBe(true);
   expect(carriesDenial(reason + REMINDER_1 + REMINDER_1, reason)).toBe(true);
-  expect(carriesDenial(HANDOFF, reason)).toBe(true);
-  for (const other of [reason + "\n", reason + " extra", "ok: wrote file", REMINDER_1, reason.slice(1), `Tool "Write" not found`]) {
+  for (const other of [HANDOFF, reason + "\n", reason + " extra", "ok: wrote file", REMINDER_1, reason.slice(1), `Tool "Write" not found`]) {
     expect(carriesDenial(other, reason)).toBe(false);
   }
 });
 
-test("the handoff text counts as a denial only on releases that can emit it", () => {
-  const reason = denialFor("Write");
-  for (const version of ["0.41.3", "0.42.0", "2.0.0", "2.5.3", null, undefined, "", "2.6", "next", "2.8.0-beta.1"]) {
-    expect([version, emitsHandoffVeto(version)]).toEqual([version, true]);
-  }
-  for (const version of ["2.6.0", "2.6.2", "2.8.0", "2.10.0", "3.0.0"]) {
-    expect([version, emitsHandoffVeto(version)]).toEqual([version, false]);
-  }
-  expect(carriesDenial(HANDOFF, reason, false)).toBe(false);
-  expect(carriesDenial(reason + REMINDER_1, reason, false)).toBe(true);
+test("legacy pre-2.6 handoff text is reported as a mismatch on >= 2.8.0", () => {
   const handoff = { role: "tool" as const, tool_call_id: "c1", content: HANDOFF };
-  const old = createHookEscapeMonitor({ ...ctx, kimiVersion: "2.5.3" });
-  old.observe(call("Write", "{}", "c1"));
-  expect(old.observe(handoff)).toBeUndefined();
   const current = createHookEscapeMonitor({ ...ctx, kimiVersion: "2.8.0" });
   current.observe(call("Write", "{}", "c1"));
   expect(current.observe(handoff)).toMatchObject({ tool_call_id: "c1", tool_name: "Write", kind: "mismatch" });
+  expect(current.settle()).toEqual([]);
 });
 
 test("monitor reports mismatch and unresolved, clears on any denial shape, and never reports twice for one call", () => {
   const reason = denialFor("Write");
-  for (const content of [reason, reason + REMINDER_1, HANDOFF]) {
+  for (const content of [reason, reason + REMINDER_1]) {
     const monitor = createHookEscapeMonitor(ctx);
     expect(monitor.observe(call())).toBeUndefined();
     expect(monitor.observe({ role: "tool", tool_call_id: "one", content })).toBeUndefined();
@@ -137,15 +125,15 @@ test("single-worker stock swarm-off refusal remains a non-enforcing mismatch fin
 });
 
 const exec = promisify(execFile);
-for (const command of [["ask"], ["review"], ["task", "challenge"], ["task", "swarm"], ["task", "rescue"], ["task", "pursue"]]) {
+for (const command of [["ask"], ["review"], ["task", "challenge"], ["task", "swarm", "--max-concurrency", "1"], ["task", "rescue"], ["task", "pursue"]]) {
   for (const scenario of ["executed", "unresolved", "denied"]) {
     test(`compiled ${command.join(" ")} hook escape ${scenario}: detection evidence, never a failure`, async () => {
       const data = await createTestPluginDataRoot("escape-integration");
       const toolName = command.includes("rescue") || command.includes("pursue") ? "EnterPlanMode" : "Write";
       const env = { ...process.env, KIMI_PLUGIN_CC_MOCK_HOOK_TOOL: toolName, KIMI_PLUGIN_CC_DATA: data, KIMI_CODE_HOME: path.join(data, "home"),
         KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", KIMI_PLUGIN_CC_KIMI_BIN: "bun",
-        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([path.resolve("tests/helpers/mock-kimi-cli-v1.ts")]),
-        KIMI_PLUGIN_CC_MOCK_VERSION: "2.2.0", KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1",
+        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([path.resolve("tests/helpers/mock-kimi-cli.ts")]),
+        KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.0",
         KIMI_PLUGIN_CC_MOCK_SCENARIO: `hook-escape-${scenario}` };
       try {
         const run = await exec("node", [path.resolve("dist/companion.js"), ...command, "inspect"], { env });
@@ -176,7 +164,7 @@ test("budget abort with a pending pure denial stays a timeout and carries the un
   const data = await createTestPluginDataRoot("escape-budget");
   const env = { ...process.env, KIMI_PLUGIN_CC_DATA: data, KIMI_CODE_HOME: path.join(data, "home"),
     KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1", KIMI_PLUGIN_CC_KIMI_BIN: "bun",
-    KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([path.resolve("tests/helpers/mock-kimi-cli-v1.ts")]),
+    KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([path.resolve("tests/helpers/mock-kimi-cli.ts")]),
     KIMI_PLUGIN_CC_MOCK_SCENARIO: "hook-escape-unresolved", KIMI_PLUGIN_CC_MOCK_HOOK_PENDING_MS: "5000" };
   try {
     await expect(exec("node", [path.resolve("dist/companion.js"), "ask", "--budget", "1s", "inspect"], { env })).rejects.toMatchObject({ code: 1 });

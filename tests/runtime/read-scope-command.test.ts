@@ -24,7 +24,7 @@ import {
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return { cwd, env, stdout: process.stdout, stderr: process.stderr };
@@ -33,7 +33,7 @@ function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
 function makeMockEnv(pluginDataRoot: string, scenario: string, invocationPath: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
     KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
@@ -215,7 +215,7 @@ describe("S1 scope flags: commands", () => {
     const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
     try {
       const extra = await realpath(pluginDataRoot);
-      const output = await runSwarm(["--network", "--read-root", pluginDataRoot, "audit", "modules"], makeContext(repoRoot, env));
+      const output = await runSwarm(["--max-concurrency", "1", "--network", "--read-root", pluginDataRoot, "audit", "modules"], makeContext(repoRoot, env));
       expect(output.startsWith(`Scope: reads confined to the workspace and 1 read root (${extra}); network on\n\n`)).toBe(true);
       const captured = await invocationEnv(invocationPath);
       expect(captured.KIMI_PLUGIN_CC_CMD).toBe("swarm");
@@ -232,7 +232,7 @@ describe("S1 scope flags: commands", () => {
     const repoRoot = await createGitRepoFixture("read-scope-uncertified-repo");
     const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
     const env = { ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath), KIMI_PLUGIN_CC_MOCK_VERSION: "2.99.0",
-      KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1", KIMI_PLUGIN_CC_STRICT_VERSIONS: "" };
+      KIMI_PLUGIN_CC_STRICT_VERSIONS: "" };
     try {
       await expect(runAsk(["--network", "q"], makeContext(repoRoot, env))).rejects.toMatchObject({
         code: "INVALID_ARGS", message: expect.stringContaining("uncertified"),

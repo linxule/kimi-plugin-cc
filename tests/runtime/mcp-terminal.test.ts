@@ -9,8 +9,8 @@ describe("MCP terminal result semantics", () => {
     try {
       client = await McpClient.modern(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_rescue",
-        arguments: { workspace: fixture.repo, prompt: "Return an empty response", fresh: true },
+        name: "kimi_write",
+        arguments: { workspace: fixture.repo, mode: "rescue", prompt: "Return an empty response" },
         _meta: modernMeta(),
       });
       expect(started.resultType).toBe("task");
@@ -38,8 +38,8 @@ describe("MCP terminal result semantics", () => {
     try {
       client = await McpClient.modern(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Exceed this budget", fresh: true, budget: "1s" },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Exceed this budget", budget: "1s" },
         _meta: modernMeta(),
       });
       let view: any;
@@ -66,8 +66,8 @@ describe("MCP terminal result semantics", () => {
     try {
       client = await McpClient.modern(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Cancel through the task method", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Cancel through the task method" },
         _meta: modernMeta(),
       });
       const acknowledged = await client.request("tasks/cancel", { taskId: started.taskId, _meta: modernMeta() });

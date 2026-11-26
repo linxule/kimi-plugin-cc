@@ -121,8 +121,8 @@ describe("MCP unattached companion recovery", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Verify starting recovery", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Verify starting recovery", wait: false },
       });
       jobId = started.structuredContent.job_id;
       const forgedStore = new JobStore(resolvePluginPaths(fixture.env));
@@ -142,8 +142,8 @@ describe("MCP unattached companion recovery", () => {
       }
 
       const refused = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(refused.isError).toBe(true);
       expect(refused.structuredContent.error.code).toBe("MCP_PROCESS_IDENTITY_MISMATCH");
@@ -163,8 +163,8 @@ describe("MCP unattached companion recovery", () => {
         restored.close();
       }
       const recovered = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(recovered.structuredContent.status).toBe("running");
       const attached = new JobStore(resolvePluginPaths(fixture.env));
@@ -178,8 +178,8 @@ describe("MCP unattached companion recovery", () => {
         attached.close();
       }
       const cancelled = await client.request("tools/call", {
-        name: "kimi_job_cancel",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "cancel", job_id: jobId },
       });
       expect(cancelled.structuredContent.cancellation.status).toBe("cancelled");
       terminal = true;
@@ -195,8 +195,8 @@ describe("MCP unattached companion recovery", () => {
       if (client && jobId && !terminal) {
         try {
           await client.request("tools/call", {
-            name: "kimi_job_cancel",
-            arguments: { job_id: jobId },
+            name: "kimi_job",
+            arguments: { action: "cancel", job_id: jobId },
           });
         } catch {}
       }
@@ -213,12 +213,15 @@ describe("MCP unattached companion recovery", () => {
     try {
       client = await McpClient.legacy(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Reconcile a stale starting job", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Reconcile a stale starting job", wait: false },
       });
       const jobId = started.structuredContent.job_id as string;
       for (let attempt = 0; attempt < 40; attempt += 1) {
-        await client.request("tools/call", { name: "kimi_job_status", arguments: { job_id: jobId } });
+        await client.request("tools/call", {
+          name: "kimi_job",
+          arguments: { action: "status", job_id: jobId },
+        });
         const attached = new JobStore(resolvePluginPaths(fixture.env));
         let captured: string | null;
         try {
@@ -244,14 +247,14 @@ describe("MCP unattached companion recovery", () => {
       backdate(fixture.env, jobId);
 
       const status = await client.request("tools/call", {
-        name: "kimi_job_status",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "status", job_id: jobId },
       });
       expect(status.structuredContent.status).toBe("failed");
       expect(status.structuredContent.error.code).toBe("MCP_COMPANION_DISAPPEARED");
       const result = await client.request("tools/call", {
-        name: "kimi_job_result",
-        arguments: { job_id: jobId },
+        name: "kimi_job",
+        arguments: { action: "result", job_id: jobId },
       });
       expect(result.isError).toBe(true);
       expect(result.structuredContent.error.code).toBe("MCP_COMPANION_DISAPPEARED");

@@ -9,7 +9,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
 
-const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli.ts");
 
 const KINDS = [
   ["ask", "Ask", (argv: string[], context: CommandContext) => runAsk(argv, context)],
@@ -21,7 +21,8 @@ async function setup(label: string) {
   const repoRoot = await createGitRepoFixture(`${label}-repo`);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_PLUGIN_CC_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: path.join(pluginDataRoot, "kimi-home"),
     KIMI_PLUGIN_CC_KIMI_BIN: "bun",
     KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
     KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: path.join(pluginDataRoot, "invocation.jsonl"),
@@ -37,7 +38,7 @@ async function setup(label: string) {
       store.createJob({
         job_id: jobId, repo_id: repoId, command_type: kind, cwd: repoRoot, model: null, thinking: null,
         background: false, pid: null, kimi_pid: null, status, kimi_session_id: sessionId,
-        operation_kind: kind, observed_engine: "legacy-v1", agent_profile: "<cli-client>", prompt_digest: "d",
+        operation_kind: kind, observed_engine: "native-v2", agent_profile: "<cli-client>", prompt_digest: "d",
         summary: `seed ${updatedOrder}`, final_output_path: null,
         stream_log_path: path.join(pluginDataRoot, `missing-${jobId}.jsonl`), error: null,
       });

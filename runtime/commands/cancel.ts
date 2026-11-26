@@ -17,7 +17,13 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
   const store = new JobStore(paths);
 
   try {
-    await sweepStaleJobs(store, paths);
+    const isMcpCancel =
+      context.mcpCompanionIdentity !== undefined || context.mcpKimiIdentity !== undefined;
+    await sweepStaleJobs(
+      store,
+      paths,
+      isMcpCancel ? { repoId: repoIdentity.repoId, workspaceCwd: context.cwd } : undefined,
+    );
 
     const job = parsed.jobId
       ? store.getJob(parsed.jobId)
@@ -47,7 +53,7 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       (context.mcpCompanionIdentity === undefined || context.mcpKimiIdentity === undefined)) {
       throw new RuntimeError(
         "MCP_CANCEL_REQUIRES_BINDING",
-        `MCP job ${job.job_id} requires MCP job-control cancellation with recorded identities; use tasks/cancel or kimi_job_cancel.`,
+        `MCP job ${job.job_id} requires MCP job-control cancellation with recorded identities; use tasks/cancel or kimi_job (action: "cancel").`,
         "mcp.cancel",
       );
     }
@@ -69,27 +75,18 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       );
     }
 
-    // review_gate runs in a Stop hook. Pre-mark the row as cancelled before
-    // signaling so the subprocess close/result path cannot persist a failure
-    // over the user's intent; later updates are no-ops on a terminal row.
-    //
-    // The terminal row also makes waitForCancellation return before its own
-    // escalation, so this path always attempts SIGTERM after the pre-mark
-    // attempt, waits 1s, and sends SIGKILL only if a recorded process remains
-    // live. A pre-mark failure is rethrown only after termination is attempted.
-    if (job.command_type === "review_gate") {
+    if (job.command_type === ("review_gate" as string)) {
       let preMarkError: unknown;
       try {
         await withJobStore(paths, async (preMarkStore) => {
-          const reviewGateCancel = getManagedCommandConfig("review_gate").cancellation;
           await markJobCancelled(
             preMarkStore,
             paths,
             job,
-            reviewGateCancel.cancelledSummary,
+            "review_gate cancelled by user request.",
             new RuntimeError(
-              reviewGateCancel.errorCodes.cancelled,
-              reviewGateCancel.cancelMessages.default,
+              "REVIEW_GATE_CANCELLED",
+              "review_gate cancelled by user request.",
               "cancel.runtime",
             ),
           );

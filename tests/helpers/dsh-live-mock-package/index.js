@@ -19,10 +19,13 @@ class KimiLiveMockAdapter extends LlmAdapter {
   async * stream(options) {
     const hasToolResult = options.messages.some(message => message.role === 'tool');
     if (!hasToolResult) {
-      const args = JSON.stringify({
-        description: process.env.DSH_MOCK_DESCRIPTION ?? 'Kimi live smoke',
-        prompt: process.env.DSH_MOCK_PROMPT,
-      });
+      let args = process.env.DSH_MOCK_ARGS;
+      if (!args) {
+        const payload = {};
+        if (process.env.DSH_MOCK_MODE) payload.mode = process.env.DSH_MOCK_MODE;
+        if (process.env.DSH_MOCK_PROMPT) payload.prompt = process.env.DSH_MOCK_PROMPT;
+        args = JSON.stringify(payload);
+      }
       const name = process.env.DSH_MOCK_TOOL;
       yield { type: 'block-start', index: 0, blockType: 'tool-call' };
       yield { type: 'tool-call-delta', index: 0, id: ToolCallId('kimi-live-smoke'), name, argumentsDelta: args };

@@ -24,17 +24,26 @@ export async function assertMcpJobBinding(task: McpTaskRecord, job: JobRecord | 
 }
 
 export function mcpCompanionIdentity(task: McpTaskRecord): ProcessIdentity | null {
-  return parseIdentity(task.companion_identity, task.companion_pid, task, "companion");
+  return parseIdentity(task.companion_identity, task.companion_pid, task.task_id, task.operation_kind, "companion");
 }
 
 export function mcpKimiIdentity(task: McpTaskRecord, job: JobRecord): ProcessIdentity | null {
-  return parseIdentity(task.kimi_identity, job.kimi_pid, task, "Kimi");
+  return parseIdentity(task.kimi_identity, job.kimi_pid, task.task_id, task.operation_kind, "Kimi");
+}
+
+export function jobCompanionIdentity(job: JobRecord): ProcessIdentity | null {
+  return parseIdentity(job.companion_identity ?? null, job.pid, job.job_id, job.operation_kind ?? job.command_type, "companion");
+}
+
+export function jobKimiIdentity(job: JobRecord): ProcessIdentity | null {
+  return parseIdentity(job.kimi_identity ?? null, job.kimi_pid, job.job_id, job.operation_kind ?? job.command_type, "Kimi");
 }
 
 function parseIdentity(
   serialized: string | null,
   expectedPid: number | null,
-  task: McpTaskRecord,
+  jobId: string,
+  operationKind: string,
   label: string,
 ): ProcessIdentity | null {
   if (serialized === null) return null;
@@ -51,7 +60,10 @@ function parseIdentity(
     if (expectedPid !== null && expectedPid !== value.pid) throw new Error("identity and recorded PID differ");
     return value as ProcessIdentity;
   } catch (error) {
-    throw bindingError(task, `The ${label} process identity is invalid.`, error);
+    throw new RuntimeError("MCP_JOB_BINDING_FAILED", `The ${label} process identity is invalid.`, "mcp.binding", {
+      ...(error instanceof Error ? { cause: error } : {}),
+      details: { job_id: jobId, operation_kind: operationKind },
+    });
   }
 }
 

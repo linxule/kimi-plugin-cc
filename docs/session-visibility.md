@@ -1,34 +1,44 @@
 # Session visibility and native titles
 
-Plugin-created sessions live in Kimi Code's local session store and can appear in both Kimi Code Desktop and Node's `kimi web`. Keep Web available: the migration away from the old Python CLI does not retire Node Web.
+Plugin sessions live in Kimi Code's local session store and appear in both Kimi Code Desktop and `kimi web`.
 
-After a user-command run settles on a native-v2 session, the plugin sets the session's preview line (`lastPrompt`, shown in Kimi Code Desktop and `kimi web`) to that run's own request and notifies the shared index. The request is the question for ask (`/kimi:task`), the task for rescue (`/kimi:task --write`), the objective for pursue and swarm, and `Review target: <target>` for review and challenge (`/kimi:review` with or without `--challenge`), followed by `. Focus: <text>` when a focus was given. It is never the plugin's prefixed prompt and never the answer. A trailing `<referenced_sessions>` block from `--reference-session` is never part of it. The text is redacted using Kimi's credential-pattern rules and limited to 4,000 characters. This applies to fresh and resumed sessions and replaces any preview that differs; an empty value is never written. Print mode never writes `lastPrompt` itself, so without this sync Desktop and Web would hide a completed session as empty. Plugin releases before 3.0.0 wrote the full prefixed prompt there.
+After a native-v2 run finishes, the plugin writes the run's raw request to the session preview (`lastPrompt`) and marks the shared index dirty. The preview shows your question for `ask`, your task for `rescue`, and your objective for `pursue`, `swarm`, or `swarm_patch`. For `review` and `challenge`, it shows `Review target: <target>`, followed by `. Focus: <text>` when you supply a focus. The preview never contains the plugin's internal prompt prefix, the model's answer, or a trailing `<referenced_sessions>` block.
 
-One race remains: if you continue the same session in Desktop and that turn finishes after the plugin's run but before its sync, the plugin's sync overwrites that turn's preview. The preview is local display metadata, not a new model prompt.
+The plugin redacts credential patterns from the preview and caps it at 4,000 characters. This sync runs on both fresh and resumed sessions, updates any differing preview, and never writes an empty string. Because `kimi -p` never updates `lastPrompt` itself, Desktop and Web would show a blank preview without this step.
+
+One timing race remains if you continue the same session in Desktop while a plugin run finishes. If your Desktop turn finishes before the plugin writes its metadata sync, the plugin overwrites that turn's preview. The preview is local display metadata and never alters model prompts.
 
 ## Native generated titles
 
-New native-v2 sessions receive a readable fallback such as `Kimi Review: ...`. The prefix names the operation, not the command, so `/kimi:task` sessions start `Kimi Ask:` and `/kimi:task --write` sessions start `Kimi Rescue:`. The fallback is marked **replaceable**, so native title generation can replace it. Existing manual titles and already-generated titles remain unchanged. Older plugin titles marked custom are also preserved because they cannot always be distinguished from a human rename.
+New native-v2 sessions start with a fallback title such as `Kimi Ask: ...`, `Kimi Rescue: ...`, or `Kimi Review: ...`. The prefix names the operation rather than the calling host. The plugin marks the fallback replaceable (`titleKind: "replaceable"` and `isCustomTitle: false`) so Kimi's native title generator can replace it later. Existing manual titles and previously generated titles stay unchanged.
 
-In Kimi Code Desktop 1.0.1, open the session's **Rename** control and select **Gen Title** to generate a title from its conversation. Native automatic generation also runs after an eligible turn finishes in Desktop. Merely opening an already-completed plugin session does not trigger it. Kimi's native generator uses its managed login; unavailable authentication or backend errors can leave the fallback in place.
+In Kimi Code Desktop, open the session's Rename menu and select Gen Title to generate a title from the conversation. Desktop also generates a title automatically after an eligible interactive turn finishes. Opening an already completed plugin session in Desktop does not trigger title generation on its own.
 
-The plugin does not silently call the native title-generation endpoint. That endpoint resumes the session, activates agent services and fires session-start hooks; it is not a metadata-only API. Selecting Gen Title in Desktop is a deliberate native-app action. The plugin makes no extra title-generation provider calls and does not read OAuth credentials.
+The plugin never calls Kimi's native title-generation endpoint automatically. That endpoint resumes the agent, starts background services, and fires session hooks rather than updating metadata alone. By skipping it, the plugin makes no extra provider calls and never reads OAuth credentials.
 
 ## Repair existing sessions
 
-Use the companion bundled with the updated plugin (or a freshly built checkout). Run while the target Kimi sessions are idle:
+Run session repair while your target Kimi sessions are idle. Call `kimi_setup` with `action: "repair_sessions"` from any host (`apply: false` previews changes; add `apply: true` to write and `all: true` for all repositories). You can also run repair from your terminal:
 
 ```sh
-scripts/companion.sh repair-sessions
-scripts/companion.sh repair-sessions --apply
+scripts/companion.sh setup --repair-sessions
+scripts/companion.sh setup --repair-sessions --apply
 ```
 
-The first command previews changes in the current repository; the second applies them. Add `--all` to cover repositories in that host's plugin job store. Claude Code and Codex have separate stores, so run against each relevant host. For a checkout repairing an existing host, select its data parent explicitly with `KIMI_PLUGIN_CC_DATA`; do not point it at the inner `kimi-plugin-cc` directory.
+The compatibility alias `scripts/companion.sh repair-sessions [--apply] [--all]` works the same way.
 
-The command reports JSON status counts and job/session IDs, without prompt bodies. It only considers completed, proven native-v2 user-command sessions and excludes sessions with a running job in that store. It recovers the original prompt from a bounded invocation-log prefix and verifies its digest against the job record. It replaces a session's preview only when the preview is blank or is one of that session's own verified plugin prompts: equal after whitespace and redaction normalization, or a prefix of one in either direction where the shorter side has at least 40 characters. It then writes the newest job's raw request, the same text a settled run writes, and reports `would-replace-preview` (preview) or `preview-replaced` (apply). Previews written by you or by Desktop are left alone. When the raw request cannot be derived exactly from the verified prompt, repair only fills a blank preview, with that prompt. Job records, logs, journals and titles stay unchanged. No model is invoked.
+Plugin 3.1.0 stores jobs in one shared data directory: `~/.local/share/kimi-plugin-cc` (or `$XDG_DATA_HOME/kimi-plugin-cc`) on macOS and Linux, and `%LOCALAPPDATA%\kimi-plugin-cc` on Windows. One repair run covers jobs from Claude Code, Codex, Antigravity, DeepSeek Harness, Magpie, and the CLI together. To repair sessions from a custom or 3.0 per-host database, set `KIMI_PLUGIN_CC_DATA` to the parent directory that contains `kimi-plugin-cc/`.
 
-`unavailable-verified-prompt` means the source log is missing, unsafe, too large at its start, or does not match the recorded invocation. It is skipped rather than guessed from an answer summary. `state-changed` means a concurrent metadata change was detected: retry when idle. `index-failed` means metadata was saved but index notification failed: fix the directory problem and retry; an unchanged session is still re-indexed on apply.
+Repair opens the SQLite database in read-only mode without running migrations. It returns JSON status counts along with job and session IDs, omitting prompt bodies. It checks only completed, proven native-v2 sessions when no job is running in the store. For each session, it reads a bounded prefix of the invocation log and verifies the prompt hash against `prompt_digest`.
 
-The index may need its next reconciliation and the UI may need a list refresh before repaired sessions appear. A native session already loaded in another process may hold older in-memory metadata. Repair is not coordinated by a cross-process native lock; keep target sessions idle and reload their view afterward.
+Repair replaces a preview only when it is blank or matches one of that session's verified plugin prompts (including normalized 40-character prefixes). It writes the newest job's raw request and reports `would-replace-preview` in preview mode or `preview-replaced` when applied. It never overwrites custom previews written by you or Desktop. If repair cannot extract raw request text from a verified prompt, it fills only a blank preview. Job rows, logs, journals, and titles stay untouched, and repair never calls a model.
 
-Write-swarm sessions belong to their temporary worktree, which is removed after patch capture. Their global history can be visible while an original-project filter omits them. The repair does not rewrite their cwd or change their execution provenance.
+Repair can report 3 non-replacement status values:
+
+- `unavailable-verified-prompt` when the source log is missing, unsafe, oversized at the start, or fails digest verification
+- `state-changed` when another process edits session metadata during repair, so you should retry while idle
+- `index-failed` when repair saves metadata but cannot invalidate the index, so you should check directory permissions and retry
+
+Desktop and Web may need a list refresh before repaired previews appear. A session that is already open in another process can also hold older metadata in memory.
+
+Write-swarm sessions run inside a temporary Git worktree that the plugin removes after capturing the patch. Their history stays visible in global views even when a project filter hides the removed worktree path. Repair never rewrites their working directory or provenance.

@@ -8,7 +8,7 @@ import { resolvePluginPaths } from "../../runtime/paths.js";
 import { createMcpFixture, McpClient, modernMeta } from "../helpers/mcp.js";
 
 describe("MCP real-node hook enforcement", () => {
-  test("a mock-backed ask succeeds without a Node override or hook-check skip", async () => {
+  test("a mock-backed kimi_read ask succeeds without a Node override or hook-check skip", async () => {
     const fixture = await createMcpFixture("mcp-hook-success");
     fixture.env.KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH = path.join(fixture.data, "invocation.json");
     let client: McpClient | undefined;
@@ -16,17 +16,12 @@ describe("MCP real-node hook enforcement", () => {
       expect(fixture.env.KIMI_PLUGIN_CC_NODE_BIN).toBeUndefined();
       expect(fixture.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK).toBeUndefined();
       client = await McpClient.legacy(fixture);
-      const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "Prove the hook is active", fresh: true },
+      const result = await client.request("tools/call", {
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "Prove the hook is active" },
       });
-      const jobId = started.structuredContent.job_id as string;
-      let result: any;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        result = await client.request("tools/call", { name: "kimi_job_result", arguments: { job_id: jobId } });
-        if (!result.isError) break;
-        await Bun.sleep(100);
-      }
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent.status).toBe("completed");
       expect(result.content[0].text).toContain("Ask answer from mock Kimi.");
       expect(existsSync(fixture.env.KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH)).toBe(true);
     } finally {
@@ -45,8 +40,8 @@ describe("MCP real-node hook enforcement", () => {
     try {
       client = await McpClient.modern(fixture);
       const started = await client.request("tools/call", {
-        name: "kimi_ask",
-        arguments: { workspace: fixture.repo, prompt: "This must not spawn", fresh: true },
+        name: "kimi_read",
+        arguments: { workspace: fixture.repo, mode: "ask", prompt: "This must not spawn" },
         _meta: modernMeta(),
       });
       expect(started.resultType).toBe("complete");

@@ -45,7 +45,7 @@ async function fixture() {
     const log = path.join(paths.logsDir, `${id}.jsonl`);
     const row = {
       job_id: id, repo_id: repoId, command_type: "ask", operation_kind: "ask", status: "completed", kimi_session_id: sessionId,
-      cwd, kimi_version: "2.0.0", intended_engine: "native-v2", observed_engine: "native-v2", stream_log_path: log,
+      cwd, kimi_version: "2.8.0", intended_engine: "native-v2", observed_engine: "native-v2", stream_log_path: log,
       prompt_digest: digestPrompt(prompt), updated_at: "2026-09-18T00:00:00Z", ...overrides,
     };
     await writeFile(log, JSON.stringify({ direction: "meta", message: { commandType: "ask" } }) + "\n" + JSON.stringify({

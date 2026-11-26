@@ -1,48 +1,21 @@
 // Probe the installed kimi-code CLI version and check it against the
-// range kimi-plugin-cc has been tested against.
-//
-// Setup probes the installed command and warns outside the tested range;
-// model jobs probe the exact command + prefix tuple to build a fail-closed
-// execution plan before spawn. The latter is the durable engine-provenance
-// gate: an operation outside its certified engine/version range is refused
-// rather than guessed.
-//
-// What this module is NOT:
-//
-//   - Not, by itself, the policy decision. setup still warns; the execution-
-//     plan layer (`kimi-engine.ts`) decides whether an exact result is certified.
-//   - Not a license to infer historical versions. Old job rows remain unknown
-//     unless their saved logs contain positive evidence.
+// >= 2.8.0 rolling compatibility window.
 
 import { spawn } from "node:child_process";
 
-import { resolveKimiRelease } from "./kimi-releases.js";
+import { KIMI_V2_RELEASES, resolveKimiRelease } from "./kimi-releases.js";
 
 const KIMI_VERSION_PROBE_TIMEOUT_MS = 5_000;
 
-/**
- * Legacy-v1 kimi-code minors tested for plugin use. Membership is by
- * `{major, minor}`; every patch within a listed minor is accepted.
- *
- * The table is 0.1 through 0.41 and never gains 0.42, which removed legacy v1.
- * Exact native-v2 certification lives in `kimi-releases.ts` (rows) and
- * `kimi-engine.ts` (per operation).
- */
-const LEGACY_V1_LAST_MINOR = 41;
-export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }> = Array.from(
-  { length: LEGACY_V1_LAST_MINOR },
-  (_, index) => ({ major: 0, minor: index + 1 }),
-);
+export const KIMI_MINIMUM_CERTIFIED_VERSION = KIMI_V2_RELEASES[0]!.version;
 
 export interface KimiVersionProbeOk {
   readonly kind: "ok";
-  /** Verbatim version string from `kimi --version` (e.g. `"0.2.0"`). */
+  /** Verbatim version string from `kimi --version` (e.g. `"2.8.0"`). */
   readonly version: string;
   readonly major: number;
   readonly minor: number;
   readonly patch: number;
-  /** True when {major, minor} appears in KIMI_TESTED_MINORS. */
-  readonly inTestedRange: boolean;
 }
 
 export interface KimiVersionProbeFailed {
@@ -55,15 +28,11 @@ export type KimiVersionProbeResult = KimiVersionProbeOk | KimiVersionProbeFailed
 
 /**
  * Spawn `<kimi-bin> --version` and parse the output. Never throws;
- * failures resolve to `{kind: "failed", reason}` so callers can decide
- * the policy. The kimi binary path defaults to bare `kimi` (PATH
- * lookup); callers that need an explicit absolute path should pass it.
+ * failures resolve to `{kind: "failed", reason}`.
  */
 export async function probeKimiVersion(options: {
   kimiBin?: string;
-  /** Prefix argv that identifies the same wrapped CLI used for the real spawn. */
   prefixArgs?: readonly string[];
-  /** Working directory used by the real spawn; relevant for relative wrappers. */
   cwd?: string;
   env: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -143,21 +112,14 @@ export async function probeKimiVersion(options: {
         major: parsed.major,
         minor: parsed.minor,
         patch: parsed.patch,
-        inTestedRange: isInTestedRange(parsed.major, parsed.minor),
       });
     });
   });
 }
 
 /**
- * Parse a `kimi --version` stdout into a structured version. Accepts
- * bare semver (`0.2.0`), `v`-prefixed (`v0.2.0`), and trailing
- * pre-release / build metadata (`0.2.0-beta.1`, `0.2.0+sha.abc`). The
- * major/minor/patch numbers are the leading three components only —
- * pre-release / build metadata is preserved in `raw` but doesn't
- * affect the tested-range check.
- *
- * Returns undefined when the first nonempty line doesn't look like a version.
+ * Parse `kimi --version` stdout into a structured version. Accepts bare semver
+ * (`2.8.0`), `v`-prefixed (`v2.8.0`), and trailing pre-release/build metadata.
  */
 export function parseVersionLine(stdout: string): {
   raw: string;
@@ -178,24 +140,6 @@ export function parseVersionLine(stdout: string): {
   };
 }
 
-export function isInTestedRange(major: number, minor: number): boolean {
-  return KIMI_TESTED_MINORS.some((entry) => entry.major === major && entry.minor === minor);
-}
-
-/**
- * The newest `{major, minor}` in the legacy-v1 tested set. Native-v2-certified
- * versions lie outside this table. Set membership already warns for anything
- * outside the legacy range; this upper bound lets the warning distinguish a
- * newer, unverified legacy release from a below/gap version.
- */
-export function maxTestedMinor(): { major: number; minor: number } {
-  return KIMI_TESTED_MINORS.reduce((max, entry) =>
-    entry.major > max.major || (entry.major === max.major && entry.minor > max.minor)
-      ? entry
-      : max,
-  );
-}
-
 function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map((part) => Number.parseInt(part, 10));
   const pb = b.split(".").map((part) => Number.parseInt(part, 10));
@@ -207,42 +151,41 @@ function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Format a user-facing warning line for an out-of-range version probe.
- * Setup itself may complete. An uncertified 2.x runs read-only operations
- * with a warning; everything else refuses at the execution-plan gate until the
- * operator installs or selects a certified binary or updates the plugin.
- * `nativeV2Certified` is the exact native-v2 table; both engines are named so
- * the newest certified version is not misreported as the legacy-v1 bound.
+ * Format a user-facing warning line when the installed kimi-code version is
+ * outside the certified rolling window (>= 2.8.0).
  */
 export function formatVersionOutOfRangeWarning(
   probe: KimiVersionProbeOk,
   pluginVersion: string,
   nativeV2Certified: readonly string[] = [],
+  env: Readonly<NodeJS.ProcessEnv> = {},
 ): string {
-  const tested = KIMI_TESTED_MINORS.map((entry) => `${entry.major}.${entry.minor}.x`).join(", ");
-  const max = maxTestedMinor();
-  const newestNative = [...nativeV2Certified].sort(compareVersions).at(-1);
+  const newestNative = [...nativeV2Certified].sort(compareVersions).at(-1) ?? KIMI_MINIMUM_CERTIFIED_VERSION;
   const probeRaw = `${probe.major}.${probe.minor}.${probe.patch}`;
-  const aboveMax = newestNative !== undefined
-    ? compareVersions(probeRaw, newestNative) > 0
-    : probe.major > max.major || (probe.major === max.major && probe.minor > max.minor);
+  const aboveMax = compareVersions(probeRaw, newestNative) > 0;
+  const belowFloor = compareVersions(probeRaw, KIMI_MINIMUM_CERTIFIED_VERSION) < 0;
   const certified = nativeV2Certified.length > 0
-    ? `legacy-v1 ${tested}; native-v2 exact ${nativeV2Certified.join(", ")}`
-    : tested;
+    ? nativeV2Certified.join(", ")
+    : KIMI_MINIMUM_CERTIFIED_VERSION;
+  const strict = env.KIMI_PLUGIN_CC_STRICT_VERSIONS === "1";
+  const resolution = resolveKimiRelease(probe.version, { strict });
   const lines = [
-    `WARNING: kimi-code version ${probe.version} is outside the versions kimi-plugin-cc ${pluginVersion} certifies (${certified}).`,
+    `WARNING: kimi-code version ${probe.version} is outside the rolling compatibility window kimi-plugin-cc ${pluginVersion} certifies (${certified}).`,
   ];
   if (aboveMax) {
-    // Commonly out-of-band auto-upgrade drift past the last certification.
     lines.push(
-      `  This is NEWER than the newest certified version (${newestNative ?? `${max.major}.${max.minor}.x`}) and is not yet certified for model execution.`,
+      `  This is NEWER than the newest certified version (${newestNative}) and is not yet certified for write/swarm execution.`,
+    );
+  } else if (belowFloor) {
+    lines.push(
+      `  This is OLDER than the supported floor (${KIMI_MINIMUM_CERTIFIED_VERSION}); legacy kimi-code releases are no longer supported.`,
     );
   }
   lines.push(
-    resolveKimiRelease(probeRaw)?.certified === false
-      ? `  Read-only commands (ask, review, challenge, review gate) run on it with a warning; rescue, pursue and swarm refuse until the version is certified.`
-      : `  Setup can complete, but model-spawning commands will refuse before Kimi starts rather than run an unreviewed engine/version route.`,
-    `  Run setup --install-kimi to give the plugin its own copy of the newest certified kimi-code, update kimi-plugin-cc to a release that certifies this version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary.`,
+    resolution?.certified === false
+      ? `  Read-only operations (ask, review, challenge) run on it with a warning; rescue, pursue and swarm refuse until this version is certified.`
+      : `  Setup can complete, but model-spawning operations will refuse before Kimi starts until a certified >= ${KIMI_MINIMUM_CERTIFIED_VERSION} binary is selected.`,
+    `  Run kimi_setup({ action: "install_kimi" }) or \`companion.sh setup --install-kimi\` to install the newest certified kimi-code, or update kimi-plugin-cc.`,
     `  KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production compatibility override.`,
   );
   return lines.join("\n");

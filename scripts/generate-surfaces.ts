@@ -1,23 +1,21 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { chmod, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  CANONICAL_SKILL_FILES,
+  CANONICAL_SKILL_NAME,
   CLAUDE_SURFACE_HASHES,
   CODEX_MARKETPLACE,
   CODEX_MCP_CONFIG,
   CODEX_PLUGIN_MANIFEST,
   CODEX_PLUGIN_SUBDIR,
-  CODEX_SKILLS,
   DSH_BUNDLE_PATCH,
   DSH_DISCOVERY_INDEX,
-  DSH_PLUGIN_MANIFEST,
-  DSH_PLUGIN_SUBDIR,
-  DSH_README,
-  type CodexSkillSpec,
 } from "./surface-registry.js";
 
 export interface GeneratedFile {
@@ -30,11 +28,12 @@ export interface SurfaceCheckResult {
   messages: string[];
 }
 
+const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 // Shell entrypoints the Codex plugin needs at runtime. Codex copies the plugin
-// root to its install cache and forbids ../ escapes, so these (and dist/**) must
-// be mirrored INSIDE the subfolder. Dev-only scripts (surface-registry.ts,
-// generate-surfaces.ts) are intentionally NOT mirrored.
-const RUNTIME_SHELL_SCRIPTS = ["scripts/companion.sh", "scripts/review-gate-hook.sh"];
+// root to its install cache and forbids ../ escapes, so companion.sh and dist/**
+// must be mirrored INSIDE plugins/kimi-codex/.
+const RUNTIME_SHELL_SCRIPTS = ["scripts/companion.sh"];
 
 export async function verifyClaudeSurfaceHashes(repoRoot: string): Promise<SurfaceCheckResult> {
   const messages: string[] = [];
@@ -61,10 +60,9 @@ export async function verifyClaudeSurfaceHashes(repoRoot: string): Promise<Surfa
   };
 }
 
-export function generatedCodexSurfaceFiles(): GeneratedFile[] {
+export function generatedCodexSurfaceFiles(repoRoot = DEFAULT_REPO_ROOT): GeneratedFile[] {
   const files: GeneratedFile[] = [
     {
-      // Codex plugin manifest lives INSIDE the self-contained subfolder root.
       path: `${CODEX_PLUGIN_SUBDIR}/.codex-plugin/plugin.json`,
       content: `${JSON.stringify(CODEX_PLUGIN_MANIFEST, null, 2)}\n`,
     },
@@ -73,21 +71,15 @@ export function generatedCodexSurfaceFiles(): GeneratedFile[] {
       content: `${JSON.stringify(CODEX_MCP_CONFIG, null, 2)}\n`,
     },
     {
-      // The repo-scope Codex marketplace stays at the repo root and POINTS INTO
-      // the subfolder via source.path; it is not part of the plugin payload.
       path: ".agents/plugins/marketplace.json",
       content: `${JSON.stringify(CODEX_MARKETPLACE, null, 2)}\n`,
     },
   ];
 
-  for (const skill of CODEX_SKILLS) {
+  for (const relPath of CANONICAL_SKILL_FILES) {
     files.push({
-      path: `${CODEX_PLUGIN_SUBDIR}/skills/${skill.name}/SKILL.md`,
-      content: renderSkillMarkdown(skill),
-    });
-    files.push({
-      path: `${CODEX_PLUGIN_SUBDIR}/skills/${skill.name}/agents/openai.yaml`,
-      content: renderOpenAiYaml(skill),
+      path: `${CODEX_PLUGIN_SUBDIR}/${relPath}`,
+      content: readFileSync(path.join(repoRoot, relPath), "utf8"),
     });
   }
 
@@ -97,16 +89,8 @@ export function generatedCodexSurfaceFiles(): GeneratedFile[] {
 export function generatedDshSurfaceFiles(): GeneratedFile[] {
   return [
     {
-      path: `${DSH_PLUGIN_SUBDIR}/package.json`,
-      content: `${JSON.stringify(DSH_PLUGIN_MANIFEST, null, 2)}\n`,
-    },
-    {
-      path: `${DSH_PLUGIN_SUBDIR}/cordis.patch.yml`,
+      path: "cordis.patch.yml",
       content: DSH_BUNDLE_PATCH,
-    },
-    {
-      path: `${DSH_PLUGIN_SUBDIR}/README.md`,
-      content: DSH_README,
     },
     {
       path: "dsh/index.json",
@@ -119,13 +103,8 @@ export async function checkGeneratedDshSurfaces(repoRoot: string): Promise<Surfa
   return checkGeneratedContent(repoRoot, generatedDshSurfaceFiles());
 }
 
-export async function checkGeneratedDshTextOrphans(repoRoot: string): Promise<SurfaceCheckResult> {
-  const expected = [...generatedDshSurfaceFiles().map((file) => file.path), `${DSH_PLUGIN_SUBDIR}/LICENSE`];
-  return checkTextOrphans(repoRoot, DSH_PLUGIN_SUBDIR, expected, []);
-}
-
 export async function checkGeneratedCodexSurfaces(repoRoot: string): Promise<SurfaceCheckResult> {
-  return checkGeneratedContent(repoRoot, generatedCodexSurfaceFiles());
+  return checkGeneratedContent(repoRoot, generatedCodexSurfaceFiles(repoRoot));
 }
 
 async function checkGeneratedContent(repoRoot: string, files: readonly GeneratedFile[]): Promise<SurfaceCheckResult> {
@@ -166,15 +145,15 @@ async function checkTextOrphans(
   return { ok: messages.length === 0, messages };
 }
 
-// Repo-relative source paths the subfolder must mirror byte-for-byte:
-// the two shell entrypoints plus every file under root dist/.
+// Repo-relative source paths the Codex subfolder must mirror byte-for-byte:
+// scripts/companion.sh plus every file under root dist/.
 async function runtimeMirrorSourceRelPaths(repoRoot: string): Promise<string[]> {
   const distFiles = await listFilesRecursive(repoRoot, "dist");
   return [...RUNTIME_SHELL_SCRIPTS, ...distFiles].sort();
 }
 
-// Verify the bundled runtime mirror (scripts + dist) under the subfolder matches
-// the freshly built root, AND that the subfolder holds no orphaned runtime files.
+// Verify the bundled runtime mirror (scripts + dist) under plugins/kimi-codex
+// matches the freshly built root, AND that it holds no orphaned runtime files.
 export async function checkRuntimeMirror(
   repoRoot: string,
   pluginSubdir = CODEX_PLUGIN_SUBDIR,
@@ -219,8 +198,6 @@ export async function checkRuntimeMirror(
     }
   }
 
-  // Orphan detection: any file under the subfolder's mirrored runtime roots that
-  // is NOT a current mirror target is stale (e.g. a renamed/removed dist chunk).
   for (const sub of ["dist", "scripts"]) {
     const subfolderFiles = await listFilesRecursive(repoRoot, path.join(pluginSubdir, sub));
     for (const rel of subfolderFiles) {
@@ -235,34 +212,27 @@ export async function checkRuntimeMirror(
   return { ok: messages.length === 0, messages };
 }
 
-// Orphan detection for generated TEXT surfaces under the subfolder, including
-// root-level launch configs and renamed/removed skills.
 export async function checkGeneratedTextOrphans(repoRoot: string): Promise<SurfaceCheckResult> {
-  const expected = generatedCodexSurfaceFiles().map((file) => file.path);
+  const expected = generatedCodexSurfaceFiles(repoRoot).map((file) => file.path);
   return checkTextOrphans(repoRoot, CODEX_PLUGIN_SUBDIR, expected, [".codex-plugin", "skills"]);
 }
 
 export async function writeGeneratedCodexSurfaces(repoRoot: string): Promise<void> {
   await assertClaudeSurfaceGate(repoRoot, "Codex");
   await pruneStaleSkillDirs(repoRoot);
-  await writeGeneratedFiles(repoRoot, generatedCodexSurfaceFiles());
+  await writeGeneratedFiles(repoRoot, generatedCodexSurfaceFiles(repoRoot));
   await mirrorRuntimePayload(repoRoot);
 }
 
 export async function writeGeneratedDshSurfaces(repoRoot: string): Promise<void> {
   await assertClaudeSurfaceGate(repoRoot, "DSH");
   await writeGeneratedFiles(repoRoot, generatedDshSurfaceFiles());
-  await mirrorRuntimePayload(repoRoot, DSH_PLUGIN_SUBDIR);
-  const license = await readFile(path.join(repoRoot, "LICENSE"));
-  const target = path.join(repoRoot, DSH_PLUGIN_SUBDIR, "LICENSE");
-  await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, license);
 }
 
 async function assertClaudeSurfaceGate(repoRoot: string, host: string): Promise<void> {
   const result = await verifyClaudeSurfaceHashes(repoRoot);
   if (!result.ok) {
-    throw new Error([`Refusing to write ${host} surfaces because the Claude surface gate failed.`, ...result.messages].join("\n"));
+    throw new Error([`Refusing to write ${host} surfaces because the root surface gate failed.`, ...result.messages].join("\n"));
   }
 }
 
@@ -296,13 +266,12 @@ async function mirrorRuntimePayload(repoRoot: string, pluginSubdir = CODEX_PLUGI
     const data = await readFile(src);
     await mkdir(path.dirname(dest), { recursive: true });
     await writeFile(dest, data);
-    await chmod(dest, rel.endsWith(".sh") ? 0o755 : 0o644);
+    await chmod(dest, rel.endsWith(".sh") || rel === "dist/companion.js" ? 0o755 : 0o644);
   }
 }
 
 async function pruneStaleSkillDirs(repoRoot: string): Promise<void> {
   const skillsRoot = path.join(repoRoot, CODEX_PLUGIN_SUBDIR, "skills");
-  const valid = new Set(CODEX_SKILLS.map((skill) => skill.name));
   let entries;
   try {
     entries = await readdir(skillsRoot, { withFileTypes: true });
@@ -310,14 +279,12 @@ async function pruneStaleSkillDirs(repoRoot: string): Promise<void> {
     return;
   }
   for (const entry of entries) {
-    if (entry.isDirectory() && !valid.has(entry.name)) {
-      await rm(path.join(skillsRoot, entry.name), { recursive: true });
+    if (entry.name !== CANONICAL_SKILL_NAME) {
+      await rm(path.join(skillsRoot, entry.name), { recursive: true, force: true });
     }
   }
 }
 
-// List files under repoRoot/<subdir> as repo-relative POSIX paths. Returns [] if
-// the directory does not exist.
 async function listFilesRecursive(repoRoot: string, subdir: string): Promise<string[]> {
   const base = path.join(repoRoot, subdir);
   let rels: string[];
@@ -348,70 +315,16 @@ export async function checkAllSurfaces(repoRoot: string): Promise<SurfaceCheckRe
   const textOrphans = await checkGeneratedTextOrphans(repoRoot);
   const runtime = await checkRuntimeMirror(repoRoot);
   const dsh = await checkGeneratedDshSurfaces(repoRoot);
-  const dshOrphans = await checkGeneratedDshTextOrphans(repoRoot);
-  const dshRuntime = await checkRuntimeMirror(repoRoot, DSH_PLUGIN_SUBDIR);
-  const dshLicense = await readFile(path.join(repoRoot, DSH_PLUGIN_SUBDIR, "LICENSE")).catch(() => null);
-  const rootLicense = await readFile(path.join(repoRoot, "LICENSE"));
-  const licenseMessages = dshLicense?.equals(rootLicense) ? [] : [`${DSH_PLUGIN_SUBDIR}/LICENSE: bundled license is missing or out of date`];
   return {
-    ok: claude.ok && codex.ok && textOrphans.ok && runtime.ok && dsh.ok && dshOrphans.ok && dshRuntime.ok && licenseMessages.length === 0,
+    ok: claude.ok && codex.ok && textOrphans.ok && runtime.ok && dsh.ok,
     messages: [
-      ...claude.messages.map((message) => `Claude: ${message}`),
+      ...claude.messages.map((message) => `Root: ${message}`),
       ...codex.messages.map((message) => `Codex: ${message}`),
       ...textOrphans.messages.map((message) => `Codex: ${message}`),
       ...runtime.messages.map((message) => `Codex runtime: ${message}`),
       ...dsh.messages.map((message) => `DSH: ${message}`),
-      ...dshOrphans.messages.map((message) => `DSH: ${message}`),
-      ...dshRuntime.messages.map((message) => `DSH runtime: ${message}`),
-      ...licenseMessages.map((message) => `DSH: ${message}`),
     ],
   };
-}
-
-function renderSkillMarkdown(skill: CodexSkillSpec): string {
-  return [
-    "---",
-    `name: ${skill.name}`,
-    `description: ${yamlDoubleQuote(skill.description)}`,
-    "---",
-    "",
-    `# ${skill.title}`,
-    "",
-    "Forward this request to the local Kimi Code companion runtime by shell. Do not use MCP for this skill.",
-    "",
-    "## Invocation",
-    "",
-    "- Resolve the plugin root: prefer `$PLUGIN_ROOT` if the host sets it; otherwise use the directory that CONTAINS the `skills/` directory (i.e. two levels up from this `SKILL.md`).",
-    "- Sanity check: `<plugin-root>/scripts/companion.sh` must exist — it is the bundled entrypoint that resolves Node and runs the compiled runtime from `<plugin-root>/dist/`.",
-    "- Launch the shell command from the user's current workspace directory so `scripts/companion.sh` captures the intended workspace cwd.",
-    `- Run: \`PLUGIN_ROOT=\"<plugin-root>\" \"<plugin-root>/scripts/companion.sh\" ${skill.command} <args>\``,
-    "- Data directories: standard cache installs verify shared `CLAUDE_PLUGIN_DATA`/`PLUGIN_DATA` against this package's own host-specific directory. On `PLUGIN_DATA_CONFLICT`, surface the error; do not automatically choose a new store or copy data. An explicit absolute `KIMI_PLUGIN_CC_DATA` selects a custom data parent (the runtime appends `kimi-plugin-cc/`). Checkouts retain unambiguous legacy variables and the Codex fallback under `CODEX_HOME` or `HOME`; a launch with no home needs an explicit data root.",
-    "",
-    "## Arguments",
-    "",
-    `Pass through: \`${skill.argumentSummary}\``,
-    "",
-    "## Handling",
-    "",
-    ...skill.guidance.map((line) => `- ${line}`),
-    "",
-  ].join("\n");
-}
-
-function renderOpenAiYaml(skill: CodexSkillSpec): string {
-  return [
-    "interface:",
-    `  display_name: ${yamlDoubleQuote(skill.title)}`,
-    `  short_description: ${yamlDoubleQuote(skill.shortDescription)}`,
-    `  default_prompt: ${yamlDoubleQuote(skill.defaultPrompt)}`,
-    "policy:",
-    `  allow_implicit_invocation: ${skill.implicit ? "true" : "false"}`,
-    "",
-  ].join("\n");
-}
-
-function yamlDoubleQuote(value: string): string {
-  return JSON.stringify(value);
 }
 
 function formatError(error: unknown): string {

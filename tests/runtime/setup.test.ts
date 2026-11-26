@@ -34,7 +34,7 @@ import { parse as parseToml } from "../../runtime/vendor/smol-toml/parse.js";
 import type { CommandContext } from "../../runtime/types.js";
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..");
-const hookScriptPath = path.join(repoRoot, "dist", "hooks", "approval-hook.js");
+const bundledHookSourcePath = path.join(repoRoot, "dist", "hooks", "approval-hook.js");
 
 let scratch: string;
 
@@ -46,7 +46,9 @@ afterAll(async () => {
   if (scratch) await rm(scratch, { recursive: true, force: true });
 });
 
-async function makeCase(name: string): Promise<{ env: NodeJS.ProcessEnv; configPath: string; pluginData: string }> {
+async function makeCase(
+  name: string,
+): Promise<{ env: NodeJS.ProcessEnv; configPath: string; pluginData: string; publishedHookPath: string }> {
   const kimiCodeHome = path.join(scratch, name, "kimi-code-home");
   const pluginData = path.join(scratch, name, "plugin-data");
   await mkdir(kimiCodeHome, { recursive: true });
@@ -55,10 +57,11 @@ async function makeCase(name: string): Promise<{ env: NodeJS.ProcessEnv; configP
     env: {
       ...process.env,
       KIMI_CODE_HOME: kimiCodeHome,
-      CLAUDE_PLUGIN_DATA: pluginData,
+      KIMI_PLUGIN_CC_DATA: pluginData,
     },
     configPath: path.join(kimiCodeHome, "config.toml"),
     pluginData,
+    publishedHookPath: path.join(pluginData, "kimi-plugin-cc", "hook", "approval-hook.js"),
   };
 }
 
@@ -78,20 +81,29 @@ describe("setup managed-block installer", () => {
     expect(markerCommentLines(input).size).toBe(0);
     expect(performance.now() - start).toBeLessThan(1500);
   });
-  test("install writes the block on a fresh config and probe passes", async () => {
-    const { env, configPath } = await makeCase("install-fresh");
+  test("install publishes bundled hook to <pluginRoot>/hook/approval-hook.js, writes canonical block, and probe passes", async () => {
+    const { env, configPath, publishedHookPath } = await makeCase("install-fresh");
     const result = await runSetup([], makeContext(env));
 
     expect(result.action).toBe("install");
     expect(result.blockWritten).toBe(true);
     expect(result.probe).toBe("ok");
-    expect(result.hookScriptPath).toBe(hookScriptPath);
+    expect(result.hookScriptPath).toBe(publishedHookPath);
+
+    // Bundled hook script and ESM package.json were atomically published under pluginRoot/hook/.
+    expect(await readFile(publishedHookPath, "utf8")).toBe(await readFile(bundledHookSourcePath, "utf8"));
+    expect(await readFile(path.join(path.dirname(publishedHookPath), "package.json"), "utf8")).toBe(
+      '{"type":"module"}\n',
+    );
+    if (process.platform !== "win32") {
+      expect((await stat(path.dirname(publishedHookPath))).mode & 0o777).toBe(0o700);
+    }
 
     const contents = await readFile(configPath, "utf8");
-    expect(contents).toContain("=== BEGIN kimi-plugin-cc-managed");
-    expect(contents).toContain("=== END kimi-plugin-cc-managed");
+    expect(contents).toContain("=== BEGIN kimi-plugin-cc-managed (v");
+    expect(contents).toContain("=== END kimi-plugin-cc-managed ===");
     expect(contents).toContain('event = "PreToolUse"');
-    expect(contents).toContain("approval-hook.js");
+    expect(contents).toContain(publishedHookPath);
     // Empty matcher is critical — `new RegExp("*")` in kimi-code would
     // throw and silently disable the hook. We must NOT write a matcher
     // line under any circumstance.
@@ -133,7 +145,7 @@ describe("setup managed-block installer", () => {
   });
 
   test("install refreshes a stale block in place when the hook path changed", async () => {
-    const { env, configPath } = await makeCase("install-refresh");
+    const { env, configPath, publishedHookPath } = await makeCase("install-refresh");
     const stale = [
       "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===",
       "[[hooks]]",
@@ -148,7 +160,7 @@ describe("setup managed-block installer", () => {
     const result = await runSetup([], makeContext(env));
     expect(result.blockWritten).toBe(true);
     const contents = await readFile(configPath, "utf8");
-    expect(contents).toContain(hookScriptPath);
+    expect(contents).toContain(publishedHookPath);
     expect(contents).not.toContain("/stale/path/approval-hook.js");
   });
 
@@ -169,63 +181,69 @@ describe("setup managed-block installer", () => {
     expect(result.warnings.join("\n")).toContain("orphaned managed marker");
   });
 
-  test("install repairs a partially rewritten hooks array without touching another host", async () => {
-    const { env, configPath } = await makeCase("partial-hooks-rewrite");
-    const foreign = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
-    const own = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+  test("install repairs a partially rewritten hooks array by pruning stale plugin tables and preserving user settings", async () => {
+    const { env, configPath, publishedHookPath } = await makeCase("partial-hooks-rewrite");
+    const legacyClaude = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
+    const legacyCodex = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
+    const userHook = "/opt/acme/my-own-hook.js";
     const seeded = [
-      "[[hooks]]", 'event = "PreToolUse"', `command = "'${process.execPath}' '${foreign}'"`, "timeout = 15", "",
-      "[[hooks]]", 'event = "PreToolUse"', `command = "'${process.execPath}' '${own}'"`, "timeout = 15",
+      "[[hooks]]", 'event = "PreToolUse"', `command = "'/usr/bin/node' '${userHook}'"`, "timeout = 20", "",
+      "[[hooks]]", 'event = "PreToolUse"', `command = "'${process.execPath}' '${legacyClaude}'"`, "timeout = 15", "",
+      "[[hooks]]", 'event = "PreToolUse"', `command = "'${process.execPath}' '${legacyCodex}'"`, "timeout = 15",
       "# === END kimi-plugin-cc-managed:codex ===", "", "[user_settings]", "keep = true", "",
     ].join("\n");
     await writeFile(configPath, seeded, "utf8");
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-    const result = await runSetup([], makeContext(codexEnv));
+    const result = await runSetup([], makeContext(env));
     const after = await readFile(configPath, "utf8");
     expect(result.probe).toBe("ok");
-    expect(after).toContain(`command = "'${process.execPath}' '${foreign}'"`);
-    expect(after).not.toContain(own);
+    expect(after).toContain(`command = "'/usr/bin/node' '${userHook}'"`);
+    expect(after).toContain(publishedHookPath);
+    expect(after).not.toContain(legacyClaude);
+    expect(after).not.toContain(legacyCodex);
     expect(after).toContain("[user_settings]\nkeep = true");
-    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
   });
 
-  test("mismatched host markers are repaired together without consuming content", async () => {
+  test("mismatched legacy host markers are repaired together without consuming content", async () => {
     const { env, configPath } = await makeCase("mismatched-host-markers");
     const seeded = '# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\nuser_setting = true\n# === END kimi-plugin-cc-managed:codex ===\n';
     await writeFile(configPath, seeded, "utf8");
-    const result = await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }));
+    const result = await runSetup([], makeContext(env));
     const after = await readFile(configPath, "utf8");
     expect(result.probe).toBe("ok");
     expect(after).toContain("user_setting = true");
     expect(after).not.toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-    expect((await runSetup(["--check"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }))).probe).toBe("ok");
+    expect(after).not.toContain("END kimi-plugin-cc-managed:codex");
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
   });
 
-  test.each(["claude-code", "codex"])("%s repairs a partially rewritten two-host hooks array", async (host) => {
-    const { env, configPath } = await makeCase(`mismatched-hooks-${host}`);
+  test("install repairs a partially rewritten two-host hooks array into one canonical block", async () => {
+    const { env, configPath, publishedHookPath } = await makeCase("mismatched-hooks-two-host");
     const claude = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
     const codex = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
     const table = (hook: string) => `[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${hook}'"\ntimeout = 15\n`;
     const seeded = `# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\n${table(claude)}\n${table(codex)}# === END kimi-plugin-cc-managed:codex ===\n`;
     await writeFile(configPath, seeded, "utf8");
-    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: host });
+    const context = makeContext(env);
     expect((await runSetup([], context)).probe).toBe("ok");
     const after = await readFile(configPath, "utf8");
-    expect(after).toContain(host === "codex" ? table(claude) : table(codex));
-    expect(after).not.toContain(host === "codex" ? codex : claude);
+    expect(after).toContain(publishedHookPath);
+    expect(after).not.toContain(claude);
+    expect(after).not.toContain(codex);
+    expect(after.match(/\[\[hooks\]\]/g)).toHaveLength(1);
     expect((await runSetup(["--check"], context)).probe).toBe("ok");
   });
 
-  test("orphan repair never rebinds quoted trailing fields onto another host's hook", async () => {
+  test("orphan repair never rebinds quoted trailing fields onto a preceding user hook", async () => {
     const { env, configPath } = await makeCase("orphan-foreign-matcher");
-    const claude = "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/2.2.1/dist/hooks/approval-hook.js";
+    const userHook = "/opt/acme/user-hook.js";
     const codex = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
-    const seeded = `# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${claude}'"\ntimeout = 15\n\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${codex}'"\ntimeout = 15\n# === END kimi-plugin-cc-managed:codex ===\n\n"matcher" = "*"\n`;
+    const seeded = `# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.1) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'/usr/bin/node' '${userHook}'"\ntimeout = 15\n\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${codex}'"\ntimeout = 15\n# === END kimi-plugin-cc-managed:codex ===\n\n"matcher" = "*"\n`;
     await writeFile(configPath, seeded, "utf8");
-    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    const context = makeContext(env);
     expect((await runSetup([], context)).probe).toBe("ok");
     const hooks = parseToml(await readFile(configPath, "utf8")).hooks as Array<Record<string, unknown>>;
-    expect(hooks.find((hook) => String(hook.command).includes(claude))?.matcher).toBeUndefined();
+    expect(hooks.find((hook) => String(hook.command).includes(userHook))?.matcher).toBeUndefined();
     expect(hooks.find((hook) => String(hook.command).includes(codex))?.matcher).toBe("*");
   });
 
@@ -233,7 +251,7 @@ describe("setup managed-block installer", () => {
     const { env, configPath } = await makeCase(`string-marker-${quote === '"""' ? 'basic' : 'literal'}`);
     const value = `custom = ${quote}\nkeep\n# === END kimi-plugin-cc-managed:codex ===\nmore\n${quote}\n`;
     await writeFile(configPath, value, "utf8");
-    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    const context = makeContext(env);
     expect((await runSetup([], context)).probe).toBe("ok");
     expect(await readFile(configPath, "utf8")).toContain(value);
     await runSetup(["--uninstall"], context);
@@ -245,7 +263,7 @@ describe("setup managed-block installer", () => {
     const hook = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
     const content = `custom = '''\n[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${hook}'"\ntimeout = 15\n'''\n`;
     await writeFile(configPath, content, "utf8");
-    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    const context = makeContext(env);
     expect((await runSetup([], context)).probe).toBe("ok");
     expect(await readFile(configPath, "utf8")).toContain(content);
   });
@@ -256,7 +274,7 @@ describe("setup managed-block installer", () => {
     const hook = "/home/u/.codex/plugins/cache/kimi-marketplace/kimi/2.4.5/dist/hooks/approval-hook.js";
     const seeded = `${value}[[hooks]]\nevent = "PreToolUse"\ncommand = "'${process.execPath}' '${hook}'"\ntimeout = 15\n# === END kimi-plugin-cc-managed:codex ===\n`;
     await writeFile(configPath, seeded, "utf8");
-    const context = makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" });
+    const context = makeContext(env);
     await runSetup(action === "install" ? [] : ["--uninstall"], context);
     expect(await readFile(configPath, "utf8")).toContain(value);
   });
@@ -265,7 +283,7 @@ describe("setup managed-block installer", () => {
     const { env, configPath } = await makeCase("orphan-invalid-hook");
     const seeded = '[[hooks]]\nevent = "PreToolUse"\ncommand = "some-hook"\nunknown_field = true\n# === END kimi-plugin-cc-managed:codex ===\n';
     await writeFile(configPath, seeded, "utf8");
-    await expect(runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }))).rejects.toMatchObject({ code: "SETUP_INVALID_HOOKS_CONFIG" });
+    await expect(runSetup([], makeContext(env))).rejects.toMatchObject({ code: "SETUP_INVALID_HOOKS_CONFIG" });
     expect(await readFile(configPath, "utf8")).toBe(seeded);
   });
 
@@ -404,18 +422,20 @@ describe("setup managed-block installer", () => {
     expect(result.warnings.join("\n")).not.toContain("kimi-code plugin(s) installed");
   });
 
-  test("rejects unknown flags and conflicting review-gate flags", async () => {
+  test("rejects unknown, removed, and conflicting setup flags", async () => {
     const { env } = await makeCase("invalid-args");
-    await expect(runSetup(["--bogus"], makeContext(env))).rejects.toMatchObject({
-      code: "INVALID_ARGS",
-      stage: "setup.parse",
-    });
-    await expect(
-      runSetup(["--enable-review-gate", "--disable-review-gate"], makeContext(env)),
-    ).rejects.toMatchObject({
-      code: "INVALID_ARGS",
-      stage: "setup.parse",
-    });
+    for (const argv of [
+      ["--bogus"],
+      ["--enable-review-gate"],
+      ["--disable-review-gate"],
+      ["--all"],
+      ["--check", "--uninstall"],
+    ]) {
+      await expect(runSetup(argv, makeContext(env))).rejects.toMatchObject({
+        code: "INVALID_ARGS",
+        stage: "setup.parse",
+      });
+    }
   });
 
   test("renderSetupResult renders details and next step", async () => {
@@ -923,44 +943,33 @@ describe("setup managed-block installer", () => {
     expect(result.warnings.join("\n")).toContain("inline hooks array (1 entry)");
   });
 
-  test("future 0.x minors validate additive events by minimum and warn separately", async () => {
+  test("versions below the 2.8.0 floor and uncertified newer 2.x releases emit rolling-window warnings", async () => {
     if (process.platform === "win32") return;
-    const { env, configPath } = await makeCase("future-minor-event");
-    const kimiBin = path.join(path.dirname(configPath), "future-kimi");
-    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '0.99.0'\n", "utf8");
-    await chmod(kimiBin, 0o700);
-    await writeFile(
-      configPath,
-      '[[hooks]]\nevent = "Interrupt"\ncommand = "foreign-hook"\n',
-      "utf8",
-    );
+    for (const [version, expectedLine] of [
+      ["0.99.0", "OLDER than the supported floor (2.8.0)"],
+      ["2.7.3", "OLDER than the supported floor (2.8.0)"],
+      ["2.9.0", "Read-only operations (ask, review, challenge) run on it with a warning"],
+    ] as const) {
+      const { env, configPath } = await makeCase(`rolling-window-warn-${version.replaceAll(".", "-")}`);
+      const kimiBin = path.join(path.dirname(configPath), `kimi-${version}`);
+      await writeFile(kimiBin, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`, "utf8");
+      await chmod(kimiBin, 0o700);
+      await writeFile(
+        configPath,
+        '[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n',
+        "utf8",
+      );
 
-    const result = await runSetup([], makeContext({
-      ...env,
-      KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
-    }));
-    expect(result.probe).toBe("ok");
-    expect(result.warnings.join("\n")).toContain("kimi-code version 0.99.0 is outside the versions");
-    expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
-  });
-
-  test.each(["2.6.0"])("%s setup reports the narrowed non-swarm certification", async (version) => {
-    if (process.platform === "win32") return;
-    const { env, configPath } = await makeCase(`non-swarm-version-notice-${version}`);
-    const kimiBin = path.join(path.dirname(configPath), `kimi-${version}`);
-    await writeFile(kimiBin, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`, "utf8");
-    await chmod(kimiBin, 0o700);
-
-    const result = await runSetup([], makeContext({
-      ...env,
-      KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
-    }));
-    expect(result.probe).toBe("ok");
-    const warnings = result.warnings.join("\n");
-    expect(warnings).toContain("certified for review, challenge, ask, rescue, review gate, and pursue only");
-    expect(warnings).toContain("Read-only swarm and write swarm refuse before model spawn");
-    expect(warnings).toContain("Select exact kimi-code 2.6.2");
-    expect(warnings).not.toContain("outside the versions");
+      const result = await runSetup([], makeContext({
+        ...env,
+        KIMI_PLUGIN_CC_KIMI_BIN: kimiBin,
+      }));
+      expect(result.probe).toBe("ok");
+      const warnings = result.warnings.join("\n");
+      expect(warnings).toContain(`kimi-code version ${version} is outside the rolling compatibility window`);
+      expect(warnings).toContain(expectedLine);
+      expect((await readFile(configPath, "utf8")).match(/^\[\[hooks\]\]$/gm)).toHaveLength(2);
+    }
   });
 
   test.each(kimiVersionsWith("bounded-swarm"))("%s setup reports bounded swarm and the single-worker path", async (version) => {
@@ -980,112 +989,45 @@ describe("setup managed-block installer", () => {
     expect(warnings).toContain("bounded waves with concurrency 2 or more");
     expect(warnings).toContain("one direct worker at concurrency 1");
     expect(warnings).not.toContain("refuse before model spawn");
-    expect(warnings).not.toContain("outside the versions");
+    expect(warnings).not.toContain("outside the rolling compatibility window");
   });
 
-  test.each(["PermissionRequest", "PermissionResult", "Interrupt"].flatMap((event) =>
-    ["2.1.0", "2.1.1", "2.2.0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.4.0", "2.4.1", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"].map((version) => [event, version] as const)))(
-    "exact reviewed 2.x schemas accept %s (setup %s) but refuse unreviewed versions",
-    async (event, setupVersion) => {
+  test.each(["PermissionRequest", "PermissionResult", "Interrupt"] as const)(
+    "exact certified >= 2.8.0 schema accepts %s but refuses pre-floor and uncertified versions",
+    async (event) => {
       const contents = `[[hooks]]\nevent = "${event}"\ncommand = "foreign-hook"\n`;
-      expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 0, version: "2.0.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 1, version: "2.0.1" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 0, patch: 2, version: "2.0.2" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 1, patch: 0, version: "2.1.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 1, patch: 1, version: "2.1.1" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 2, patch: 0, version: "2.2.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 0, version: "2.3.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 1, version: "2.3.1" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 2, version: "2.3.2" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 3, patch: 3, version: "2.3.3" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 4, patch: 0, version: "2.4.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 4, patch: 1, version: "2.4.1" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 5, patch: 0, version: "2.5.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 5, patch: 1, version: "2.5.1" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 5, patch: 2, version: "2.5.2" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 5, patch: 3, version: "2.5.3" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 6, patch: 0, version: "2.6.0" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 6, patch: 2, version: "2.6.2" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 6, patch: 3, version: "2.6.3" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 7, patch: 2, version: "2.7.2" }).valid).toBe(true);
-      expect(validateKimiHookSet(contents, { major: 2, minor: 7, patch: 3, version: "2.7.3" }).valid).toBe(true);
+      expect(validateKimiHookSet(contents, { major: 2, minor: 8, patch: 0, version: "2.8.0" }).valid).toBe(true);
       for (const version of [
-        { major: 2, minor: 7, patch: 0, version: "2.7.0" },
-        { major: 2, minor: 7, patch: 1, version: "2.7.1" },
-        { major: 2, minor: 7, patch: 4, version: "2.7.4" },
-        { major: 2, minor: 6, patch: 1, version: "2.6.1" },
-        { major: 2, minor: 6, patch: 4, version: "2.6.4" },
-        { major: 2, minor: 6, patch: 2, version: "2.6.2-rc.1" },
-        { major: 2, minor: 6, patch: 2, version: "2.6.2+unreviewed" },
-        { major: 2, minor: 6, patch: 0, version: "2.6.0-rc.1" },
-        { major: 2, minor: 6, patch: 0, version: "2.6.0+unreviewed" },
-        { major: 2, minor: 5, patch: 4, version: "2.5.4" },
-        { major: 2, minor: 5, patch: 2, version: "2.5.2-rc.1" },
-        { major: 2, minor: 5, patch: 0, version: "2.5.0-rc.1" },
-        { major: 2, minor: 5, patch: 0, version: "2.5.0+unreviewed" },
-        { major: 2, minor: 5, patch: 0, version: "2.4.1" },
-        { major: 2, minor: 4, patch: 2, version: "2.4.2" },
-        { major: 2, minor: 4, patch: 1, version: "2.4.1-rc.1" },
-        { major: 2, minor: 4, patch: 1, version: "2.4.1+unreviewed" },
-        { major: 2, minor: 4, patch: 0, version: "2.4.1" },
-        { major: 2, minor: 4, patch: 0, version: "2.4.0-rc.1" },
-        { major: 2, minor: 4, patch: 0, version: "2.4.0+unreviewed" },
-        { major: 2, minor: 3, patch: 0, version: "2.4.0" },
-        { major: 2, minor: 3, patch: 4, version: "2.3.4" },
-        { major: 2, minor: 3, patch: 3, version: "2.3.3-rc.1" },
-        { major: 2, minor: 3, patch: 3, version: "2.3.3+unreviewed" },
-        { major: 2, minor: 3, patch: 2, version: "2.3.3" },
-        { major: 2, minor: 3, patch: 3, version: "2.3.2" },
-        { major: 2, minor: 2, patch: 0, version: "2.3.0" },
-        { major: 2, minor: 3, patch: 1, version: "2.3.0" },
-        { major: 2, minor: 3, patch: 1, version: "2.3.2" },
-        { major: 2, minor: 3, patch: 2, version: "2.3.1" },
-        { major: 2, minor: 3, patch: 2, version: "2.3.2-rc.1" },
-        { major: 2, minor: 3, patch: 2, version: "2.3.2+unreviewed" },
-        { major: 2, minor: 3, patch: 0, version: "2.3.0-rc.1" },
-        { major: 2, minor: 3, patch: 0, version: "2.3.0+unreviewed" },
-        { major: 2, minor: 0, patch: 0, version: "2.1.0" },
-        { major: 2, minor: 1, patch: 1, version: "2.1.0" },
-        { major: 2, minor: 1, patch: 0, version: "2.1.0-rc.1" },
-        { major: 2, minor: 1, patch: 0, version: "2.1.0+unreviewed" },
-        { major: 2, minor: 0, patch: 1, version: "2.1.1" },
-        { major: 2, minor: 1, patch: 0, version: "2.1.1" },
-        { major: 2, minor: 1, patch: 1, version: "2.1.1-rc.1" },
-        { major: 2, minor: 1, patch: 1, version: "2.1.1+unreviewed" },
-        { major: 2, minor: 1, patch: 2, version: "2.1.2" },
-        { major: 2, minor: 1, patch: 0, version: "2.2.0" },
-        { major: 2, minor: 2, patch: 1, version: "2.2.0" },
-        { major: 2, minor: 2, patch: 0, version: "2.2.0-rc.1" },
-        { major: 2, minor: 2, patch: 0, version: "2.2.0+unreviewed" },
-        { major: 2, minor: 2, patch: 1, version: "2.2.1" },
-        { major: 2, minor: 0 },
-        { major: 2, minor: 0, patch: 0 },
-        { major: 2, minor: 0, patch: 0, version: "2.0.0-rc.1" },
-        { major: 2, minor: 0, patch: 0, version: "2.0.0+unreviewed" },
-        { major: 2, minor: 0, patch: 1 },
-        { major: 2, minor: 0, patch: 0, version: "2.0.1" },
-        { major: 2, minor: 0, patch: 1, version: "2.0.1-rc.1" },
-        { major: 2, minor: 0, patch: 1, version: "2.0.1+unreviewed" },
-        { major: 2, minor: 0, patch: 2 },
-        { major: 2, minor: 0, patch: 1, version: "2.0.2" },
-        { major: 2, minor: 0, patch: 2, version: "2.0.1" },
-        { major: 2, minor: 0, patch: 2, version: "2.0.2-rc.1" },
-        { major: 2, minor: 0, patch: 2, version: "2.0.2+unreviewed" },
-        { major: 2, minor: 0, patch: 3, version: "2.0.3" },
-        { major: 2, minor: 1, patch: 0 },
-        { major: 1, minor: 0, patch: 0 },
-        { major: 3, minor: 0, patch: 0 },
+        { major: 0, minor: 14, patch: 0, version: "0.14.0" },
+        { major: 0, minor: 41, patch: 3, version: "0.41.3" },
+        { major: 2, minor: 0, patch: 0, version: "2.0.0" },
+        { major: 2, minor: 6, patch: 0, version: "2.6.0" },
+        { major: 2, minor: 7, patch: 3, version: "2.7.3" },
+        { major: 2, minor: 8, patch: 1, version: "2.8.1" },
+        { major: 2, minor: 9, patch: 0, version: "2.9.0" },
+        { major: 2, minor: 8, patch: 0, version: "2.8.0-rc.1" },
+        { major: 2, minor: 8, patch: 0, version: "2.8.0+unreviewed" },
+        { major: 2, minor: 8, patch: 1, version: "2.8.0" },
+        { major: 2, minor: 8 },
+        { major: 2, minor: 8, patch: 0 },
+        { major: 1, minor: 0, patch: 0, version: "1.0.0" },
+        { major: 3, minor: 0, patch: 0, version: "3.0.0" },
       ]) {
         expect(validateKimiHookSet(contents, version).valid).toBe(false);
       }
-      expect(validateKimiHookSet(contents + 'unexpected = true\n',
-        { major: 2, minor: 0, patch: 0, version: "2.0.0" }).valid).toBe(false);
-      expect(validateKimiHookSet(contents + 'unexpected = true\n',
-        { major: 2, minor: 0, patch: 2, version: "2.0.2" }).valid).toBe(false);
+      expect(
+        validateKimiHookSet(contents + "unexpected = true\n", {
+          major: 2,
+          minor: 8,
+          patch: 0,
+          version: "2.8.0",
+        }).valid,
+      ).toBe(false);
+
       if (process.platform === "win32") return;
-      const { env, configPath } = await makeCase(`major-two-${event}-${setupVersion}`);
-      const kimiBin = path.join(path.dirname(configPath), "kimi-two");
-      await writeFile(kimiBin, `#!/bin/sh\nprintf '%s\\n' '${setupVersion}'\n`, "utf8");
+      const { env, configPath } = await makeCase(`major-two-${event}-2-8-0`);
+      const kimiBin = path.join(path.dirname(configPath), "kimi-2-8-0");
+      await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '2.8.0'\n", "utf8");
       await chmod(kimiBin, 0o700);
       await writeFile(configPath, contents, "utf8");
       const result = await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_KIMI_BIN: kimiBin }));
@@ -1098,7 +1040,7 @@ describe("setup managed-block installer", () => {
     if (process.platform === "win32") return;
     const { configPath } = await makeCase("skip-version-does-not-skip-schema");
     const kimiBin = path.join(path.dirname(configPath), "old-kimi");
-    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '0.2.0'\n", "utf8");
+    await writeFile(kimiBin, "#!/bin/sh\nprintf '%s\\n' '2.7.3'\n", "utf8");
     await chmod(kimiBin, 0o700);
     const contents = '[[hooks]]\nevent = "Interrupt"\ncommand = "foreign-hook"\n';
     const result = await validateKimiHookSetForEnvironment(contents, {
@@ -1107,8 +1049,8 @@ describe("setup managed-block installer", () => {
       KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
     });
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain('event "Interrupt" requires kimi-code >= 0.14');
-    expect(result.reason).toContain("installed version is 0.2");
+    expect(result.reason).toContain('event "Interrupt" requires a certified kimi-code >= 2.8.0 release');
+    expect(result.reason).toContain("got 2.7.3");
   });
 
   test("install refuses nested hooks table shapes without changing config", async () => {
@@ -1130,7 +1072,7 @@ describe("setup managed-block installer", () => {
     ["malformed unrelated array", 'bad = [1,,2]\n[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n'],
     ["duplicate unrelated key", 'bad = 1\nbad = 2\n[[hooks]]\nevent = "PreToolUse"\ncommand = "foreign-hook"\n'],
   ])("rejects TOML-invalid config syntax: %s", (_name, contents) => {
-    const validation = validateKimiHookSet(contents, { major: 0, minor: 23 });
+    const validation = validateKimiHookSet(contents, { major: 2, minor: 8, patch: 0, version: "2.8.0" });
     expect(validation.valid).toBe(false);
     expect(validation.reason).toContain("no configured PreToolUse hook");
   });
@@ -1172,173 +1114,97 @@ describe("setup managed-block installer", () => {
   });
 });
 
-// v1.7.0 — Claude Code and Codex share one ~/.kimi-code/config.toml and each
-// own a host-scoped managed block, so setup in one host never clobbers the other.
+// v3.1.0 — Single canonical managed block across all hosts, with automatic
+// consolidation of legacy host-scoped `:<host-id>` blocks and bare plugin tables.
 
-function extractBlock(contents: string, host: string): string {
-  const lines = contents.split("\n");
-  const begin = lines.findIndex((l) =>
-    new RegExp(`BEGIN kimi-plugin-cc-managed:${host}\\b`).test(l),
-  );
-  const end = lines.findIndex(
-    (l, i) => i > begin && new RegExp(`END kimi-plugin-cc-managed:${host}\\b`).test(l),
-  );
-  return lines.slice(begin, end + 1).join("\n");
-}
+describe("single canonical managed block and legacy consolidation", () => {
+  const legacyBlock = (host: string, hookPath: string) => [
+    `# === BEGIN kimi-plugin-cc-managed:${host} (v2.8.0) ===`,
+    "[[hooks]]",
+    'event = "PreToolUse"',
+    `command = "'${process.execPath}' '${hookPath}'"`,
+    "timeout = 15",
+    `# === END kimi-plugin-cc-managed:${host} ===`,
+  ].join("\n");
 
-describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
-  test("a new host block is placed after the existing managed block, not after foreign tables", async () => {
-    const { env, configPath } = await makeCase("placement-after-managed");
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-    await runSetup([], makeContext(claudeEnv));
-    const foreign = '[models."magpie/x"]\nprovider = "magpie"\nmodel = "x"\n';
-    await writeFile(configPath, `${await readFile(configPath, "utf8")}\n${foreign}`, "utf8");
+  test("simultaneous setup runs serialize via the lock and produce one canonical block", async () => {
+    const { env, configPath } = await makeCase("concurrent-canonical");
 
-    await runSetup([], makeContext(codexEnv));
-    const after = await readFile(configPath, "utf8");
-    const claudeEnd = after.indexOf("# === END kimi-plugin-cc-managed:claude-code ===");
-    const codexBegin = after.indexOf("# === BEGIN kimi-plugin-cc-managed:codex");
-    const foreignAt = after.indexOf('[models."magpie/x"]');
-    expect(claudeEnd).toBeGreaterThan(-1);
-    expect(codexBegin).toBeGreaterThan(claudeEnd);
-    expect(foreignAt).toBeGreaterThan(codexBegin);
-    expect(after).toContain(foreign);
-    expect(() => parseToml(after)).not.toThrow();
-    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
-    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
-  });
-
-  test("placement falls back to append when a field follows the existing block's END", async () => {
-    const { env, configPath } = await makeCase("placement-trailing-field");
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-    await runSetup([], makeContext(claudeEnv));
-    const seeded = (await readFile(configPath, "utf8")).replace(
-      "# === END kimi-plugin-cc-managed:claude-code ===\n",
-      '# === END kimi-plugin-cc-managed:claude-code ===\n# gap comment\nnote = 1\n\n[user]\nkeep = true\n',
-    );
-    await writeFile(configPath, seeded, "utf8");
-    await runSetup([], makeContext(codexEnv)).catch(() => undefined);
-    const after = await readFile(configPath, "utf8");
-    // A [[hooks]] header above `note = 1` would rebind that field to our table.
-    const codexAt = after.indexOf("BEGIN kimi-plugin-cc-managed:codex");
-    if (codexAt !== -1) expect(codexAt).toBeGreaterThan(after.indexOf("[user]"));
-    expect(after).toContain("# gap comment\nnote = 1\n");
-  });
-
-  test("another host's orphan END: owner fails closed with plain-setup advice, other host stays enforcing, install repairs", async () => {
-    const { env, configPath } = await makeCase("foreign-orphan-end");
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-    await runSetup([], makeContext(claudeEnv));
-    await runSetup([], makeContext(codexEnv));
-    const healthy = await readFile(configPath, "utf8");
-    // Reproduce the Magpie rewrite: codex's BEGIN marker and header comments vanish.
-    const begin = healthy.indexOf("# === BEGIN kimi-plugin-cc-managed:codex");
-    const table = healthy.indexOf("[[hooks]]", begin);
-    await writeFile(configPath, healthy.slice(0, begin) + healthy.slice(table), "utf8");
-
-    // The owning host fails closed with the plain-setup remedy.
-    const codexBroken = await runSetup(["--check"], makeContext(codexEnv));
-    expect(codexBroken.probe).toBe("failed");
-    expect(codexBroken.probeError).toContain("END-without-BEGIN");
-    expect(codexBroken.nextStep).toContain("without --uninstall");
-    expect(codexBroken.nextStep).not.toContain("Run /kimi:setup --uninstall, then");
-    // Another host's orphan never blocks this host's intact block, but is reported.
-    const claudeCheck = await runSetup(["--check"], makeContext(claudeEnv));
-    expect(claudeCheck.probe).toBe("ok");
-    expect(claudeCheck.warnings.join("\n")).toContain('Host "codex" has an orphaned END-without-BEGIN');
-
-    const repaired = await runSetup([], makeContext(claudeEnv));
-    expect(repaired.warnings.join("\n")).toContain("orphaned managed marker");
-    const after = await readFile(configPath, "utf8");
-    expect(after).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-    expect(after).not.toContain("END kimi-plugin-cc-managed:codex");
-    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
-    // Codex setup then re-adorns its markers.
-    await runSetup([], makeContext(codexEnv));
-    const readorned = await readFile(configPath, "utf8");
-    expect(readorned.match(/BEGIN kimi-plugin-cc-managed:codex/g)).toHaveLength(1);
-    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
-  }, 30_000);
-
-  test("simultaneous dual-host setup serializes without lost updates", async () => {
-    const { env, configPath } = await makeCase("dual-host-concurrent");
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-
-    const [claude, codex] = await Promise.all([
-      runSetup([], makeContext(claudeEnv)),
-      runSetup([], makeContext(codexEnv)),
+    const [first, second] = await Promise.all([
+      runSetup([], makeContext(env)),
+      runSetup([], makeContext(env)),
     ]);
-    expect(claude.probe).toBe("ok");
-    expect(codex.probe).toBe("ok");
+    expect(first.probe).toBe("ok");
+    expect(second.probe).toBe("ok");
 
     const contents = await readFile(configPath, "utf8");
-    expect(contents.match(/BEGIN kimi-plugin-cc-managed:claude-code/g)).toHaveLength(1);
-    expect(contents.match(/BEGIN kimi-plugin-cc-managed:codex/g)).toHaveLength(1);
-    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
-    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
+    expect(contents.match(/BEGIN kimi-plugin-cc-managed \(v/g)).toHaveLength(1);
+    expect(contents.match(/END kimi-plugin-cc-managed ===/g)).toHaveLength(1);
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
   });
 
-  test("two hosts coexist — setup in one host never clobbers the other's block", async () => {
-    const { env, configPath } = await makeCase("dual-host-coexist");
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
+  test("install migrates a single legacy host-scoped block in place to the canonical un-suffixed block", async () => {
+    const { env, configPath, publishedHookPath } = await makeCase("legacy-single-migrate");
+    const claudeHook =
+      "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/2.8.0/dist/hooks/approval-hook.js";
+    await writeFile(configPath, `user_setting = true\n\n${legacyBlock("claude-code", claudeHook)}\n`, "utf8");
 
-    await runSetup([], makeContext(claudeEnv));
-    const afterClaude = await readFile(configPath, "utf8");
-    expect(afterClaude).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-    const claudeBlock = extractBlock(afterClaude, "claude-code");
-
-    const codexResult = await runSetup([], makeContext(codexEnv));
-    expect(codexResult.blockWritten).toBe(true);
-    const afterCodex = await readFile(configPath, "utf8");
-    expect(afterCodex).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-    expect(afterCodex).toContain("BEGIN kimi-plugin-cc-managed:codex");
-    // Claude's block is byte-identical after the Codex install.
-    expect(extractBlock(afterCodex, "claude-code")).toBe(claudeBlock);
-
-    // Each host's --check passes for its OWN block.
-    expect((await runSetup(["--check"], makeContext(claudeEnv))).probe).toBe("ok");
-    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
-
-    // Re-running Claude setup is idempotent and does not touch Codex's block.
-    const codexBlock = extractBlock(afterCodex, "codex");
-    await runSetup([], makeContext(claudeEnv));
-    expect(extractBlock(await readFile(configPath, "utf8"), "codex")).toBe(codexBlock);
-  });
-
-  test("install migrates a legacy un-suffixed block to a host-scoped marker in place", async () => {
-    const { env, configPath } = await makeCase("legacy-migrate");
-    const legacy = [
-      "# === BEGIN kimi-plugin-cc-managed (v0.9.0) ===",
-      "[[hooks]]",
-      'event = "PreToolUse"',
-      'command = "node /stale/approval-hook.js"',
-      "timeout = 15",
-      "# === END kimi-plugin-cc-managed ===",
-      "",
-    ].join("\n");
-    await writeFile(configPath, legacy, "utf8");
-
-    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
+    const result = await runSetup([], makeContext(env));
+    expect(result.probe).toBe("ok");
     const after = await readFile(configPath, "utf8");
-    expect(after).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-    // Converted in place — exactly one block, not duplicated.
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed (v");
+    expect(after).toContain("END kimi-plugin-cc-managed ===");
+    expect(after).not.toContain(":claude-code");
+    expect(after).not.toContain(claudeHook);
+    expect(after).toContain(publishedHookPath);
+    expect(after).toContain("user_setting = true");
     expect(after.match(/BEGIN kimi-plugin-cc-managed/g)?.length).toBe(1);
-    expect(after).not.toContain("/stale/approval-hook.js");
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
   });
 
-  test("install prunes orphaned marker-less approval-hook [[hooks]] entries", async () => {
-    const { env, configPath } = await makeCase("prune-orphans");
-    const orphanHook =
+  test("install consolidates multiple legacy host-scoped blocks into one canonical block while preserving foreign tables", async () => {
+    const { env, configPath, publishedHookPath } = await makeCase("legacy-multi-consolidate");
+    const claudeHook =
+      "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/2.8.0/dist/hooks/approval-hook.js";
+    const codexHook =
+      "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/2.8.0/dist/hooks/approval-hook.js";
+    const foreign = '[models."magpie/x"]\nprovider = "magpie"\nmodel = "x"\n';
+    await writeFile(
+      configPath,
+      `${legacyBlock("claude-code", claudeHook)}\n\n${foreign}\n${legacyBlock("codex", codexHook)}\n`,
+      "utf8",
+    );
+
+    const result = await runSetup([], makeContext(env));
+    expect(result.probe).toBe("ok");
+    expect(result.warnings.join("\n")).toContain(
+      "Consolidated 2 legacy host-scoped managed block(s) into one canonical block.",
+    );
+    const after = await readFile(configPath, "utf8");
+    expect(after.match(/BEGIN kimi-plugin-cc-managed/g)).toHaveLength(1);
+    expect(after).not.toContain(":claude-code");
+    expect(after).not.toContain(":codex");
+    expect(after).toContain(publishedHookPath);
+    expect(after).toContain(foreign);
+    expect(() => parseToml(after)).not.toThrow();
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
+  });
+
+  test("install prunes orphaned marker-less approval-hook [[hooks]] entries from legacy hosts", async () => {
+    const { env, configPath, publishedHookPath } = await makeCase("prune-orphans");
+    const claudeOrphan =
       "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
+    const antigravityOrphan =
+      "/home/u/.gemini/config/plugins/kimi/dist/hooks/approval-hook.js";
     const seeded = [
       "[[hooks]]",
       'event = "PreToolUse"',
-      `command = "'${process.execPath}' '${orphanHook}'"`,
+      `command = "'${process.execPath}' '${claudeOrphan}'"`,
+      "timeout = 15",
+      "",
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'${process.execPath}' '${antigravityOrphan}'"`,
       "timeout = 15",
       "",
       "[settings]",
@@ -1347,27 +1213,20 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     ].join("\n");
     await writeFile(configPath, seeded, "utf8");
 
-    // v1.8.2: the prune is host-scoped — run as the host that OWNS the orphan
-    // (`~/.claude/…` → claude-code). Another host's install must leave it be
-    // (covered by the marker-strip suite).
-    const result = await runSetup(
-      [],
-      makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }),
-    );
+    const result = await runSetup([], makeContext(env));
     const after = await readFile(configPath, "utf8");
-    // Orphan removed, user content preserved, our fresh block installed.
-    expect(after).not.toContain(orphanHook);
+    expect(after).not.toContain(claudeOrphan);
+    expect(after).not.toContain(antigravityOrphan);
+    expect(after).toContain(publishedHookPath);
     expect(after).toContain("user_setting = true");
-    expect(after).toContain("BEGIN kimi-plugin-cc-managed");
-    expect(result.warnings.join("\n")).toContain("Pruned");
+    expect(after).toContain("BEGIN kimi-plugin-cc-managed (v");
+    expect(result.warnings.join("\n")).toContain("Pruned 2 stale marker-less kimi-plugin-cc hook block(s)");
   });
 
   test("prune stops at a table header with a trailing comment (never eats the next table)", async () => {
     const { env, configPath } = await makeCase("prune-boundary-comment");
     const orphanHook =
       "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
-    // No blank line between the orphan hook and the user's permission rule, and
-    // the table header carries an inline comment (Codex review scenario).
     const seeded = [
       "[[hooks]]",
       'event = "PreToolUse"',
@@ -1380,93 +1239,49 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     ].join("\n");
     await writeFile(configPath, seeded, "utf8");
 
-    // Host-scoped prune (v1.8.2): run as the orphan's owning host.
-    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
+    await runSetup([], makeContext(env));
     const after = await readFile(configPath, "utf8");
-    // Orphan hook removed…
     expect(after).not.toContain(orphanHook);
-    // …but the user's permission rule (and its inline-comment header) survive.
     expect(after).toContain("[[permission.rules]] # user security rule");
     expect(after).toContain('pattern = "Bash(rm *)"');
   });
 
-  test("uninstall is host-scoped by default; --all removes every host", async () => {
-    const { env, configPath } = await makeCase("uninstall-hosts");
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-    await runSetup([], makeContext(claudeEnv));
-    await runSetup([], makeContext(codexEnv));
+  test("uninstall removes canonical and legacy blocks while preserving user hooks and settings", async () => {
+    const { env, configPath } = await makeCase("uninstall-all-blocks");
+    const claudeHook =
+      "/Users/x/.claude/plugins/cache/kimi-marketplace/kimi/2.8.0/dist/hooks/approval-hook.js";
+    const codexHook =
+      "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/2.8.0/dist/hooks/approval-hook.js";
+    const userHook = "/opt/acme/my-own-hook.js";
+    const seeded = [
+      "user_setting = true",
+      "",
+      "[[hooks]]",
+      'event = "PreToolUse"',
+      `command = "'/usr/bin/node' '${userHook}'"`,
+      "timeout = 20",
+      "",
+      legacyBlock("claude-code", claudeHook),
+      "",
+      legacyBlock("codex", codexHook),
+      "",
+    ].join("\n");
+    await writeFile(configPath, seeded, "utf8");
 
-    // Default uninstall as Claude removes ONLY Claude's block.
-    const scoped = await runSetup(["--uninstall"], makeContext(claudeEnv));
-    expect(scoped.blockRemoved).toBe(true);
-    let after = await readFile(configPath, "utf8");
-    expect(after).not.toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-    expect(after).toContain("BEGIN kimi-plugin-cc-managed:codex");
-
-    // Reinstall Claude, then --all clears everything.
-    await runSetup([], makeContext(claudeEnv));
-    const all = await runSetup(["--uninstall", "--all"], makeContext(codexEnv));
-    expect(all.blockRemoved).toBe(true);
-    after = await readFile(configPath, "utf8");
+    const uninstall = await runSetup(["--uninstall"], makeContext(env));
+    expect(uninstall.blockRemoved).toBe(true);
+    const after = await readFile(configPath, "utf8");
     expect(after).not.toContain("kimi-plugin-cc-managed");
-  });
-
-  test("install does NOT adopt or clobber another host's legacy block", async () => {
-    const { env, configPath } = await makeCase("no-clobber-foreign-legacy");
-    // A pre-1.7.0 legacy (un-suffixed) block whose command path is Codex's.
-    const codexHook =
-      "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js";
-    const legacy = [
-      "# === BEGIN kimi-plugin-cc-managed (v1.6.5) ===",
-      "[[hooks]]",
-      'event = "PreToolUse"',
-      `command = "'${process.execPath}' '${codexHook}'"`,
-      "timeout = 15",
-      "# === END kimi-plugin-cc-managed ===",
-      "",
-    ].join("\n");
-    await writeFile(configPath, legacy, "utf8");
-
-    // Claude installs: it must APPEND its own block and leave Codex's intact —
-    // NOT convert the Codex-owned legacy block to a Claude block (the migration
-    // clobber the whole change exists to prevent).
-    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
-    const after = await readFile(configPath, "utf8");
-    expect(after).toContain(codexHook);
-    expect(after).toContain("BEGIN kimi-plugin-cc-managed:claude-code");
-  });
-
-  test("default uninstall leaves another host's legacy block intact", async () => {
-    const { env, configPath } = await makeCase("uninstall-keeps-foreign-legacy");
-    const codexHook =
-      "/Users/x/.codex/plugins/cache/kimi-marketplace/kimi/1.6.5/dist/hooks/approval-hook.js";
-    const legacy = [
-      "# === BEGIN kimi-plugin-cc-managed (v1.6.5) ===",
-      "[[hooks]]",
-      'event = "PreToolUse"',
-      `command = "'${process.execPath}' '${codexHook}'"`,
-      "timeout = 15",
-      "# === END kimi-plugin-cc-managed ===",
-      "",
-    ].join("\n");
-    await writeFile(configPath, legacy, "utf8");
-    await runSetup([], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
-
-    // Claude's default uninstall removes only Claude's block — Codex's legacy
-    // block (host-neutral marker, but Codex-owned command path) survives.
-    await runSetup(["--uninstall"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" }));
-    const after = await readFile(configPath, "utf8");
-    expect(after).toContain(codexHook);
-    expect(after).not.toContain("BEGIN kimi-plugin-cc-managed:claude-code");
+    expect(after).not.toContain(claudeHook);
+    expect(after).not.toContain(codexHook);
+    expect(after).toContain(userHook);
+    expect(after).toContain("user_setting = true");
   });
 
   test("prune leaves an unmanaged hook that carries a matcher (not our grammar)", async () => {
     const { env, configPath } = await makeCase("prune-skips-matcher");
     const ourScript =
       "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
-    // Reuses approval-hook.js but with a matcher — a deliberate user hook, not
-    // an orphan of ours. Must survive the prune.
     const seeded = [
       "[[hooks]]",
       'matcher = "Write"',
@@ -1486,8 +1301,6 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     const { env, configPath } = await makeCase("prune-multiline-array");
     const ourScript =
       "/home/u/.claude/plugins/cache/kimi-marketplace/kimi/1.5.0/dist/hooks/approval-hook.js";
-    // A marker-less table that reuses approval-hook.js but also has a multi-line
-    // array key — NOT our grammar. Must be left fully intact (no partial cut).
     const seeded = [
       "[[hooks]]",
       'event = "PreToolUse"',
@@ -1507,17 +1320,14 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
       message: expect.stringContaining('unknown field "metadata"'),
     });
     const after = await readFile(configPath, "utf8");
-    // The whole table survives byte-for-byte; setup neither partially prunes
-    // it nor appends a block that kimi-code would silently discard with it.
     expect(after).toBe(seeded);
     expect(after).toContain("metadata = [");
     expect(after).toContain('  "a",');
     expect(after).toContain("user_setting = true");
   });
 
-  test("scoped uninstall keeps a legacy block it cannot attribute; --all removes it", async () => {
-    const { env, configPath } = await makeCase("uninstall-ambiguous-legacy");
-    // Legacy block with a NON-canonical (bare-node) command — un-attributable.
+  test("uninstall removes a legacy block with a non-canonical command", async () => {
+    const { env, configPath } = await makeCase("uninstall-legacy-noncanonical");
     const legacy = [
       "# === BEGIN kimi-plugin-cc-managed (v1.6.5) ===",
       "[[hooks]]",
@@ -1529,84 +1339,57 @@ describe("setup host scoping (Claude Code ↔ Codex coexistence)", () => {
     ].join("\n");
     await writeFile(configPath, legacy, "utf8");
 
-    // Scoped uninstall (some other host) must NOT remove the ambiguous block.
-    await runSetup(["--uninstall"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }));
-    let after = await readFile(configPath, "utf8");
-    expect(after).toContain("BEGIN kimi-plugin-cc-managed");
-
-    // --all clears it.
-    await runSetup(["--uninstall", "--all"], makeContext({ ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" }));
-    after = await readFile(configPath, "utf8");
+    const uninstall = await runSetup(["--uninstall"], makeContext(env));
+    expect(uninstall.blockRemoved).toBe(true);
+    const after = await readFile(configPath, "utf8");
     expect(after).not.toContain("kimi-plugin-cc-managed");
-  });
-
-  test("--all is rejected without --uninstall", async () => {
-    const { env } = await makeCase("all-requires-uninstall");
-    await expect(runSetup(["--all"], makeContext(env))).rejects.toMatchObject({
-      code: "INVALID_ARGS",
-      stage: "setup.parse",
-    });
   });
 });
 
-describe("host-scoped orphan markers", () => {
-  const blockFor = (host: string, cmd: string) =>
-    `# === BEGIN kimi-plugin-cc-managed:${host} (v2.5.4) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "${cmd}"\ntimeout = 15\n# === END kimi-plugin-cc-managed:${host} ===\n`;
+describe("canonical orphan marker handling", () => {
+  const blockFor = (host: string | null, cmd: string) =>
+    `# === BEGIN kimi-plugin-cc-managed${host ? `:${host}` : ""} (v2.8.0) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "${cmd}"\ntimeout = 15\n# === END kimi-plugin-cc-managed${host ? `:${host}` : ""} ===\n`;
 
-  test("own, legacy, and interleaved orphans still fail closed", async () => {
+  test("any orphan marker (canonical, legacy-suffixed, or interleaved) fails closed as orphan", async () => {
     const { parseManagedBlock } = await import("../../runtime/hooks/managed-block.js");
-    const own = `${blockFor("codex", "x")}# === END kimi-plugin-cc-managed:claude-code ===\n`;
-    expect(parseManagedBlock(own, "claude-code").state.kind).toBe("orphan");
-    const legacy = `${blockFor("claude-code", "x")}# === END kimi-plugin-cc-managed ===\n`;
-    expect(parseManagedBlock(legacy, "claude-code").state.kind).toBe("orphan");
-    // A foreign BEGIN interleaved inside this host's markers orphans this host's markers too.
+    const suffixed = `${blockFor("codex", "x")}# === END kimi-plugin-cc-managed:claude-code ===\n`;
+    expect(parseManagedBlock(suffixed).state.kind).toBe("orphan");
+    expect(parseManagedBlock(suffixed).orphans).toEqual([
+      { line: 6, detail: "END-without-BEGIN", hostId: "claude-code" },
+    ]);
+    const canonical = `${blockFor(null, "x")}# === END kimi-plugin-cc-managed ===\n`;
+    expect(parseManagedBlock(canonical).state.kind).toBe("orphan");
     const interleaved =
-      "# === BEGIN kimi-plugin-cc-managed:claude-code (v2.5.4) ===\n# === BEGIN kimi-plugin-cc-managed:codex (v2.5.4) ===\n[[hooks]]\nevent = \"PreToolUse\"\ncommand = \"x\"\n# === END kimi-plugin-cc-managed:claude-code ===\n";
-    expect(parseManagedBlock(interleaved, "claude-code").state.kind).toBe("orphan");
+      "# === BEGIN kimi-plugin-cc-managed:claude-code (v2.8.0) ===\n# === BEGIN kimi-plugin-cc-managed:codex (v2.8.0) ===\n[[hooks]]\nevent = \"PreToolUse\"\ncommand = \"x\"\n# === END kimi-plugin-cc-managed:claude-code ===\n";
+    expect(parseManagedBlock(interleaved).state.kind).toBe("orphan");
   });
 
-  test("absent fallback sees a matcher that another host's block binds to this host's bare table", async () => {
+  test("check fails closed on an orphan END with plain-setup advice and install repairs it", async () => {
+    const { env, configPath } = await makeCase("orphan-end-repair");
+    await runSetup([], makeContext(env));
+    const healthy = await readFile(configPath, "utf8");
+    const begin = healthy.indexOf("# === BEGIN kimi-plugin-cc-managed");
+    const table = healthy.indexOf("[[hooks]]", begin);
+    await writeFile(configPath, healthy.slice(0, begin) + healthy.slice(table), "utf8");
+
+    const broken = await runSetup(["--check"], makeContext(env));
+    expect(broken.probe).toBe("failed");
+    expect(broken.probeError).toContain("END-without-BEGIN");
+    expect(broken.nextStep).toContain("without --uninstall");
+    expect(broken.nextStep).not.toContain("Run setup --uninstall, then");
+
+    const repaired = await runSetup([], makeContext(env));
+    expect(repaired.probe).toBe("ok");
+    expect(repaired.warnings.join("\n")).toContain("orphaned managed marker");
+    expect((await runSetup(["--check"], makeContext(env))).probe).toBe("ok");
+  });
+
+  test("absent fallback sees a matcher bound across a blank line", async () => {
     const { evaluateInstalled } = await import("../../runtime/hooks/managed-block.js");
-    // `matcher` precedes codex's [[hooks]] header, so TOML binds it to the bare
-    // table above; deleting block lines before parsing used to hide it.
-    const base = `[[hooks]]\nevent = "PreToolUse"\ncommand = "expected"\n# === BEGIN kimi-plugin-cc-managed:codex (v2.5.4) ===\nmatcher = "*"\n[[hooks]]\nevent = "PreToolUse"\ncommand = "other"\n# === END kimi-plugin-cc-managed:codex ===\n`;
-    for (const text of [base, `${base}# === END kimi-plugin-cc-managed:dsh ===\n`]) {
-      const verdict = evaluateInstalled(text, "expected", { hostId: "claude-code" });
-      expect(verdict.installed).toBe(false);
-    }
-    // A clean bare table next to an intact foreign block still passes.
-    const clean = base.replace('matcher = "*"\n', "");
-    expect(evaluateInstalled(clean, "expected", { hostId: "claude-code" }).installed).toBe(true);
-    // Another host's marked block carrying this exact command never counts for this host.
-    const foreignOnly = `# === BEGIN kimi-plugin-cc-managed:codex (v2.5.4) ===\n[[hooks]]\nevent = "PreToolUse"\ncommand = "expected"\n# === END kimi-plugin-cc-managed:codex ===\n`;
-    expect(evaluateInstalled(foreignOnly, "expected", { hostId: "claude-code" }).installed).toBe(false);
-  });
-
-  test("insertion never lands inside a multiline value; setup falls back to append", async () => {
-    const { env, configPath } = await makeCase("placement-inside-array");
-    const codexEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "codex" };
-    const claudeEnv = { ...env, KIMI_PLUGIN_CC_HOST_ID: "claude-code" };
-    await runSetup([], makeContext(claudeEnv));
-    const seeded = (await readFile(configPath, "utf8")).replace(
-      "# === END kimi-plugin-cc-managed:claude-code ===\n",
-      "# === END kimi-plugin-cc-managed:claude-code ===\n\n[user]\noptions = [\n# === BEGIN kimi-plugin-cc-managed:dsh (v2.5.4) ===\n# === END kimi-plugin-cc-managed:dsh ===\n[1, 2],\n]\n",
-    );
-    await writeFile(configPath, seeded, "utf8");
-    const result = await runSetup([], makeContext(codexEnv));
-    expect(result.probe).toBe("ok");
-    const after = await readFile(configPath, "utf8");
-    expect(() => parseToml(after)).not.toThrow();
-    expect((parseToml(after) as any).user.options).toEqual([[1, 2]]);
-    expect((await runSetup(["--check"], makeContext(codexEnv))).probe).toBe("ok");
-  });
-
-  test("a foreign orphan leaves this host's well-formed block found and reports it", async () => {
-    const { parseManagedBlock } = await import("../../runtime/hooks/managed-block.js");
-    const text = `${blockFor("claude-code", "x")}\n[[hooks]]\nevent = "PreToolUse"\ncommand = "y"\n# === END kimi-plugin-cc-managed:codex ===\n`;
-    const parsed = parseManagedBlock(text, "claude-code");
-    expect(parsed.state.kind).toBe("found");
-    expect(parsed.foreignOrphans).toEqual([{ line: 10, detail: "END-without-BEGIN", hostId: "codex" }]);
-    expect(parseManagedBlock(text, "codex").state.kind).toBe("orphan");
+    const tainted = `[[hooks]]\nevent = "PreToolUse"\ncommand = "expected"\n\nmatcher = "*"\n`;
+    expect(evaluateInstalled(tainted, "expected").installed).toBe(false);
+    const clean = `[[hooks]]\nevent = "PreToolUse"\ncommand = "expected"\ntimeout = 15\n`;
+    expect(evaluateInstalled(clean, "expected")).toMatchObject({ installed: true, via: "bare-table" });
   });
 });
 

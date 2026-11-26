@@ -70,11 +70,13 @@ function mockOptions(overrides: {
 }) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    KIMI_CODE_HOME: path.join(overrides.cwd, "kimi-home"),
+    KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
     KIMI_MOCK_RECORDS: JSON.stringify(overrides.records),
     KIMI_MOCK_SESSION_ID:
       overrides.sessionId ?? "26242650-d95f-4805-80d9-c947d309b2c6",
     KIMI_MOCK_EMIT_ANNOUNCE: overrides.emitAnnounce === false ? "0" : "1",
-    KIMI_MOCK_ANNOUNCE_VIA: overrides.announceVia ?? "stderr",
+    KIMI_MOCK_ANNOUNCE_VIA: overrides.announceVia ?? "stdout-meta",
     KIMI_MOCK_EXIT_CODE: String(overrides.exitCode ?? 0),
     KIMI_MOCK_INTERLEAVE_LF: overrides.interleave ? "1" : "0",
     KIMI_MOCK_DELAY_MS: String(overrides.delayMs ?? 0),
@@ -114,11 +116,11 @@ function testExecutionPlan(
   return {
     schemaVersion: 1,
     operationKind: "review",
-    intendedEngine: "legacy-v1",
+    intendedEngine: "native-v2",
     command,
     prefixArgs: [...prefixArgs],
-    kimiVersion: "0.39.0",
-    certification: "certified",
+    kimiVersion: null,
+    certification: "test-bypass",
     resumedFromJobId: null,
     safetyProfile: null,
   };
@@ -204,7 +206,7 @@ async function stopDetachedTestProcess(child: ChildProcess | undefined): Promise
 }
 
 describe("runCliPrompt", () => {
-  test("captures assistant + tool records and parses the session id from stderr", async () => {
+  test("captures assistant + tool records and parses the session id from stdout meta", async () => {
     const root = await createTestPluginDataRoot("cli-client-basic");
     try {
       const records = [
@@ -242,7 +244,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
+  test.each(["2.8.0"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
     const root = await createTestPluginDataRoot("cli-client-local-environment");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;
@@ -299,7 +301,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test("does not select the 2.5.0 local flag on resume or other candidate versions", async () => {
+  test("does not select the local flag on resume or non-borrowing candidate versions", async () => {
     const root = await createTestPluginDataRoot("cli-client-local-environment-resume");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;
@@ -310,7 +312,7 @@ describe("runCliPrompt", () => {
     try {
       const options = mockOptions({
         cwd: root,
-        records: [{ role: "meta", type: "system.version", version: "2.5.0" }],
+        records: [{ role: "meta", type: "system.version", version: "2.8.0" }],
       });
       options.executionPlan = {
         ...options.executionPlan,
@@ -329,7 +331,7 @@ describe("runCliPrompt", () => {
       await writeFile(path.join(agentDir, "wire.jsonl"), `${JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: root })}\n`);
       await writeFile(path.join(agentDir, "..", "..", "state.json"), JSON.stringify({ environmentCwd: root }));
       options.resumeSessionId = sessionId;
-      for (const candidate of ["2.5.0", "2.7.2", "2.7.3", "2.8.0"]) {
+      for (const candidate of ["2.8.0"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([
@@ -341,7 +343,7 @@ describe("runCliPrompt", () => {
       }
 
       options.resumeSessionId = undefined;
-      for (const candidate of ["2.4.1", "2.4.2", "2.7.3-rc.1", "3.0.0"]) {
+      for (const candidate of ["2.7.3", "2.8.0-rc.1", "3.0.0"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([
@@ -350,8 +352,8 @@ describe("runCliPrompt", () => {
           "-p", "test prompt",
         ]);
       }
-      // An unlisted plain 2.x borrows the fresh-print argv of the row below it (G1).
-      for (const candidate of ["2.7.0", "2.7.1", "2.7.4"]) {
+      // An unlisted plain 2.x >= 2.8.0 borrows the fresh-print argv of the row below it (G1).
+      for (const candidate of ["2.8.1", "2.9.0", "2.10.0"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([
@@ -664,6 +666,12 @@ describe("runCliPrompt", () => {
         opts.executionPlan = { ...opts.executionPlan, operationKind };
         opts.env.KIMI_PLUGIN_CC_OPERATION = operationKind === "pursue" ? "review" : "pursue";
         opts.env.KIMI_MOCK_ECHO_ENV = "KIMI_PLUGIN_CC_OPERATION";
+        const resumeDir = path.join(opts.env.KIMI_CODE_HOME!, "sessions", "wd_test", "session_existing_operation", "agents", "main");
+        await mkdir(resumeDir, { recursive: true });
+        await writeFile(
+          path.join(resumeDir, "wire.jsonl"),
+          `${JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: root })}\n`,
+        );
         for (const resumeSessionId of [undefined, "session_existing_operation"]) {
           const result = await runCliPrompt({ ...opts, resumeSessionId, trustedWorkspaceRoot: root });
           expect(result.exitCode).toBe(0);
@@ -711,30 +719,6 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each([undefined, "", "0", "false", "off", "1"])(
-    "forces KIMI_CODE_LEGACY_FLAG=1 for fresh and resumed sessions over ambient value %j",
-    async (ambient) => {
-      const root = await createTestPluginDataRoot("cli-client-legacy-v1-pin");
-      try {
-        const opts = mockOptions({ cwd: root, records: [] });
-        if (ambient === undefined) delete opts.env.KIMI_CODE_LEGACY_FLAG;
-        else opts.env.KIMI_CODE_LEGACY_FLAG = ambient;
-        opts.env.KIMI_MOCK_ECHO_ENV = "KIMI_CODE_LEGACY_FLAG";
-
-        for (const resumeSessionId of [undefined, "session_plan_state_restored_out_of_band"]) {
-          const result = await runCliPrompt({ ...opts, resumeSessionId });
-          expect(result.exitCode).toBe(0);
-          expect(result.records).toContainEqual({
-            role: "assistant",
-            content: "KIMI_CODE_LEGACY_FLAG=1",
-          });
-        }
-      } finally {
-        await cleanupTestPath(root);
-      }
-    },
-  );
-
   test("canonicalizes relative KIMI_CODE_HOME against the spawned cwd", async () => {
     const root = await createTestPluginDataRoot("cli-kimi-home-relative");
     try {
@@ -743,9 +727,11 @@ describe("runCliPrompt", () => {
         env: {
           ...process.env,
           KIMI_CODE_HOME: "relative-kimi-home",
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_RECORDS: "[]",
           KIMI_MOCK_ECHO_ENV: "KIMI_CODE_HOME",
           KIMI_MOCK_EMIT_ANNOUNCE: "1",
+          KIMI_MOCK_ANNOUNCE_VIA: "stdout-meta",
           KIMI_MOCK_EXIT_CODE: "0",
         },
         command: "bun",
@@ -814,9 +800,9 @@ describe("runCliPrompt", () => {
         .split("\n")
         .filter((l) => l.length > 0)
         .map((l) => JSON.parse(l) as Record<string, unknown>);
-      // Events: spawn, record x2, exit (order intentional)
+      // Events: spawn, record x2, session_announce, exit (order intentional)
       const kinds = events.map((e) => e["event"]);
-      expect(kinds).toEqual(["spawn", "record", "record", "exit"]);
+      expect(kinds).toEqual(["spawn", "record", "record", "session_announce", "exit"]);
       const exit = events[events.length - 1]!;
       expect(exit["exit_code"]).toBe(0);
       expect(exit["session_id"]).toBe("26242650-d95f-4805-80d9-c947d309b2c6");
@@ -1018,75 +1004,30 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["1", "true", "TRUE", " yes ", "On"])(
-    "refuses experimental-v2 value %j before spawning kimi",
-    async (flag) => {
-      const root = await createTestPluginDataRoot("cli-client-v2-refusal");
-      try {
-        const opts = mockOptions({ cwd: root, records: [] });
-        opts.env.KIMI_CODE_EXPERIMENTAL_FLAG = flag;
-        await expect(runCliPrompt(opts)).rejects.toMatchObject({
-          code: "CLI_V2_HOOK_ORDER_UNSAFE",
-          stage: "cli-client.pre-spawn",
-          details: {
-            refusal_kind: "v2-hook-order-unsafe",
-            experimental_v2: true,
-          },
-        });
-      } finally {
-        await cleanupTestPath(root);
-      }
-    },
-  );
-
-  test.each([undefined, "", "0", "false", "no", "off"])(
-    "accepts non-experimental values on the forced legacy-v1 path for value %j",
-    async (flag) => {
-      const root = await createTestPluginDataRoot("cli-client-v1-flag-matrix");
-      try {
-        const opts = mockOptions({ cwd: root, records: [] });
-        if (flag === undefined) delete opts.env.KIMI_CODE_EXPERIMENTAL_FLAG;
-        else opts.env.KIMI_CODE_EXPERIMENTAL_FLAG = flag;
-        const result = await runCliPrompt({ ...opts, resumeSessionId: "session_v1" });
-        expect(result.exitCode).toBe(0);
-      } finally {
-        await cleanupTestPath(root);
-      }
-    },
-  );
-
-  test("the v2 refusal applies to fresh and resumed sessions", async () => {
-    const root = await createTestPluginDataRoot("cli-client-v2-fresh-resume");
+  test("refuses explicit legacy-v1 execution plans before spawning kimi", async () => {
+    const root = await createTestPluginDataRoot("cli-client-legacy-v1-refused");
     try {
       const opts = mockOptions({ cwd: root, records: [] });
-      opts.env.KIMI_CODE_EXPERIMENTAL_FLAG = "1";
-      await expect(runCliPrompt(opts)).rejects.toMatchObject({
-        code: "CLI_V2_HOOK_ORDER_UNSAFE",
-      });
-      await expect(
-        runCliPrompt({ ...opts, resumeSessionId: "session_changed_out_of_band" }),
-      ).rejects.toMatchObject({ code: "CLI_V2_HOOK_ORDER_UNSAFE" });
-    } finally {
-      await cleanupTestPath(root);
-    }
-  });
-
-  test("KIMI_PLUGIN_CC_SKIP_HOOK_CHECK cannot bypass the independent v2 refusal", async () => {
-    const root = await createTestPluginDataRoot("cli-client-v2-skip-hook-check");
-    try {
-      const opts = mockOptions({ cwd: root, records: [] });
-      opts.env.KIMI_CODE_EXPERIMENTAL_FLAG = "1";
       opts.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK = "1";
-      await expect(runCliPrompt(opts)).rejects.toMatchObject({
-        code: "CLI_V2_HOOK_ORDER_UNSAFE",
-        details: { refusal_kind: "v2-hook-order-unsafe" },
+      await expect(
+        runCliPrompt({
+          ...opts,
+          executionPlan: {
+            ...opts.executionPlan,
+            intendedEngine: "legacy-v1",
+            kimiVersion: "0.39.0",
+            certification: "certified",
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: "KIMI_EXECUTION_PLAN_INVALID",
       });
     } finally {
       await cleanupTestPath(root);
     }
   });
 
-  test("kills a forced-v1 child on the pre-tool native-v2 marker", async () => {
+  test("kills a certified native-v2 child on a mismatched pre-tool marker before any post-marker write", async () => {
     const root = await createTestPluginDataRoot("cli-engine-marker-mismatch");
     const sentinel = path.join(root, "post-marker-write.txt");
     let recordCount = 0;
@@ -1096,11 +1037,22 @@ describe("runCliPrompt", () => {
           cwd: root,
           env: {
             ...process.env,
+            KIMI_CODE_HOME: path.join(root, "kimi-home"),
             KIMI_MOCK_POST_MARKER_WRITE: sentinel,
           },
           command: "bun",
           prefixArgs: ["run", v2MarkerThenWritePath],
-          executionPlan: testExecutionPlan("bun", ["run", v2MarkerThenWritePath]),
+          executionPlan: {
+            schemaVersion: 1,
+            operationKind: "review",
+            intendedEngine: "native-v2",
+            command: "bun",
+            prefixArgs: ["run", v2MarkerThenWritePath],
+            kimiVersion: "2.8.0",
+            certification: "certified",
+            resumedFromJobId: null,
+            safetyProfile: "native-v2-no-plan/1",
+          },
           prompt: "must never reach a tool",
           commandLabel: "review",
           onRecord: () => {
@@ -1111,8 +1063,9 @@ describe("runCliPrompt", () => {
       ).rejects.toMatchObject({
         code: "CLI_ENGINE_PROVENANCE_MISMATCH",
         details: {
-          intended_engine: "legacy-v1",
+          intended_engine: "native-v2",
           observed_engine: "native-v2",
+          planned_kimi_version: "2.8.0",
           system_version: "0.39.0",
         },
       });
@@ -1327,7 +1280,7 @@ describe("runCliPrompt", () => {
       // absolute non-existent path also routes through the same listener.
       const error = await runCliPrompt({
         cwd: root,
-        env: { ...process.env },
+        env: { ...process.env, KIMI_CODE_HOME: path.join(root, "kimi-home"), KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1" },
         command: "/nonexistent/path/to/kimi-binary-does-not-exist",
         executionPlan: testExecutionPlan("/nonexistent/path/to/kimi-binary-does-not-exist"),
         prompt: "x",
@@ -1343,13 +1296,14 @@ describe("runCliPrompt", () => {
 });
 
 describe("native-v2 provenance", () => {
-  const V2_MARKER = { role: "meta", type: "system.version", version: "0.42.0" };
+  const V2_MARKER = { role: "meta", type: "system.version", version: "2.8.0" };
 
-  function v2Plan(prefixArgs: readonly string[], kimiVersion: string | null = "0.42.0"): KimiExecutionPlan {
+  function v2Plan(prefixArgs: readonly string[], kimiVersion: string | null = "2.8.0"): KimiExecutionPlan {
     return {
       ...testExecutionPlan("bun", prefixArgs),
       intendedEngine: "native-v2",
       kimiVersion,
+      certification: kimiVersion === null ? "test-bypass" : "certified",
       safetyProfile: "native-v2-no-plan/1",
     };
   }
@@ -1421,11 +1375,15 @@ describe("native-v2 provenance", () => {
         expect(capturedEnv!.KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK).toBe("0");
       }
 
-      // A legacy-v1 plan cannot keep the flag from the child, so it still refuses before spawning.
+      // An explicit legacy-v1 plan refuses before spawning.
       const legacy = mockOptions({ cwd: root, records: [{ role: "assistant", content: "ok" }] });
       const spawnCount = spawnSpy.mock.calls.length;
-      await expect(runCliPrompt({ ...legacy, env: { ...legacy.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" } })).rejects.toMatchObject({
-        code: "CLI_V2_HOOK_ORDER_UNSAFE", stage: "cli-client.pre-spawn",
+      await expect(runCliPrompt({
+        ...legacy,
+        executionPlan: { ...legacy.executionPlan, intendedEngine: "legacy-v1", kimiVersion: "0.39.0", certification: "certified" },
+        env: { ...legacy.env, KIMI_CODE_EXPERIMENTAL_FLAG: "1" },
+      })).rejects.toMatchObject({
+        code: "KIMI_EXECUTION_PLAN_INVALID",
       });
       expect(spawnSpy).toHaveBeenCalledTimes(spawnCount);
     } finally {
@@ -1477,7 +1435,7 @@ describe("native-v2 provenance", () => {
         }),
       );
       expect(result.observedEngine).toBe("native-v2");
-      expect(result.systemVersion).toBe("0.42.0");
+      expect(result.systemVersion).toBe("2.8.0");
       expect(result.records).toHaveLength(1);
       expect(result.sessionId).toBe("26242650-d95f-4805-80d9-c947d309b2c6");
     } finally {
@@ -1492,7 +1450,7 @@ describe("native-v2 provenance", () => {
         runCliPrompt(
           v2Options(root, {
             cwd: root,
-            records: [{ ...V2_MARKER, version: "0.41.0" }, { role: "assistant", content: "x" }],
+            records: [{ ...V2_MARKER, version: "2.7.3" }, { role: "assistant", content: "x" }],
             escalationMs: 50,
           }),
         ),
@@ -1501,8 +1459,8 @@ describe("native-v2 provenance", () => {
         details: {
           intended_engine: "native-v2",
           observed_engine: "native-v2",
-          planned_kimi_version: "0.42.0",
-          system_version: "0.41.0",
+          planned_kimi_version: "2.8.0",
+          system_version: "2.7.3",
         },
       });
     } finally {
@@ -1648,13 +1606,13 @@ describe("native-v2 provenance", () => {
           v2Options(root, {
             cwd: root,
             emitAnnounce: false,
-            records: [{ ...V2_MARKER, version: "0.42.0\n0.43.0" }, { role: "assistant", content: "x" }],
+            records: [{ ...V2_MARKER, version: "2.8.0\n2.8.1" }, { role: "assistant", content: "x" }],
             escalationMs: 50,
           }),
         ),
       ).rejects.toMatchObject({
         code: "CLI_ENGINE_PROVENANCE_MISMATCH",
-        details: { intended_engine: "native-v2", observed_engine: "native-v2", system_version: "0.42.0\n0.43.0" },
+        details: { intended_engine: "native-v2", observed_engine: "native-v2", system_version: "2.8.0\n2.8.1" },
       });
     } finally {
       await cleanupTestPath(root);
@@ -1717,7 +1675,6 @@ describe("native-v2 provenance", () => {
       expect(spawnLine).toMatchObject({
         intended_engine: "native-v2",
         safety_profile: "native-v2-no-plan/1",
-        legacy_v1_forced: false,
       });
     } finally {
       await cleanupTestPath(root2);
@@ -1753,7 +1710,7 @@ describe("native-v2 provenance", () => {
     }
   });
 
-  test.each(["ask", "review", "challenge", "rescue", "swarm", "swarm-write", "review_gate"])("never inherits KIMI_CODE_TRUST_WORKSPACE for %s", async (commandLabel) => {
+  test.each(["ask", "review", "challenge", "rescue", "swarm", "swarm-write"])("never inherits KIMI_CODE_TRUST_WORKSPACE for %s", async (commandLabel) => {
     const root = await createTestPluginDataRoot("cli-no-ambient-trust");
     try {
       const opts = mockOptions({ cwd: root, records: [], commandLabel });
@@ -1766,8 +1723,8 @@ describe("native-v2 provenance", () => {
     }
   });
 
-  test("exports KIMI_CODE_NO_AUTO_UPDATE=1 to every spawn (legacy plan)", async () => {
-    const root = await createTestPluginDataRoot("cli-v1-no-auto-update");
+  test("exports KIMI_CODE_NO_AUTO_UPDATE=1 to every spawn", async () => {
+    const root = await createTestPluginDataRoot("cli-v2-no-auto-update");
     try {
       const opts = mockOptions({ cwd: root, records: [] });
       const env: NodeJS.ProcessEnv = { ...opts.env, KIMI_MOCK_ECHO_ENV: "KIMI_CODE_NO_AUTO_UPDATE" };
@@ -1786,11 +1743,13 @@ describe("native-v2 provenance", () => {
     await mkdir(kimiHome, { recursive: true });
     await writeFile(path.join(kimiHome, "config.toml"), "default_plan_mode = true\n");
     try {
+      const base = v2Options(root, { cwd: root, records: [V2_MARKER], kimiHome, commandLabel: "swarm", swarmMaxConcurrency: 2 });
       await expect(
         runCliPrompt({
-          ...v2Options(root, { cwd: root, records: [V2_MARKER], kimiHome }),
+          ...base,
+          executionPlan: { ...base.executionPlan, operationKind: "swarm" },
           env: {
-            ...v2Options(root, { cwd: root, records: [V2_MARKER], kimiHome }).env,
+            ...base.env,
             KIMI_MOCK_POST_MARKER_WRITE: sentinel,
           },
         }),
@@ -1826,6 +1785,8 @@ describe("SIGKILL escalation", () => {
         cwd: root,
         env: {
           ...process.env,
+          KIMI_CODE_HOME: path.join(root, "kimi-home"),
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_RECORDS: JSON.stringify([{ role: "assistant", content: "x" }]),
           KIMI_MOCK_SESSION_ID: "10000000-0000-0000-0000-000000000000",
         },
@@ -1866,6 +1827,8 @@ describe("SIGKILL escalation", () => {
         cwd: root,
         env: {
           ...process.env,
+          KIMI_CODE_HOME: path.join(root, "kimi-home"),
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_GRANDCHILD_READY_FILE: readyPath,
           KIMI_MOCK_GRANDCHILD_WRITE_FILE: writesPath,
           KIMI_MOCK_TERM_SIGNAL_FILE: termSignalPath,
@@ -1930,6 +1893,8 @@ describe("SIGKILL escalation", () => {
         cwd: root,
         env: {
           ...process.env,
+          KIMI_CODE_HOME: path.join(root, "kimi-home"),
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_RECORDS: JSON.stringify([{ role: "assistant", content: "x" }]),
           KIMI_MOCK_SESSION_ID: "20000000-0000-0000-0000-000000000000",
           SIGTERM_TRAP_SELF_EXIT_MS: "500",
@@ -2012,6 +1977,8 @@ describe("descendant reaping", () => {
         cwd: root,
         env: {
           ...process.env,
+          KIMI_CODE_HOME: path.join(root, "kimi-home"),
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
         },
         command: "bun",
@@ -2179,6 +2146,8 @@ describe("descendant reaping", () => {
         cwd: root,
         env: {
           ...process.env,
+          KIMI_CODE_HOME: path.join(root, "kimi-home"),
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
           KIMI_MOCK_GRANDCHILD_READY_FILE: grandchildReadyFile,
           KIMI_MOCK_GRANDCHILD_WRITE_FILE: grandchildWrites,
@@ -2239,6 +2208,8 @@ describe("descendant reaping", () => {
         cwd: root,
         env: {
           ...process.env,
+          KIMI_CODE_HOME: path.join(root, "kimi-home"),
+          KIMI_PLUGIN_CC_SKIP_VERSION_PROBE: "1",
           KIMI_MOCK_GRANDCHILD_PID_FILE: grandchildPidFile,
           KIMI_MOCK_GRANDCHILD_READY_FILE: grandchildReadyFile,
           KIMI_MOCK_GRANDCHILD_WRITE_FILE: grandchildWrites,

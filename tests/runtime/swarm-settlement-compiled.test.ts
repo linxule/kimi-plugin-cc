@@ -9,7 +9,7 @@ import { cleanupRecordedSwarmProcesses, readSwarmCleanupIdentities, waitForSwarm
 const runner = path.join(process.cwd(), "tests/helpers/swarm-settlement-runner.mjs");
 const posixTest = process.platform === "win32" ? test.skip : test;
 
-for (const distribution of ["dist", "plugins/kimi-codex/dist", "plugins/kimi-dsh/dist"]) {
+for (const distribution of ["dist", "plugins/kimi-codex/dist"]) {
   for (const mode of [
     "success", "failure", "snapshot-error", "batch-snapshot-error", "identity-error", "persistence-error", "incomplete-retention",
     "snapshot-persistent", "identity-persistent", "persistence-persistent", "spawn-callback-error",

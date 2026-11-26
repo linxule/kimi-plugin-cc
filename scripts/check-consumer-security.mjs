@@ -18,7 +18,7 @@ try {
       else if (entry.isDirectory()) scan(file);
     }
   };
-  for (const dir of ['dist', 'plugins/kimi-codex', 'plugins/kimi-dsh']) scan(path.join(repo, dir));
+  for (const dir of ['dist', 'plugins/kimi-codex']) scan(path.join(repo, dir));
   if (conflicts.length > 0) throw new Error(`sync-conflict copies in package surfaces: ${conflicts.slice(0, 8).join(', ')}${conflicts.length > 8 ? ` (and ${conflicts.length - 8} more)` : ''}`);
   const pkg = JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8'));
   const pack = spawnSync('bun', ['pm', 'pack', '--ignore-scripts', '--destination', scratch, '--quiet'], { cwd: repo, encoding: 'utf8', timeout: 120_000 });

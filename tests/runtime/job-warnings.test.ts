@@ -24,7 +24,7 @@ const PLAN: KimiExecutionPlan = {
   intendedEngine: "native-v2",
   command: "/bin/kimi",
   prefixArgs: [],
-  kimiVersion: "2.7.3",
+  kimiVersion: "2.8.0",
   certification: "certified",
   resumedFromJobId: null,
   safetyProfile: "native-v2-no-plan/1",
@@ -64,13 +64,6 @@ describe("channel W rendering", () => {
     }
   });
 
-  test("review_gate keeps its parsed decision and carries warnings in the artifact", () => {
-    const decision = JSON.stringify({ decision: "ALLOW", confidence: "high", summary: "ok", issues: [] });
-    const rendered = renderManagedJobOutput(record({ command_type: "review_gate", warnings: WARNINGS_JSON }), decision);
-    expect(typeof rendered.output).toBe("object");
-    expect(rendered.rendered.startsWith("Warnings:\n")).toBe(true);
-  });
-
   test("terminal artifacts list warnings", () => {
     const text = renderTerminalJobArtifact(record({ status: "failed", warnings: WARNINGS_JSON }));
     expect(text).toContain(`Warnings:\n- ${WARNINGS[0]}`);
@@ -86,7 +79,7 @@ describe("channel W JSON surfaces", () => {
     const root = await createTestPluginDataRoot("job-warnings-surfaces");
     const repo = await realpath(await createGitRepoFixture("job-warnings-repo"));
     try {
-      const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PLUGIN_DATA: root };
+      const env: NodeJS.ProcessEnv = { ...process.env, KIMI_PLUGIN_CC_DATA: root };
       const paths = resolvePluginPaths(env);
       await ensurePluginPaths(paths);
       const { repoId } = await resolveRepoIdentity(repo);
@@ -131,13 +124,12 @@ describe("channel W end to end", () => {
     try {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
-        CLAUDE_PLUGIN_DATA: root,
+        KIMI_PLUGIN_CC_DATA: root,
         KIMI_CODE_HOME: path.join(root, "home"),
         KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
         KIMI_PLUGIN_CC_KIMI_BIN: "bun",
-        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", path.resolve("tests/helpers/mock-kimi-cli-v1.ts")]),
+        KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", path.resolve("tests/helpers/mock-kimi-cli.ts")]),
         KIMI_PLUGIN_CC_MOCK_VERSION: "2.99.0",
-        KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2: "1",
         KIMI_PLUGIN_CC_STRICT_VERSIONS: "",
       };
       const warning = "kimi-code 2.99.0 is not certified by this plugin release; running ask read-only with 2.8.0 mechanics.";

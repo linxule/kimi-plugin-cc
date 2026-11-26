@@ -40,12 +40,13 @@ export async function replayJob(job) {
     if (stats.size > MAX_REPLAY_LOG_BYTES) {
         throw new RuntimeError("REPLAY_LOG_TOO_LARGE", `Job ${job.job_id} stream log is ${stats.size} bytes, which exceeds the ${MAX_REPLAY_LOG_BYTES}-byte replay ceiling.`, "replay.lookup");
     }
-    const finalText = await replayFinalText(job.stream_log_path);
-    const rendered = renderManagedJobOutput(job, finalText);
+    const replayed = await replayFinalText(job.stream_log_path);
+    const rendered = renderManagedJobOutput(job, replayed.text);
     return {
         rendered: rendered.rendered,
         output: rendered.output,
         summary: rendered.summary,
+        partial: replayed.partial,
     };
 }
 async function replayFinalText(logPath) {
@@ -120,5 +121,5 @@ async function replayFinalText(logPath) {
     if (!sawExit && assistantContent.length === 0) {
         throw new RuntimeError("REPLAY_LOG_INVALID", `Stream log ${logPath} did not capture any assistant content before truncation.`, "replay.log", { details: { logPath } });
     }
-    return assistantContent;
+    return { text: assistantContent, partial: !sawExit };
 }

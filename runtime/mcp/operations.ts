@@ -2,17 +2,18 @@ import { RuntimeError } from "../errors.js";
 import type { KimiOperationKind } from "../kimi-engine.js";
 import { kimiVersionsWith } from "../kimi-releases.js";
 import { MAX_SESSION_REFERENCES, parseDurationMs, SESSION_REFERENCE_ID_MAX, validateThinkingEffort } from "../parsing.js";
+import type { JobStatus } from "../types.js";
 
-export type McpModelOperation = Exclude<KimiOperationKind, "review_gate">;
-export type McpModelToolName =
-  | "kimi_ask"
-  | "kimi_review"
-  | "kimi_rescue"
-  | "kimi_pursue"
-  | "kimi_swarm"
-  | "kimi_swarm_write";
-export type McpJobToolName = "kimi_job_status" | "kimi_job_result" | "kimi_job_cancel";
-export type McpToolName = McpModelToolName | McpJobToolName;
+export type McpModelOperation = KimiOperationKind;
+export type McpModelToolName = "kimi_read" | "kimi_write";
+export type McpJobToolName = "kimi_job";
+export type McpSetupToolName = "kimi_setup";
+export type McpToolName = McpModelToolName | McpJobToolName | McpSetupToolName;
+
+export type McpReadMode = "ask" | "review" | "challenge" | "swarm";
+export type McpWriteMode = "rescue" | "pursue" | "swarm_patch";
+export type McpJobAction = "list" | "status" | "result" | "wait" | "cancel" | "replay" | "recover_swarm";
+export type McpSetupAction = "check" | "models" | "install" | "install_kimi" | "repair_sessions";
 
 export interface McpToolDefinition {
   name: McpToolName;
@@ -24,279 +25,472 @@ export interface McpToolDefinition {
 export interface McpOperationInvocation {
   operationKind: McpModelOperation;
   workspace?: string;
+  wait: boolean;
+  waitTimeoutMs?: number;
   argv: string[];
 }
 
-interface OperationSpec {
-  kind: McpModelOperation;
-  command: string[];
-  write: boolean;
-  inputSchema: Record<string, unknown>;
-  summary: string;
+export interface McpJobControlArgs {
+  action: McpJobAction;
+  workspace?: string;
+  jobId?: string;
+  statusFilter?: JobStatus;
+  limit?: number;
+  waitMs?: number;
+  apply?: boolean;
 }
+
+export interface McpSetupArgs {
+  action: McpSetupAction;
+  workspace?: string;
+  apply?: boolean;
+  all?: boolean;
+}
+
+const DEFAULT_WAIT_TIMEOUT_MIN_MS = 1_000;
+const MAX_WAIT_TIMEOUT_MS = 86_400_000;
 
 const WORKSPACE_PROPERTY = {
   type: "string",
-  description: "Absolute workspace directory. Required when the host does not configure a default; Codex normally supplies it explicitly.",
+  description: "Absolute workspace directory. Required when the host does not configure a default.",
 } as const;
 const MODEL_PROPERTY = {
   type: "string",
-  description: "One configured Kimi model alias. Omit to preserve the normal session default; never guess an alias.",
+  description: "Configured Kimi model alias. Omit to use the default model; never guess an alias.",
 } as const;
 const THINKING_PROPERTY = {
   type: "string",
-  description: "Per-run thinking-effort request such as off, low, medium, or high. Provider/model support varies and is not observable by the plugin.",
+  description: "Per-run thinking-effort request (off, low, medium, high). Not observable on the wire.",
 } as const;
 const BUDGET_PROPERTY = {
   type: "string",
-  description: "Finite duration such as 30m, 1h, or 90s; bare numbers mean minutes. Maximum 24h. Background operation does not extend it.",
+  description: "Finite duration such as 30m, 1h, or 90s; bare numbers mean minutes. Maximum 24h.",
 } as const;
-const COMMON_PROPERTIES = {
-  workspace: WORKSPACE_PROPERTY,
-  model: MODEL_PROPERTY,
-  thinking: THINKING_PROPERTY,
-  budget: BUDGET_PROPERTY,
-} as const;
-const RESUME_PROPERTIES = {
-  fresh: {
+const WAIT_PROPERTIES = {
+  wait: {
     type: "boolean",
-    description: "Start a fresh Kimi session. Incompatible with resume and resume_latest.",
+    description: "Wait for completion and return the result directly (default true on standard calls; set false to get job_id immediately for parallel fan-out).",
   },
-  resume: {
-    type: "string",
-    description: "Resume this job ID or Kimi session ID with the standard continuation instruction. Do not also supply prompt.",
-  },
-  resume_latest: {
-    type: "boolean",
-    description: "Resume the latest matching session for this repository. May be combined with a new prompt.",
-  },
-} as const;
-const PROMPT_PROPERTY = {
-  type: "string",
-  description: "The complete user request, preserved verbatim. Required except when resume or resume_latest supplies the continuation context.",
-} as const;
-const OBJECTIVE_PROPERTY = {
-  type: "string",
-  description: "The complete objective, preserved verbatim.",
-} as const;
-const SCOPE_PROPERTIES = {
-  read_roots: {
-    type: "array",
-    items: { type: "string" },
-    description: "Absolute directories Kimi may also read. Omit for the default read scope.",
-  },
-  network: {
-    type: "boolean",
-    description: "Enable web search and URL fetch; file reads are then confined to the workspace plus read_roots. Default false.",
+  wait_timeout_ms: {
+    type: "integer",
+    minimum: DEFAULT_WAIT_TIMEOUT_MIN_MS,
+    maximum: MAX_WAIT_TIMEOUT_MS,
+    description: "Maximum milliseconds this call waits before returning a running handle (job keeps running in background; poll with kimi_job).",
   },
 } as const;
 const REFERENCE_PROPERTIES = {
   referenced_sessions: {
     type: "array",
     items: { type: "string" },
-    description: "Optional. Job IDs or Kimi session IDs of earlier sessions for Kimi to consult (at most 8). Each is passed as a referenced session log that Kimi can read. Use when prior work matters. On a job with read_roots or network, each session's whole main-agent directory (its log, saved tool outputs and plans) becomes readable; with network that content can reach the web.",
+    description: "Up to 8 earlier job IDs or Kimi session IDs whose main logs Kimi may consult.",
   },
 } as const;
-const REVIEW_MODE_PROPERTY = {
-  type: "string",
-  enum: ["defects", "challenge"],
-  description: "defects (default) reviews for bugs and regressions; challenge questions assumptions, design choices, and tradeoffs instead.",
+
+const COMMON_PROPERTIES = {
+  workspace: WORKSPACE_PROPERTY,
+  model: MODEL_PROPERTY,
+  thinking: THINKING_PROPERTY,
+  budget: BUDGET_PROPERTY,
+  ...WAIT_PROPERTIES,
 } as const;
-const FOCUS_PROPERTY = {
-  type: "string",
-  description: "Optional review focus or adversarial framing, preserved verbatim.",
-} as const;
-const BASE_PROPERTY = {
-  type: "string",
-  description: "Optional Git base ref. The committed branch diff is authoritative; dirty current files are not treated as committed snapshots.",
-} as const;
-const TURNS_PROPERTY = {
-  type: "integer",
-  minimum: 1,
-  description: "Soft turn-count hint included in the objective. The finite budget is the hard bound.",
-} as const;
-const CAP_PROPERTY = {
-  type: "integer",
-  minimum: 1,
-  description: "Soft hint for total subagent count, not a hook-enforced limit.",
-} as const;
-const MAX_CONCURRENCY_PROPERTY = {
-  type: "integer",
-  minimum: 1,
-  description: `Concurrent worker limit on exact Kimi Code ${kimiVersionsWith("bounded-swarm").join("/")}: one runs directly; larger values bound each native swarm wave. Older certified versions limit normal launches only and recovery can exceed it. Distinct from the soft total cap.`,
-} as const;
-const START_RESULT_GUIDANCE =
-  "Task-capable clients receive an MCP task. Other clients receive a job ID immediately after launch; use kimi_job_status and kimi_job_result until terminal, and kimi_job_cancel to stop. Do not present a launch handle as the finished answer.";
+
+const READ_SCHEMA = schema({
+  mode: {
+    type: "string",
+    enum: ["ask", "review", "challenge", "swarm"],
+    description: "ask (default): explain/investigate; review: defect review of diff; challenge: adversarial design critique; swarm: read-only parallel fan-out.",
+  },
+  prompt: {
+    type: "string",
+    description: "User question, review focus, or swarm objective, preserved verbatim. Required for ask (unless resume is set) and swarm.",
+  },
+  ...COMMON_PROPERTIES,
+  base: {
+    type: "string",
+    description: "Git base ref for review/challenge (committed branch diff; incompatible with uncommitted=true).",
+  },
+  uncommitted: {
+    type: "boolean",
+    description: "Review uncommitted/untracked working-tree changes (default for review/challenge; incompatible with base).",
+  },
+  resume: {
+    type: "string",
+    description: "Resume session for ask: \"last\" (latest repo session, may pair with prompt) or a job/session ID (no prompt).",
+  },
+  read_roots: {
+    type: "array",
+    items: { type: "string" },
+    description: "Additional absolute directories Kimi may read outside workspace.",
+  },
+  network: {
+    type: "boolean",
+    description: "Enable web search and URL fetch (file reads remain confined to workspace + read_roots). Default false.",
+  },
+  cap: {
+    type: "integer",
+    minimum: 1,
+    maximum: 25,
+    description: "Soft hint for total swarm subagent count.",
+  },
+  max_concurrency: {
+    type: "integer",
+    minimum: 1,
+    maximum: 16,
+    description: `Maximum simultaneous swarm workers on Kimi Code ${kimiVersionsWith("bounded-swarm").join("/")}+ (1 runs directly).`,
+  },
+  ...REFERENCE_PROPERTIES,
+});
+
+const WRITE_SCHEMA = schema({
+  mode: {
+    type: "string",
+    enum: ["rescue", "pursue", "swarm_patch"],
+    description: "rescue (default): bounded workspace edit/fix; pursue: autonomous multi-turn goal; swarm_patch: parallel edits in isolated worktree returning a git patch without modifying the real tree.",
+  },
+  prompt: {
+    type: "string",
+    description: "Task objective or edit instruction, preserved verbatim. Never mutates Git.",
+  },
+  ...COMMON_PROPERTIES,
+  resume: {
+    type: "string",
+    description: "Resume session for rescue: \"last\" or a job/session ID.",
+  },
+  cap: {
+    type: "integer",
+    minimum: 1,
+    maximum: 25,
+    description: "Soft hint for total swarm_patch subagent count.",
+  },
+  max_concurrency: {
+    type: "integer",
+    minimum: 1,
+    maximum: 16,
+    description: "Maximum simultaneous swarm_patch workers (default 1 runs directly).",
+  },
+  ...REFERENCE_PROPERTIES,
+});
+
+const JOB_SCHEMA = schema(
+  {
+    action: {
+      type: "string",
+      enum: ["list", "status", "result", "wait", "cancel", "replay", "recover_swarm"],
+      description: "Job lifecycle action to run in this workspace.",
+    },
+    job_id: {
+      type: "string",
+      description: "Job UUID. Required for replay and recover_swarm; optional for status/result/wait/cancel (defaults to latest repo job).",
+    },
+    workspace: WORKSPACE_PROPERTY,
+    status_filter: {
+      type: "string",
+      enum: ["running", "completed", "failed", "cancelled"],
+      description: "Filter jobs returned by action=list.",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 100,
+      description: "Maximum jobs to return for action=list (default 20).",
+    },
+    wait_ms: {
+      type: "integer",
+      minimum: 100,
+      maximum: 600_000,
+      description: "Poll duration in ms for action=wait (default 30000).",
+    },
+    apply: {
+      type: "boolean",
+      description: "Apply cleanup and patch capture during recover_swarm (default false previews only).",
+    },
+  },
+  ["action"],
+);
+
+const SETUP_SCHEMA = schema({
+  action: {
+    type: "string",
+    enum: ["check", "models", "install", "install_kimi", "repair_sessions"],
+    description: "check (default): verify PreToolUse hook & binary; models: list configured model aliases; install: write/repair hook; install_kimi: install newest certified CLI; repair_sessions: preview/repair Kimi session titles.",
+  },
+  workspace: WORKSPACE_PROPERTY,
+  apply: {
+    type: "boolean",
+    description: "Write repaired session previews during repair_sessions (default false previews only).",
+  },
+  all: {
+    type: "boolean",
+    description: "Scope repair_sessions across all repositories.",
+  },
+});
 
 function schema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
   return { type: "object", properties, required, additionalProperties: false };
 }
 
-const OPERATION_SPECS: Readonly<Record<McpModelToolName, OperationSpec>> = {
-  kimi_ask: {
-    kind: "ask",
-    command: ["ask"],
-    write: false,
-    summary: "Start an independent read-only Kimi repository explanation.",
-    inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, ...REFERENCE_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
-  },
-  kimi_review: {
-    kind: "review",
-    command: ["review"],
-    write: false,
-    summary: "Start an independent read-only Kimi review of working-tree changes, including untracked files, or a committed base diff. Mode challenge questions the approach instead of hunting defects.",
-    inputSchema: schema({ ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, ...REFERENCE_PROPERTIES, mode: REVIEW_MODE_PROPERTY, base: BASE_PROPERTY, focus: FOCUS_PROPERTY }),
-  },
-  kimi_rescue: {
-    kind: "rescue",
-    command: ["task", "rescue"],
-    write: true,
-    summary: "Start a bounded write-capable Kimi investigation or fix inside the validated workspace. Review the resulting changes; no commit is made.",
-    inputSchema: schema({ ...COMMON_PROPERTIES, ...REFERENCE_PROPERTIES, prompt: PROMPT_PROPERTY, ...RESUME_PROPERTIES }),
-  },
-  kimi_pursue: {
-    kind: "pursue",
-    command: ["task", "pursue"],
-    write: true,
-    summary: "Start explicitly autonomous Kimi goal mode with a finite hard budget and workspace write limits. Use only for hands-off objectives, not a single bounded fix.",
-    inputSchema: schema({ ...COMMON_PROPERTIES, objective: OBJECTIVE_PROPERTY, turns: TURNS_PROPERTY }, ["objective"]),
-  },
-  kimi_swarm: {
-    kind: "swarm",
-    command: ["task", "swarm"],
-    write: false,
-    summary: "Start a read-only parallel Kimi fan-out across many independent review targets.",
-    inputSchema: schema(
-      { ...COMMON_PROPERTIES, ...SCOPE_PROPERTIES, ...REFERENCE_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY },
-      ["objective"],
-    ),
-  },
-  kimi_swarm_write: {
-    kind: "swarm-write",
-    command: ["task", "swarm"],
-    write: true,
-    summary: "Start parallel Kimi implementation in a disposable worktree off HEAD. The real tree is not edited; the result is a patch to review and apply separately.",
-    inputSchema: schema(
-      { ...COMMON_PROPERTIES, ...REFERENCE_PROPERTIES, objective: OBJECTIVE_PROPERTY, cap: CAP_PROPERTY, max_concurrency: MAX_CONCURRENCY_PROPERTY },
-      ["objective"],
-    ),
-  },
-};
-
-const JOB_CONTROL_SCHEMA = schema({
-  workspace: WORKSPACE_PROPERTY,
-  job_id: { type: "string", description: "The UUID returned by an MCP-launched Kimi operation." },
-}, ["job_id"]);
-
 export const MCP_TOOL_DEFINITIONS: readonly McpToolDefinition[] = [
-  ...Object.entries(OPERATION_SPECS).map(([name, spec]) => ({
-    name: name as McpModelToolName,
-    description: `${spec.summary} ${START_RESULT_GUIDANCE}`,
-    inputSchema: spec.inputSchema,
+  {
+    name: "kimi_read",
+    description:
+      "Run a read-only Kimi operation (ask, review, challenge, or parallel read-only swarm). Waits for prose by default on standard tool calls; set wait=false to return job_id immediately.",
+    inputSchema: READ_SCHEMA,
     annotations: {
-      title: name.replaceAll("_", " "),
-      readOnlyHint: !spec.write,
-      destructiveHint: spec.write,
+      title: "kimi read",
+      readOnlyHint: true,
+      destructiveHint: false,
       idempotentHint: false,
       openWorldHint: true,
     },
-  })),
-  {
-    name: "kimi_job_status",
-    description: "Read one MCP-launched job's durable state and phase in the same workspace. This is always an ordinary MCP result, never a task.",
-    inputSchema: JOB_CONTROL_SCHEMA,
-    annotations: { title: "kimi job status", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
-    name: "kimi_job_result",
-    description: "Read the terminal artifact for one MCP-launched job in the same workspace. Failed jobs return isError:true with their artifact; running jobs return JOB_NOT_TERMINAL without changing state.",
-    inputSchema: JOB_CONTROL_SCHEMA,
-    annotations: { title: "kimi job result", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    name: "kimi_write",
+    description:
+      "Run a workspace-confined write operation: rescue (single-turn edit/test), pursue (autonomous multi-turn goal), or swarm_patch (isolated worktree producing a git patch without modifying the working tree).",
+    inputSchema: WRITE_SCHEMA,
+    annotations: {
+      title: "kimi write",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   },
   {
-    name: "kimi_job_cancel",
-    description: "Cooperatively cancel one running MCP-launched job in the same workspace. Terminal jobs are a no-op. Cancellation does not roll back edits, and write-swarm still captures its patch before cleanup.",
-    inputSchema: JOB_CONTROL_SCHEMA,
-    annotations: { title: "kimi job cancel", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    name: "kimi_job",
+    description: "Inspect, await, cancel, replay, or recover Kimi jobs in the workspace.",
+    inputSchema: JOB_SCHEMA,
+    annotations: {
+      title: "kimi job",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: "kimi_setup",
+    description: "Verify or install the Kimi PreToolUse safety hook, list configured models, install a certified Kimi CLI binary, or repair session titles.",
+    inputSchema: SETUP_SCHEMA,
+    annotations: {
+      title: "kimi setup",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
   },
 ];
 
 export function isMcpModelToolName(name: string): name is McpModelToolName {
-  return Object.hasOwn(OPERATION_SPECS, name);
+  return name === "kimi_read" || name === "kimi_write";
 }
 
 export function buildMcpOperationInvocation(name: McpModelToolName, input: unknown): McpOperationInvocation {
-  const spec = OPERATION_SPECS[name];
-  const properties = spec.inputSchema.properties as Record<string, unknown>;
-  const args = readArguments(input, Object.keys(properties));
+  const allowedKeys = Object.keys((name === "kimi_read" ? READ_SCHEMA : WRITE_SCHEMA).properties as Record<string, unknown>);
+  const args = readArguments(input, allowedKeys);
   const workspace = optionalString(args, "workspace");
-  const challenge = name === "kimi_review" && reviewMode(args) === "challenge";
-  const kind: McpModelOperation = challenge ? "challenge" : spec.kind;
-  const argv = challenge ? ["task", "challenge"] : [...spec.command];
-  appendCommonOptions(argv, args, kind === "pursue" || kind === "swarm" || kind === "swarm-write" ? "safety" : "response");
-  appendScopeOptions(argv, args);
-  appendReferenceOptions(argv, args);
+  const wait = optionalBoolean(args, "wait") ?? true;
+  const waitTimeoutMs = optionalBoundedInteger(args, "wait_timeout_ms", DEFAULT_WAIT_TIMEOUT_MIN_MS, MAX_WAIT_TIMEOUT_MS);
 
-  switch (kind) {
-    case "ask":
-    case "rescue": {
-      const prompt = args.prompt === undefined ? undefined : requiredNonEmptyString(args, "prompt");
-      const fresh = optionalBoolean(args, "fresh") ?? false;
-      const resumeLatest = optionalBoolean(args, "resume_latest") ?? false;
-      const resume = args.resume === undefined ? undefined : requiredNonEmptyString(args, "resume");
-      if (fresh && (resumeLatest || resume !== undefined)) {
-        throw invalidArguments("fresh cannot be combined with resume or resume_latest.");
-      }
-      if (resumeLatest && resume !== undefined) {
-        throw invalidArguments("resume and resume_latest are alternatives; choose one.");
-      }
-      if (resume !== undefined && prompt !== undefined) {
-        throw invalidArguments("resume uses the standard continuation instruction and cannot include prompt. Use resume_latest with a new prompt instead.");
-      }
-      if (prompt === undefined && !resumeLatest && resume === undefined) {
-        throw invalidArguments(`${kind} requires prompt unless resume or resume_latest is selected.`);
-      }
-      if (fresh) argv.push("--fresh");
-      if (resumeLatest) argv.push("-r");
-      if (resume !== undefined) argv.push("--resume", resume);
-      if (prompt !== undefined) argv.push("--", prompt);
-      break;
+  if (name === "kimi_read") {
+    const mode = readMode(args);
+    const kind: McpModelOperation = mode;
+    const argv = mode === "ask" ? ["ask"] : mode === "review" ? ["review"] : ["task", mode];
+    appendCommonOptions(argv, args, mode === "swarm" ? "safety" : "response");
+    appendScopeOptions(argv, args);
+    appendReferenceOptions(argv, args);
+
+    const base = args.base === undefined ? undefined : requiredNonEmptyString(args, "base");
+    const uncommitted = optionalBoolean(args, "uncommitted");
+    const resume = args.resume === undefined ? undefined : requiredNonEmptyString(args, "resume");
+    const cap = optionalBoundedInteger(args, "cap", 1, 25);
+    const maxConcurrency = optionalBoundedInteger(args, "max_concurrency", 1, 16);
+    const prompt = optionalString(args, "prompt");
+
+    if (mode !== "review" && mode !== "challenge" && (base !== undefined || uncommitted !== undefined)) {
+      throw invalidArguments(`base and uncommitted are only valid for mode "review" or "challenge" (got ${mode}).`);
     }
-    case "review":
-    case "challenge": {
-      const base = args.base === undefined ? undefined : requiredNonEmptyString(args, "base");
-      const focus = optionalString(args, "focus");
-      if (base !== undefined) argv.push("--base", base);
-      if (focus !== undefined) argv.push("--", focus);
-      break;
+    if (base !== undefined && uncommitted === true) {
+      throw invalidArguments("base and uncommitted=true are mutually exclusive.");
     }
-    case "pursue": {
-      const turns = optionalPositiveInteger(args, "turns");
-      if (turns !== undefined) argv.push("--turns", String(turns));
-      argv.push("--", requiredNonEmptyString(args, "objective"));
-      break;
+    if ((mode === "review" || mode === "challenge") && uncommitted === false && base === undefined) {
+      throw invalidArguments('uncommitted=false requires a base ref for mode "review" or "challenge".');
     }
-    case "swarm":
-    case "swarm-write": {
-      const cap = optionalPositiveInteger(args, "cap");
-      const maxConcurrency = optionalPositiveInteger(args, "max_concurrency");
-      if (cap !== undefined) argv.push("--cap", String(cap));
-      if (maxConcurrency !== undefined) argv.push("--max-concurrency", String(maxConcurrency));
-      if (kind === "swarm-write") argv.push("--write");
-      argv.push("--", requiredNonEmptyString(args, "objective"));
-      break;
+    if (mode !== "ask" && resume !== undefined) {
+      throw invalidArguments(`resume is only valid for mode "ask" (got ${mode}).`);
     }
+    if (mode !== "swarm" && (cap !== undefined || maxConcurrency !== undefined)) {
+      throw invalidArguments(`cap and max_concurrency are only valid for mode "swarm" (got ${mode}).`);
+    }
+
+    switch (mode) {
+      case "ask": {
+        const cleanPrompt = prompt === undefined ? undefined : requiredNonEmptyString(args, "prompt");
+        if (resume === "last") {
+          argv.push("-r");
+          if (cleanPrompt !== undefined) argv.push("--", cleanPrompt);
+        } else if (resume !== undefined) {
+          if (cleanPrompt !== undefined) {
+            throw invalidArguments('resume with a job/session ID uses the continuation prompt and cannot include prompt; use resume="last" to pair with a new prompt.');
+          }
+          argv.push("--resume", resume);
+        } else {
+          argv.push("--", requiredNonEmptyString(args, "prompt"));
+        }
+        break;
+      }
+      case "review":
+      case "challenge": {
+        if (base !== undefined) argv.push("--base", base);
+        if (prompt !== undefined && prompt.trim().length > 0) argv.push("--", prompt);
+        break;
+      }
+      case "swarm": {
+        if (cap !== undefined) argv.push("--cap", String(cap));
+        if (maxConcurrency !== undefined) argv.push("--max-concurrency", String(maxConcurrency));
+        argv.push("--", requiredNonEmptyString(args, "prompt"));
+        break;
+      }
+    }
+
+    return {
+      operationKind: kind,
+      ...(workspace !== undefined ? { workspace } : {}),
+      wait,
+      ...(waitTimeoutMs !== undefined ? { waitTimeoutMs } : {}),
+      argv,
+    };
   }
 
-  return { operationKind: kind, ...(workspace !== undefined ? { workspace } : {}), argv };
+  // kimi_write
+  const mode = writeMode(args);
+  const kind: McpModelOperation = mode === "swarm_patch" ? "swarm-write" : mode;
+  const argv = mode === "swarm_patch" ? ["task", "swarm"] : ["task", mode];
+  appendCommonOptions(argv, args, mode === "rescue" ? "response" : "safety");
+
+  const resume = args.resume === undefined ? undefined : requiredNonEmptyString(args, "resume");
+  const cap = optionalBoundedInteger(args, "cap", 1, 25);
+  const maxConcurrency = optionalBoundedInteger(args, "max_concurrency", 1, 16);
+  const prompt = optionalString(args, "prompt");
+
+  if (mode === "pursue" && args.referenced_sessions !== undefined) {
+    throw invalidArguments('referenced_sessions is not supported for mode "pursue".');
+  }
+  appendReferenceOptions(argv, args);
+  if (mode !== "rescue" && resume !== undefined) {
+    throw invalidArguments(`resume is only valid for mode "rescue" (got ${mode}).`);
+  }
+  if (mode !== "swarm_patch" && (cap !== undefined || maxConcurrency !== undefined)) {
+    throw invalidArguments(`cap and max_concurrency are only valid for mode "swarm_patch" (got ${mode}).`);
+  }
+
+  if (mode === "rescue") {
+    const cleanPrompt = prompt === undefined ? undefined : requiredNonEmptyString(args, "prompt");
+    if (resume === "last") {
+      argv.push("-r");
+      if (cleanPrompt !== undefined) argv.push("--", cleanPrompt);
+    } else if (resume !== undefined) {
+      if (cleanPrompt !== undefined) {
+        throw invalidArguments('resume with a job/session ID cannot include prompt; use resume="last" to pair with a new prompt.');
+      }
+      argv.push("--resume", resume);
+    } else {
+      argv.push("--fresh", "--", requiredNonEmptyString(args, "prompt"));
+    }
+  } else if (mode === "pursue") {
+    argv.push("--", requiredNonEmptyString(args, "prompt"));
+  } else {
+    if (cap !== undefined) argv.push("--cap", String(cap));
+    if (maxConcurrency !== undefined) argv.push("--max-concurrency", String(maxConcurrency));
+    argv.push("--write", "--", requiredNonEmptyString(args, "prompt"));
+  }
+
+  return {
+    operationKind: kind,
+    ...(workspace !== undefined ? { workspace } : {}),
+    wait,
+    ...(waitTimeoutMs !== undefined ? { waitTimeoutMs } : {}),
+    argv,
+  };
 }
 
-export function readJobControlArguments(input: unknown): { workspace?: string; jobId: string } {
-  const args = readArguments(input, ["workspace", "job_id"]);
+export function readJobControlArguments(input: unknown): McpJobControlArgs {
+  const args = readArguments(input, Object.keys(JOB_SCHEMA.properties as Record<string, unknown>));
+  const action = requiredEnum<McpJobAction>(
+    args,
+    "action",
+    ["list", "status", "result", "wait", "cancel", "replay", "recover_swarm"],
+  );
+  const workspace = optionalString(args, "workspace");
+  const jobId = args.job_id === undefined ? undefined : requiredNonEmptyString(args, "job_id");
+  const statusFilter = args.status_filter === undefined
+    ? undefined
+    : requiredEnum<JobStatus>(args, "status_filter", ["running", "completed", "failed", "cancelled"]);
+  const limit = optionalBoundedInteger(args, "limit", 1, 100);
+  const waitMs = optionalBoundedInteger(args, "wait_ms", 100, 600_000);
+  const apply = optionalBoolean(args, "apply");
+
+  if (action !== "list" && (statusFilter !== undefined || limit !== undefined)) {
+    throw invalidArguments('status_filter and limit are only valid for action "list".');
+  }
+  if (action !== "wait" && waitMs !== undefined) {
+    throw invalidArguments('wait_ms is only valid for action "wait".');
+  }
+  if (action !== "recover_swarm" && apply !== undefined) {
+    throw invalidArguments('apply is only valid for action "recover_swarm".');
+  }
+  if ((action === "replay" || action === "recover_swarm") && jobId === undefined) {
+    throw invalidArguments(`job_id is required for action "${action}".`);
+  }
+
   return {
-    ...(optionalString(args, "workspace") !== undefined ? { workspace: optionalString(args, "workspace") } : {}),
-    jobId: requiredNonEmptyString(args, "job_id"),
+    action,
+    ...(workspace !== undefined ? { workspace } : {}),
+    ...(jobId !== undefined ? { jobId } : {}),
+    ...(statusFilter !== undefined ? { statusFilter } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+    ...(waitMs !== undefined ? { waitMs } : {}),
+    ...(apply !== undefined ? { apply } : {}),
   };
+}
+
+export function readSetupArguments(input: unknown): McpSetupArgs {
+  const args = readArguments(input, Object.keys(SETUP_SCHEMA.properties as Record<string, unknown>));
+  const actionRaw = optionalString(args, "action") ?? "check";
+  const validActions: readonly McpSetupAction[] = ["check", "models", "install", "install_kimi", "repair_sessions"];
+  if (!validActions.includes(actionRaw as McpSetupAction)) {
+    throw invalidArguments(`action must be one of ${validActions.join(", ")}.`);
+  }
+  const action = actionRaw as McpSetupAction;
+  const workspace = optionalString(args, "workspace");
+  const apply = optionalBoolean(args, "apply");
+  const all = optionalBoolean(args, "all");
+  if (action !== "repair_sessions" && (apply !== undefined || all !== undefined)) {
+    throw invalidArguments('apply and all are only valid for action "repair_sessions".');
+  }
+  return {
+    action,
+    ...(workspace !== undefined ? { workspace } : {}),
+    ...(apply !== undefined ? { apply } : {}),
+    ...(all !== undefined ? { all } : {}),
+  };
+}
+
+function readMode(args: Record<string, unknown>): McpReadMode {
+  const raw = optionalString(args, "mode") ?? "ask";
+  if (raw !== "ask" && raw !== "review" && raw !== "challenge" && raw !== "swarm") {
+    throw invalidArguments('kimi_read mode must be one of "ask", "review", "challenge", "swarm".');
+  }
+  return raw;
+}
+
+function writeMode(args: Record<string, unknown>): McpWriteMode {
+  const raw = optionalString(args, "mode") ?? "rescue";
+  if (raw !== "rescue" && raw !== "pursue" && raw !== "swarm_patch") {
+    throw invalidArguments('kimi_write mode must be one of "rescue", "pursue", "swarm_patch".');
+  }
+  return raw;
 }
 
 function appendCommonOptions(argv: string[], args: Record<string, unknown>, budgetKind: "safety" | "response"): void {
@@ -314,12 +508,6 @@ function appendCommonOptions(argv: string[], args: Record<string, unknown>, budg
   }
 }
 
-function reviewMode(args: Record<string, unknown>): "defects" | "challenge" {
-  const mode = optionalString(args, "mode") ?? "defects";
-  if (mode !== "defects" && mode !== "challenge") throw invalidArguments('mode must be "defects" or "challenge".');
-  return mode;
-}
-
 /** Type checks only: the companion parser and read-scope resolver own every scope rule. */
 function appendScopeOptions(argv: string[], args: Record<string, unknown>): void {
   const readRoots = args.read_roots;
@@ -332,11 +520,6 @@ function appendScopeOptions(argv: string[], args: Record<string, unknown>): void
   if (optionalBoolean(args, "network") === true) argv.push("--network");
 }
 
-/**
- * The companion parser and resolver own every reference rule. This only keeps
- * an oversized list or id out of the child's argv, where it could fail the
- * launch before the companion can answer.
- */
 function appendReferenceOptions(argv: string[], args: Record<string, unknown>): void {
   const references = args.referenced_sessions;
   if (references === undefined) return;
@@ -366,6 +549,14 @@ function readArguments(input: unknown, allowedKeys: readonly string[]): Record<s
   return args;
 }
 
+function requiredEnum<T extends string>(args: Record<string, unknown>, key: string, values: readonly T[]): T {
+  const value = args[key];
+  if (typeof value !== "string" || !values.includes(value as T)) {
+    throw invalidArguments(`${key} must be one of ${values.join(", ")}.`);
+  }
+  return value as T;
+}
+
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
   if (value === undefined) return undefined;
@@ -386,10 +577,17 @@ function optionalBoolean(args: Record<string, unknown>, key: string): boolean | 
   return value;
 }
 
-function optionalPositiveInteger(args: Record<string, unknown>, key: string): number | undefined {
+function optionalBoundedInteger(
+  args: Record<string, unknown>,
+  key: string,
+  min: number,
+  max: number,
+): number | undefined {
   const value = args[key];
   if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) throw invalidArguments(`${key} must be a positive safe integer.`);
+  if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) {
+    throw invalidArguments(`${key} must be an integer between ${min} and ${max}.`);
+  }
   return value as number;
 }
 

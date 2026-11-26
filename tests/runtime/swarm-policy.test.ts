@@ -14,7 +14,7 @@ const context = { commandLabel: "swarm", swarmPolicy: BOUNDED_SWARM_POLICY, swar
 function plan(overrides: Partial<KimiExecutionPlan> = {}): KimiExecutionPlan {
   return {
     schemaVersion: 1, operationKind: "swarm", intendedEngine: "native-v2", command: "kimi",
-    prefixArgs: [], kimiVersion: "2.6.2", certification: "certified", resumedFromJobId: null,
+    prefixArgs: [], kimiVersion: "2.8.0", certification: "certified", resumedFromJobId: null,
     safetyProfile: "native-v2-no-plan/1", ...overrides,
   };
 }
@@ -22,21 +22,21 @@ function plan(overrides: Partial<KimiExecutionPlan> = {}): KimiExecutionPlan {
 describe("bounded swarm environment", () => {
   test("selects only the exact engine, version and swarm operation", () => {
     for (const operationKind of ["swarm", "swarm-write"] as const) {
-      for (const kimiVersion of ["2.6.2", "2.6.3", "2.7.2", "2.7.3", "2.8.0"]) {
+      for (const kimiVersion of ["2.8.0"]) {
         expect(usesBoundedSwarmPolicy(plan({ operationKind, kimiVersion }))).toBe(true);
       }
-      for (const kimiVersion of ["2.5.3", "2.6.0", "2.6.1", "2.6.4", "2.7.0", "2.7.1", "2.7.4", "2.7", "2.7.x", ">=2.7.2", "2.7.2+local", "2.7.2-rc.1", "2.6.2+local", "2.6.2-rc.1", null]) {
+      for (const kimiVersion of ["2.5.3", "2.6.0", "2.6.2", "2.7.2", "2.7.3", "2.8.1", "2.8", "2.8.x", ">=2.8.0", "2.8.0+local", "2.8.0-rc.1", null]) {
         expect(usesBoundedSwarmPolicy(plan({ operationKind, kimiVersion }))).toBe(false);
       }
       expect(usesBoundedSwarmPolicy(plan({ operationKind, intendedEngine: "legacy-v1" }))).toBe(false);
     }
-    for (const operationKind of ["ask", "review", "challenge", "rescue", "pursue", "review_gate"] as const) {
+    for (const operationKind of ["ask", "review", "challenge", "rescue", "pursue"] as const) {
       expect(usesBoundedSwarmPolicy(plan({ operationKind }))).toBe(false);
     }
   });
 
   test.each([1, 2, 4])("overwrites forged ambient admission and child timeout at concurrency %i", (limit) => {
-    for (const kimiVersion of ["2.6.2", "2.7.2", "2.7.3", "2.8.0"]) {
+    for (const kimiVersion of ["2.8.0"]) {
       for (const operationKind of ["swarm", "swarm-write"] as const) {
         const ambient = Object.freeze({
           KIMI_CODE_HOME: "/isolated/kimi", [SWARM_POLICY_ENV]: "forged", [SWARM_WAVE_SIZE_ENV]: "999",
@@ -57,8 +57,7 @@ describe("bounded swarm environment", () => {
   });
 
   test("removes ambient plugin admission overlays from other operations and versions", () => {
-    for (const executionPlan of [plan({ kimiVersion: "2.5.3" }), plan({ kimiVersion: "2.6.0" }),
-      plan({ kimiVersion: "2.7.0" }), plan({ kimiVersion: "2.7.1" }), plan({ kimiVersion: "2.7.4" }),
+    for (const executionPlan of [plan({ kimiVersion: "2.7.3" }), plan({ kimiVersion: "2.8.1" }),
       plan({ intendedEngine: "legacy-v1" }), plan({ operationKind: "rescue" }), plan({ operationKind: "ask" })]) {
       const env = buildKimiCliEnvironment({
         cwd: "/isolated/workspace", env: { KIMI_CODE_HOME: "/isolated/kimi",
@@ -204,7 +203,7 @@ describe("managed wave admission", () => {
   });
 
   test("does not grant swarm access to other operations or alter legacy admission", async () => {
-    for (const commandLabel of ["ask", "review", "challenge", "review_gate", "rescue"]) {
+    for (const commandLabel of ["ask", "review", "challenge", "rescue", "pursue"]) {
       expect((await decideHookOutcome({ tool_name: "AgentSwarm", tool_input: input }, {
         ...context, commandLabel,
       })).decision).toBe("deny");

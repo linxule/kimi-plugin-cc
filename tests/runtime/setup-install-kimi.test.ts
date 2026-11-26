@@ -162,9 +162,9 @@ describe.skipIf(process.platform === "win32")("setup --install-kimi containment 
 });
 
 describe.skipIf(process.platform === "win32")("setup --install-kimi", () => {
-  test("picks the numerically highest certified version", () => {
-    expect(highestCertifiedKimiVersion(["2.9.0", "2.10.0", "2.7.3"])).toBe("2.10.0");
-    expect(HIGHEST).toMatch(/^\d+\.\d+\.\d+$/);
+  test("picks the numerically highest certified version (>= 2.8.0 floor)", () => {
+    expect(highestCertifiedKimiVersion(["2.9.0", "2.10.0", "2.8.0"])).toBe("2.10.0");
+    expect(HIGHEST).toBe("2.8.0");
   });
 
   test("installs the highest certified version, verifies it, and points current at it", async () => {
@@ -278,7 +278,7 @@ describe.skipIf(process.platform === "win32")("setup --install-kimi", () => {
 
   test("--install-kimi refuses other setup flags, and --json needs it", async () => {
     const c = await makeCase();
-    for (const argv of [["--install-kimi", "--check"], ["--install-kimi", "--uninstall"], ["--enable-review-gate", "--install-kimi"], ["--json"]]) {
+    for (const argv of [["--install-kimi", "--check"], ["--install-kimi", "--uninstall"], ["--install-kimi", "--bogus"], ["--json"]]) {
       await expect(runSetup(argv, c.context)).rejects.toMatchObject({ code: "INVALID_ARGS", stage: "setup.parse" });
     }
     expect(await npmCalls(c)).toEqual([]);

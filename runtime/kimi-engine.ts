@@ -9,7 +9,7 @@ import { formatVersionChoice, kimiVersionsInScope, kimiVersionsWith, resolveKimi
 import { hookGateRefusal, verifyHookInstalled } from "./hooks/install.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import {
-  isInTestedRange,
+  KIMI_MINIMUM_CERTIFIED_VERSION,
   parseVersionLine,
   probeKimiVersion,
   type KimiVersionProbeOk,
@@ -17,6 +17,7 @@ import {
 import type { JobRecord, JobStore } from "./job-store.js";
 import { isRecord } from "./util.js";
 
+/** Engine lineage; only `native-v2` (>= 2.8.0) is launched by 3.1.0+. Historical `legacy-v1` stays readable on old SQLite rows only. */
 export type KimiEngine = "legacy-v1" | "native-v2";
 
 /**
@@ -24,22 +25,21 @@ export type KimiEngine = "legacy-v1" | "native-v2";
  * separate from JobRecord.command_type: pursue and swarm-write reuse the
  * rescue job lineage, while read-only swarm reuses review.
  */
-const NON_SWARM_OPERATION_KINDS = ["review", "challenge", "ask", "rescue", "review_gate", "pursue"] as const;
+const NON_SWARM_OPERATION_KINDS = ["review", "challenge", "ask", "rescue", "pursue"] as const;
 const OPERATION_KINDS = [...NON_SWARM_OPERATION_KINDS, "swarm", "swarm-write"] as const;
 export type KimiOperationKind = (typeof OPERATION_KINDS)[number];
 
 /**
- * "uncertified": an unlisted plain 2.x running a read-only operation on the
- * mechanics of the highest certified row below it (`resolveKimiRelease`).
+ * "uncertified": an unlisted plain 2.x above 2.8.0 running a read-only operation
+ * on the mechanics of the highest certified row below it (`resolveKimiRelease`).
  */
 export type KimiPlanCertification = "certified" | "uncertified" | "test-bypass";
 
-/** Operations that may run on an uncertified release. Every write or swarm operation stays exact. */
+/** Operations that may run on an uncertified release (> 2.8.0). Every write or swarm operation stays exact. */
 const UNCERTIFIED_READ_ONLY_OPERATIONS: ReadonlySet<KimiOperationKind> = new Set<KimiOperationKind>([
   "ask",
   "review",
   "challenge",
-  "review_gate",
 ]);
 
 /** Restores exact-version refusal for every operation. */
@@ -120,36 +120,19 @@ export interface PrepareKimiExecutionPlanOptions {
 }
 
 /**
- * Minimum legacy-v1 version that actually contains each operation. The upper
- * boundary is KIMI_TESTED_MINORS, enforced by probe.inTestedRange.
- */
-const LEGACY_V1_MINIMUMS: Readonly<Record<KimiOperationKind, { major: number; minor: number }>> = {
-  review: { major: 0, minor: 1 },
-  challenge: { major: 0, minor: 1 },
-  ask: { major: 0, minor: 1 },
-  rescue: { major: 0, minor: 1 },
-  review_gate: { major: 0, minor: 1 },
-  pursue: { major: 0, minor: 8 },
-  swarm: { major: 0, minor: 12 },
-  "swarm-write": { major: 0, minor: 18 },
-};
-
-/**
  * Exact kimi-code releases certified for native v2 under
  * NATIVE_V2_SAFETY_PROFILE. Exact, not minor-ranged: upstream ships
  * behavioural changes in patch releases, and the no-plan construction must be
  * re-proven (mechanized tag scan + real-binary smoke) per tag before a row is
  * added to KIMI_V2_RELEASES in kimi-releases.ts with scope "all". Each entry
- * has its own row in tests/audit/v2-tag-scan.test.ts and a dated entry in
- * ROADMAP-TO-GA.md § Post-GA audit log.
+ * has its own row in tests/audit/v2-tag-scan.test.ts and an active
+ * certification record in docs/upstream-<version>-certification.md.
  */
 export const NATIVE_V2_CERTIFIED_VERSIONS: readonly string[] = Object.freeze([...kimiVersionsInScope("all")]);
 
 /**
- * Exact releases certified only for review, challenge, ask, rescue, review_gate
- * and pursue. Their upstream rate-limit recovery can exceed AgentSwarm's
- * configured maximum, and these releases lack a certified plugin admission
- * construction, so both swarm operations refuse before model spawn.
+ * Exact releases certified only for non-swarm operations. Empty in the 2.8.0+
+ * rolling window, kept exported so callers/diagnostics checking scope compile cleanly.
  */
 export const NATIVE_V2_NON_SWARM_VERSIONS: readonly string[] = Object.freeze([...kimiVersionsInScope("non-swarm")]);
 
@@ -172,7 +155,6 @@ export const NATIVE_V2_CERTIFIED: ReadonlyMap<KimiOperationKind, readonly string
   ["challenge", NATIVE_V2_ANY_OPERATION_VERSIONS],
   ["ask", NATIVE_V2_ANY_OPERATION_VERSIONS],
   ["rescue", NATIVE_V2_ANY_OPERATION_VERSIONS],
-  ["review_gate", NATIVE_V2_ANY_OPERATION_VERSIONS],
   ["pursue", NATIVE_V2_ANY_OPERATION_VERSIONS],
   ["swarm", NATIVE_V2_CERTIFIED_VERSIONS],
   ["swarm-write", NATIVE_V2_CERTIFIED_VERSIONS],
@@ -189,9 +171,6 @@ export function isNativeV2Certified(
 
 /**
  * True when this exact version is certified for native v2 for ANY operation.
- * Used by setup to phrase its version notice: a v2-certified version is NOT an
- * "out of tested range, will refuse" case even though it is outside the legacy
- * `KIMI_TESTED_MINORS` table (that table intentionally never gains 0.42).
  */
 export function isNativeV2CertifiedVersion(version: string): boolean {
   const normalized = parseVersionLine(version)?.raw;
@@ -200,20 +179,15 @@ export function isNativeV2CertifiedVersion(version: string): boolean {
 }
 
 /**
- * Select native v2 for a certified version, a test-only operation admission,
- * or any major-2 release, then enforce scope in assertCertifiedCapability. A
- * narrowed or uncertified 2.x never falls back to legacy-v1 (deleted upstream
- * at 0.42.0), so its refusal names the native-v2 set.
+ * All kimi-code releases >= 2.8.0 use native agent-core-v2. Legacy-v1
+ * (0.1–0.41) and < 2.8.0 shims are no longer supported; assertCertifiedCapability
+ * enforces the exact 2.8.0+ window.
  */
 export function selectIntendedEngine(
-  operationKind: KimiOperationKind,
-  probe: Pick<KimiVersionProbeOk, "version">,
+  _operationKind: KimiOperationKind,
+  _probe: Pick<KimiVersionProbeOk, "version">,
 ): KimiEngine {
-  if (isNativeV2CertifiedVersion(probe.version) || isNativeV2Certified(operationKind, probe.version)) {
-    return "native-v2";
-  }
-  const parsed = parseVersionLine(probe.version);
-  return parsed !== undefined && parsed.major >= 2 ? "native-v2" : "legacy-v1";
+  return "native-v2";
 }
 
 const UNSAFE_EXPERIMENTAL_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -260,14 +234,24 @@ export function assertNoUnsafeExperimentalSelector(
 export async function prepareKimiExecutionPlan(
   options: PrepareKimiExecutionPlanOptions,
 ): Promise<KimiExecutionPlan> {
-  // An explicit legacy-v1 plan refuses before any subprocess; otherwise the
-  // engine and certification decide below, after the master-flag-free probe.
-  if (options.intendedEngine === "legacy-v1") assertNoUnsafeExperimentalSelector(options.env);
+  if (options.intendedEngine === "legacy-v1") {
+    throw new RuntimeError(
+      "KIMI_CAPABILITY_NOT_CERTIFIED",
+      `Refusing ${options.operationKind}: legacy-v1 is unsupported in 3.1.0+; use kimi-code >= ${KIMI_MINIMUM_CERTIFIED_VERSION}.`,
+      "kimi-engine.plan",
+      {
+        details: {
+          refusal_kind: "legacy-v1-unsupported",
+          retryable_after_setup: false,
+          operation_kind: options.operationKind,
+          intended_engine: "legacy-v1",
+          minimum_version: KIMI_MINIMUM_CERTIFIED_VERSION,
+        },
+      },
+    );
+  }
 
-  if (
-    options.intendedEngine === "native-v2" &&
-    !NATIVE_V2_CERTIFIED.has(options.operationKind)
-  ) {
+  if (!NATIVE_V2_CERTIFIED.has(options.operationKind)) {
     throw nativeV2NotCertified(options.operationKind, null);
   }
 
@@ -301,8 +285,8 @@ export async function prepareKimiExecutionPlan(
   };
 
   if (options.env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1") {
-    const intendedEngine = options.intendedEngine ?? "legacy-v1";
-    const safetyProfile = intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
+    const intendedEngine: KimiEngine = "native-v2";
+    const safetyProfile = options.intendedEngine === "native-v2" ? NATIVE_V2_SAFETY_PROFILE : null;
     assertNoUnsafeExperimentalSelector(options.env, "kimi-engine.plan", { intendedEngine });
     await runPreflight(intendedEngine, { kimiVersion: null, certification: "test-bypass" });
     warnings.push(...await planHookCheck(options.operationKind, options.env, options.stderr));
@@ -328,7 +312,7 @@ export async function prepareKimiExecutionPlan(
   if (probe.kind !== "ok") {
     throw new RuntimeError(
       "KIMI_EXECUTION_PLAN_UNRESOLVED",
-      `Refusing to spawn kimi because the exact command/version plan could not be established: ${probe.reason}. Run Claude Code \`/kimi:setup\` or Codex \`$kimi-setup\` to verify the active binary, or correct KIMI_PLUGIN_CC_KIMI_BIN / KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS and retry.`,
+      `Refusing to spawn kimi because the exact command/version plan could not be established: ${probe.reason}. Run \`kimi_setup\` (or \`scripts/companion.sh setup\`) to verify the active binary, or correct KIMI_PLUGIN_CC_KIMI_BIN / KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS and retry.`,
       "kimi-engine.plan",
       {
         details: {
@@ -800,62 +784,53 @@ export function classifyHistoricalEngineProvenance(
   };
 }
 
+function isBelowMinimumVersion(probe: Pick<KimiVersionProbeOk, "major" | "minor" | "patch">): boolean {
+  const min = parseVersionLine(KIMI_MINIMUM_CERTIFIED_VERSION);
+  if (min === undefined) return false;
+  if (probe.major !== min.major) return probe.major < min.major;
+  if (probe.minor !== min.minor) return probe.minor < min.minor;
+  return probe.patch < min.patch;
+}
+
 function assertCertifiedCapability(
   engine: KimiEngine,
   operationKind: KimiOperationKind,
   probe: KimiVersionProbeOk,
   env: Readonly<NodeJS.ProcessEnv>,
 ): "certified" | "uncertified" {
-  if (engine === "native-v2") {
-    const certification = resolveNativeV2Certification(operationKind, probe.version, env);
-    if (certification === null) throw nativeV2NotCertified(operationKind, probe.version, env);
-    return certification;
-  }
-
-  const minimum = LEGACY_V1_MINIMUMS[operationKind];
-  const meetsMinimum =
-    probe.major > minimum.major ||
-    (probe.major === minimum.major && probe.minor >= minimum.minor);
-  if (!probe.inTestedRange || !meetsMinimum) {
-    const remedy = !probe.inTestedRange
-      ? "Update kimi-plugin-cc to a release that certifies this kimi-code minor, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary."
-      : `Upgrade kimi-code to at least ${minimum.major}.${minimum.minor}.0 within a certified minor.`;
+  if (engine !== "native-v2" || isBelowMinimumVersion(probe)) {
     throw new RuntimeError(
       "KIMI_CAPABILITY_NOT_CERTIFIED",
-      `Refusing ${operationKind}: kimi-code ${probe.version} is not in this operation's certified legacy-v1 range. ${remedy} KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production repair path.`,
+      `Refusing ${operationKind}: kimi-code ${probe.version} is below the >= ${KIMI_MINIMUM_CERTIFIED_VERSION} rolling window supported by 3.1.0+. Run \`kimi_setup\` with action "install_kimi" (or \`setup --install-kimi\`) or point KIMI_PLUGIN_CC_KIMI_BIN at kimi-code >= ${KIMI_MINIMUM_CERTIFIED_VERSION}.`,
       "kimi-engine.capability",
       {
         details: {
-          refusal_kind: "v1-version-not-certified",
+          refusal_kind: "legacy-v1-unsupported",
           retryable_after_setup: false,
           operation_kind: operationKind,
           intended_engine: engine,
           kimi_version: probe.version,
-          minimum_version: `${minimum.major}.${minimum.minor}.0`,
-          tested_minor: probe.inTestedRange,
+          minimum_version: KIMI_MINIMUM_CERTIFIED_VERSION,
         },
       },
     );
   }
-  return "certified";
+  const certification = resolveNativeV2Certification(operationKind, probe.version, env);
+  if (certification === null) throw nativeV2NotCertified(operationKind, probe.version, env);
+  return certification;
 }
 
 /**
  * Revalidate the persisted certification at the final subprocess boundary.
  * This keeps a corrupt/forged SQLite row from converting a once-certified plan
- * into an untested-version or native-v2 spawn.
+ * into an untested-version or legacy spawn.
  */
 function assertPlanCertification(
   plan: KimiExecutionPlan,
   env: Readonly<NodeJS.ProcessEnv>,
 ): void {
-  if (plan.intendedEngine === "native-v2" && plan.safetyProfile !== NATIVE_V2_SAFETY_PROFILE) {
-    // A forged/deserialized v2 row cannot reach spawn without the profile it
-    // was certified under.
-    throw invalidPersistedPlan("native-v2 plans require the native-v2-no-plan safety profile");
-  }
-  if (plan.intendedEngine === "legacy-v1" && plan.safetyProfile !== null) {
-    throw invalidPersistedPlan("legacy-v1 plans must not carry a safety profile");
+  if (plan.intendedEngine !== "native-v2") {
+    throw invalidPersistedPlan("only native-v2 plans are supported at the spawn boundary");
   }
   if (plan.certification === "test-bypass") {
     if (plan.kimiVersion !== null) {
@@ -868,15 +843,17 @@ function assertPlanCertification(
     }
     return;
   }
+  if (plan.safetyProfile !== NATIVE_V2_SAFETY_PROFILE) {
+    // A forged/deserialized v2 row cannot reach spawn without the profile it
+    // was certified under.
+    throw invalidPersistedPlan("native-v2 plans require the native-v2-no-plan safety profile");
+  }
   if (plan.kimiVersion === null) {
     throw invalidPersistedPlan(`${plan.certification} plans require kimi_version`);
   }
   const parsed = parseVersionLine(plan.kimiVersion);
   if (parsed === undefined) {
     throw invalidPersistedPlan("kimi_version is not a parseable semantic version");
-  }
-  if (plan.certification === "uncertified" && plan.intendedEngine !== "native-v2") {
-    throw invalidPersistedPlan("uncertified plans must use native-v2");
   }
   // Recompute from the release table and the current environment: a strict
   // environment, a write operation, or a row that has since been added all
@@ -887,7 +864,6 @@ function assertPlanCertification(
     major: parsed.major,
     minor: parsed.minor,
     patch: parsed.patch,
-    inTestedRange: isInTestedRange(parsed.major, parsed.minor),
   }, env);
   if (certification !== plan.certification) {
     // A plan claiming exact certification for an uncertified release keeps the
@@ -953,7 +929,7 @@ function nativeV2NotCertified(
   ) {
     return new RuntimeError(
       "KIMI_CAPABILITY_NOT_CERTIFIED",
-      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, review_gate, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code ${formatVersionChoice(kimiVersionsWith("bounded-swarm"))} for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
+      `Refusing ${operationKind}: kimi-code ${normalized} is certified only for non-swarm operations (review, challenge, ask, rescue, pursue). Its native rate-limit recovery can exceed AgentSwarm's configured maximum, so this exact release refuses swarm before model spawn. Select exact kimi-code ${formatVersionChoice(kimiVersionsWith("bounded-swarm"))} for this plugin's certified bounded waves and single-worker path, or use a non-swarm operation on ${normalized}.`,
       "kimi-engine.capability",
       {
         details: {
@@ -975,10 +951,10 @@ function nativeV2NotCertified(
     ? ""
     : strictVersions(env)
       ? ` ${STRICT_VERSIONS_ENV}=1 is set, so read-only operations on this uncertified release also refuse.`
-      : " Read-only operations (ask, review, challenge, review gate) still run on this uncertified release with a warning; write and swarm operations need an exact certified release.";
+      : " Read-only operations (ask, review, challenge) still run on this uncertified release with a warning; write and swarm operations need an exact certified release.";
   return new RuntimeError(
     "KIMI_CAPABILITY_NOT_CERTIFIED",
-    `Refusing ${operationKind} on native v2: ${observed} is not in this operation's exactly certified set [${certified.join(", ")}].${readOnlyNote} Run setup --install-kimi to give the plugin its own copy of the newest certified kimi-code, update kimi-plugin-cc to a release that certifies this version, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/smoke seam, not a production repair path.`,
+    `Refusing ${operationKind} on native v2: ${observed} is not in this operation's exactly certified set [${certified.join(", ")}] (rolling window >= ${KIMI_MINIMUM_CERTIFIED_VERSION}).${readOnlyNote} Run \`kimi_setup\` with action "install_kimi" (or \`setup --install-kimi\`) to install the newest certified kimi-code, update kimi-plugin-cc, or point KIMI_PLUGIN_CC_KIMI_BIN at a certified binary.`,
     "kimi-engine.capability",
     {
       details: {
@@ -1042,7 +1018,7 @@ async function resolveExactExecutable(
 
   throw new RuntimeError(
     "KIMI_EXECUTION_PLAN_UNRESOLVED",
-    `Refusing to spawn kimi because executable ${JSON.stringify(command)} could not be resolved to an exact runnable path. Run Claude Code \`/kimi:setup\` or Codex \`$kimi-setup\` to verify the active binary, or correct KIMI_PLUGIN_CC_KIMI_BIN and retry.`,
+    `Refusing to spawn kimi because executable ${JSON.stringify(command)} could not be resolved to an exact runnable path. Run \`kimi_setup\` (or \`scripts/companion.sh setup\`) to verify the active binary, or correct KIMI_PLUGIN_CC_KIMI_BIN and retry.`,
     "kimi-engine.plan",
     { details: { command, cwd } },
   );

@@ -229,6 +229,48 @@ export class JobStore {
         const row = this.db.get(`SELECT * FROM jobs WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC LIMIT 1`, params);
         return row ? hydrateRow(row) : null;
     }
+    listJobs(options) {
+        const conditions = ["repo_id = @repo_id"];
+        const params = {
+            repo_id: options.repoId,
+        };
+        if (options.status) {
+            conditions.push("status = @status");
+            params.status = options.status;
+        }
+        if (options.operationKind) {
+            conditions.push("operation_kind = @operation_kind");
+            params.operation_kind = options.operationKind;
+        }
+        if (options.limit === null) {
+            return this.db
+                .all(`SELECT * FROM jobs WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC, rowid DESC`, params)
+                .map(hydrateRow);
+        }
+        params.limit = Math.max(1, Math.min(100, Math.trunc(options.limit ?? 20)));
+        return this.db
+            .all(`SELECT * FROM jobs WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC, rowid DESC LIMIT @limit`, params)
+            .map(hydrateRow);
+    }
+    listJobsByUpdated(options) {
+        const conditions = ["repo_id = @repo_id"];
+        const params = {
+            repo_id: options.repoId,
+        };
+        if (options.commandType) {
+            conditions.push("command_type = @command_type");
+            params.command_type = options.commandType;
+        }
+        if (options.terminalOnly) {
+            conditions.push("status IN ('completed', 'failed', 'cancelled')");
+        }
+        if (options.runningOnly) {
+            conditions.push("status = 'running'");
+        }
+        return this.db
+            .all(`SELECT * FROM jobs WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC, rowid DESC`, params)
+            .map(hydrateRow);
+    }
     listRunningJobsWithProcessHints() {
         const rows = this.db.all(`SELECT * FROM jobs WHERE status = 'running' AND (pid IS NOT NULL OR kimi_pid IS NOT NULL)`);
         return rows.map(hydrateRow);
@@ -341,13 +383,34 @@ export class JobStore {
         return this.getJob(jobId);
     }
     markCompleted(jobId, patch) {
-        return this.updateRunningJob(jobId, { ...patch, status: "completed", pid: null, kimi_pid: null });
+        return this.updateRunningJob(jobId, {
+            ...patch,
+            status: "completed",
+            pid: null,
+            kimi_pid: null,
+            companion_identity: null,
+            kimi_identity: null,
+        });
     }
     markFailed(jobId, patch) {
-        return this.updateRunningJob(jobId, { ...patch, status: "failed", pid: null, kimi_pid: null });
+        return this.updateRunningJob(jobId, {
+            ...patch,
+            status: "failed",
+            pid: null,
+            kimi_pid: null,
+            companion_identity: null,
+            kimi_identity: null,
+        });
     }
     markCancelled(jobId, patch) {
-        return this.updateRunningJob(jobId, { ...patch, status: "cancelled", pid: null, kimi_pid: null });
+        return this.updateRunningJob(jobId, {
+            ...patch,
+            status: "cancelled",
+            pid: null,
+            kimi_pid: null,
+            companion_identity: null,
+            kimi_identity: null,
+        });
     }
 }
 /** Columns added after the first schema, in the order older stores receive them. */
@@ -373,11 +436,13 @@ const ADDED_JOB_COLUMNS = [
     ["safety_profile", "TEXT"],
     ["warnings", "TEXT"],
     ["read_scope", "TEXT"],
+    ["companion_identity", "TEXT"],
+    ["kimi_identity", "TEXT"],
 ];
 /** Columns createJob writes, in INSERT order. hook_escapes is written only by updates. */
 const INSERT_JOB_COLUMNS = [
     "job_id", "repo_id", "command_type", "created_at", "updated_at", "cwd", "model", "thinking", "thinking_effort",
-    "background", "pid", "kimi_pid", "status", "kimi_session_id", "kimi_session_id_source", "budget_source",
+    "background", "pid", "kimi_pid", "companion_identity", "kimi_identity", "status", "kimi_session_id", "kimi_session_id_source", "budget_source",
     "operation_kind", "intended_engine", "observed_engine", "kimi_version", "system_version",
     "kimi_command", "kimi_prefix_args", "plan_certification", "resumed_from_job_id", "safety_profile", "warnings",
     "read_scope", "agent_profile", "prompt_digest", "summary", "phase", "budget_ms", "final_output_path", "stream_log_path", "error",
@@ -391,11 +456,13 @@ const UPDATABLE_JOB_COLUMNS = new Set([
 function hydrateRow(row) {
     // A warning-free row keeps its historical shape, so every JSON surface that
     // spreads a JobRecord stays byte-identical.
-    const { warnings, read_scope, ...rest } = row;
+    const { warnings, read_scope, companion_identity, kimi_identity, ...rest } = row;
     return {
         ...rest,
         ...(warnings !== null && warnings !== undefined ? { warnings } : {}),
         ...(read_scope !== null && read_scope !== undefined ? { read_scope } : {}),
+        ...(companion_identity !== null && companion_identity !== undefined ? { companion_identity } : {}),
+        ...(kimi_identity !== null && kimi_identity !== undefined ? { kimi_identity } : {}),
         thinking: row.thinking === null ? null : Boolean(row.thinking),
         background: Boolean(row.background),
         error: row.error ? JSON.parse(row.error) : null,

@@ -26,12 +26,18 @@ export async function assertMcpJobBinding(task, job) {
     return job;
 }
 export function mcpCompanionIdentity(task) {
-    return parseIdentity(task.companion_identity, task.companion_pid, task, "companion");
+    return parseIdentity(task.companion_identity, task.companion_pid, task.task_id, task.operation_kind, "companion");
 }
 export function mcpKimiIdentity(task, job) {
-    return parseIdentity(task.kimi_identity, job.kimi_pid, task, "Kimi");
+    return parseIdentity(task.kimi_identity, job.kimi_pid, task.task_id, task.operation_kind, "Kimi");
 }
-function parseIdentity(serialized, expectedPid, task, label) {
+export function jobCompanionIdentity(job) {
+    return parseIdentity(job.companion_identity ?? null, job.pid, job.job_id, job.operation_kind ?? job.command_type, "companion");
+}
+export function jobKimiIdentity(job) {
+    return parseIdentity(job.kimi_identity ?? null, job.kimi_pid, job.job_id, job.operation_kind ?? job.command_type, "Kimi");
+}
+function parseIdentity(serialized, expectedPid, jobId, operationKind, label) {
     if (serialized === null)
         return null;
     try {
@@ -47,7 +53,10 @@ function parseIdentity(serialized, expectedPid, task, label) {
         return value;
     }
     catch (error) {
-        throw bindingError(task, `The ${label} process identity is invalid.`, error);
+        throw new RuntimeError("MCP_JOB_BINDING_FAILED", `The ${label} process identity is invalid.`, "mcp.binding", {
+            ...(error instanceof Error ? { cause: error } : {}),
+            details: { job_id: jobId, operation_kind: operationKind },
+        });
     }
 }
 function bindingError(task, message, cause) {

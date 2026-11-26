@@ -19,7 +19,7 @@ describe("companion Kimi-unavailable handling", () => {
     const repoRoot = await createGitRepoFixture("companion-unavailable-repo");
     const env = {
       ...process.env,
-      CLAUDE_PLUGIN_DATA: pluginDataRoot,
+      KIMI_PLUGIN_CC_DATA: pluginDataRoot,
       KIMI_PLUGIN_CC_KIMI_BIN: "/nonexistent/path",
       KIMI_PLUGIN_CC_WORKSPACE_CWD: repoRoot,
       // This test exercises the kimi-binary-unavailable code path
@@ -64,7 +64,7 @@ async function assertUnavailableCommand(
 
     expect(failure.exitCode).not.toBeNull();
     expect(output).toContain("KIMI_EXECUTION_PLAN_UNRESOLVED");
-    expect(output).toContain("Run Claude Code `/kimi:setup` or Codex `$kimi-setup`");
+    expect(output).toContain("Run `kimi_setup` (or `scripts/companion.sh setup`)");
     expect(output).not.toContain("persisted as failed");
     expect(latest).toBeNull();
   } finally {

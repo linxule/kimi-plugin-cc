@@ -7,28 +7,29 @@ import { resolvePluginPaths } from "../../runtime/paths.js";
 import { createMcpFixture, McpClient } from "../helpers/mcp.js";
 
 describe("MCP write-operation cancellation cleanup", () => {
-  test("pursue keeps its identity and write-swarm captures then removes its worktree", async () => {
+  test("pursue keeps its identity and swarm_patch captures then removes its worktree", async () => {
     const fixture = await createMcpFixture("mcp-write-cleanup", { delayMs: "30000" });
     let client: McpClient | undefined;
     try {
       client = await McpClient.legacy(fixture);
-      for (const [name, args, operation] of [
-        ["kimi_pursue", { objective: "Cancel an autonomous goal" }, "pursue"],
-        ["kimi_swarm_write", { objective: "Cancel a worktree run", cap: 1, max_concurrency: 1 }, "swarm-write"],
+      for (const [args, operation] of [
+        [{ mode: "pursue", prompt: "Cancel an autonomous goal", wait: false }, "pursue"],
+        [{ mode: "swarm_patch", prompt: "Cancel a worktree run", cap: 1, max_concurrency: 1, wait: false }, "swarm-write"],
       ] as const) {
         const started = await client.request("tools/call", {
-          name,
+          name: "kimi_write",
           arguments: { ...args, workspace: fixture.repo },
         });
+        expect(started.isError).toBe(false);
         const jobId = started.structuredContent.job_id as string;
         const cancelled = await client.request("tools/call", {
-          name: "kimi_job_cancel",
-          arguments: { job_id: jobId },
+          name: "kimi_job",
+          arguments: { action: "cancel", job_id: jobId },
         });
         expect(cancelled.isError).toBe(false);
         const result = await client.request("tools/call", {
-          name: "kimi_job_result",
-          arguments: { job_id: jobId },
+          name: "kimi_job",
+          arguments: { action: "result", job_id: jobId },
         });
         expect(result.isError).toBe(true);
         expect(result.structuredContent.status).toBe("cancelled");

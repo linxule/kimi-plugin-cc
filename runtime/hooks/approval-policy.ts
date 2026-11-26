@@ -139,7 +139,6 @@ const KNOWN_LABELS = new Set<string>([
   "ask",
   "review",
   "challenge",
-  "review_gate",
   "rescue",
   "swarm",
   "swarm-write",
@@ -238,7 +237,6 @@ export function decideHookOutcomePure(
     case "ask":
     case "review":
     case "challenge":
-    case "review_gate":
       // Read-only narrative surfaces share READ_ONLY_TOOLS. They run as
       // non-interactive subprocesses, so interactive tool prompts cannot
       // substitute for this allowlist.

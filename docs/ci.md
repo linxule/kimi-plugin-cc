@@ -6,8 +6,7 @@ Normal CI uses mock models and needs no model credentials. Live smoke tests are 
 
 Before release validation, run `bun install --frozen-lockfile` locally too.
 An existing `node_modules` directory can disagree with the committed lockfile.
-Generate all three runtime distributions with those dependencies, run the full
-check, and wait for the release commit's CI success before tagging/publishing.
+Generate all compiled and generated surfaces (`dist/`, `plugins/kimi-codex/`, `cordis.patch.yml`, and `dsh/index.json`) with those dependencies, run the full check, and wait for the release commit's CI success before tagging or publishing.
 Keep compiled-runtime regressions that execute emitted JS under Node and Bun;
 source-only Bun tests do not exercise TypeScript's compiler output.
 
@@ -15,13 +14,14 @@ source-only Bun tests do not exercise TypeScript's compiler output.
 
 The full check covers:
 
-- compiled runtime output
-- Claude surface hashes and generated Codex/DSH surfaces
+- compiled runtime output and self-contained bundled `dist/hooks/approval-hook.js`
+- `AGENTS.md` size gate (strictly below 24,576 bytes)
+- pinned root surface hashes and generated Codex (`plugins/kimi-codex/`) and DSH (`cordis.patch.yml`, `dsh/index.json`) surfaces
 - TypeScript types
-- the test suite, including real-process MCP protocol, task recovery, ownership, cancellation, and hook-enforcement coverage
-- changed or untracked files in `dist/`, `plugins/kimi-codex/`, and `plugins/kimi-dsh/`
+- the test suite, including real-process MCP protocol, `SEP-2640` skills/resources, task recovery, ownership, cancellation, and hook-enforcement coverage
+- changed or untracked files in `dist/`, `plugins/kimi-codex/`, `cordis.patch.yml`, and `dsh/index.json`
 
-`bun run check:package` additionally packs the release tarball and runs modern MCP discovery plus legacy initialization on all three extracted compiled distributions. These checks use mock-backed or protocol-only fixtures and make no provider calls.
+`bun run check:package` packs the release tarball, verifies the npm-installed `kimi-companion` bin, runs modern MCP discovery plus legacy initialization, setup/check, and version-floor refusal smokes on the extracted package, and boots a fresh patched DSH host against the tarball's `cordis.patch.yml`. These checks use mock-backed or protocol-only fixtures and make no provider calls.
 
 The real-binary smoke suite skips unless explicitly enabled. Before any model turn it removes every other kimi-plugin-cc hook block from its isolated copy of the config, so its allows and denials come from this checkout's hook alone. A successful base CI run does not certify a new CLI version.
 
@@ -46,11 +46,11 @@ The suite checks:
 
 The `--network` WebSearch lane runs only when the seed home has a Kimi login or config, or `KIMI_WEB_SEARCH_BASE_URL` is set. Kimi offers WebSearch only with its managed login, a provider `search_url`, `[services.moonshot_search]` or `KIMI_WEB_SEARCH_BASE_URL`, so on the API-key route with an empty seed home and no search endpoint the lane is skipped by name. A skip is not evidence: a certification record must say whether that lane ran.
 
-On versions requiring host activation (currently exact 2.3.2, 2.3.3, 2.4.0, 2.4.1, 2.5.0, 2.5.1, 2.5.2 and 2.5.3, plus the 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 parallel path), targeted OFF/ON controls must also distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
+On versions requiring host activation (exact `2.8.0` and future bounded-swarm rows on the parallel path), targeted OFF/ON controls must distinguish direct print (no children) from the preactivated path (real children and verified deactivation). Exit status, tool-call records, denial text, or a patch alone never prove swarm compatibility.
 
-Exact 2.6.0 retains the narrowed non-swarm profile: its three swarm execution lanes are intentional exclusions and both real command paths must prove pre-spawn refusal. Exact 2.6.2/2.6.3/2.7.2/2.7.3/2.8.0 requires full operation evidence, including the canonical wave guard, new/resumed entry counting, fresh-singleton rejection, nested rejection, recovery, swarm-child-timeout protection, native Bash background-policy closure, explicit background denial, direct-worker read/write behavior, and normal-exit/cancellation quiescence before artifact capture and test-provider cleanup. Agent-turn counts and OS subprocess checks are separate evidence. Expected negative controls must actually reproduce their preconditions. Exact 2.6.1, 2.6.4, 2.7.0, 2.7.1 and 2.7.4 gain no certification by implication.
+Exact `2.8.0` requires full 7-operation evidence, including the canonical wave guard, new/resumed entry counting, fresh-singleton rejection, nested rejection, recovery, swarm-child-timeout protection, native Bash background-policy closure, explicit background denial, direct-worker read/write behavior, and normal-exit/cancellation quiescence before artifact capture and test-provider cleanup. Agent-turn counts and OS subprocess checks are separate evidence. Expected negative controls must actually reproduce their preconditions. Releases below `2.8.0` and `legacy-v1` are removed in 3.1.0 and refuse before spawn.
 
-Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidate, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
+For a new native-v2 candidate above `2.8.0`, follow the [certification playbook](./upstream-compat-audit.md). A candidate smoke is not production certification.
 
 ## Authentication and credential handling
 
@@ -110,7 +110,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.6.0
+  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.8.0
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```
@@ -132,13 +132,21 @@ Billing and access depend on the account behind the key. The workflow references
 
 ## DSH host smoke and release maintenance
 
-`node scripts/check-dsh-package.mjs [destination]` packs the root npm artifact and creates a fresh DSH 0.2.1-rc.5 host with explicit dependency overrides from `package.json`. It audits that actual host and the isolated plugin profile for high/critical advisories, checks all seven operations in the composed config, and boots Web with a disposable probe that verifies all seven providers and model tools are registered. It uses no model calls or maintainer Kimi configuration. An existing host binary cannot substitute for the audited installation. See [patched host and profile requirements](./registry-releases.md#patched-dsh-host-and-profiles); verify the current supported release and the latest prerelease before widening `engines.dsh`. The separate `bun run check:consumer-security` gate installs the packed package normally into a fresh npm consumer and audits its production graph; both CI and release validation run it.
+`node scripts/check-dsh-package.mjs [destination]` packs the root npm artifact and creates a fresh DSH `0.2.1-rc.5` host with explicit `zod` (`>=4.6.6`) and `undici` (`>=8.12.2`) dependency overrides. It audits both that host and the isolated plugin profile for high or critical advisories, mounts the tarball's root `cordis.patch.yml` (`@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-skill-filesystem`), boots `dsh web`, verifies that all 4 MCP tools (`mcp__kimi__kimi_read`, `mcp__kimi__kimi_write`, `mcp__kimi__kimi_job`, `mcp__kimi__kimi_setup`) and the `kimi` skill register on `ctx.tools` and `ctx.skills`, and exercises a credential-free `mcp__kimi__kimi_setup` (`{ action: "models" }`) call through the live DSH bridge. It makes no model calls and touches no maintainer Kimi configuration. An existing host binary cannot substitute for the audited installation. See [patched DSH host and profiles](./safety.md#patched-dsh-host-and-profiles); verify the current supported release and the latest prerelease before widening `engines.dsh`. The separate `bun run check:consumer-security` gate installs the packed package normally into a fresh npm consumer and audits its production graph; both CI and release validation run it.
 
-For live DSH integration smoke, use `tests/helpers/dsh-live-mock-package` with `tests/helpers/dsh-live.patch.yml`. Install that mock and the bundle into an isolated DSH profile, install the DSH-managed hook through the normal sanitized setup path, and use an isolated Kimi home with an authorized authentication route. The scripted parent makes real DSH tool calls while the actual Kimi CLI executes, so no parent-provider credential is needed. `DSH_MOCK_TOOL`, `DSH_MOCK_DESCRIPTION`, and `DSH_MOCK_PROMPT` select the operation and task; `dsh --profile headless --patch tests/helpers/dsh-live.patch.yml 'Delegate the task'` runs it.
+For live DSH integration smoke, install the root package into an isolated DSH profile, install the canonical PreToolUse hook through `kimi_setup` (`action: "install"`) or `scripts/companion.sh setup`, and use an isolated Kimi home with an authorized authentication route.
 
-Required scenarios for a host-parity change are: `kimi_ask` returns `4`; a write attempt through the read-only tool is denied and creates no file; `kimi_rescue` writes only the requested marker; and `kimi_swarm_write` returns a valid disjoint-target patch without applying it or placing target files in the real workspace. Inspect the persisted result, marker, and patch rather than relying only on the parent's completion text. Run these sequentially, keep all test state in throwaway homes, and clean up interrupted processes and worktrees.
+Required scenarios for a host-parity change are:
 
-Every release also updates `DSH_PUBLISH_TIMESTAMP` in `scripts/surface-registry.ts`, regenerates `dsh/index.json`, and validates the version/timestamp/engine assertions in `tests/runtime/dsh-surfaces.test.ts`. This keeps the DSH Discover entry aligned with the published package.
+- `kimi_read` (`mode: "ask"`) returns `4`
+- a write attempt through `kimi_read` is denied and creates no file
+- `kimi_write` (`mode: "rescue"`) writes only the requested marker inside the workspace
+- `kimi_write` (`mode: "swarm_patch"`) returns a valid disjoint-target patch without applying it or modifying the real workspace
+- `kimi_setup` (`check` and `models`) and the `kimi` skill resolve cleanly
+
+Inspect the persisted job result, marker file, and patch artifact rather than relying only on parent completion text. Run these sequentially, keep all test state in throwaway homes, and clean up interrupted processes and worktrees.
+
+Every release also updates `DSH_PUBLISH_TIMESTAMP` in `scripts/surface-registry.ts`, regenerates `cordis.patch.yml` and `dsh/index.json`, and validates the version, timestamp, and engine assertions in `tests/runtime/dsh-surfaces.test.ts`. This keeps the DSH Discover entry aligned with the published package.
 
 ## Dependency maintenance
 
@@ -148,4 +156,20 @@ The vendored runtime parsers are outside `bun audit` coverage. Review [TOML pars
 
 ## Windows spawn controls
 
-The `windows-spawn` CI job compiles TypeScript on `windows-latest` and runs `node --test tests/windows/spawn-preflight.mjs` with Node 22. It checks UTF-16/quoting bounds, a real short Node spawn and refusal of a 103 KB prompt through the emitted CLI client before spawn. It uses no credentials, Kimi binary or model calls. This is not native Kimi, Git Bash or full Windows lifecycle certification; community reproduction of issue #14 remains welcome; see [the validation checklist](windows-validation.md). The normal `check` also enforces the AGENTS.md size limit.
+The `windows-spawn` CI job compiles TypeScript on `windows-latest` and runs `node --test tests/windows/spawn-preflight.mjs` with Node 22. It checks UTF-16 quoting bounds, a short Node subprocess spawn, and pre-spawn `CLI_COMMAND_LINE_TOO_LONG` refusal of a 103 KB prompt. It uses no credentials, Kimi binary, or model calls.
+
+Run the same offline diagnostics locally with Node.js `22.5` or newer and Bun:
+
+```powershell
+bun install --frozen-lockfile
+bunx tsc -p tsconfig.build.json
+node --test tests/windows/spawn-preflight.mjs
+```
+
+This does not certify native Kimi, Git Bash, or Windows execution; report native CLI or Git Bash findings in [issue #14](https://github.com/linxule/kimi-plugin-cc/issues/14). The normal `check` also enforces the `AGENTS.md` size limit.
+
+## npm OIDC publishing
+
+Before configuring Trusted Publishing, publish the validated `npm-package` workflow tarball once with `npm login` and `npm publish kimi-plugin-cc-X.Y.Z.tgz --access public`. Configure npm Trusted Publishing for owner `linxule`, repository `kimi-plugin-cc`, workflow `publish.yml`, environment `npm`, and direct publishing, then set repository variable `NPM_TRUSTED_PUBLISHING=true`. Use `npm` only for registry operations and package installs while keeping Bun for development.
+
+On every `release.published` event, [.github/workflows/publish.yml](../.github/workflows/publish.yml) verifies that the tag matches `package.json`, runs `bun run check`, `check-package.mjs`, `check-dsh-package.mjs`, and `bun run check:consumer-security`, and publishes the single root tarball through OIDC with provenance (which also serves DSH via root `cordis.patch.yml`). If a release run fails before npm accepts the tarball, confirm on npm that the version was not published, then trigger `publish.yml` manually with the existing tag. Published versions never change.

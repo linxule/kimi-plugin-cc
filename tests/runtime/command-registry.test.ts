@@ -33,7 +33,6 @@ const managedTypes: readonly ManagedCommandType[] = [
   "review",
   "challenge",
   "rescue",
-  "review_gate",
 ] as const;
 
 describe("COMMAND_REGISTRY", () => {
@@ -104,20 +103,11 @@ describe("COMMAND_REGISTRY", () => {
     expect(cancel.failedSummary).toBe("challenge failed.");
   });
 
-  test("review_gate cancellation codes use the lowercased compound noun", () => {
-    const cancel = COMMAND_REGISTRY.review_gate.cancellation;
-    expect(cancel.errorCodes.cancelled).toBe("REVIEW_GATE_CANCELLED");
-    expect(cancel.errorCodes.cancelledDuringStart).toBe("REVIEW_GATE_CANCELLED_DURING_START");
-    expect(cancel.cancelMessages.default).toBe("review_gate cancelled by user request.");
-    expect(cancel.cancelledSummary).toBe("review_gate cancelled by user request.");
-  });
-
-  test("outputMode discriminant: review_gate is parsed; everything else is passthrough", () => {
+  test("outputMode discriminant: every managed command is passthrough", () => {
     expect(COMMAND_REGISTRY.ask.outputMode).toBe("passthrough");
     expect(COMMAND_REGISTRY.review.outputMode).toBe("passthrough");
     expect(COMMAND_REGISTRY.challenge.outputMode).toBe("passthrough");
     expect(COMMAND_REGISTRY.rescue.outputMode).toBe("passthrough");
-    expect(COMMAND_REGISTRY.review_gate.outputMode).toBe("parsed");
   });
 
   test.each([...managedTypes])(

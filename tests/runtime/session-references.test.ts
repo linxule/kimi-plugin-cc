@@ -254,41 +254,40 @@ describe("--reference-session parsing", () => {
 describe("MCP referenced_sessions", () => {
   test("passes each id as a leading flag before --", () => {
     const references = { referenced_sessions: ["a", "b"] };
-    expect(buildMcpOperationInvocation("kimi_ask", { ...references, prompt: "q" }).argv)
+    expect(buildMcpOperationInvocation("kimi_read", { mode: "ask", ...references, prompt: "q" }).argv)
       .toEqual(["ask", "--reference-session", "a", "--reference-session", "b", "--", "q"]);
-    expect(buildMcpOperationInvocation("kimi_review", { ...references, mode: "challenge" }).argv)
+    expect(buildMcpOperationInvocation("kimi_read", { mode: "challenge", ...references }).argv)
       .toEqual(["task", "challenge", "--reference-session", "a", "--reference-session", "b"]);
-    expect(buildMcpOperationInvocation("kimi_rescue", { ...references, prompt: "fix" }).argv)
-      .toEqual(["task", "rescue", "--reference-session", "a", "--reference-session", "b", "--", "fix"]);
-    expect(buildMcpOperationInvocation("kimi_swarm", { ...references, objective: "x" }).argv)
+    expect(buildMcpOperationInvocation("kimi_write", { mode: "rescue", ...references, prompt: "fix" }).argv)
+      .toEqual(["task", "rescue", "--reference-session", "a", "--reference-session", "b", "--fresh", "--", "fix"]);
+    expect(buildMcpOperationInvocation("kimi_read", { mode: "swarm", ...references, prompt: "x" }).argv)
       .toEqual(["task", "swarm", "--reference-session", "a", "--reference-session", "b", "--", "x"]);
-    expect(buildMcpOperationInvocation("kimi_swarm_write", { ...references, objective: "x" }).argv)
+    expect(buildMcpOperationInvocation("kimi_write", { mode: "swarm_patch", ...references, prompt: "x" }).argv)
       .toEqual(["task", "swarm", "--reference-session", "a", "--reference-session", "b", "--write", "--", "x"]);
   });
 
   test("type checks, pursue omission, and pass-through with the scope arguments", () => {
     for (const value of ["a", [1], [null], {}]) {
-      expect(() => buildMcpOperationInvocation("kimi_ask", { prompt: "q", referenced_sessions: value }))
+      expect(() => buildMcpOperationInvocation("kimi_read", { prompt: "q", referenced_sessions: value }))
         .toThrow(expect.objectContaining({ code: "MCP_INVALID_ARGUMENTS" }));
     }
     // An oversized list or id is refused here, before it becomes child argv.
     const nine = Array.from({ length: 9 }, (_, index) => `s${index}`);
-    expect(() => buildMcpOperationInvocation("kimi_ask", { prompt: "q", referenced_sessions: nine }))
+    expect(() => buildMcpOperationInvocation("kimi_read", { prompt: "q", referenced_sessions: nine }))
       .toThrow(expect.objectContaining({ code: "MCP_INVALID_ARGUMENTS", message: expect.stringContaining("at most 8 distinct") }));
-    expect(() => buildMcpOperationInvocation("kimi_ask", { prompt: "q", referenced_sessions: ["x".repeat(129)] }))
+    expect(() => buildMcpOperationInvocation("kimi_read", { prompt: "q", referenced_sessions: ["x".repeat(129)] }))
       .toThrow(expect.objectContaining({ code: "MCP_INVALID_ARGUMENTS", message: expect.stringContaining("at most 128 characters") }));
-    expect(buildMcpOperationInvocation("kimi_ask", { prompt: "q", referenced_sessions: Array.from({ length: 5000 }, () => "a") }).argv)
+    expect(buildMcpOperationInvocation("kimi_read", { prompt: "q", referenced_sessions: Array.from({ length: 5000 }, () => "a") }).argv)
       .toEqual(["ask", "--reference-session", "a", "--", "q"]);
-    expect(() => buildMcpOperationInvocation("kimi_pursue", { objective: "x", referenced_sessions: ["a"] }))
-      .toThrow(expect.objectContaining({ code: "MCP_INVALID_ARGUMENTS", message: expect.stringContaining("Unknown argument referenced_sessions") }));
-    const scoped = buildMcpOperationInvocation("kimi_ask", { prompt: "q", network: true, referenced_sessions: ["a"] });
+    expect(() => buildMcpOperationInvocation("kimi_write", { mode: "pursue", prompt: "x", referenced_sessions: ["a"] }))
+      .toThrow(expect.objectContaining({ code: "MCP_INVALID_ARGUMENTS", message: expect.stringContaining('referenced_sessions is not supported for mode "pursue"') }));
+    const scoped = buildMcpOperationInvocation("kimi_read", { prompt: "q", network: true, referenced_sessions: ["a"] });
     expect(parseAskArgs(scoped.argv.slice(1))).toMatchObject({ network: true, referenceSessions: ["a"], prompt: "q" });
     const withSchema = MCP_TOOL_DEFINITIONS.filter((tool) =>
       "referenced_sessions" in (tool.inputSchema.properties as Record<string, unknown>)).map((tool) => tool.name);
-    expect(withSchema).toEqual(["kimi_ask", "kimi_review", "kimi_rescue", "kimi_swarm", "kimi_swarm_write"]);
+    expect(withSchema).toEqual(["kimi_read", "kimi_write"]);
     const property = (MCP_TOOL_DEFINITIONS[0]!.inputSchema.properties as Record<string, { description: string }>).referenced_sessions!;
-    expect(property.description).toContain("whole main-agent directory (its log, saved tool outputs and plans)");
-    expect(property.description).toContain("with network that content can reach the web");
+    expect(property.description).toContain("Up to 8 earlier job IDs or Kimi session IDs");
   });
 });
 
@@ -330,8 +329,8 @@ describe("resolution against a Kimi home", () => {
     store.createJob({
       job_id: jobId, repo_id: "other-repo", command_type: "ask", cwd: "/elsewhere", model: null, thinking: null,
       background: false, pid: null, kimi_pid: null, status: "completed", kimi_session_id: sessionId,
-      operation_kind: "ask", intended_engine: "native-v2", observed_engine: "native-v2", kimi_version: "2.7.3",
-      system_version: "2.7.3", agent_profile: "<cli-client>", prompt_digest: "digest", summary: "s",
+      operation_kind: "ask", intended_engine: "native-v2", observed_engine: "native-v2", kimi_version: "2.8.0",
+      system_version: "2.8.0", agent_profile: "<cli-client>", prompt_digest: "digest", summary: "s",
       final_output_path: null, stream_log_path: "/dev/null", error: null,
     });
   }
@@ -371,7 +370,7 @@ describe("resolution against a Kimi home", () => {
         await expect(resolve(fixture, ["SESSION_ONE"])).rejects.toEqual(refusal("no plugin job or Kimi session has this id"));
       }
       expect(await resolve(fixture, ["ses_two"], { plan: { intendedEngine: "legacy-v1" }, resumeSessionId: "x" })
-        .catch((error: Error) => error.message)).toContain("legacy-v1");
+        .catch((error: Error) => error.message)).toContain("native-v2 Kimi Code (>= 2.8.0)");
     });
   });
 
@@ -456,7 +455,7 @@ describe("resolution against a Kimi home", () => {
       addJob(fixture.store, "44444444-4444-4444-8444-444444444444", "session_gone");
       await expect(resolve(fixture, ["44444444-4444-4444-8444-444444444444"])).rejects.toEqual(refusal("was not found"));
       await expect(resolve(fixture, ["session_one"], { resumeSessionId: "session_one" })).rejects.toEqual(refusal("being resumed"));
-      await expect(resolve(fixture, ["session_one"], { plan: { intendedEngine: "legacy-v1" } })).rejects.toEqual(refusal("legacy-v1"));
+      await expect(resolve(fixture, ["session_one"], { plan: { intendedEngine: "legacy-v1" } })).rejects.toEqual(refusal("native-v2 Kimi Code (>= 2.8.0)"));
     });
   });
 

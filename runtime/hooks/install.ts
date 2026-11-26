@@ -1,28 +1,24 @@
 import { constants as fsConstants, existsSync } from "node:fs";
-import { access, open, readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { validateKimiHookSetForEnvironment } from "./config-safety.js";
 import {
   countCleanEntriesInFile,
-  effectiveHost,
   evaluateInstalled,
   findShortHookTimeout,
-  findUnmanagedApprovalHookBlocks,
-  parseManagedBlock,
   type HookCommandDrift,
 } from "./managed-block.js";
 import {
-  hostIdFromHookCommand,
   parseHookShellCommand,
-  resolveHostId,
   tryBuildExpectedHookCommand,
+  verifyManagedHookArtifact,
 } from "./install-paths.js";
 import { RuntimeError } from "../errors.js";
 import type { KimiOperationKind } from "../kimi-engine.js";
 import { resolveKimiCodeConfigPath } from "../kimi-home.js";
 import type { KimiVersionProbeOk } from "../kimi-version-probe.js";
-import { KIMI_PLUGIN_CC_VERSION } from "../version.js";
 
 /**
  * Verify the managed PreToolUse hook and require its decoded command to equal
@@ -42,8 +38,7 @@ export interface HookInstallStatus {
   installed: boolean;
   /**
    * Job-time only, recorded by the job (channel W): the setup remedy for an
-   * installed hook whose markers need repair (duplicate or orphan), and a note
-   * for each other host's hook from an older plugin version, whose rules still apply.
+   * installed hook whose markers need repair (duplicate or orphan).
    */
   warnings?: string[];
   /** Human-readable reason (filled when `installed === false`). */
@@ -132,12 +127,7 @@ export async function verifyHookInstalled(
     };
   }
 
-  // Classify command mismatches into actionable drift reasons without changing
-  // the installed=false decision. hostId isolates this host's block in the
-  // shared config.
-  const hostId = resolveHostId(env, expected.hookScriptPath);
   const check = evaluateInstalled(raw, expected.command, {
-    hostId,
     nodeExists: (binPath) => existsSync(binPath),
   });
   // Markers are bookkeeping, not the security boundary. At job time a
@@ -169,40 +159,38 @@ export async function verifyHookInstalled(
     };
   }
 
-  // A byte-exact command does not prove the hook can run. Confirm the script
-  // remains readable and fail closed on every access error.
+  const artifact = await verifyManagedHookArtifact(env, expected.hookScriptPath);
+  if (!artifact.ok) {
+    if (artifact.kind === "sha256-mismatch") {
+      return {
+        installed: false,
+        reason: artifact.reason,
+        configPath,
+        drift: {
+          axis: "hook-script",
+          installedCommand: expected.command,
+          expectedCommand: expected.command,
+          nodeInterpreterUnchanged: true,
+        },
+      };
+    }
+    return {
+      installed: false,
+      reason: artifact.reason,
+      configPath,
+    };
+  }
+
   try {
     await access(expected.hookScriptPath, fsConstants.R_OK);
   } catch {
     return {
       installed: false,
-      reason: `hook script ${expected.hookScriptPath} is missing or unreadable — run /kimi:setup to reinstall`,
+      reason: `hook script ${expected.hookScriptPath} is missing or unreadable — run \`kimi_setup\` (action "install") or \`scripts/companion.sh setup\` to reinstall`,
       configPath,
     };
   }
 
-  // Confirm the pinned interpreter with a NARROW X_OK backstop. Interpreter
-  // moves that change the recomputed command are already refused as drift; this
-  // check covers only unchanged command bytes whose Node token fails X_OK now:
-  //
-  //   1. An absolute KIMI_PLUGIN_CC_NODE_BIN override names a dead interpreter
-  //      other than the running process, so launch never proved it executable.
-  //   2. The interpreter is chmodded after launch. realpathSync still resolves
-  //      it, the preferred path and command bytes stay unchanged, but X_OK fails.
-  //   3. The pathname is removed after launch. realpathSync throws, and the
-  //      execPath fallback can retain the same spelling, so equality still passes
-  //      while the pinned path is gone.
-  //
-  // Refusing these cases matters because a failed hook spawn is ALLOW upstream.
-  // This per-spawn check also catches degradation since setup's last execution
-  // probe. It proves only the exec bit, not a working Node, architecture, or
-  // version; setup's shell probe executes the byte-identical command instead.
-  //
-  // Fail closed on EVERY access error. Do not harmonize this with spawning code
-  // that ignores selected errnos: a security verifier cannot "try and see".
-  //
-  // This refusal carries no drift and therefore no retryable_after_setup field:
-  // setup cannot repair a broken Node installation.
   try {
     await access(expected.nodeBin, fsConstants.X_OK);
   } catch {
@@ -211,137 +199,26 @@ export async function verifyHookInstalled(
       reason:
         `hook interpreter ${expected.nodeBin} is missing or not executable, so the PreToolUse hook ` +
         `cannot spawn (kimi-code reads a failed hook as ALLOW). Repair the Node install, or set ` +
-        `KIMI_PLUGIN_CC_NODE_BIN to a valid Node >=22.5 executable and run /kimi:setup.`,
+        `KIMI_PLUGIN_CC_NODE_BIN to a valid Node >=22.5 executable and run \`kimi_setup\` (action "install").`,
       configPath,
       refusalKind: "node-bin-not-executable",
       nodeBin: expected.nodeBin,
     };
   }
 
-  // Channel W notice: an older host hook still applies its own rules here.
-  warnings.push(...await olderHostHookWarnings(raw, hostId, expected.command));
   return warnings.length > 0 ? { installed: true, configPath, warnings } : { installed: true, configPath };
-}
-
-const MANIFEST_WALK_LEVELS = 4;
-const MANIFEST_MAX_BYTES = 64 * 1024;
-const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-/**
- * One launch warning per other host's kimi-plugin-cc hook from an older plugin
- * version than this one (or whose version cannot be read). kimi-code runs every
- * host's hook for every tool call and any deny wins, so that hook's older rules
- * still apply to this job. Covers other hosts' managed blocks and their
- * marker-less tables left by a config rewrite. Reads manifests only; never
- * executes anything and never refuses.
- */
-export async function olderHostHookWarnings(
-  contents: string,
-  ownHostId: string,
-  ownCommand: string,
-): Promise<string[]> {
-  const ownDerived = hostIdFromHookCommand(ownCommand);
-  const ownIds = new Set([ownHostId, ...(ownDerived !== null ? [ownDerived] : [])]);
-  const others = new Map<string, string>();
-  for (const block of parseManagedBlock(contents, ownHostId).blocks) {
-    const host = effectiveHost(block, ownHostId);
-    if (ownIds.has(host) || block.commandPath.length === 0 || block.commandPath === ownCommand) continue;
-    if (!others.has(block.commandPath)) others.set(block.commandPath, host);
-  }
-  for (const table of findUnmanagedApprovalHookBlocks(contents)) {
-    const host = hostIdFromHookCommand(table.command);
-    if (host === null || ownIds.has(host) || table.command === ownCommand) continue;
-    if (!others.has(table.command)) others.set(table.command, host);
-  }
-  const warnings: string[] = [];
-  for (const [command, host] of others) {
-    const version = await hookPluginVersion(command);
-    if (version !== undefined && !pluginVersionIsOlder(version)) continue;
-    warnings.push(
-      `The ${host} host's kimi-plugin-cc hook (${version === undefined ? "an unknown version" : `version ${version}`}) ` +
-        `also checks this job with its older rules; it can deny what this version allows. ` +
-        `Update the plugin in ${host} and run its setup.`,
-    );
-  }
-  return warnings;
-}
-
-/**
- * The plugin version behind a canonical hook command: walk up a few levels
- * from the hook script to the nearest named `package.json` (it must be
- * `kimi-plugin-cc`) or a Codex install's `.codex-plugin/plugin.json` (name
- * `kimi`; that root has no package.json). Nameless `{"type":"module"}`
- * markers under dist/ are skipped. Undefined when nothing trustworthy is found.
- */
-export async function hookPluginVersion(command: string): Promise<string | undefined> {
-  const parsed = parseHookShellCommand(command);
-  if (parsed === null || !path.isAbsolute(parsed.hookScript)) return undefined;
-  let dir = path.dirname(path.resolve(parsed.hookScript));
-  for (let level = 0; level <= MANIFEST_WALK_LEVELS; level += 1) {
-    const pkg = await readSmallJsonObject(path.join(dir, "package.json"));
-    if (pkg !== undefined && typeof pkg.name === "string") {
-      return pkg.name === "kimi-plugin-cc" ? semverOrUndefined(pkg.version) : undefined;
-    }
-    const codex = await readSmallJsonObject(path.join(dir, ".codex-plugin", "plugin.json"));
-    if (codex !== undefined && typeof codex.name === "string") {
-      return codex.name === "kimi" ? semverOrUndefined(codex.version) : undefined;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return undefined;
-}
-
-/**
- * True when `version` is older than `current` (this plugin by default). Any
- * prerelease other than `current` itself, and any unparseable value, counts as
- * older.
- */
-export function pluginVersionIsOlder(version: string, current: string = KIMI_PLUGIN_CC_VERSION): boolean {
-  if (version === current) return false;
-  const have = SEMVER_RE.exec(version);
-  const want = SEMVER_RE.exec(current);
-  if (have === null || want === null || have[4] !== undefined) return true;
-  for (let i = 1; i <= 3; i += 1) {
-    const diff = Number(have[i]) - Number(want[i]);
-    if (diff !== 0) return diff < 0;
-  }
-  return false;
-}
-
-function semverOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && SEMVER_RE.test(value) ? value : undefined;
-}
-
-async function readSmallJsonObject(file: string): Promise<Record<string, unknown> | undefined> {
-  let handle;
-  try {
-    handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > MANIFEST_MAX_BYTES) return undefined;
-    const value: unknown = JSON.parse(await handle.readFile("utf8"));
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : undefined;
-  } catch {
-    return undefined;
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
 }
 
 /**
  * Caller-facing repair protocol shared by every hook-refusal surface. Re-pin
- * through the resolved plugin root, retry ONCE only when
- * `retryable_after_setup` is literally true and setup exits zero, and never use
- * the skip-check environment variable as a repair.
+ * cleanly, retry ONCE only when `retryable_after_setup` is literally true and
+ * setup exits zero, and never use the skip-check environment variable as a repair.
  */
-export function hookRefusalRetryProtocol(env: NodeJS.ProcessEnv): string {
-  const root = env.CLAUDE_PLUGIN_ROOT ?? env.PLUGIN_ROOT ?? "${CLAUDE_PLUGIN_ROOT}";
+export function hookRefusalRetryProtocol(_env: NodeJS.ProcessEnv): string {
+  const hereRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
   return (
     `If details shows retryable_after_setup:true (routine after a plugin update — the ` +
-    `version-stamped hook path moved), run \`${root}/scripts/companion.sh setup\` and, only ` +
+    `hook script or node path moved), run \`${hereRoot}/scripts/companion.sh setup\` and, only ` +
     `if it exits 0, retry the refused command once. Anything else — or a second refusal — ` +
     `surface the refusal instead of retrying.`
   );
@@ -375,15 +252,15 @@ export function hookRefusalDetails(status: HookInstallStatus): Record<string, un
   };
 }
 
-/** Repair sentences of the read-only (ask, review, challenge, review gate) hook refusal. */
+/** Repair sentences of the read-only (ask, review, challenge) hook refusal. */
 export const READ_ONLY_HOOK_REPAIR = [
-  "Run /kimi:setup or $kimi-setup to install or repair this host's managed block.",
+  "Run `kimi_setup` (action \"install\") or `scripts/companion.sh setup` to install or repair the canonical managed block.",
   "Set KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 only if you intentionally accept un-enforced execution.",
 ];
 
 /** Repair sentences of the write-capable (rescue, pursue) hook refusal. */
 export const WRITE_HOOK_REPAIR = [
-  "Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry.",
+  "Repair by running `kimi_setup` (action \"install\") or `scripts/companion.sh setup`, then retry.",
   "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 is only for deliberate tests or diagnostics.",
 ];
 
@@ -412,10 +289,10 @@ const SWARM_GATE: HookGate = {
   stage: "swarm.hook-check",
   warnLabel: "swarm",
   intro: [
-    "/kimi:swarm refuses to run without the kimi-plugin-cc PreToolUse hook.",
+    "swarm refuses to run without the kimi-plugin-cc PreToolUse hook.",
     "The hook enforces each worker's tool permissions, write confinement, and delegation limits.",
   ],
-  repair: ["Repair by running Claude Code /kimi:setup or Codex $kimi-setup, then retry."],
+  repair: ["Repair by running `kimi_setup` (action \"install\") or `scripts/companion.sh setup`, then retry."],
 };
 
 /**
@@ -427,7 +304,6 @@ const HOOK_GATES: Readonly<Record<KimiOperationKind, HookGate>> = {
   ask: readOnlyGate("ask", "ASK_HOOK_NOT_INSTALLED"),
   review: readOnlyGate("review", "REVIEW_HOOK_NOT_INSTALLED"),
   challenge: readOnlyGate("challenge", "CHALLENGE_HOOK_NOT_INSTALLED"),
-  review_gate: readOnlyGate("review_gate", "REVIEW_GATE_HOOK_NOT_INSTALLED"),
   rescue: {
     code: "RESCUE_HOOK_NOT_INSTALLED",
     stage: "rescue.hook-check",
@@ -439,7 +315,7 @@ const HOOK_GATES: Readonly<Record<KimiOperationKind, HookGate>> = {
     code: "PURSUE_HOOK_NOT_INSTALLED",
     stage: "pursue.hook-check",
     warnLabel: "rescue",
-    intro: ["/kimi:pursue refuses to run without the kimi-plugin-cc PreToolUse hook."],
+    intro: ["pursue refuses to run without the kimi-plugin-cc PreToolUse hook."],
     repair: WRITE_HOOK_REPAIR,
   },
   swarm: SWARM_GATE,
@@ -487,14 +363,13 @@ export function formatHookMissingWarning(
     "  documented as read-only.",
     "",
     "  This command will not start a Kimi model run until enforcement is",
-    "  repaired (the review gate skips instead of blocking stop).",
+    "  repaired.",
     "",
-    "  Fix: run Claude Code `/kimi:setup` or Codex `$kimi-setup` to install",
-    "  or repair this host's managed block in",
-    "  ~/.kimi-code/config.toml. If you use nvm, asdf, mise, or fnm, you",
-    "  must re-run `/kimi:setup` after any Node version switch — the",
-    "  verifier pins the absolute Node binary path and a switch invalidates",
-    "  the previously-installed block by design. See docs/safety.md.",
+    "  Fix: run `kimi_setup` (action \"install\") or `scripts/companion.sh setup`",
+    "  to install or repair the canonical managed block in ~/.kimi-code/config.toml.",
+    "  If you use nvm, asdf, mise, or fnm, re-run setup after any Node version",
+    "  switch — the verifier pins the absolute Node binary path and a switch",
+    "  invalidates the previously-installed block by design. See docs/safety.md.",
     "",
     "  KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1 explicitly bypasses hook-verification",
     "  refusals and restores un-enforced `permission: auto` execution. It does",

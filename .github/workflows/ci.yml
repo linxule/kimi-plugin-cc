@@ -1,9 +1,8 @@
 name: CI
 
-# Base CI: build, generated surfaces, types, tests, and distribution drift. Runs on every
-# push to main and every PR. NO secrets, NO kimi binary, NO model tokens — the
-# real-binary smokes auto-skip without KIMI_PLUGIN_CC_SMOKE=1. This is the
-# per-push safety net the repo previously only had locally via `bun run check`.
+# Base CI: build, generated surfaces, types, tests, and distribution drift.
+# Runs on every push to main and every pull request without secrets, a kimi
+# binary, or model tokens. Real-binary smokes skip unless KIMI_PLUGIN_CC_SMOKE=1.
 
 on:
   push:
@@ -26,7 +25,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.5
 
       # DSH requires Node >= 24.9; the companion still supports >= 22.5.
       - name: Set up Node
@@ -43,8 +42,8 @@ jobs:
       - name: Audit dependencies
         run: bun audit
 
-      # Rebuilds and checks root dist/ plus the self-contained Codex and DSH packages.
-      # Generated surface hashes and untracked distribution files are checked too.
+      # Rebuilds root dist/ and checks generated Codex and DSH surfaces (plugins/kimi-codex/,
+      # cordis.patch.yml, and dsh/index.json), pinned hashes, and untracked files.
       - name: Check (build, surfaces, typecheck, test, drift gate)
         run: bun run check
 
@@ -60,7 +59,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.5
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
