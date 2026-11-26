@@ -2,7 +2,7 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
-## 3.0.0 — 2026-11-25
+## 3.0.0 — 2026-11-26
 
 The plugin makes promises about the sessions it launches and no longer polices the user's own Kimi configuration. Certified kimi-code versions are unchanged: exact 0.42.0 through 2.7.3 as listed in `runtime/kimi-releases.ts`, with 2.7.3 the newest and 2.6.0 still non-swarm-only.
 
