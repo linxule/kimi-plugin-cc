@@ -40,19 +40,29 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Audit dependencies
-        run: bun audit
 
       # Rebuilds and checks root dist/ plus the self-contained Codex and DSH packages.
       # Generated surface hashes and untracked distribution files are checked too.
-      - name: Check (build, surfaces, typecheck, test, drift gate)
-        run: bun run check
+      - name: Probe loop (swarm activation, 450 runs)
+        run: |
+          pass=0; fail=0
+          for i in $(seq 1 450); do
+            if bun test tests/runtime/swarm-activation.test.ts -t "verifies activation and deactivation through authenticated agent state" > "run-$i.log" 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); echo "=== run $i failed"; grep -n "probe-\|(fail)" "run-$i.log" | cut -c1-1500; fi
+          done
+          echo "PROBE RESULT pass=$pass fail=$fail"
+          echo "retries (any):        $(cat run-*.log | grep -c 'probe-retry')"
+          echo "retries rescued:      $(cat run-*.log | grep 'probe-retry' | grep -c '"complete":true')"
+          echo "retries not rescued:  $(cat run-*.log | grep 'probe-retry' | grep -c '"complete":false')"
+          echo "latch set:            $(cat run-*.log | grep -c 'probe-latch')"
+          echo "--- incomplete reasons"
+          cat run-*.log | grep 'probe-incomplete' | sort | uniq -c | sort -rn | cut -c1-300 | head -40
+          echo "--- latch reasons"
+          cat run-*.log | grep 'probe-latch' | sort | uniq -c | cut -c1-300 | head
+          echo "--- runs with a rescue"
+          grep -l '"complete":true' run-*.log | head -40 | tr '\n' ' '
+          nproc; uname -sr
 
-      - name: Check root and DSH npm package installation
-        run: bun run check:package
 
-      - name: Audit installed npm consumer dependencies
-        run: bun run check:consumer-security
 
   windows-spawn:
     runs-on: windows-latest

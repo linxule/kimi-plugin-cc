@@ -1325,6 +1325,7 @@ async function refreshOwnedDescendants(owned: OwnedWebChild): Promise<void> {
     if (snapshot.complete && (snapshot.root !== undefined || previousRoot !== undefined)) {
       if (!owned.snapshotIncomplete) owned.lastSnapshotComplete = true;
     } else {
+      console.error("[probe-latch]", JSON.stringify({ complete: snapshot.complete, root: snapshot.root !== undefined, previousRoot: previousRoot !== undefined }));
       owned.snapshotIncomplete = true;
       owned.lastSnapshotComplete = false;
     }
@@ -1435,7 +1436,7 @@ async function captureDescendantIdentities(
         timer = setTimeout(() => resolve(null), DESCENDANT_SNAPSHOT_TIMEOUT_MS);
       }),
     ]);
-    if (snapshot === null) return { identities: [], complete: false, timedOut: true };
+    if (snapshot === null) { console.error("[probe-incomplete]", JSON.stringify({ why: "timeout" })); return { identities: [], complete: false, timedOut: true }; }
     const [collected, rootProbe] = snapshot;
     const identities: ProcessIdentity[] = [];
     const seen = new Set<string>();
@@ -1454,8 +1455,10 @@ async function captureDescendantIdentities(
         identities.push({ ...identity });
       }
     }
+    if (!rootProbe.complete) console.error("[probe-incomplete]", JSON.stringify({ why: "root-probe-incomplete", root: rootProbe.identity ?? null }));
     return { identities, complete: rootProbe.complete, root: rootProbe.identity };
-  } catch {
+  } catch (err) {
+    console.error("[probe-incomplete]", JSON.stringify({ why: "collector-threw", message: String(err instanceof Error ? err.message : err) }));
     return { identities: [], complete: false };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
@@ -1516,6 +1519,7 @@ function failure(
   message: string,
   details: Record<string, unknown> = {},
 ): RuntimeError {
+  console.error("[probe-failure]", JSON.stringify({ code, stage, message, details }));
   return new RuntimeError(code, message, stage, { details });
 }
 

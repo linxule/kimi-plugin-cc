@@ -106,6 +106,7 @@ export async function retryIncompleteCapture<T extends { complete: boolean; time
     if (snapshot.complete || snapshot.timedOut === true) break;
     await sleep(delayMs);
     snapshot = await capture();
+    console.error("[probe-retry]", JSON.stringify({ delayMs, complete: snapshot.complete }));
   }
   return snapshot;
 }
@@ -447,7 +448,7 @@ async function collectProcessSnapshotRowsFromProc(): Promise<ProcessSnapshotRow[
       .filter((entry) => /^\d+$/.test(entry))
       .map((entry) => readProcRow(Number.parseInt(entry, 10))),
   );
-  if (outcomes.some((outcome) => outcome.status === "error")) return undefined;
+  if (outcomes.some((outcome) => outcome.status === "error")) { console.error("[probe-incomplete]", JSON.stringify({ why: "proc-row-error" })); return undefined; }
   // Retain valid hidden/released groups for ancestry. Only a requested subtree
   // that depends on such a row must fail; unrelated rows cannot disable capture.
   return outcomes.flatMap((outcome) => outcome.status === "found" || outcome.status === "nonsignalable" ? [outcome.row] : []);
