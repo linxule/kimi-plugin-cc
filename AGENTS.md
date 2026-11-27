@@ -53,7 +53,7 @@ Thin universal connectors, single runtime:
 - Connectors route only; runtime owns subprocesses, SQLite jobs, approval policy, and rendering.
 - MCP: `host MCP client -> companion.sh mcp -> supervised mcp-child -> execution plan, job store, artifact`.
 - CLI: `companion.sh <read|write|job|setup> -> companion.js -> kimi -p --output-format stream-json -> job store -> artifact`.
-- Removed in 3.1.0: Claude slash commands (`commands/`), subagent definitions (`agents/`), optional review-gate Stop hook (`hooks/`, `review_gate`), and custom DSH companion runtime (`runtime/dsh/`, `plugins/kimi-dsh/`).
+- No slash commands (`commands/`), subagent files (`agents/`), `review_gate` hook, or custom DSH runtime (`runtime/dsh/`, `plugins/kimi-dsh/`).
 
 Standing invariants (full statements in `docs/invariants.md` §4 unless linked otherwise):
 
@@ -94,7 +94,7 @@ Open items: H1 enforcement (detection shipped; fail/stop needs positive executio
 - Read the runtime before changing it; safety invariants are not obvious from file names.
 - Run `bun run check` before considering a change done.
 - After `runtime/**`, `skills/**`, or `scripts/companion.sh` changes, run `bun run build && bun run generate:surfaces`, then stage `dist/`, `plugins/kimi-codex/`, `cordis.patch.yml`, and `dsh/index.json`. Never hand-edit generated files.
-- `check:surfaces` checks pinned root hashes, Codex/DSH generated text, byte-exact runtime mirrors, self-contained `dist/hooks/approval-hook.js`, and no orphaned generated files. Re-pin hashes in `CLAUDE_SURFACE_HASHES` with `shasum -a 256 <file>` on root surface changes.
+- `check:surfaces` checks pinned root hashes, Codex/DSH generated text, byte-exact runtime mirrors, self-contained `dist/hooks/approval-hook.js`, and no orphaned or sync-conflict files. Re-pin `CLAUDE_SURFACE_HASHES` with `shasum -a 256 <file>` on root surface changes.
 - Tests never inherit host plugin env: `bunfig.toml` preloads `tests/helpers/preload.ts` to clear host root/data and overlays (`KIMI_PLUGIN_CC_TEST_NO_DEFAULT_DATA=1`); never remove the preload.
 - Comments state current constraints and change with behavior; history belongs in `CHANGELOG.md`.
 - Changing a contract requires updating both `docs/invariants.md` (full) and this file (short summary).
@@ -115,4 +115,4 @@ Commit and push, wait for CI, then `git tag -a vX.Y.Z -m "..."`, `git push origi
 
 ### npm distribution
 
-`package.json` allowlists publication files. `bun run check:package` packs the archive, rejects sync-conflict copies, checks compiled outputs and generated surfaces, boots DSH against the tarball's `cordis.patch.yml` to verify the 4 `kimi_*` MCP tools and `kimi` skill register, and runs isolated setup/check, version-floor refusal, and modern/legacy MCP smokes without credentials or model calls. CI runs it after `bun run check`. `publish.yml` builds/tests a release tag and publishes via npm OIDC ([docs/ci.md](docs/ci.md#npm-oidc-publishing)).
+`package.json` allowlists published files. `bun run check:package` packs the archive, rejects sync-conflict copies, verifies compiled/generated surfaces, boots DSH on `cordis.patch.yml` (4 `kimi_*` tools + `kimi` skill), and runs isolated setup/check, version-floor, and MCP smokes without credentials. CI runs it after `bun run check`; `publish.yml` publishes release tags via npm OIDC ([docs/ci.md](docs/ci.md#npm-oidc-publishing)).

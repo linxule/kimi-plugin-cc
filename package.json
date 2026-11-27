@@ -24,7 +24,7 @@
     "check": "bun run build && bun run check:contracts && bun run check:surfaces && bunx tsc --noEmit && bun test --bail && git diff --exit-code -- dist plugins/kimi-codex dsh/index.json cordis.patch.yml && UNTRACKED=\"$(git ls-files --others --exclude-standard -- dist plugins/kimi-codex dsh/index.json cordis.patch.yml)\" && { [ -z \"$UNTRACKED\" ] || { echo \"drift gate: untracked generated files (stage them and re-run check):\"; echo \"$UNTRACKED\"; exit 1; }; }",
     "check:surfaces": "bun run scripts/generate-surfaces.ts --check",
     "generate:surfaces": "bun run scripts/generate-surfaces.ts",
-    "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && bun build runtime/hooks/approval-hook.ts --target=node --format=esm --outfile=dist/hooks/approval-hook.js && mkdir -p dist/vendor/shell-quote dist/vendor/smol-toml && cp runtime/vendor/shell-quote/LICENSE dist/vendor/shell-quote/LICENSE && cp runtime/vendor/smol-toml/*.js runtime/vendor/smol-toml/LICENSE dist/vendor/smol-toml/ && echo '{\"type\":\"module\"}' > dist/package.json && chmod 755 dist/companion.js",
+    "build": "node scripts/build.mjs",
     "companion": "node --import tsx runtime/companion.ts",
     "test": "bun test",
     "smoke:real": "KIMI_PLUGIN_CC_SMOKE=1 bun test tests/runtime/real-binary-smoke.test.ts --path-ignore-patterns '**/worktrees/**'",

@@ -1,18 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { access, readFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import {
+  SYNC_CONFLICT_COPY_RE,
   checkGeneratedCodexSurfaces,
   checkGeneratedTextOrphans,
   checkRuntimeMirror,
   generatedCodexSurfaceFiles,
   verifyClaudeSurfaceHashes,
+  writeGeneratedCodexSurfaces,
 } from "../../scripts/generate-surfaces.js";
 import {
   CANONICAL_SKILL_FILES,
   CANONICAL_SKILL_NAME,
+  CLAUDE_SURFACE_HASHES,
   CODEX_MARKETPLACE,
   CODEX_MCP_CONFIG,
   CODEX_PLUGIN_MANIFEST,
@@ -245,5 +249,51 @@ describe("canonical shared plugin data root", () => {
         PLUGIN_DATA: "/tmp/codex-data",
       } as NodeJS.ProcessEnv),
     ).toThrow(/KIMI_PLUGIN_CC_DATA|data/i);
+  });
+});
+
+describe("sync-conflict copy guard", () => {
+  test("rejects sync-conflict copies in root dist and mirrored Codex outputs without mirroring them", async () => {
+    expect(SYNC_CONFLICT_COPY_RE.test("dist/version 2.js")).toBe(true);
+    expect(SYNC_CONFLICT_COPY_RE.test("dist/vendor/smol-toml/LICENSE 2")).toBe(true);
+
+    const tmpRoot = await mkdtemp(path.join(os.tmpdir(), "kimi-surfaces-conflict-"));
+    try {
+      for (const entry of CLAUDE_SURFACE_HASHES) {
+        const dest = path.join(tmpRoot, entry.path);
+        await mkdir(path.dirname(dest), { recursive: true });
+        await copyFile(path.join(repoRoot, entry.path), dest);
+      }
+      await mkdir(path.join(tmpRoot, "scripts"), { recursive: true });
+      await copyFile(path.join(repoRoot, "scripts/companion.sh"), path.join(tmpRoot, "scripts/companion.sh"));
+      await mkdir(path.join(tmpRoot, "dist"), { recursive: true });
+      await writeFile(path.join(tmpRoot, "dist/version.js"), 'export const KIMI_PLUGIN_CC_VERSION = "0.0.0";\n', "utf8");
+
+      await writeGeneratedCodexSurfaces(tmpRoot);
+      expect((await checkRuntimeMirror(tmpRoot)).ok).toBe(true);
+
+      await writeFile(path.join(tmpRoot, "dist/version 2.js"), "// iCloud conflict copy\n", "utf8");
+      const rootCheck = await checkRuntimeMirror(tmpRoot);
+      expect(rootCheck.ok).toBe(false);
+      expect(rootCheck.messages.some((m) => /dist\/version 2\.js: sync-conflict copy detected/.test(m))).toBe(true);
+      expect(rootCheck.messages.join("\n")).not.toContain("run `bun run generate:surfaces`");
+
+      await expect(writeGeneratedCodexSurfaces(tmpRoot)).rejects.toThrow(/Refusing to mirror sync-conflict copies/);
+      await expect(access(path.join(tmpRoot, CODEX_PLUGIN_SUBDIR, "dist/version 2.js"), constants.F_OK)).rejects.toThrow();
+
+      await rm(path.join(tmpRoot, "dist/version 2.js"));
+      await writeFile(path.join(tmpRoot, CODEX_PLUGIN_SUBDIR, "dist/version 2.js"), "// conflict\n", "utf8");
+      await writeFile(path.join(tmpRoot, CODEX_PLUGIN_SUBDIR, "skills/kimi/SKILL 2.md"), "# conflict\n", "utf8");
+
+      const mirrorCheck = await checkRuntimeMirror(tmpRoot);
+      expect(mirrorCheck.ok).toBe(false);
+      expect(mirrorCheck.messages.some((m) => /dist\/version 2\.js: sync-conflict copy detected/.test(m))).toBe(true);
+
+      const textCheck = await checkGeneratedTextOrphans(tmpRoot);
+      expect(textCheck.ok).toBe(false);
+      expect(textCheck.messages.some((m) => /SKILL 2\.md: sync-conflict copy detected/.test(m))).toBe(true);
+    } finally {
+      await rm(tmpRoot, { recursive: true, force: true });
+    }
   });
 });

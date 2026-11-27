@@ -35,7 +35,7 @@ Each recovery run uses a 30-second cancellation timeout with bounded identity pr
 Keep 5 boundaries in mind when inspecting or recovering an interrupted swarm:
 
 - a hard kill between process spawn and identity capture leaves an unrecorded launch that `--apply` refuses to guess
-- jobs without a recovery record (such as concurrency `1` runs or failures before activation) cannot use automatic recovery
+- jobs that failed or stopped before saving a recovery record cannot use automatic recovery
 - Windows supports preview mode only and refuses `--apply` because it lacks durable process-identity verification
 - a changed Kimi home, missing worktree, invalid hook, uncertain process identity, or changed selected CLI binary causes recovery to refuse and preserve evidence
 - the plugin never deletes abandoned worktrees by age, so you can inspect and recover them before removing them manually

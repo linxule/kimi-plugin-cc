@@ -35,6 +35,8 @@ const DEFAULT_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.ur
 // must be mirrored INSIDE plugins/kimi-codex/.
 const RUNTIME_SHELL_SCRIPTS = ["scripts/companion.sh"];
 
+export const SYNC_CONFLICT_COPY_RE = /(?:^|\/)[^/]* [0-9]+(?:\.[^/]*)?(?:\/|$)/;
+
 export async function verifyClaudeSurfaceHashes(repoRoot: string): Promise<SurfaceCheckResult> {
   const messages: string[] = [];
 
@@ -141,7 +143,11 @@ async function checkTextOrphans(
   }
   const messages = candidates
     .filter((rel) => !expected.has(rel))
-    .map((rel) => `${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`);
+    .map((rel) =>
+      SYNC_CONFLICT_COPY_RE.test(rel)
+        ? `${rel}: sync-conflict copy detected (delete the conflict copy instead of regenerating surfaces)`
+        : `${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`,
+    );
   return { ok: messages.length === 0, messages };
 }
 
@@ -174,6 +180,10 @@ export async function checkRuntimeMirror(
 
   const expectedTargets = new Set<string>();
   for (const rel of sources) {
+    if (SYNC_CONFLICT_COPY_RE.test(rel)) {
+      messages.push(`${rel}: sync-conflict copy detected in root runtime (delete the conflict copy instead of mirroring it)`);
+      continue;
+    }
     const target = `${pluginSubdir}/${rel}`;
     expectedTargets.add(target);
 
@@ -203,7 +213,9 @@ export async function checkRuntimeMirror(
     for (const rel of subfolderFiles) {
       if (!expectedTargets.has(rel)) {
         messages.push(
-          `${rel}: orphaned bundled file (no matching root runtime file — run \`bun run generate:surfaces\`)`,
+          SYNC_CONFLICT_COPY_RE.test(rel)
+            ? `${rel}: sync-conflict copy detected in bundled runtime (delete the conflict copy)`
+            : `${rel}: orphaned bundled file (no matching root runtime file — run \`bun run generate:surfaces\`)`,
         );
       }
     }
@@ -251,6 +263,15 @@ async function writeGeneratedFiles(repoRoot: string, files: readonly GeneratedFi
 
 async function mirrorRuntimePayload(repoRoot: string, pluginSubdir = CODEX_PLUGIN_SUBDIR): Promise<void> {
   const sources = await runtimeMirrorSourceRelPaths(repoRoot);
+  const conflicts = sources.filter((rel) => SYNC_CONFLICT_COPY_RE.test(rel));
+  if (conflicts.length > 0) {
+    throw new Error(
+      [
+        "Refusing to mirror sync-conflict copies into Codex surfaces (delete conflict copies or run `bun run build` first):",
+        ...conflicts,
+      ].join("\n"),
+    );
+  }
   const expectedTargets = new Set(sources.map((rel) => `${pluginSubdir}/${rel}`));
 
   for (const sub of ["dist", "scripts"]) {
@@ -264,9 +285,22 @@ async function mirrorRuntimePayload(repoRoot: string, pluginSubdir = CODEX_PLUGI
     const src = path.join(repoRoot, rel);
     const dest = path.join(repoRoot, pluginSubdir, rel);
     const data = await readFile(src);
+    const wantExec = rel.endsWith(".sh") || rel === "dist/companion.js";
+    try {
+      const info = await stat(dest);
+      if (
+        info.isFile() &&
+        (await readFile(dest)).equals(data) &&
+        (process.platform === "win32" || ((info.mode & 0o111) !== 0) === wantExec)
+      ) {
+        continue;
+      }
+    } catch {
+      // Missing destination will be written below.
+    }
     await mkdir(path.dirname(dest), { recursive: true });
     await writeFile(dest, data);
-    await chmod(dest, rel.endsWith(".sh") || rel === "dist/companion.js" ? 0o755 : 0o644);
+    await chmod(dest, wantExec ? 0o755 : 0o644);
   }
 }
 
