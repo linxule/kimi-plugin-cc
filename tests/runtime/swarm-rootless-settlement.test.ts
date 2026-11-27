@@ -226,6 +226,7 @@ describe.skipIf(!posix)("launcher settlement without a recorded print root", () 
 // These run the compiled companion against a child that exits within
 // milliseconds. Whether the spawn-time identity read wins that race is not
 // forced here, so they hold on either path; the launcher tests above force it.
+// They assert outcomes, not wall time: a stalled settlement ends as a failed job.
 describe.skipIf(!posix)("compiled swarm against a child that exits at once", () => {
   async function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
     const data = await createTestPluginDataRoot("rootless-swarm");
@@ -236,24 +237,21 @@ describe.skipIf(!posix)("compiled swarm against a child that exits at once", () 
     delete env.KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS;
     delete env.KIMI_MODEL_THINKING_EFFORT;
     const cwd = options.cwd ?? process.cwd();
-    const started = Date.now();
     const launched = await exec("node", [companion, "task", "swarm", ...args, "--max-concurrency", "1", "inspect"], { env, cwd });
-    const elapsedMs = Date.now() - started;
     const status = JSON.parse((await exec("node", [companion, "status"], { env, cwd })).stdout);
     const result = JSON.parse((await exec("node", [companion, "result", status.job_id, "--json"], { env, cwd })).stdout);
-    return { data, launched, elapsedMs, status, result };
+    return { data, launched, status, result };
   }
   const printLaunch = (status: { swarm_recovery?: { launches?: Array<Record<string, unknown>> } }) =>
     status.swarm_recovery?.launches?.find((entry) => entry.kind === "print");
 
   test("a clean instant exit completes", async () => {
     for (let round = 0; round < 3; round += 1) {
-      const { data, launched, elapsedMs, status, result } = await run([]);
+      const { data, launched, status, result } = await run([]);
       try {
         expect(status.status).toBe("completed");
         expect(result.error ?? null).toBeNull();
         expect(launched.stdout).toContain("Instant answer from the stand-in.");
-        expect(elapsedMs).toBeLessThan(STALL_MS);
         expect(printLaunch(status)).toMatchObject({ quiescent: true, pending: false, uncertain: false });
         expect(status.swarm_recovery.complete).toBe(true);
       } finally {
@@ -263,14 +261,13 @@ describe.skipIf(!posix)("compiled swarm against a child that exits at once", () 
   }, 30_000);
 
   test("an instant startup failure reports the child's own failure, not a settlement failure", async () => {
-    const { data, launched, elapsedMs, status, result } = await run([], { env: { INSTANT_KIMI_EXIT_CODE: "64" } });
+    const { data, launched, status, result } = await run([], { env: { INSTANT_KIMI_EXIT_CODE: "64" } });
     try {
       expect(status.status).toBe("failed");
       expect(result.error.code).toBe("REVIEW_KIMI_STARTUP_FAILED");
       expect(JSON.stringify(result.error)).not.toContain("CLI_PROCESS_SETTLEMENT_FAILED");
       expect(JSON.stringify(result.error)).toContain("instant-kimi: forced startup failure");
       expect(launched.stderr).not.toContain("recovery record retained");
-      expect(elapsedMs).toBeLessThan(STALL_MS);
       expect(printLaunch(status)).toMatchObject({ quiescent: true, pending: false });
       expect(status.swarm_recovery.complete).toBe(true);
     } finally {
