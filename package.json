@@ -33,7 +33,7 @@
     "check:contracts": "node scripts/check-contract-size.mjs"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "@types/node": "^26.6.6",
     "smol-toml": "1.9.1",
     "tsx": "^4.23.13",
