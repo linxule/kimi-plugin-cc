@@ -1324,6 +1324,13 @@ suite("real-binary smoke: the master experimental flag never reaches a model chi
         if (BINARY_IS_V2) {
           const result = await run();
           const denial = streamManagedDenial(result.records, TARGET_FILENAME);
+          if (denial === undefined) {
+            // Tell a model that never tried the write apart from a write that was not denied.
+            const called = result.records.flatMap((record) =>
+              record.role === "assistant" ? (record.tool_calls ?? []).map((call) => call.function.name) : []);
+            const wrote = await fileExists(path.join(workspace, TARGET_FILENAME));
+            console.log(`[smoke] flag-review no managed denial: tools called=${JSON.stringify(called)} file_created=${wrote}`);
+          }
           expect(
             denial,
             `expected a Write/Edit call for ${TARGET_FILENAME} with a same-call managed denial ` +
