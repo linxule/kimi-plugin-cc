@@ -1,6 +1,6 @@
 import { resolveKimiHome } from "../kimi-home.js";
 import { probeProcessIdentity } from "../process-tree.js";
-import { recordRecoveryEvent, finishRecoveryRecord } from "../swarm-recovery.js";
+import { recordRecoveryEvent, recordPrintSnapshot, finishRecoveryRecord } from "../swarm-recovery.js";
 import { allocateJobId } from "../job-id.js";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -605,6 +605,7 @@ writeMode, executionCwd) {
         store.updateRunningJob(job.job_id, { phase: "turn-running" });
         if (recovery)
             recordRecoveryEvent(store, recovery, { kind: "print-spawn" });
+        let printRootPid;
         const result = await runCliPromptWithBudget({
             ...spawnOptions,
             prefixArgs: [...executionPlan.prefixArgs],
@@ -612,6 +613,7 @@ writeMode, executionCwd) {
             resumeSessionId: preactivated?.sessionId,
             logPath: job.stream_log_path,
             onSpawn: async (pid) => {
+                printRootPid = pid;
                 store.updateRunningJob(job.job_id, { kimi_pid: pid });
                 const probe = await probeProcessIdentity(pid);
                 if (probe.identity) {
@@ -622,10 +624,9 @@ writeMode, executionCwd) {
                 }
             },
             onProcessIdentities: recovery
-                ? (identities, complete) => recordRecoveryEvent(store, recovery, {
-                    kind: boundedSwarm ? "print-processes-snapshot" : "print-processes",
-                    identities: [...identities], complete,
-                })
+                ? (identities, complete, root) => boundedSwarm
+                    ? recordPrintSnapshot(store, recovery, { identities, complete, rootExited: root.exited, rootClosed: root.closed }, printRootPid)
+                    : recordRecoveryEvent(store, recovery, { kind: "print-processes", identities: [...identities], complete })
                 : undefined,
             signal: handlers.signal,
         }, promptBudgetMs, "swarm.prompt");

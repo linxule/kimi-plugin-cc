@@ -166,8 +166,14 @@ export interface CliClientOptions {
   onRecord?: (record: StreamJsonRecord) => void;
   /** Called with the real child PID before stream processing; failures trigger owned teardown. */
   onSpawn?: (pid: number) => void | Promise<void>;
-  /** Persist bounded-swarm descendant ownership before returning or capturing a patch. */
-  onProcessIdentities?: (identities: readonly ProcessIdentity[], complete: boolean) => void | Promise<void>;
+  /**
+   * Persist bounded-swarm descendant ownership before returning or capturing a patch.
+   * `root.exited` and `root.closed` are true only when the direct child had already
+   * exited, and its stdout and stderr had already closed, when the pass began.
+   */
+  onProcessIdentities?: (
+    identities: readonly ProcessIdentity[], complete: boolean, root: { exited: boolean; closed: boolean },
+  ) => void | Promise<void>;
   /**
    * Milliseconds between SIGTERM and SIGKILL escalation after an abort.
    * Larger values delay SIGKILL; only `Infinity` suppresses escalation entirely.
@@ -612,6 +618,8 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     const escalationMs = opts.escalationMs ?? DEFAULT_ESCALATION_MS;
     const identityReader = opts.processIdentityReader;
     let processExited = false;
+    let processClosed = false;
+    child.once("close", () => { processClosed = true; });
     child.once("exit", () => {
       processExited = true;
       // A descendant may still hold stdout open. Start cleanup on exit rather
@@ -751,7 +759,12 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         const noteFailure = (error: unknown) => { passError ??= error; };
         const childPid = child.pid;
         if (childPid === undefined || process.platform === "win32") return;
-        const reachable = !processExited ? await captureDescendantIdentities(childPid, undefined, noteFailure) : [];
+        // Read once: the checkpoint below reports whether the whole pass ran
+        // after the direct child's exit and pipe close, not whether they
+        // happened meanwhile.
+        const rootExited = processExited;
+        const rootClosed = processClosed;
+        const reachable = !rootExited ? await captureDescendantIdentities(childPid, undefined, noteFailure) : [];
         retainIdentities(reachable);
         const reachableKeys = new Set(reachable.map(identityKey));
         const validation = await revalidateProcessIdentities([...trackedIdentities.values()], {
@@ -785,7 +798,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
         observationError = passError;
         lastPassComplete = passError === undefined;
         const current = [...trackedIdentities.values()];
-        const signature = JSON.stringify([current.map((identity) => [identity.pid, identity.startToken, identity.processGroupId]), lastPassComplete]);
+        const signature = JSON.stringify([current.map((identity) => [identity.pid, identity.startToken, identity.processGroupId]), lastPassComplete, rootExited, rootClosed]);
         // Recovery stores the print root first. Capture starts immediately,
         // but descendant publication waits for that durable root checkpoint.
         if (spawnRecorded) {
@@ -793,7 +806,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
             lastPassCheckpointed = true;
           } else {
             try {
-              await opts.onProcessIdentities?.(current, lastPassComplete);
+              await opts.onProcessIdentities?.(current, lastPassComplete, { exited: rootExited, closed: rootClosed });
               publishedIdentities = signature;
               checkpointError = undefined;
               lastPassCheckpointed = true;

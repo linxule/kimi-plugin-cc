@@ -52,6 +52,24 @@ export async function retryIncompleteCapture(capture, retryDelaysMs = INCOMPLETE
     }
     return snapshot;
 }
+/**
+ * Ask the kernel whether a process group has any member. Signal 0 runs the
+ * existence and permission checks and delivers nothing, so this never signals
+ * the group. True only on ESRCH: a member (a zombie included), a permission
+ * error and any other failure all read as "not proven empty". Unlike a process
+ * listing, the answer cannot miss a member that exists when it is asked.
+ */
+export function processGroupIsProvenEmpty(processGroupId) {
+    if (process.platform === "win32" || !Number.isInteger(processGroupId) || processGroupId <= 1)
+        return false;
+    try {
+        process.kill(-processGroupId, 0);
+        return false;
+    }
+    catch (error) {
+        return hasErrorCode(error, "ESRCH");
+    }
+}
 /** Return current members of the selected process groups, or undefined when unreadable. */
 export async function collectProcessGroupsIdentities(processGroupIds) {
     if (process.platform === "win32")

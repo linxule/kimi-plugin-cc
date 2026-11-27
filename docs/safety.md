@@ -1,6 +1,6 @@
 # Safety
 
-This guide explains how kimi-plugin-cc 3.1.1 constrains every Kimi session it starts. Read-only operations deny file writes and shell commands. Rescue and pursue edit files only inside your workspace and never mutate Git. Write-swarm (`swarm_patch`) edits inside a temporary Git worktree and returns an unapplied patch.
+This guide explains how kimi-plugin-cc 3.1.2 constrains every Kimi session it starts. Read-only operations deny file writes and shell commands. Rescue and pursue edit files only inside your workspace and never mutate Git. Write-swarm (`swarm_patch`) edits inside a temporary Git worktree and returns an unapplied patch.
 
 The plugin makes promises about the sessions it launches. It does not police your own interactive Kimi configuration. One mechanism enforces every promise: a single bundled PreToolUse hook that denies every tool call outside the running operation's allowlist. Plan mode stays closed across every release as defense in depth even though Kimi Code 2.8.0 runs the hook before the plan guard. Where a Kimi setting would break a promise, the plugin neutralizes it for its own children or refuses before spawn; where it would not, the plugin runs and surfaces a launch warning.
 
@@ -37,7 +37,7 @@ If the hook is missing, drifted, or invalid, every model-spawning operation fail
 Running `kimi_setup({ action: "install" })` or `scripts/companion.sh setup` verifies `pluginRoot` and `hook/` via `lstat`/`realpath` (rejecting symlinks and non-directories), stages `package.json` (`{"type":"module"}`) and the self-contained bundled ESM `dist/hooks/approval-hook.js` in a unique staging subdirectory, probes the staged candidate before activating `<pluginRoot>/hook/approval-hook.js` (preserving any working hook on failure), and writes one canonical block in `~/.kimi-code/config.toml` inside the serialized config lock:
 
 ```toml
-# === BEGIN kimi-plugin-cc-managed (v3.1.1) ===
+# === BEGIN kimi-plugin-cc-managed (v3.1.2) ===
 # DO NOT EDIT — managed by kimi-plugin-cc setup. Run `scripts/companion.sh setup --uninstall` to remove.
 # Purpose:
 #   kimi-code's `kimi -p` mode hard-codes permission='auto' and

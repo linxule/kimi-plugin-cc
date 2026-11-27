@@ -2,6 +2,21 @@
 
 Release notes for notable plugin changes. Published tags and GitHub Releases never change.
 
+## 3.1.2 — 2026-11-27
+
+Fixes a swarm run that failed when its Kimi process exited before the plugin read its process identity. Certified Kimi Code versions and hook policy are unchanged.
+
+### Fixed
+
+- A swarm or write swarm no longer fails with `CLI_PROCESS_SETTLEMENT_FAILED` ("The print root identity was not durably recorded before its process snapshot") when the Kimi process has already exited by the time its identity is read, or when that read times out. Before this fix the run stalled for about 2 seconds, lost a clean result, reported a settlement error where the process had failed at startup, and left a recovery record behind. On macOS and Linux, such a launch now settles once 4 things hold: the plugin's own child handle has reported the exit, the plugin has seen the process's output pipes close, no process the plugin had seen is still alive, and the operating system reports no process left in the process's own process group. The job keeps the process's own result or startup error.
+- Each of those checks is refused and retried until all 4 hold. The teardown deadline bounds the retries; if the checks never all hold, settlement fails as before and a write swarm captures no patch. This covers a helper that survives in the process group and a helper that keeps the output pipes open.
+- A cancelled or timed-out write swarm of this kind can now capture its partial patch, as one with an identified process already could.
+- `recover-swarm --apply` finishes a launch of this kind that settled but was interrupted before its exit was recorded. It signals nothing and still refuses one that never settled.
+
+### Changed
+
+- A settled launch of this kind is recorded with `rootUnidentified: true` and no identities in `swarm_recovery`. Plugin 3.1.0 and 3.1.1 read these records in status, result and the recovery preview. Their `recover-swarm --apply` refuses one that was interrupted before its exit was recorded; 3.1.2 finishes it.
+
 ## 3.1.1 — 2026-11-26
 
 Fixes what a host reports when a leftover `KIMI_PLUGIN_CC_DATA` override points it away from the shared hook. Certified Kimi Code versions and hook policy are unchanged.

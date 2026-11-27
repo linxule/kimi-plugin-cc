@@ -1,6 +1,6 @@
 import { resolveKimiHome } from "../kimi-home.js";
 import { probeProcessIdentity } from "../process-tree.js";
-import { recordRecoveryEvent, finishRecoveryRecord, type SwarmRecoveryRecord } from "../swarm-recovery.js";
+import { recordRecoveryEvent, recordPrintSnapshot, finishRecoveryRecord, type SwarmRecoveryRecord } from "../swarm-recovery.js";
 import { allocateJobId } from "../job-id.js";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -761,6 +761,7 @@ async function executeSwarmJob(
     if (promptBudgetMs <= 0) throw new ResponseTimeoutError(budgetMs, "swarm.prompt", commandLabel);
     store.updateRunningJob(job.job_id, { phase: "turn-running" });
     if (recovery) recordRecoveryEvent(store, recovery, { kind: "print-spawn" });
+    let printRootPid: number | undefined;
     const result = await runCliPromptWithBudget(
       {
         ...spawnOptions,
@@ -769,6 +770,7 @@ async function executeSwarmJob(
         resumeSessionId: preactivated?.sessionId,
         logPath: job.stream_log_path,
         onSpawn: async (pid) => {
+          printRootPid = pid;
           store.updateRunningJob(job.job_id, { kimi_pid: pid });
           const probe = await probeProcessIdentity(pid);
           if (probe.identity) {
@@ -779,10 +781,9 @@ async function executeSwarmJob(
           }
         },
         onProcessIdentities: recovery
-          ? (identities, complete) => recordRecoveryEvent(store, recovery!, {
-              kind: boundedSwarm ? "print-processes-snapshot" : "print-processes",
-              identities: [...identities], complete,
-            })
+          ? (identities, complete, root) => boundedSwarm
+              ? recordPrintSnapshot(store, recovery!, { identities, complete, rootExited: root.exited, rootClosed: root.closed }, printRootPid)
+              : recordRecoveryEvent(store, recovery!, { kind: "print-processes", identities: [...identities], complete })
           : undefined,
         signal: handlers.signal,
       },

@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 
 import type { JobStore } from "../../runtime/job-store.js";
-import type { ProcessIdentity } from "../../runtime/process-tree.js";
+import { processGroupIsProvenEmpty, type ProcessIdentity } from "../../runtime/process-tree.js";
 import {
   inspectRecoveryLaunchProcesses,
+  recordPrintSnapshot,
   recordRecoveryEvent,
+  recoverLaunch,
   validateRecoveryGroupMembers,
+  type PrintRootEvidence,
   type SwarmRecoveryEvent,
   type SwarmRecoveryRecord,
 } from "../../runtime/swarm-recovery.js";
@@ -44,8 +48,8 @@ function fixture(kind: "print" | "web" = "print", withRoot = true) {
   const emit = (event: SwarmRecoveryEvent) => recordRecoveryEvent(store, record, event);
   emit({ kind: `${kind}-spawn` });
   if (withRoot) emit({ kind: `${kind}-processes`, identities: [rootIdentity], complete: true });
-  const snapshot = (identities: ProcessIdentity[], complete = true) => {
-    emit({ kind: "print-processes-snapshot", identities, complete });
+  const snapshot = (identities: ProcessIdentity[], complete = true, evidence: Partial<PrintRootEvidence> = {}) => {
+    emit({ kind: "print-processes-snapshot", identities, complete, ...evidence });
   };
   return { record, saved, emit, snapshot, launch: record.launches[0]! };
 }
@@ -167,6 +171,192 @@ describe("bounded swarm recovery process snapshots", () => {
     expect(launch.identities).toEqual([rootIdentity, oldChild, newChild]);
     expect(launch).toMatchObject({ uncertain: true, pending: false, quiescent: false });
     expect(launch.boundedSnapshot).toBeUndefined();
+  });
+});
+
+describe("a print root that exited before its identity was read", () => {
+  const refusal = expect.objectContaining({
+    code: "SWARM_RECOVERY_REQUIRED",
+    message: expect.stringContaining("The print root identity was not durably recorded before its process snapshot."),
+  });
+  const settled: PrintRootEvidence = { rootExited: true, rootClosed: true, rootGroupEmpty: true };
+
+  function rootless(probeComplete = true) {
+    const built = fixture("print", false);
+    // What the spawn callback records when the probe finds no process, or cannot finish.
+    built.emit({ kind: "print-processes", identities: [], complete: probeComplete });
+    expect(built.launch).toMatchObject({ pending: true, identities: [], uncertain: !probeComplete, quiescent: false });
+    return built;
+  }
+
+  test("settles on a complete empty pass once the root exited, its pipes closed and its group is empty", () => {
+    const { snapshot, launch, saved, emit } = rootless();
+    snapshot([], true, settled);
+    expect(launch).toMatchObject({ pending: false, uncertain: false, identities: [], quiescent: false, boundedSnapshot: true, rootUnidentified: true });
+    expect(saved.at(-1)?.launches[0]).toMatchObject({ pending: false, rootUnidentified: true });
+    // Repeated passes after exit stay accepted, and the exit event completes the launch.
+    snapshot([], true, settled);
+    emit({ kind: "print-exit" });
+    expect(launch).toMatchObject({ quiescent: true, pending: false, identities: [] });
+  });
+
+  test("a spawn probe that timed out on a root that later exits settles the same way", () => {
+    const { snapshot, launch } = rootless(false);
+    snapshot([], true, settled);
+    expect(launch).toMatchObject({ pending: false, uncertain: false, rootUnidentified: true });
+  });
+
+  test.each([
+    ["the root has not been reported as exited", [] as ProcessIdentity[], true, { ...settled, rootExited: false }],
+    ["its pipes have not closed", [] as ProcessIdentity[], true, { ...settled, rootClosed: false }],
+    ["its process group still has a member, or could not be read", [] as ProcessIdentity[], true, { ...settled, rootGroupEmpty: false }],
+    ["the exit report is absent", [] as ProcessIdentity[], true, { rootClosed: true, rootGroupEmpty: true }],
+    ["the pipe report is absent", [] as ProcessIdentity[], true, { rootExited: true, rootGroupEmpty: true }],
+    ["the group reading is absent", [] as ProcessIdentity[], true, { rootExited: true, rootClosed: true }],
+    ["no evidence is carried at all", [] as ProcessIdentity[], true, {}],
+    ["the pass is incomplete", [] as ProcessIdentity[], false, settled],
+    ["a descendant is still tracked", [childIdentity(1)], true, settled],
+    ["a descendant is tracked on an incomplete pass", [childIdentity(1)], false, settled],
+  ] as const)("refuses while %s", (_name, identities, complete, evidence) => {
+    const { snapshot, launch, saved } = rootless();
+    const before = saved.length;
+    expect(() => snapshot([...identities], complete, evidence)).toThrow(refusal);
+    expect(launch).toMatchObject({ pending: true, identities: [], quiescent: false });
+    expect(launch.rootUnidentified).toBeUndefined();
+    expect(launch.boundedSnapshot).toBeUndefined();
+    expect(saved).toHaveLength(before);
+  });
+
+  test("a refusal does not stop a later valid pass from settling", () => {
+    const { snapshot, launch } = rootless();
+    expect(() => snapshot([childIdentity(1)], true, settled)).toThrow(refusal);
+    expect(() => snapshot([], true, { ...settled, rootExited: false })).toThrow(refusal);
+    snapshot([], true, settled);
+    expect(launch).toMatchObject({ pending: false, rootUnidentified: true });
+  });
+
+  test("a descendant seen after a rootless settlement is refused, not adopted", () => {
+    const { snapshot, launch } = rootless();
+    snapshot([], true, settled);
+    expect(() => snapshot([childIdentity(2)], true, settled)).toThrow(refusal);
+    expect(launch.identities).toEqual([]);
+  });
+
+  test("a recorded root never takes the rootless path, whatever the evidence says", () => {
+    const { snapshot, launch } = fixture();
+    snapshot([], true, { rootExited: false, rootClosed: false, rootGroupEmpty: false });
+    snapshot([], true, settled);
+    expect(launch.identities).toEqual([rootIdentity]);
+    expect(launch.rootUnidentified).toBeUndefined();
+  });
+});
+
+describe("the process-group probe behind a rootless settlement", () => {
+  const rootPid = 71001;
+  const exited = { identities: [] as ProcessIdentity[], complete: true, rootExited: true, rootClosed: true };
+  const refusal = expect.objectContaining({ code: "SWARM_RECOVERY_REQUIRED" });
+
+  function build(withRoot: boolean) {
+    const built = fixture("print", withRoot);
+    if (!withRoot) built.emit({ kind: "print-processes", identities: [], complete: true });
+    const probes: number[] = [];
+    const probe = (provenEmpty: boolean) => (processGroupId: number) => {
+      probes.push(processGroupId);
+      return provenEmpty;
+    };
+    const store = { saveSwarmRecovery() {} } as unknown as JobStore;
+    return { ...built, probes, probe, store };
+  }
+
+  test("a group the kernel reports as gone settles the launch, and only the root's own group is probed", () => {
+    const { record, launch, probes, probe, store } = build(false);
+    recordPrintSnapshot(store, record, exited, rootPid, probe(true));
+    expect(probes).toEqual([rootPid]);
+    expect(launch).toMatchObject({ pending: false, rootUnidentified: true });
+  });
+
+  test("a group not proven empty refuses", () => {
+    const { record, launch, probes, probe, store } = build(false);
+    expect(() => recordPrintSnapshot(store, record, exited, rootPid, probe(false))).toThrow(refusal);
+    expect(probes).toEqual([rootPid]);
+    expect(launch).toMatchObject({ pending: true, identities: [] });
+    expect(launch.rootUnidentified).toBeUndefined();
+  });
+
+  test.each([
+    ["the root has not exited", { ...exited, rootExited: false }],
+    ["its pipes are open", { ...exited, rootClosed: false }],
+    ["the pass is incomplete", { ...exited, complete: false }],
+    ["a descendant is tracked", { ...exited, identities: [childIdentity(1)] }],
+  ])("no group is probed, and the snapshot is refused, while %s", (_name, snapshot) => {
+    const { record, probes, probe, store } = build(false);
+    expect(() => recordPrintSnapshot(store, record, snapshot, rootPid, probe(true))).toThrow(refusal);
+    expect(probes).toEqual([]);
+  });
+
+  test("an unknown root PID refuses without probing any group", () => {
+    const { record, probes, probe, store } = build(false);
+    expect(() => recordPrintSnapshot(store, record, exited, undefined, probe(true))).toThrow(refusal);
+    expect(probes).toEqual([]);
+  });
+
+  test("a recorded root is never probed", () => {
+    const { record, launch, probes, probe, store } = build(true);
+    recordPrintSnapshot(store, record, exited, rootPid, probe(false));
+    recordPrintSnapshot(store, record, { ...exited, rootExited: false, rootClosed: false, identities: [childIdentity(3)] }, rootPid, probe(false));
+    expect(probes).toEqual([]);
+    expect(launch.identities).toEqual([rootIdentity, childIdentity(3)]);
+    expect(launch.rootUnidentified).toBeUndefined();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("the kernel process-group probe", () => {
+  test("reports a live group as not proven empty and a reaped one as empty, without signalling it", async () => {
+    const child = spawn("sleep", ["5"], { detached: true, stdio: "ignore" });
+    try {
+      const pid = child.pid!;
+      expect(processGroupIsProvenEmpty(pid)).toBe(false);
+      // The probe delivered nothing: the member is still running.
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      const exit = new Promise((resolve) => child.once("exit", resolve));
+      child.kill("SIGKILL");
+      await exit;
+      expect(processGroupIsProvenEmpty(pid)).toBe(true);
+    } finally {
+      try { child.kill("SIGKILL"); } catch { /* Already gone. */ }
+    }
+  });
+
+  test.each([0, 1, -5, 1.5, Number.NaN])("refuses the unusable group id %p", (id) => {
+    expect(processGroupIsProvenEmpty(id)).toBe(false);
+  });
+});
+
+describe("recovery of a launch with no recorded root", () => {
+  test("a settled one is finished without probing or signalling anything", async () => {
+    const { launch, emit } = fixture("print", false);
+    emit({ kind: "print-processes", identities: [], complete: true });
+    emit({ kind: "print-processes-snapshot", identities: [], complete: true, rootExited: true, rootClosed: true, rootGroupEmpty: true });
+    expect(launch).toMatchObject({ quiescent: false, pending: false, rootUnidentified: true });
+    let persisted = 0;
+    await recoverLaunch(launch, () => { persisted += 1; });
+    expect(launch.quiescent).toBe(true);
+    expect(persisted).toBe(1);
+  });
+
+  test.each([
+    ["never settled", {}],
+    ["flagged but still pending", { rootUnidentified: true as const, pending: true }],
+    ["flagged but uncertain", { rootUnidentified: true as const, pending: false, uncertain: true }],
+  ])("one that %s is still refused", async (_name, overrides) => {
+    const { launch, emit } = fixture("print", false);
+    emit({ kind: "print-processes", identities: [], complete: true });
+    Object.assign(launch, overrides);
+    let persisted = 0;
+    await expect(recoverLaunch(launch, () => { persisted += 1; })).rejects.toMatchObject({ code: "SWARM_RECOVERY_REQUIRED" });
+    expect(launch.quiescent).toBe(false);
+    expect(persisted).toBe(0);
   });
 });
 

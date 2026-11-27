@@ -1,13 +1,25 @@
 import { RuntimeError } from "./errors.js";
 import type { JobStore } from "./job-store.js";
 import { sleep } from "./util.js";
-import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, revalidateProcessIdentities, type ProcessIdentity } from "./process-tree.js";
+import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, processGroupIsProvenEmpty, revalidateProcessIdentities, type ProcessIdentity } from "./process-tree.js";
 
 export type SwarmRecoveryEvent =
   | { kind: "web-spawn" | "print-spawn" | "web-exit" | "print-exit" | "disabled" }
   | { kind: "web-processes" | "print-processes"; identities: ProcessIdentity[]; complete: boolean }
-  | { kind: "print-processes-snapshot"; identities: ProcessIdentity[]; complete: boolean }
+  | ({ kind: "print-processes-snapshot"; identities: ProcessIdentity[]; complete: boolean } & Partial<PrintRootEvidence>)
   | { kind: "session"; sessionId: string; workspaceId: string };
+/**
+ * What the launcher knows about a print root without having read its identity.
+ * Only a launch with no recorded root consults it; a missing field counts as false.
+ */
+export interface PrintRootEvidence {
+  /** The launcher's own child handle reported exit before the tracker pass began. */
+  rootExited: boolean;
+  /** That handle's stdout and stderr had closed before the pass began, so nothing still holds them. */
+  rootClosed: boolean;
+  /** After the exit, the kernel reported no process in the root's own process group. */
+  rootGroupEmpty: boolean;
+}
 export interface RecoveryLaunch {
   kind: "web" | "print";
   pending: boolean;
@@ -15,6 +27,8 @@ export interface RecoveryLaunch {
   quiescent: boolean;
   uncertain: boolean;
   boundedSnapshot?: true;
+  /** The print root exited before its identity was read; the launch settled with nothing tracked. */
+  rootUnidentified?: true;
 }
 export interface SwarmRecoveryRecord {
   schema: 1;
@@ -50,17 +64,37 @@ export function recordRecoveryEvent(store: JobStore, record: SwarmRecoveryRecord
       launch.pending = false;
     } else if (event.kind === "print-processes-snapshot") {
       const root = launch.identities[0];
-      if (!root) throw recoveryError("The print root identity was not durably recorded before its process snapshot.");
-      // The root remains the recovery anchor after exit. Complete bounded
-      // snapshots replace historical descendants; an incomplete observation
-      // cannot discard an identity whose exit has not been proven.
-      const previous = new Map(launch.identities.map((identity) => [processIdentityKey(identity), identity]));
-      const current = event.identities.map((identity) => previous.get(processIdentityKey(identity)) ?? identity);
-      const all = event.complete ? [root, ...current] : [...launch.identities, ...current];
-      launch.identities = [...new Map(all.map((identity) => [processIdentityKey(identity), identity])).values()];
-      launch.pending = false;
-      launch.uncertain = !event.complete;
-      launch.boundedSnapshot = true;
+      if (!root) {
+        // The root can exit before its identity is read, and the read can fail
+        // or time out. With no anchor, settlement rests on four observations
+        // that need none: the launcher's own handle reported the exit; the
+        // launcher saw its pipes close; a complete pass tracks no process; and
+        // the kernel reports no process in the root's own group. Each one
+        // missing is a refusal, exactly as every rootless snapshot was refused
+        // before. A helper that left the group and keeps no pipe open is
+        // invisible here, as it is behind an identified root that has exited.
+        if (
+          event.rootExited !== true || event.rootClosed !== true || event.rootGroupEmpty !== true ||
+          !event.complete || event.identities.length > 0
+        ) {
+          throw recoveryError("The print root identity was not durably recorded before its process snapshot.");
+        }
+        launch.pending = false;
+        launch.uncertain = false;
+        launch.boundedSnapshot = true;
+        launch.rootUnidentified = true;
+      } else {
+        // The root remains the recovery anchor after exit. Complete bounded
+        // snapshots replace historical descendants; an incomplete observation
+        // cannot discard an identity whose exit has not been proven.
+        const previous = new Map(launch.identities.map((identity) => [processIdentityKey(identity), identity]));
+        const current = event.identities.map((identity) => previous.get(processIdentityKey(identity)) ?? identity);
+        const all = event.complete ? [root, ...current] : [...launch.identities, ...current];
+        launch.identities = [...new Map(all.map((identity) => [processIdentityKey(identity), identity])).values()];
+        launch.pending = false;
+        launch.uncertain = !event.complete;
+        launch.boundedSnapshot = true;
+      }
     } else if ("identities" in event) {
       const all = [...launch.identities, ...event.identities];
       launch.identities = [...new Map(all.map((identity) => [`${identity.pid}:${identity.startToken}:${identity.processGroupId}`, identity])).values()];
@@ -69,6 +103,31 @@ export function recordRecoveryEvent(store: JobStore, record: SwarmRecoveryRecord
     }
   }
   store.saveSwarmRecovery(record.jobId, record);
+}
+
+/**
+ * Record one bounded print snapshot. For a launch with no recorded root, and
+ * only then, probe the root's own process group once the other conditions
+ * hold. The child is spawned as the leader of its own group, so that group's
+ * id is the child's PID. The probe observes and never signals; anything short
+ * of the kernel's "no such process" is a refusal. A recorded root is never probed.
+ */
+export function recordPrintSnapshot(
+  store: JobStore,
+  record: SwarmRecoveryRecord,
+  snapshot: { identities: readonly ProcessIdentity[]; complete: boolean; rootExited: boolean; rootClosed: boolean },
+  rootPid: number | undefined,
+  groupIsProvenEmpty: (processGroupId: number) => boolean = processGroupIsProvenEmpty,
+): void {
+  const launch = [...record.launches].reverse().find((entry) => entry.kind === "print");
+  const rootGroupEmpty =
+    launch !== undefined && launch.identities.length === 0 && rootPid !== undefined &&
+    snapshot.rootExited && snapshot.rootClosed && snapshot.complete && snapshot.identities.length === 0 &&
+    groupIsProvenEmpty(rootPid);
+  recordRecoveryEvent(store, record, {
+    kind: "print-processes-snapshot", identities: [...snapshot.identities], complete: snapshot.complete,
+    rootExited: snapshot.rootExited, rootClosed: snapshot.rootClosed, rootGroupEmpty,
+  });
 }
 
 function processIdentityKey(identity: ProcessIdentity): string {
@@ -148,6 +207,14 @@ export async function inspectRecoveryLaunchProcesses(
 /** Never signal an unproven group, PID replacement, or changed-PGID process. */
 export async function recoverLaunch(launch: RecoveryLaunch, persist: () => void, signal?: AbortSignal): Promise<void> {
   if (launch.quiescent) return;
+  // A rootless launch that settled already rests on the root's exit, closed
+  // pipes, an empty group and an empty complete pass. It records no identity to
+  // inspect or signal, so recovery finishes it without probing anything.
+  if (launch.rootUnidentified === true && !launch.pending && !launch.uncertain && launch.identities.length === 0) {
+    launch.quiescent = true;
+    persist();
+    return;
+  }
   if (launch.pending || launch.uncertain || launch.identities.length === 0) {
     throw recoveryError("Launch ownership was not fully recorded before interruption; manual inspection is required. No process was signalled.");
   }

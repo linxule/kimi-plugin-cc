@@ -14,7 +14,9 @@ const completedChildIdentity: ProcessIdentity = { pid: 71003, processGroupId: 71
 
 interface PrintOptions {
   onSpawn?: (pid: number) => void | Promise<void>;
-  onProcessIdentities?: (identities: readonly ProcessIdentity[], complete: boolean) => void | Promise<void>;
+  onProcessIdentities?: (
+    identities: readonly ProcessIdentity[], complete: boolean, root: { exited: boolean; closed: boolean },
+  ) => void | Promise<void>;
 }
 
 type FaultKind = "settlement-code" | "cleanup-flag" | "budget-wrapped" | "ordinary";
@@ -71,6 +73,7 @@ async function runFault(options: { kind: FaultKind; complete?: boolean; cancelli
     RuntimeError,
     ResponseTimeoutError: cli.ResponseTimeoutError,
     recordRecoveryEvent: recovery.recordRecoveryEvent,
+    recordPrintSnapshot: recovery.recordPrintSnapshot,
     finishRecoveryRecord: recovery.finishRecoveryRecord,
     usesBoundedSwarmPolicy: policy.usesBoundedSwarmPolicy,
     resolveKimiHome: () => "/virtual/home",
@@ -102,10 +105,10 @@ async function runFault(options: { kind: FaultKind; complete?: boolean; cancelli
       expect(typeof print.onProcessIdentities).toBe("function");
       await print.onSpawn?.(rootIdentity.pid);
       const firstSnapshot = options.complete === false ? [rootIdentity] : [rootIdentity, completedChildIdentity];
-      await print.onProcessIdentities!(firstSnapshot, true);
+      await print.onProcessIdentities!(firstSnapshot, true, { exited: false, closed: false });
       identityCallbackCalls += 1;
       expect(snapshots.at(-1)?.launches[0]?.identities).toEqual(firstSnapshot);
-      await print.onProcessIdentities!([rootIdentity, childIdentity], options.complete ?? true);
+      await print.onProcessIdentities!([rootIdentity, childIdentity], options.complete ?? true, { exited: false, closed: false });
       identityCallbackCalls += 1;
       durableBeforeThrow = structuredClone(snapshots.at(-1)!);
       if (options.cancelling) {
