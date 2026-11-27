@@ -48,9 +48,8 @@ const ACP = "packages/acp-server/src";
  * A new version MUST add its own row after a human read of the diff; a missing row
  * fails the scan rather than silently accepting drift.
  */
-const PINNED_HASHES: Record<string, Record<string, string>> = {
-  "2.8.0": {
-    [`${CORE}/features/externalHooks/configSection.ts`]: "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
+const HASHES_2_8_0: Record<string, string> = {
+  [`${CORE}/features/externalHooks/configSection.ts`]: "a95482d27f1a873a64d4e67fda77e844dc8dc29e424acbe03f6ffb094d832b20",
     [`${CORE}/features/externalHooks/internal/types.ts`]: "eb697379c4efdc48b0ee5ac00256d1205b85d99eefb7b19843218d35107852dc",
     [`${CORE}/agent/toolExecutor/beforeToolExecuteEvent.ts`]: "54d52bb02917cebbc97df66e92aa67ea0aab2768fe1b759c9a3f53f27571841b",
     [`${CORE}/features/plan/planService.ts`]: "bca08fffe66ed16dc75d932e39d5e069b70e099ed6fcf37544abe9a8e7cc20d2",
@@ -219,8 +218,15 @@ const PINNED_HASHES: Record<string, Record<string, string>> = {
     [`${CORE}/features/tower/towerOps.ts`]: "90de8ecdee312b68bcae931f2c2528f8ae827e3cb6559b78429e04742687f28f",
     [`${CORE}/agent/mcp/mcpDiscoveryOps.ts`]: "e0ab31236276de123509579d6b1a9ad8b5bb4110c60468eb4ac72aa009d7fe6c",
     [`${CORE}/agent/mcp/mcpFailureOps.ts`]: "cc345370443fc1064407ca56fb885cc0105a1ed4843628eb237a5c655df7b4a9",
-    [`${CORE}/agent/tools/task/task-wait/taskWaitTool.ts`]: "2b6c62a2fc611c6bf27f998d76d3de98f072dde83e91e1fb4ea09fd9aa42dc35",
-    [`${CORE}/agent/tools/task/task-wait/task-wait.ts`]: "70a620adb3bad8da904d5e5d77e6e6ac2fa5e8f7540d1c9507a60a269c7b08e2",
+  [`${CORE}/agent/tools/task/task-wait/taskWaitTool.ts`]: "2b6c62a2fc611c6bf27f998d76d3de98f072dde83e91e1fb4ea09fd9aa42dc35",
+  [`${CORE}/agent/tools/task/task-wait/task-wait.ts`]: "70a620adb3bad8da904d5e5d77e6e6ac2fa5e8f7540d1c9507a60a269c7b08e2",
+};
+
+const PINNED_HASHES: Record<string, Record<string, string>> = {
+  "2.8.0": HASHES_2_8_0,
+  "2.8.1": {
+    ...HASHES_2_8_0,
+    [`${CORE}/agent/toolSelect/toolSelectService.ts`]: "ced5e3ca3e9ef7230f69be16b55f3237d6516a9461c9f7c53a43644d630f7eb4",
   },
 };
 
@@ -1236,7 +1242,7 @@ function sliceBetween(source: string, start: string, end: string): string {
 
 // SHA-256 of each audited `taskWaitTool.ts` for certified rows (>= 2.8.0 floor).
 const WAIT_FOR_TOOL_SOURCES: Readonly<Record<string, readonly string[]>> = {
-  "2b6c62a2fc611c6bf27f998d76d3de98f072dde83e91e1fb4ea09fd9aa42dc35": ["2.8.0"],
+  "2b6c62a2fc611c6bf27f998d76d3de98f072dde83e91e1fb4ea09fd9aa42dc35": ["2.8.0", "2.8.1"],
 };
 
 const releaseRowSuite = sourceIsGitClone() ? describe : describe.skip;

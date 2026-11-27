@@ -9,14 +9,12 @@ import { assertPrefixArgsSafe } from "./kimi-command.js";
 import { assertExecutionPlanMatchesSpawn, assertNoUnsafeExperimentalSelector, } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { kimiJournalRecords, UNPARSEABLE_JOURNAL_LINE } from "./kimi-journal.js";
-import { kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
+import { kimiCertifiedReleaseHas, kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
 import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
 import { sleep } from "./util.js";
 import { collectDescendantIdentities, collectProcessGroupsIdentities, probeProcessIdentity, retryIncompleteCapture, revalidateProcessIdentities, waitForProcessTreeExit, } from "./process-tree.js";
-// Exact 2.8.0+ preactivation releases; production scope is enforced per operation.
-const PREACTIVATION_VERSIONS = kimiVersionsWith("web-preactivation");
 const KIMI_AGENT_PROTOCOL_VERSION = "1.0.0";
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
@@ -36,7 +34,7 @@ const ESCALATION_MS = 1_500;
 const POST_KILL_QUIESCENCE_MS = 500;
 const ENV_MODEL_ALIAS = "__kimi_env_model__";
 export function requiresSwarmPreactivation(version) {
-    return version !== null && PREACTIVATION_VERSIONS.includes(version);
+    return kimiCertifiedReleaseHas(version, "web-preactivation");
 }
 export async function preactivateSwarmSession(options) {
     const failureCode = "SWARM_ACTIVATION_FAILED";
@@ -136,7 +134,7 @@ async function prepareWebSpawn(options, failureCode) {
     }
     const expectedVersion = options.expectedVersion ?? options.executionPlan.kimiVersion;
     if (expectedVersion === null || !requiresSwarmPreactivation(expectedVersion)) {
-        throw failure(failureCode, "swarm-activation.version", `Swarm web preactivation requires exact kimi-code ${PREACTIVATION_VERSIONS.join(" or ")}.`);
+        throw failure(failureCode, "swarm-activation.version", `Swarm web preactivation requires exact kimi-code ${kimiVersionsWith("web-preactivation").join(" or ")}.`);
     }
     const kimiHome = resolveKimiHome(options.env, options.cwd);
     if (options.executionPlan.intendedEngine === "native-v2") {

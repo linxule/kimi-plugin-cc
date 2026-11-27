@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { formatError, RuntimeError } from "../../runtime/errors.js";
 import { buildKimiCliEnvironment } from "../../runtime/cli-client.js";
+import { registerSmokeCandidateReleaseForTests } from "../../runtime/kimi-releases.js";
 import { NATIVE_V2_CERTIFIED, type KimiExecutionPlan, type KimiOperationKind } from "../../runtime/kimi-engine.js";
 import { readProcessIdentity } from "../../runtime/process-tree.js";
 import {
@@ -297,9 +298,17 @@ describe("requiresSwarmPreactivation", () => {
 
   test("matches only exact upstream versions with reviewed activation", () => {
     expect(requiresSwarmPreactivation("2.8.0")).toBe(true);
-    for (const version of [null, "2.3.2", "2.5.3", "2.6.0", "2.6.2", "2.7.2", "2.7.3", "2.8.1", "2.8", "2.8.x", ">=2.8.0", "2.8.0-rc.1", "2.8.0+local", "v2.8.0", "kimi-code 2.8.0"]) {
+    expect(requiresSwarmPreactivation("2.8.1")).toBe(true);
+    for (const version of [null, "2.3.2", "2.5.3", "2.6.0", "2.6.2", "2.7.2", "2.7.3", "2.8.2", "2.8", "2.8.x", ">=2.8.0", "2.8.0-rc.1", "2.8.0+local", "v2.8.0", "kimi-code 2.8.0"]) {
       expect(requiresSwarmPreactivation(version)).toBe(false);
     }
+    const dispose = registerSmokeCandidateReleaseForTests("2.99.0");
+    try {
+      expect(requiresSwarmPreactivation("2.99.0")).toBe(true);
+    } finally {
+      dispose();
+    }
+    expect(requiresSwarmPreactivation("2.99.0")).toBe(false);
   });
 
   test("plugin-owned lifecycle disables ambient idle session reclamation", async () => {

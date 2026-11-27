@@ -36,11 +36,11 @@ You need:
 - macOS or Linux
 - Claude Code, Codex, Antigravity, DSH `>=0.2.1-rc.5 <0.3.0`, or Magpie (or any stdio MCP client)
 - Node.js 22.5 or newer (24.9 or newer for DSH)
-- Kimi Code CLI `2.8.0` or newer (this plugin certifies `2.8.0` for all 7 operations and refuses older versions)
+- Kimi Code CLI `2.8.0` or newer (this plugin certifies `2.8.0` and `2.8.1` for all 7 operations and refuses older versions)
 
 This plugin does not support model runs on Windows. Contributors can run the [Windows diagnostics checks](./docs/ci.md#windows-spawn-controls).
 
-Install Kimi Code with the [Kimi Code getting started guide](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started), or let `kimi_setup` install a certified `2.8.0` binary for you. You do not need Bun or a build step.
+Install Kimi Code with the [Kimi Code getting started guide](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started), or let `kimi_setup` install a certified `2.8.1` binary for you. You do not need Bun or a build step.
 
 Run `kimi` in your terminal, then use `/login` for a Kimi subscription or `/provider` for an API key. Enter credentials only in Kimi, never in an assistant chat. If you set `KIMI_CODE_HOME`, use the same directory for Kimi and this plugin.
 
@@ -119,7 +119,7 @@ Run `/path/to/kimi-plugin-cc/scripts/companion.sh setup` and `setup --check` onc
 You can also install [`kimi-plugin-cc` from npm](https://www.npmjs.com/package/kimi-plugin-cc) into a dedicated package directory. Keep that directory separate from `~/.local/share/kimi-plugin-cc`, which stores shared runtime data:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.2
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.3
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -151,7 +151,7 @@ Run the 5 primary CLI subcommands through `scripts/companion.sh`:
 | `scripts/companion.sh read [--mode ask\|review\|challenge\|swarm] [options] [--] [prompt]` | Run a read-only question, diff review (`--base <ref>`), design challenge, or parallel read-only swarm |
 | `scripts/companion.sh write [--mode rescue\|pursue\|swarm-patch] [options] [--] <prompt>` | Run a workspace fix, multi-step goal, or temporary worktree patch swarm |
 | `scripts/companion.sh job <list\|status\|result\|wait\|cancel\|replay\|recover-swarm> [job-id]` | List, check, read, wait on, stop, replay, or recover jobs |
-| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | Install or check the hook, list models, install certified Kimi `2.8.0`, or repair session previews |
+| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | Install or check the hook, list models, install certified Kimi `2.8.1`, or repair session previews |
 | `scripts/companion.sh mcp` | Start the stdio MCP server |
 
 Place `--mode` and other flags before `--` or the prompt text. Older subcommands such as `ask`, `review`, `task rescue`, `status`, `result`, and `cancel` still work as aliases.
@@ -177,9 +177,9 @@ Write tasks reject both options. Read and network limits apply to one run only a
 
 ## Keep Kimi working when Kimi updates
 
-Plugin 3.1.0 uses a rolling compatibility window starting at Kimi Code `2.8.0`:
+Plugin 3.1.3 uses a rolling compatibility window starting at Kimi Code `2.8.0`:
 
-- exact `2.8.0` runs all 7 operations
+- exact `2.8.0` and `2.8.1` run all 7 operations
 - unlisted plain `2.y.z` releases above `2.8.0` run `ask`, `review`, and `challenge` with a warning and `--environment local`
 - unlisted plain `2.y.z` releases above `2.8.0` refuse write tasks, swarm tasks, and `--network` with `KIMI_CAPABILITY_NOT_CERTIFIED`
 - releases below `2.8.0` refuse every operation
@@ -190,7 +190,7 @@ To keep all 7 operations working on a certified binary across every host, run `k
 
 All 5 hosts share one data directory (`<data-dir>`) and one bundled PreToolUse safety hook at `<data-dir>/hook/approval-hook.js`. The default data directory is `~/.local/share/kimi-plugin-cc` (or `$XDG_DATA_HOME/kimi-plugin-cc`) on macOS and Linux, and `%LOCALAPPDATA%\kimi-plugin-cc` on Windows. You can override the base directory with `KIMI_PLUGIN_CC_DATA` so data lives in `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc`.
 
-Running `setup` once publishes the bundled hook and writes one `# === BEGIN kimi-plugin-cc-managed (v3.1.2) ===` block in `~/.kimi-code/config.toml`. It also replaces any older `:<host-id>` blocks from version 3.0. Hosts that use the same Node binary need only one setup run. If your hosts use different Node paths, point them to the same binary with `KIMI_PLUGIN_CC_NODE_BIN`.
+Running `setup` once publishes the bundled hook and writes one `# === BEGIN kimi-plugin-cc-managed (v3.1.3) ===` block in `~/.kimi-code/config.toml`. It also replaces any older `:<host-id>` blocks from version 3.0. Hosts that use the same Node binary need only one setup run. If your hosts use different Node paths, point them to the same binary with `KIMI_PLUGIN_CC_NODE_BIN`.
 
 ## Manage sessions, models, and jobs
 
@@ -243,11 +243,11 @@ Report bugs or suggest changes in [GitHub issues](https://github.com/linxule/kim
 - macOS 或 Linux
 - Claude Code、Codex、Antigravity、DSH `>=0.2.1-rc.5 <0.3.0` 或 Magpie（或任何 stdio MCP 客户端）
 - Node.js 22.5 或更高版本（DSH 需要 24.9 或更高版本）
-- Kimi Code CLI `2.8.0` 或更高版本（本插件对 `2.8.0` 认证了全部 7 项操作，并拒绝更早版本）
+- Kimi Code CLI `2.8.0` 或更高版本（本插件对 `2.8.0` 和 `2.8.1` 认证了全部 7 项操作，并拒绝更早版本）
 
 Windows 不支持运行模型任务。贡献者可以运行 [Windows 诊断检查](./docs/ci.md#windows-spawn-controls)。
 
-你可以按照 [Kimi Code 入门指南](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started) 安装 Kimi Code，也可以让 `kimi_setup` 自动安装已认证的 `2.8.0` 二进制文件。无需安装 Bun，也无需执行构建步骤。
+你可以按照 [Kimi Code 入门指南](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started) 安装 Kimi Code，也可以让 `kimi_setup` 自动安装已认证的 `2.8.1` 二进制文件。无需安装 Bun，也无需执行构建步骤。
 
 先在终端运行 `kimi`，使用 `/login` 登录 Kimi 订阅，或使用 `/provider` 配置 API 密钥。请只在 Kimi 终端中输入凭据，切勿在助手对话中粘贴密钥。如果设置了 `KIMI_CODE_HOME`，请确保 Kimi 和本插件使用同一个目录。
 
@@ -326,7 +326,7 @@ magpie library mcp add kimi /path/to/kimi-plugin-cc/scripts/companion.sh mcp age
 你也可以从 npm 安装 [`kimi-plugin-cc` 包](https://www.npmjs.com/package/kimi-plugin-cc) 到单独的包目录中。请将该目录与存放共享运行时数据的 `~/.local/share/kimi-plugin-cc` 分开：
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.2
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.3
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -358,7 +358,7 @@ claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-c
 | `scripts/companion.sh read [--mode ask\|review\|challenge\|swarm] [options] [--] [prompt]` | 运行只读提问、差异审查（`--base <ref>`）、设计质疑或并行只读任务 |
 | `scripts/companion.sh write [--mode rescue\|pursue\|swarm-patch] [options] [--] <prompt>` | 运行工作区修复、多步目标或临时工作树补丁任务 |
 | `scripts/companion.sh job <list\|status\|result\|wait\|cancel\|replay\|recover-swarm> [job-id]` | 列出、查看、读取、等待、停止、重放或恢复任务 |
-| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | 安装或检查安全钩子、列出模型、安装认证版 Kimi `2.8.0` 或修复会话预览 |
+| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | 安装或检查安全钩子、列出模型、安装认证版 Kimi `2.8.1` 或修复会话预览 |
 | `scripts/companion.sh mcp` | 启动 stdio MCP 服务器 |
 
 请将 `--mode` 和其他选项放在 `--` 或提示词之前。旧版子命令写法（如 `ask`、`review`、`task rescue`、`status`、`result` 和 `cancel`）仍作为兼容别名保留。
@@ -384,9 +384,9 @@ Kimi 会收到每个会话主日志的路径，并按需读取内容。当你设
 
 ## 在 Kimi 更新时保持兼容
 
-插件 3.1.0 采用从 Kimi Code `2.8.0` 起算的滚动兼容窗口：
+插件 3.1.3 采用从 Kimi Code `2.8.0` 起算的滚动兼容窗口：
 
-- 精确版本 `2.8.0` 支持运行全部 7 项操作
+- 精确版本 `2.8.0` 和 `2.8.1` 支持运行全部 7 项操作
 - 高于 `2.8.0` 的未列入正式版 `2.y.z` 可以带警告并使用 `--environment local` 运行只读的 `ask`、`review` 和 `challenge`
 - 高于 `2.8.0` 的未列入正式版 `2.y.z` 会以 `KIMI_CAPABILITY_NOT_CERTIFIED` 拒绝写入任务、并行 swarm 任务和 `--network`
 - 低于 `2.8.0` 的版本会拒绝所有操作
@@ -397,7 +397,7 @@ Kimi 会收到每个会话主日志的路径，并按需读取内容。当你设
 
 全部 5 个宿主共享同一个数据目录（`<data-dir>`）和位于 `<data-dir>/hook/approval-hook.js` 的单一打包 PreToolUse 安全钩子。默认数据目录在 macOS 和 Linux 上为 `~/.local/share/kimi-plugin-cc`（或 `$XDG_DATA_HOME/kimi-plugin-cc`），在 Windows 上为 `%LOCALAPPDATA%\kimi-plugin-cc`。你可以用 `KIMI_PLUGIN_CC_DATA` 覆盖父级基础目录，使数据存放在 `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc` 下。
 
-运行一次 `setup` 即可发布打包好的安全钩子，并在 `~/.kimi-code/config.toml` 中写入单一的 `# === BEGIN kimi-plugin-cc-managed (v3.1.2) ===` 配置块，同时自动合并 3.0 版本遗留的 `:<host-id>` 配置块。共享同一个 Node 二进制文件的宿主只需运行一次 `setup`。如果不同宿主解析到不同的 Node 路径，请通过 `KIMI_PLUGIN_CC_NODE_BIN` 将它们指向同一个 Node 可执行文件。
+运行一次 `setup` 即可发布打包好的安全钩子，并在 `~/.kimi-code/config.toml` 中写入单一的 `# === BEGIN kimi-plugin-cc-managed (v3.1.3) ===` 配置块，同时自动合并 3.0 版本遗留的 `:<host-id>` 配置块。共享同一个 Node 二进制文件的宿主只需运行一次 `setup`。如果不同宿主解析到不同的 Node 路径，请通过 `KIMI_PLUGIN_CC_NODE_BIN` 将它们指向同一个 Node 可执行文件。
 
 ## 管理会话、模型和任务
 
@@ -450,11 +450,11 @@ Vous avez besoin des éléments suivants :
 - macOS ou Linux
 - Claude Code, Codex, Antigravity, DSH `>=0.2.1-rc.5 <0.3.0` ou Magpie (ou tout client MCP stdio)
 - Node.js 22.5 ou plus récent (24.9 ou plus récent pour DSH)
-- Kimi Code CLI `2.8.0` ou plus récent (ce plugin certifie `2.8.0` pour les 7 opérations et refuse les versions plus anciennes)
+- Kimi Code CLI `2.8.0` ou plus récent (ce plugin certifie `2.8.0` et `2.8.1` pour les 7 opérations et refuse les versions plus anciennes)
 
 Ce plugin ne prend pas en charge l'exécution des modèles sous Windows. Les contributeurs peuvent lancer les [vérifications de diagnostic sous Windows](./docs/ci.md#windows-spawn-controls).
 
-Installez Kimi Code avec le [guide de démarrage Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started), ou laissez `kimi_setup` installer un binaire `2.8.0` certifié pour vous. Vous n'avez besoin ni de Bun ni d'une étape de compilation.
+Installez Kimi Code avec le [guide de démarrage Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started), ou laissez `kimi_setup` installer un binaire `2.8.1` certifié pour vous. Vous n'avez besoin ni de Bun ni d'une étape de compilation.
 
 Lancez `kimi` dans votre terminal, puis utilisez `/login` pour un abonnement Kimi ou `/provider` pour une clé API. Saisissez vos identifiants uniquement dans Kimi, jamais dans la discussion avec un assistant. Si vous définissez `KIMI_CODE_HOME`, utilisez le même répertoire pour Kimi et pour ce plugin.
 
@@ -533,7 +533,7 @@ Exécutez ensuite `/path/to/kimi-plugin-cc/scripts/companion.sh setup` et `setup
 Vous pouvez aussi installer [`kimi-plugin-cc` depuis npm](https://www.npmjs.com/package/kimi-plugin-cc) dans un répertoire de paquet dédié. Gardez ce répertoire séparé de `~/.local/share/kimi-plugin-cc`, qui stocke les données d'exécution partagées :
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.2
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.3
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -565,7 +565,7 @@ Exécutez les 5 sous-commandes CLI principales via `scripts/companion.sh` :
 | `scripts/companion.sh read [--mode ask\|review\|challenge\|swarm] [options] [--] [prompt]` | Lancer une question en lecture seule, une revue de diff (`--base <ref>`), une critique de conception ou un swarm parallèle en lecture seule |
 | `scripts/companion.sh write [--mode rescue\|pursue\|swarm-patch] [options] [--] <prompt>` | Lancer un correctif dans l'espace de travail, un objectif en plusieurs étapes ou un swarm de patch dans un arbre de travail temporaire |
 | `scripts/companion.sh job <list\|status\|result\|wait\|cancel\|replay\|recover-swarm> [job-id]` | Lister, vérifier, lire, attendre, arrêter, rejouer ou récupérer des tâches |
-| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | Installer ou vérifier le hook, lister les modèles, installer Kimi `2.8.0` certifié ou réparer les aperçus de session |
+| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | Installer ou vérifier le hook, lister les modèles, installer Kimi `2.8.1` certifié ou réparer les aperçus de session |
 | `scripts/companion.sh mcp` | Démarrer le serveur MCP stdio |
 
 Placez `--mode` et les autres options avant `--` ou le texte de l'invite. Les anciennes sous-commandes comme `ask`, `review`, `task rescue`, `status`, `result` et `cancel` fonctionnent toujours comme alias.
@@ -591,9 +591,9 @@ Les tâches en écriture refusent ces 2 options. Ces limites de lecture et de r�
 
 ## Garder Kimi fonctionnel lors des mises à jour
 
-Le plugin 3.1.0 applique une fenêtre de compatibilité glissante à partir de Kimi Code `2.8.0` :
+Le plugin 3.1.3 applique une fenêtre de compatibilité glissante à partir de Kimi Code `2.8.0` :
 
-- la version exacte `2.8.0` exécute les 7 opérations
+- les versions exactes `2.8.0` et `2.8.1` exécutent les 7 opérations
 - les versions `2.y.z` standard supérieures à `2.8.0` exécutent `ask`, `review` et `challenge` en lecture seule avec un avertissement et `--environment local`
 - les versions `2.y.z` standard supérieures à `2.8.0` refusent les tâches en écriture, les tâches swarm et `--network` avec le code `KIMI_CAPABILITY_NOT_CERTIFIED`
 - les versions inférieures à `2.8.0` refusent toutes les opérations
@@ -604,7 +604,7 @@ Pour conserver les 7 opérations sur un binaire certifié partagé par tous les 
 
 Les 5 hôtes partagent un seul répertoire de données (`<data-dir>`) et un seul hook de sécurité PreToolUse empaqueté dans `<data-dir>/hook/approval-hook.js`. Le répertoire de données par défaut est `~/.local/share/kimi-plugin-cc` (ou `$XDG_DATA_HOME/kimi-plugin-cc`) sous macOS et Linux, et `%LOCALAPPDATA%\kimi-plugin-cc` sous Windows. Vous pouvez remplacer le répertoire parent avec `KIMI_PLUGIN_CC_DATA` pour stocker les données dans `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc`.
 
-Exécuter `setup` une seule fois publie le hook empaqueté et écrit un bloc unique `# === BEGIN kimi-plugin-cc-managed (v3.1.2) ===` dans `~/.kimi-code/config.toml`. Cette commande remplace aussi automatiquement les anciens blocs `:<host-id>` de la version 3.0. Les hôtes qui partagent le même binaire Node n'ont besoin que d'une seule exécution de `setup`. Si vos hôtes utilisent des chemins Node différents, pointez-les vers le même binaire avec `KIMI_PLUGIN_CC_NODE_BIN`.
+Exécuter `setup` une seule fois publie le hook empaqueté et écrit un bloc unique `# === BEGIN kimi-plugin-cc-managed (v3.1.3) ===` dans `~/.kimi-code/config.toml`. Cette commande remplace aussi automatiquement les anciens blocs `:<host-id>` de la version 3.0. Les hôtes qui partagent le même binaire Node n'ont besoin que d'une seule exécution de `setup`. Si vos hôtes utilisent des chemins Node différents, pointez-les vers le même binaire avec `KIMI_PLUGIN_CC_NODE_BIN`.
 
 ## Gérer les sessions, les modèles et les tâches
 
@@ -657,11 +657,11 @@ Signalez les bogues ou proposez des modifications dans les [issues GitHub](https
 - macOS または Linux
 - Claude Code、Codex、Antigravity、DSH `>=0.2.1-rc.5 <0.3.0`、または Magpie（もしくは任意の stdio MCP クライアント）
 - Node.js 22.5 以降（DSH は 24.9 以降）
-- Kimi Code CLI `2.8.0` 以降（このプラグインは `2.8.0` で全 7 操作を認定しており、それより古いバージョンを拒否します）
+- Kimi Code CLI `2.8.0` 以降（このプラグインは `2.8.0` と `2.8.1` で全 7 操作を認定しており、それより古いバージョンを拒否します）
 
 Windows ではモデル実行をサポートしていません。コントリビューターは [Windows 診断チェック](./docs/ci.md#windows-spawn-controls) を実行できます。
 
-[Kimi Code はじめにガイド](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started) に従って Kimi Code をインストールするか、`kimi_setup` を使って認定済みの `2.8.0` バイナリをインストールしてください。Bun やビルド手順は不要です。
+[Kimi Code はじめにガイド](https://www.kimi.com/code/docs/en/kimi-code-cli/getting-started) に従って Kimi Code をインストールするか、`kimi_setup` を使って認定済みの `2.8.1` バイナリをインストールしてください。Bun やビルド手順は不要です。
 
 ターミナルで `kimi` を実行し、サブスクリプションなら `/login`、API キーなら `/provider` で認証してください。認証情報は必ず Kimi 内で入力し、アシスタントのチャットには入力しないでください。`KIMI_CODE_HOME` を設定する場合は、Kimi とこのプラグインで同じディレクトリを使ってください。
 
@@ -740,7 +740,7 @@ magpie library mcp add kimi /path/to/kimi-plugin-cc/scripts/companion.sh mcp age
 専用のパッケージディレクトリに [npm から `kimi-plugin-cc`](https://www.npmjs.com/package/kimi-plugin-cc) をインストールすることもできます。共有ランタイムデータを保存する `~/.local/share/kimi-plugin-cc` とは別のディレクトリを指定してください：
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.2
+npm install --prefix ~/.local/share/kimi-plugin-cc-pkg kimi-plugin-cc@3.1.3
 claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-cc
 ```
 
@@ -772,7 +772,7 @@ claude --plugin-dir ~/.local/share/kimi-plugin-cc-pkg/node_modules/kimi-plugin-c
 | `scripts/companion.sh read [--mode ask\|review\|challenge\|swarm] [options] [--] [prompt]` | 読み取り専用の質問、差分レビュー（`--base <ref>`）、設計への批評、または並列の読み取り専用スウォームを実行 |
 | `scripts/companion.sh write [--mode rescue\|pursue\|swarm-patch] [options] [--] <prompt>` | ワークスペース内の修正、複数ステップのゴール、または一時ワークツリーでのパッチスウォームを実行 |
 | `scripts/companion.sh job <list\|status\|result\|wait\|cancel\|replay\|recover-swarm> [job-id]` | ジョブの一覧表示、状態確認、結果取得、待機、停止、再出力、復旧を実行 |
-| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | フックの導入と確認、モデル一覧表示、認定済み Kimi `2.8.0` の導入、セッションプレビューの修復を実行 |
+| `scripts/companion.sh setup [--check\|--uninstall\|--models\|--install-kimi\|--repair-sessions]` | フックの導入と確認、モデル一覧表示、認定済み Kimi `2.8.1` の導入、セッションプレビューの修復を実行 |
 | `scripts/companion.sh mcp` | stdio MCP サーバーを起動 |
 
 `--mode` などのフラグは `--` またはプロンプトの前に置いてください。`ask`、`review`、`task rescue`、`status`、`result`、`cancel` といった旧サブコマンドも互換エイリアスとしてそのまま使えます。
@@ -798,9 +798,9 @@ Kimi は各セッションのメインログへのパスを受け取り、必要
 
 ## Kimi 更新時も動作を維持する
 
-プラグイン 3.1.0 は Kimi Code `2.8.0` 以降のローリング互換ウィンドウを採用しています：
+プラグイン 3.1.3 は Kimi Code `2.8.0` 以降のローリング互換ウィンドウを採用しています：
 
-- 完全一致の `2.8.0` は全 7 操作を実行できる
+- 完全一致の `2.8.0` と `2.8.1` は全 7 操作を実行できる
 - `2.8.0` より新しい未登録の通常版 `2.y.z` は、警告付きかつ `--environment local` で読み取り専用の `ask`、`review`、`challenge` を実行できる
 - `2.8.0` より新しい未登録の通常版 `2.y.z` は、書き込みタスク、スウォームタスク、`--network` を `KIMI_CAPABILITY_NOT_CERTIFIED` で拒否する
 - `2.8.0` 未満のリリースはすべての操作を拒否する
@@ -811,7 +811,7 @@ Kimi は各セッションのメインログへのパスを受け取り、必要
 
 全 5 ホストは、1 つのデータディレクトリ（`<data-dir>`）と `<data-dir>/hook/approval-hook.js` にある 1 つのバンドル済み PreToolUse 安全フックを共有します。既定のデータディレクトリは、macOS と Linux では `~/.local/share/kimi-plugin-cc`（または `$XDG_DATA_HOME/kimi-plugin-cc`）、Windows では `%LOCALAPPDATA%\kimi-plugin-cc` です。親ディレクトリを `KIMI_PLUGIN_CC_DATA` で上書きすると、データは `$KIMI_PLUGIN_CC_DATA/kimi-plugin-cc` に保存されます。
 
-`setup` を 1 回実行すると、バンドル済みフックが配置され、`~/.kimi-code/config.toml` に単一の `# === BEGIN kimi-plugin-cc-managed (v3.1.2) ===` ブロックが書き込まれます。バージョン 3.0 の古い `:<host-id>` ブロックも自動的に統合されます。同じ Node バイナリを使うホスト間では、`setup` の実行は 1 回だけで十分です。ホストごとに異なる Node パスが解決される場合は、`KIMI_PLUGIN_CC_NODE_BIN` で同じ Node バイナリを指定してください。
+`setup` を 1 回実行すると、バンドル済みフックが配置され、`~/.kimi-code/config.toml` に単一の `# === BEGIN kimi-plugin-cc-managed (v3.1.3) ===` ブロックが書き込まれます。バージョン 3.0 の古い `:<host-id>` ブロックも自動的に統合されます。同じ Node バイナリを使うホスト間では、`setup` の実行は 1 回だけで十分です。ホストごとに異なる Node パスが解決される場合は、`KIMI_PLUGIN_CC_NODE_BIN` で同じ Node バイナリを指定してください。
 
 ## セッション、モデル、ジョブを管理する
 

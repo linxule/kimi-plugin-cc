@@ -72,9 +72,9 @@ describe("kimi execution plan (>= 2.8.0 floor)", () => {
   });
 
   test("native-v2 certifies only the exact >= 2.8.0 per-operation set under the no-plan profile", async () => {
-    expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["2.8.0"]);
+    expect(NATIVE_V2_ANY_OPERATION_VERSIONS).toEqual(["2.8.0", "2.8.1"]);
     for (const operationKind of ["swarm", "swarm-write"] as const) {
-      expect(NATIVE_V2_CERTIFIED.get(operationKind)).toEqual(["2.8.0"]);
+      expect(NATIVE_V2_CERTIFIED.get(operationKind)).toEqual(["2.8.0", "2.8.1"]);
     }
     expect([...NATIVE_V2_CERTIFIED.keys()].sort()).toEqual(
       ["ask", "challenge", "pursue", "rescue", "review", "swarm", "swarm-write"],
@@ -123,7 +123,7 @@ describe("kimi execution plan (>= 2.8.0 floor)", () => {
       const belowFloor = new Set(["0.39.0", "0.41.0", "0.42.0", "2.0.0", "2.5.3", "2.6.0", "2.6.2", "2.7.2", "2.7.3", "2.7.4"]);
       for (const version of [
         "0.39.0", "0.41.0", "0.42.0", "2.0.0", "2.5.3", "2.6.0", "2.6.2", "2.7.2", "2.7.3", "2.7.4",
-        "2.8.0-rc.1", "2.8.0+unreviewed", "2.8.1-rc.1", "2.8.1", "3.0.0",
+        "2.8.0-rc.1", "2.8.0+unreviewed", "2.8.1-rc.1", "2.8.2", "3.0.0",
       ]) {
         const borrowable = /^2\.\d+\.\d+$/.test(version) && version.localeCompare("2.8.0", "en", { numeric: true }) > 0;
         const expectedRefusalKind = belowFloor.has(version) ? "legacy-v1-unsupported" : "v2-version-not-certified";
@@ -300,7 +300,7 @@ describe("kimi execution plan (>= 2.8.0 floor)", () => {
     try {
       for (const operationKind of ["ask", "review", "challenge"] as const) {
         const plan = await prepareKimiExecutionPlan({ operationKind, cwd, env, stderr });
-        const warning = `kimi-code 2.99.0 is not certified by this plugin release; running ${operationKind} read-only with 2.8.0 mechanics.`;
+        const warning = `kimi-code 2.99.0 is not certified by this plugin release; running ${operationKind} read-only with 2.8.1 mechanics.`;
         expect(plan).toMatchObject({
           operationKind, intendedEngine: "native-v2", kimiVersion: "2.99.0",
           certification: "uncertified", safetyProfile: NATIVE_V2_SAFETY_PROFILE, warnings: [warning],
@@ -318,10 +318,10 @@ describe("kimi execution plan (>= 2.8.0 floor)", () => {
       }
 
       const nextPatch = await prepareKimiExecutionPlan({
-        operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.1" }, stderr,
+        operationKind: "ask", cwd, env: { ...env, KIMI_PLUGIN_CC_MOCK_VERSION: "2.8.2" }, stderr,
       });
       expect(nextPatch.warnings).toEqual([
-        "kimi-code 2.8.1 is not certified by this plugin release; running ask read-only with 2.8.0 mechanics.",
+        "kimi-code 2.8.2 is not certified by this plugin release; running ask read-only with 2.8.1 mechanics.",
       ]);
 
       for (const operationKind of ["rescue", "pursue", "swarm", "swarm-write"] as const) {
@@ -376,7 +376,9 @@ describe("kimi execution plan (>= 2.8.0 floor)", () => {
   test("isNativeV2CertifiedVersion recognizes exactly the certified >= 2.8.0 versions", () => {
     expect(isNativeV2CertifiedVersion("2.8.0")).toBe(true);
     expect(isNativeV2CertifiedVersion("v2.8.0")).toBe(true);
-    expect(isNativeV2CertifiedVersion("2.8.1")).toBe(false);
+    expect(isNativeV2CertifiedVersion("2.8.1")).toBe(true);
+    expect(isNativeV2CertifiedVersion("v2.8.1")).toBe(true);
+    expect(isNativeV2CertifiedVersion("2.8.2")).toBe(false);
     expect(isNativeV2CertifiedVersion("2.7.3")).toBe(false);
     expect(isNativeV2CertifiedVersion("2.6.0")).toBe(false);
     expect(isNativeV2CertifiedVersion("0.42.0")).toBe(false);

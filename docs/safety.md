@@ -1,10 +1,10 @@
 # Safety
 
-This guide explains how kimi-plugin-cc 3.1.2 constrains every Kimi session it starts. Read-only operations deny file writes and shell commands. Rescue and pursue edit files only inside your workspace and never mutate Git. Write-swarm (`swarm_patch`) edits inside a temporary Git worktree and returns an unapplied patch.
+This guide explains how kimi-plugin-cc 3.1.3 constrains every Kimi session it starts. Read-only operations deny file writes and shell commands. Rescue and pursue edit files only inside your workspace and never mutate Git. Write-swarm (`swarm_patch`) edits inside a temporary Git worktree and returns an unapplied patch.
 
-The plugin makes promises about the sessions it launches. It does not police your own interactive Kimi configuration. One mechanism enforces every promise: a single bundled PreToolUse hook that denies every tool call outside the running operation's allowlist. Plan mode stays closed across every release as defense in depth even though Kimi Code 2.8.0 runs the hook before the plan guard. Where a Kimi setting would break a promise, the plugin neutralizes it for its own children or refuses before spawn; where it would not, the plugin runs and surfaces a launch warning.
+The plugin makes promises about the sessions it launches. It does not police your own interactive Kimi configuration. One mechanism enforces every promise: a single bundled PreToolUse hook that denies every tool call outside the running operation's allowlist. Plan mode stays closed across every release as defense in depth even though Kimi Code 2.8.0+ runs the hook before the plan guard. Where a Kimi setting would break a promise, the plugin neutralizes it for its own children or refuses before spawn; where it would not, the plugin runs and surfaces a launch warning.
 
-Plugin 3.1.0 uses a rolling compatibility window with floor `>= 2.8.0`. The [runtime release table](../runtime/kimi-releases.ts) is the single authority: exact Kimi Code `2.8.0` is certified for all 7 model operations ([2.8.0 certification record](upstream-2.8.0-certification.md)), unlisted plain `2.y.z` releases strictly above `2.8.0` run read-only operations (`ask`, `review`, `challenge`) with a warning, and releases below `2.8.0` (including `legacy-v1`) refuse before spawn. The hook is not an operating-system sandbox.
+Plugin 3.1.3 uses a rolling compatibility window with floor `>= 2.8.0`. The [runtime release table](../runtime/kimi-releases.ts) is the single authority: exact Kimi Code `2.8.0` ([2.8.0 record](upstream-2.8.0-certification.md)) and `2.8.1` ([2.8.1 record](upstream-2.8.1-certification.md)) are certified for all 7 model operations, unlisted plain `2.y.z` releases strictly above `2.8.0` run read-only operations (`ask`, `review`, `challenge`) with a warning, and releases below `2.8.0` (including `legacy-v1`) refuse before spawn. The hook is not an operating-system sandbox.
 
 ## Why enforcement is hook-based
 
@@ -37,7 +37,7 @@ If the hook is missing, drifted, or invalid, every model-spawning operation fail
 Running `kimi_setup({ action: "install" })` or `scripts/companion.sh setup` verifies `pluginRoot` and `hook/` via `lstat`/`realpath` (rejecting symlinks and non-directories), stages `package.json` (`{"type":"module"}`) and the self-contained bundled ESM `dist/hooks/approval-hook.js` in a unique staging subdirectory, probes the staged candidate before activating `<pluginRoot>/hook/approval-hook.js` (preserving any working hook on failure), and writes one canonical block in `~/.kimi-code/config.toml` inside the serialized config lock:
 
 ```toml
-# === BEGIN kimi-plugin-cc-managed (v3.1.2) ===
+# === BEGIN kimi-plugin-cc-managed (v3.1.3) ===
 # DO NOT EDIT — managed by kimi-plugin-cc setup. Run `scripts/companion.sh setup --uninstall` to remove.
 # Purpose:
 #   kimi-code's `kimi -p` mode hard-codes permission='auto' and
@@ -149,11 +149,11 @@ The hook reads only per-spawn `KIMI_PLUGIN_CC_READ_ROOTS` and `KIMI_PLUGIN_CC_NE
 
 ### Native agent-core-v2 and the no-plan closures
 
-At Kimi Code `2.8.0`, upstream runs external `PreToolUse` hooks in `legacyHook` ahead of every `registerHook` hook (including the plan guard) and zero production code calls `event.allow()`. A live plan-ON control confirmed the hook denies plan-file Writes. Because upstream issue MoonshotAI/kimi-code#3431 remains open and no ordering promise is documented, all four plugin-owned no-plan closures remain active on every release:
+At Kimi Code `2.8.0` and `2.8.1`, upstream runs external `PreToolUse` hooks in `legacyHook` ahead of every `registerHook` hook (including the plan guard) and zero production code calls `event.allow()`. A live plan-ON control confirmed the hook denies plan-file Writes. Because upstream issue MoonshotAI/kimi-code#3431 remains open and no ordering promise is documented, all four plugin-owned no-plan closures remain active on every release:
 
-- Default plan mode preflight: `runtime/native-v2-preflight.ts` parses `<KIMI_CODE_HOME>/config.toml` under every spelling upstream normalizes to `defaultPlanMode`. On exact `2.8.0` (`print-cancels-plan`), fresh `kimi -p` cancels create-time plan entry before any turn, so configured `default_plan_mode` no longer refuses non-swarm launches; it still refuses swarm, write-swarm (including concurrency 1), and uncertified releases (`CLI_V2_PLAN_MODE_CONFIGURED`).
+- Default plan mode preflight: `runtime/native-v2-preflight.ts` parses `<KIMI_CODE_HOME>/config.toml` under every spelling upstream normalizes to `defaultPlanMode`. On certified `print-cancels-plan` rows (`2.8.0`, `2.8.1`), fresh `kimi -p` cancels create-time plan entry before any turn, so configured `default_plan_mode` no longer refuses non-swarm launches; it still refuses swarm, write-swarm (including concurrency 1), and uncertified releases (`CLI_V2_PLAN_MODE_CONFIGURED`).
 - Plan tool denials: `EnterPlanMode` and `ExitPlanMode` are denied by the managed hook for every label.
-- Resume lineage, plan-taint, and tower scans: resume requires proven `native-v2` lineage (`KIMI_SESSION_LINEAGE_UNKNOWN` or `KIMI_SESSION_ENGINE_MISMATCH` otherwise) and scans every agent `wire.jsonl` raw for `plan_mode.*` and `plan.*` records (`KIMI_SESSION_PLAN_TAINTED`). On exact `2.8.0` non-swarm resumes, the single create-time `plan_mode.enter` followed by its cancel before any activity in a linear journal is tolerated, allowing only Kimi's 3 MCP bookkeeping records (`mcp.tools_discovered`, `mcp.server_failed`, `mcp.server_failure_resolved`) between them. The same scan refuses any session whose main journal leaves the main agent in tower mode (`KIMI_SESSION_TOWER_ACTIVE`).
+- Resume lineage, plan-taint, and tower scans: resume requires proven `native-v2` lineage (`KIMI_SESSION_LINEAGE_UNKNOWN` or `KIMI_SESSION_ENGINE_MISMATCH` otherwise) and scans every agent `wire.jsonl` raw for `plan_mode.*` and `plan.*` records (`KIMI_SESSION_PLAN_TAINTED`). On certified `print-cancels-plan` non-swarm resumes (`2.8.0`, `2.8.1`), the single create-time `plan_mode.enter` followed by its cancel before any activity in a linear journal is tolerated, allowing only Kimi's 3 MCP bookkeeping records (`mcp.tools_discovered`, `mcp.server_failed`, `mcp.server_failure_resolved`) between them. The same scan refuses any session whose main journal leaves the main agent in tower mode (`KIMI_SESSION_TOWER_ACTIVE`).
 - Experimental selector forcing: every child receives `KIMI_CODE_EXPERIMENTAL_TOWER=0` and `KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK=0` and never receives `KIMI_CODE_EXPERIMENTAL_FLAG`. On certified releases this forcing is silent; on uncertified `> 2.8.0` releases it runs with a launch warning naming every switched-on experimental selector.
 
 Provenance: every native-v2 launch requires `system.version` as the first stream-json line matching the probed version (`CLI_ENGINE_PROVENANCE_MISMATCH` tears down the process tree before any record reaches the caller).
@@ -191,7 +191,7 @@ The child receives `KIMI_PLUGIN_CC_OPERATION=pursue` from its immutable plan. Wi
 
 ## Bounded swarm on 2.8.0 and newer
 
-`--max-concurrency` defaults to 4 for read-only swarms (`kimi_read`, `mode: "swarm"`) and 1 for write-swarm (`kimi_write`, `mode: "swarm_patch"`). On exact `2.8.0`:
+`--max-concurrency` defaults to 4 for read-only swarms (`kimi_read`, `mode: "swarm"`) and 1 for write-swarm (`kimi_write`, `mode: "swarm_patch"`). On exact `2.8.0` and `2.8.1`:
 
 - Concurrency 1 runs one direct worker in fresh print with no `kimi web` activation and delegation tools denied, preserving read-only or ephemeral-worktree patch rules.
 - Concurrency 2 or more uses short-lived loopback `kimi web --json` activation with an in-memory ephemeral token (`KIMI_CODE_SESSION_IDLE_RECLAIM_MS=0`), explicitly binds `environment_id: "local"` and canonical cwd, verifies direct WebSocket subscription state, disables native `TaskStop` in that fresh owned session (closing automatic Bash backgrounding), runs one `kimi -p -r` print job (`kimi_session_id_source: "preactivated"`), and deactivates swarm mode afterward.
@@ -216,19 +216,19 @@ Write-swarm creates one detached worktree off born `HEAD` under `<pluginRoot>/wo
 
 Single-turn operations default to 30 minutes (`ask`, `review`, `challenge`) or 45 minutes (`rescue`), overridable up to 24 hours with `--budget` / `budget`. Budget timeouts save partial settled prose under a clearly marked NOT-a-final-answer heading (`partial_output: true`) and recover a uniquely matched native-v2 session ID via exact `prompt_digest` binding when no ID was announced. Cancellation never captures partial output.
 
-Every spawn deletes `KIMI_CODE_TRUST_WORKSPACE` and requires local execution. On exact `2.8.0`, configured `[environments] default` is neutralized on fresh non-swarm launches by `--environment local` and checked against stored local bindings on resume; it still refuses swarm and uncertified launches (`CLI_V2_ENVIRONMENT_UNSAFE`). `[workspace] require_trust = false` runs with a launch warning.
+Every spawn deletes `KIMI_CODE_TRUST_WORKSPACE` and requires local execution. On exact `2.8.0` and `2.8.1`, configured `[environments] default` is neutralized on fresh non-swarm launches by `--environment local` and checked against stored local bindings on resume; it still refuses swarm and uncertified launches (`CLI_V2_ENVIRONMENT_UNSAFE`). `[workspace] require_trust = false` runs with a launch warning.
 
 ### Running a newer Kimi than the plugin certifies
 
 When your selected binary is an unlisted plain `2.y.z` strictly above `2.8.0`, read-only operations (`ask`, `review`, `challenge`) run with this warning:
 
 ```text
-kimi-code <version> is not certified by this plugin release; running <operation> read-only with 2.8.0 mechanics.
+kimi-code <version> is not certified by this plugin release; running <operation> read-only with 2.8.1 mechanics.
 ```
 
 Uncertified releases borrow only `--environment local`. Write operations, swarm operations, `--network`, configured `default_plan_mode`, configured `[environments] default`, and additive hook events (`PermissionRequest`, `PermissionResult`, `Interrupt`) all refuse. Set `KIMI_PLUGIN_CC_STRICT_VERSIONS=1` to refuse uncertified releases for read-only operations too. Releases below `2.8.0`, pre-release/build-suffixed versions, and other majors refuse every operation.
 
-To keep every operation working independently of your `PATH` `kimi`, run `kimi_setup({ action: "install_kimi" })` or `scripts/companion.sh setup --install-kimi`. It installs the newest certified release (`2.8.0`) into `<pluginRoot>/kimi-bin/<version>/` with `--ignore-scripts`, verifies containment and exact `--version`, and swaps `kimi-bin/current` atomically. One install serves all 5 hosts through the shared data directory. Jobs pick `KIMI_PLUGIN_CC_KIMI_BIN`, then `kimi-bin/current`, then `kimi` on `PATH`.
+To keep every operation working independently of your `PATH` `kimi`, run `kimi_setup({ action: "install_kimi" })` or `scripts/companion.sh setup --install-kimi`. It installs the newest certified release (`2.8.1`) into `<pluginRoot>/kimi-bin/<version>/` with `--ignore-scripts`, verifies containment and exact `--version`, and swaps `kimi-bin/current` atomically. One install serves all 5 hosts through the shared data directory. Jobs pick `KIMI_PLUGIN_CC_KIMI_BIN`, then `kimi-bin/current`, then `kimi` on `PATH`.
 
 ## Setup probe, verification, and opt-out
 

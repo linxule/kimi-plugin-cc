@@ -5,6 +5,7 @@ import {
   formatVersionChoice,
   kimiCertifiedReleaseHas,
   kimiReleaseHas,
+  registerSmokeCandidateReleaseForTests,
   resolveKimiRelease,
   kimiVersionsInScope,
   kimiVersionsWith,
@@ -16,14 +17,14 @@ import { MCP_TOOL_DEFINITIONS } from "../../runtime/mcp/operations.js";
 // runtime; these literals pin what each capability means under the >= 2.8.0
 // rolling compatibility floor.
 const EXPECTED: Record<KimiReleaseCapability, string[]> = {
-  "hook-schema": ["2.8.0"],
-  "web-preactivation": ["2.8.0"],
-  "local-environment": ["2.8.0"],
-  "agent-state": ["2.8.0"],
-  "modern-ws-control": ["2.8.0"],
-  "bounded-swarm": ["2.8.0"],
-  "web-json-ready": ["2.8.0"],
-  "print-cancels-plan": ["2.8.0"],
+  "hook-schema": ["2.8.0", "2.8.1"],
+  "web-preactivation": ["2.8.0", "2.8.1"],
+  "local-environment": ["2.8.0", "2.8.1"],
+  "agent-state": ["2.8.0", "2.8.1"],
+  "modern-ws-control": ["2.8.0", "2.8.1"],
+  "bounded-swarm": ["2.8.0", "2.8.1"],
+  "web-json-ready": ["2.8.0", "2.8.1"],
+  "print-cancels-plan": ["2.8.0", "2.8.1"],
 };
 
 describe("kimi-releases table (>= 2.8.0 floor)", () => {
@@ -49,7 +50,7 @@ describe("kimi-releases table (>= 2.8.0 floor)", () => {
 
   test("all certified >= 2.8.0 releases are full-scope", () => {
     expect(kimiVersionsInScope("non-swarm")).toEqual([]);
-    expect(kimiVersionsInScope("all")).toEqual(["2.8.0"]);
+    expect(kimiVersionsInScope("all")).toEqual(["2.8.0", "2.8.1"]);
     expect(kimiVersionsInScope("all")).toHaveLength(KIMI_V2_RELEASES.length);
   });
 
@@ -91,19 +92,33 @@ describe("kimi-releases table (>= 2.8.0 floor)", () => {
 
   test("an unlisted plain 2.x strictly above 2.8.0 borrows only local-environment", () => {
     expect(resolveKimiRelease("2.8.0")).toMatchObject({ certified: true, release: { version: "2.8.0" } });
-    expect(resolveKimiRelease("2.8.1")).toMatchObject({ certified: false, release: { version: "2.8.0" } });
-    expect(resolveKimiRelease("2.10.0")).toMatchObject({ certified: false, release: { version: "2.8.0" } });
-    expect(resolveKimiRelease("2.8.1", { strict: true })).toBeNull();
+    expect(resolveKimiRelease("2.8.1")).toMatchObject({ certified: true, release: { version: "2.8.1" } });
+    expect(resolveKimiRelease("2.8.2")).toMatchObject({ certified: false, release: { version: "2.8.1" } });
+    expect(resolveKimiRelease("2.10.0")).toMatchObject({ certified: false, release: { version: "2.8.1" } });
+    expect(resolveKimiRelease("2.8.2", { strict: true })).toBeNull();
+    expect(resolveKimiRelease("2.8.1", { strict: true })).toMatchObject({ certified: true });
     expect(resolveKimiRelease("2.8.0", { strict: true })).toMatchObject({ certified: true });
 
     for (const capability of Object.keys(EXPECTED) as KimiReleaseCapability[]) {
       const borrowable = capability === "local-environment";
-      expect([capability, kimiReleaseHas("2.8.1", capability)]).toEqual([capability, borrowable]);
-      expect([capability, kimiCertifiedReleaseHas("2.8.1", capability)]).toEqual([capability, false]);
+      expect([capability, kimiReleaseHas("2.8.2", capability)]).toEqual([capability, borrowable]);
+      expect([capability, kimiCertifiedReleaseHas("2.8.2", capability)]).toEqual([capability, false]);
+      expect([capability, kimiCertifiedReleaseHas("2.8.1", capability)]).toEqual([capability, true]);
       expect([capability, kimiCertifiedReleaseHas("2.8.0", capability)]).toEqual([capability, true]);
     }
-    expect(kimiReleaseHas("2.8.1", "hook-schema")).toBe(false);
-    expect(kimiReleaseHas("2.8.1", "bounded-swarm")).toBe(false);
+    expect(kimiReleaseHas("2.8.2", "hook-schema")).toBe(false);
+    expect(kimiReleaseHas("2.8.2", "bounded-swarm")).toBe(false);
+
+    const dispose = registerSmokeCandidateReleaseForTests("2.99.0");
+    try {
+      expect(resolveKimiRelease("2.99.0")).toMatchObject({ certified: true, release: { version: "2.99.0" } });
+      expect(kimiCertifiedReleaseHas("2.99.0", "bounded-swarm")).toBe(true);
+      expect(KIMI_V2_RELEASES.map((release) => release.version)).toEqual(["2.8.0", "2.8.1"]);
+    } finally {
+      dispose();
+    }
+    expect(resolveKimiRelease("2.99.0")).toMatchObject({ certified: false, release: { version: "2.8.1" } });
+    expect(() => registerSmokeCandidateReleaseForTests("2.7.3")).toThrow();
   });
 
   test("formatVersionChoice matches the refusal wording", () => {
@@ -111,7 +126,7 @@ describe("kimi-releases table (>= 2.8.0 floor)", () => {
     expect(formatVersionChoice(["2.8.0"])).toBe("2.8.0");
     expect(formatVersionChoice(["2.8.0", "2.8.1"])).toBe("2.8.0 or 2.8.1");
     expect(formatVersionChoice(["2.8.0", "2.8.1", "2.9.0"])).toBe("2.8.0, 2.8.1 or 2.9.0");
-    expect(formatVersionChoice(kimiVersionsWith("bounded-swarm"))).toBe("2.8.0");
+    expect(formatVersionChoice(kimiVersionsWith("bounded-swarm"))).toBe("2.8.0 or 2.8.1");
   });
 });
 

@@ -997,13 +997,14 @@ describe("setup managed-block installer", () => {
     async (event) => {
       const contents = `[[hooks]]\nevent = "${event}"\ncommand = "foreign-hook"\n`;
       expect(validateKimiHookSet(contents, { major: 2, minor: 8, patch: 0, version: "2.8.0" }).valid).toBe(true);
+      expect(validateKimiHookSet(contents, { major: 2, minor: 8, patch: 1, version: "2.8.1" }).valid).toBe(true);
       for (const version of [
         { major: 0, minor: 14, patch: 0, version: "0.14.0" },
         { major: 0, minor: 41, patch: 3, version: "0.41.3" },
         { major: 2, minor: 0, patch: 0, version: "2.0.0" },
         { major: 2, minor: 6, patch: 0, version: "2.6.0" },
         { major: 2, minor: 7, patch: 3, version: "2.7.3" },
-        { major: 2, minor: 8, patch: 1, version: "2.8.1" },
+        { major: 2, minor: 8, patch: 2, version: "2.8.2" },
         { major: 2, minor: 9, patch: 0, version: "2.9.0" },
         { major: 2, minor: 8, patch: 0, version: "2.8.0-rc.1" },
         { major: 2, minor: 8, patch: 0, version: "2.8.0+unreviewed" },

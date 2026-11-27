@@ -23,10 +23,10 @@ export interface ClaudeSurfaceHash {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "8ca513c5126ccbcb72edb802a147944c215a7433a825e5e8777273e76e3772fe" },
-  { path: ".claude-plugin/marketplace.json", sha256: "3f3aea040c98c3cca3285a913eeb812294e563b4af4d68b09affd8f22d16724c" },
+  { path: ".claude-plugin/plugin.json", sha256: "cbbf3a9b54f081d1d33eaf02cbfea5fc9535ea02163f6eb7a197a41409d28a68" },
+  { path: ".claude-plugin/marketplace.json", sha256: "d51dad3eb22233744620a41bb930dc316a8dcb66c9dff48e2d2a70d0ef206195" },
   { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
-  { path: "plugin.json", sha256: "4a9cdaa07e7ade93956396b5f53ec9cdcdf8bfa0510fd7ed2c91416d59882b5d" },
+  { path: "plugin.json", sha256: "49047e5ffdae8a3bdd5f504b57d3ffa8e22b36da8ff80b1b1024973468c853c6" },
   { path: "mcp_config.json", sha256: "0be7f9fbb8a75863bf96738b99e624fba80f2e160ebae66281d15610c83ab215" },
   { path: "assets/logo.svg", sha256: "2216c896ac716fd40adfe1eacd353e8af9e5824012e903ce52a3bd06f114f8fb" },
   { path: "skills/kimi/SKILL.md", sha256: "ff7e0263d608eeb3c859a918b2b87f3296de5735ce68c680cb75f6a4ee905966" },
@@ -147,7 +147,7 @@ export const DSH_BUNDLE_PATCH = [
   "",
 ].join("\n");
 
-export const DSH_PUBLISH_TIMESTAMP = 1795778071;
+export const DSH_PUBLISH_TIMESTAMP = 1795783457;
 
 export const DSH_DISCOVERY_INDEX = {
   format: 1,

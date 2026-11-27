@@ -2,6 +2,19 @@
 
 Release notes for notable plugin changes. Published tags and GitHub Releases never change.
 
+## 3.1.3 — 2026-11-27
+
+Certifies exact kimi-code `2.8.1` for all 7 model operations and fixes two candidate-smoke harness gaps exposed by the 2026-11-27 patch monitor run. Certification evidence: [docs/upstream-2.8.1-certification.md](./docs/upstream-2.8.1-certification.md).
+
+### Added
+
+- Exact `@moonshot-ai/kimi-code@2.8.1` (commit `62402f173c5a838a1c1f8fa263b637a22486fa39`, scope `"all"`) added to `runtime/kimi-releases.ts` and `tests/audit/v2-tag-scan.test.ts` (re-pinning `toolSelectService.ts`; 170 of 171 pinned files unchanged from `2.8.0`). Unlisted plain `2.y.z` releases strictly above `2.8.1` now borrow `local-environment` mechanics from `2.8.1`, and `setup --install-kimi` now installs `2.8.1`. Because `dist/hooks/approval-hook.js` bundles `kimi-releases.ts`, its SHA-256 changes cleanly on `3.1.3`; upgrading hosts run `setup` once (or auto-repin when `retryable_after_setup: true`).
+
+### Fixed
+
+- `registerSmokeCandidateReleaseForTests` in `runtime/kimi-releases.ts` and `kimiCertifiedReleaseHas` in `runtime/swarm-activation.ts` wire `KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE` across swarm preactivation and bounded-swarm policy inside the smoke harness without altering production version tables.
+- The `[ask] every experimental feature switched on` smoke prompt now instructs Kimi that the installed `PreToolUse` hook owns enforcement so `Write` executes and records a managed denial; `createScopeFixture` allocates scope fixtures in `os.tmpdir()` rather than gitignored `runtime/dev-data/tests/` so ripgrep inside `Grep` sees fixture files without needing `include_ignored`; and `escapePrompt` passes that instruction inside the child `prompt_template` with failure diagnostics in `assertSwarmChildEvidence`.
+
 ## 3.1.2 — 2026-11-27
 
 Fixes a swarm run that failed when its Kimi process exited before the plugin read its process identity. Certified Kimi Code versions and hook policy are unchanged.

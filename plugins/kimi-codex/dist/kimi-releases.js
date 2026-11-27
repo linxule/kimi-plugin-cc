@@ -30,6 +30,7 @@ const BASELINE = Object.freeze([
 /** Ascending. Order is visible in error messages and in the exported version arrays. */
 export const KIMI_V2_RELEASES = Object.freeze([
     { version: "2.8.0", commit: "46d9085f", scope: "all", capabilities: BASELINE },
+    { version: "2.8.1", commit: "62402f17", scope: "all", capabilities: BASELINE },
 ]);
 /**
  * Mechanics an uncertified release borrows from its row: only the fresh-print
@@ -42,6 +43,7 @@ const BORROWABLE_CAPABILITIES = new Set([
     "local-environment",
 ]);
 const PLAIN_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+let smokeCandidateRelease;
 function versionTriple(version) {
     const match = PLAIN_VERSION.exec(version);
     return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])];
@@ -52,6 +54,32 @@ function compareTriples(left, right) {
             return left[index] - right[index];
     }
     return 0;
+}
+/**
+ * Test-process-only registration for candidate smoke runs against an unreleased
+ * or pre-certification `2.y.z` binary strictly above the floor. Never mutates
+ * `KIMI_V2_RELEASES` and reads no environment variables.
+ */
+export function registerSmokeCandidateReleaseForTests(version) {
+    const triple = versionTriple(version);
+    const floor = versionTriple(KIMI_V2_RELEASES[0].version);
+    if (triple === null || triple[0] !== 2 || floor === null || compareTriples(triple, floor) < 0) {
+        throw new Error(`Invalid smoke candidate release version: ${version}`);
+    }
+    if (KIMI_V2_RELEASES.some((release) => release.version === version)) {
+        return () => { };
+    }
+    const registered = Object.freeze({
+        version,
+        commit: "00000000",
+        scope: "all",
+        capabilities: BASELINE,
+    });
+    smokeCandidateRelease = registered;
+    return () => {
+        if (smokeCandidateRelease === registered)
+            smokeCandidateRelease = undefined;
+    };
 }
 /**
  * The single answer to "which row's mechanics apply, and is it certified".
@@ -66,6 +94,9 @@ export function resolveKimiRelease(version, options = {}) {
     const exact = KIMI_V2_RELEASES.find((release) => release.version === version);
     if (exact !== undefined)
         return { release: exact, certified: true };
+    if (smokeCandidateRelease !== undefined && smokeCandidateRelease.version === version) {
+        return { release: smokeCandidateRelease, certified: true };
+    }
     if (options.strict === true)
         return null;
     const triple = versionTriple(version);

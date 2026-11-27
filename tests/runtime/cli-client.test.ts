@@ -244,7 +244,7 @@ describe("runCliPrompt", () => {
     }
   });
 
-  test.each(["2.8.0"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
+  test.each(["2.8.0", "2.8.1"])("pins the local environment on exact %s candidate and currently certified production spawns", async (version) => {
     const root = await createTestPluginDataRoot("cli-client-local-environment");
     const originalSpawn = childProcess.spawn;
     let capturedArgs: string[] | undefined;
@@ -331,7 +331,7 @@ describe("runCliPrompt", () => {
       await writeFile(path.join(agentDir, "wire.jsonl"), `${JSON.stringify({ type: "environment.set_binding", environmentId: "local", cwd: root })}\n`);
       await writeFile(path.join(agentDir, "..", "..", "state.json"), JSON.stringify({ environmentCwd: root }));
       options.resumeSessionId = sessionId;
-      for (const candidate of ["2.8.0"]) {
+      for (const candidate of ["2.8.0", "2.8.1"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([
@@ -353,7 +353,7 @@ describe("runCliPrompt", () => {
         ]);
       }
       // An unlisted plain 2.x >= 2.8.0 borrows the fresh-print argv of the row below it (G1).
-      for (const candidate of ["2.8.1", "2.9.0", "2.10.0"]) {
+      for (const candidate of ["2.8.2", "2.9.0", "2.10.0"]) {
         options.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE = candidate;
         await runCliPrompt(options);
         expect(capturedArgs).toEqual([

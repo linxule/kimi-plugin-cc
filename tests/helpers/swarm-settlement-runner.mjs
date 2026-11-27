@@ -78,7 +78,7 @@ async function killObserved() {
 }
 
 async function main() {
-  const version = mode === "legacy" ? "2.8.1" : "2.8.0";
+  const version = mode === "legacy" ? "2.99.0" : "2.8.0";
   const exitCode = ["error-exit", "persistence-persistent"].includes(mode) ? 7 : 0;
   const oldRow = NATIVE_V2_CERTIFIED.get("swarm");
   NATIVE_V2_CERTIFIED.set("swarm", [...new Set([...oldRow, version])]);

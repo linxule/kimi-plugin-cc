@@ -164,7 +164,7 @@ describe.skipIf(process.platform === "win32")("setup --install-kimi containment 
 describe.skipIf(process.platform === "win32")("setup --install-kimi", () => {
   test("picks the numerically highest certified version (>= 2.8.0 floor)", () => {
     expect(highestCertifiedKimiVersion(["2.9.0", "2.10.0", "2.8.0"])).toBe("2.10.0");
-    expect(HIGHEST).toBe("2.8.0");
+    expect(HIGHEST).toBe("2.8.1");
   });
 
   test("installs the highest certified version, verifies it, and points current at it", async () => {

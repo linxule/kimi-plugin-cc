@@ -23,7 +23,7 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
       KIMI_CODE_SWARM_TIMEOUT_MS: '3', KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '9999',
       KIMI_PLUGIN_CC_OPERATION: 'rescue', KIMI_PLUGIN_CC_CMD: 'rescue',
     };
-    for (const kimiVersion of ['2.8.0']) {
+    for (const kimiVersion of ['2.8.0', '2.8.1']) {
       for (const operationKind of ['swarm', 'swarm-write']) {
         for (const concurrency of [1, 4]) {
           const env = buildKimiCliEnvironment({
@@ -57,7 +57,7 @@ test.each(distributions)("%s exports only plan-owned bounded swarm settings", (r
     }
     for (const unboundedPlan of [
       { ...plan, kimiVersion: '2.7.3' },
-      { ...plan, kimiVersion: '2.8.1' },
+      { ...plan, kimiVersion: '2.8.2' },
       { ...plan, kimiVersion: '2.8.x' },
       { ...plan, kimiVersion: '2.8.0-rc.1' },
       { ...plan, kimiVersion: '2.8.0+build' },
@@ -145,7 +145,7 @@ test.each(distributions)("%s enforces bounded waves through the compiled hook pr
     // Missing both new overlays remains the uncertified/unbounded behavior.
     const oldEnv = buildKimiCliEnvironment({
       cwd: process.cwd(), env: { KIMI_CODE_HOME: process.cwd() },
-      executionPlan: { ...plan, kimiVersion: '2.8.1' }, commandLabel: 'swarm',
+      executionPlan: { ...plan, kimiVersion: '2.8.2' }, commandLabel: 'swarm',
       swarmMaxConcurrency: 4,
     });
     invoke(oldEnv, 'AgentSwarm', { ...four, items: ['a', 'b', 'c'] }, 0);

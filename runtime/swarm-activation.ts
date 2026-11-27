@@ -18,7 +18,7 @@ import {
 } from "./kimi-engine.js";
 import { resolveKimiHome } from "./kimi-home.js";
 import { kimiJournalRecords, UNPARSEABLE_JOURNAL_LINE } from "./kimi-journal.js";
-import { kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
+import { kimiCertifiedReleaseHas, kimiReleaseHas, kimiVersionsWith } from "./kimi-releases.js";
 import { assertNativeV2Preflight } from "./native-v2-preflight.js";
 import { usesBoundedSwarmPolicy } from "./swarm-policy.js";
 import { installBoundedSwarmToolPolicy } from "./swarm-tool-policy.js";
@@ -33,8 +33,6 @@ import {
   type ProcessIdentity,
 } from "./process-tree.js";
 
-// Exact 2.8.0+ preactivation releases; production scope is enforced per operation.
-const PREACTIVATION_VERSIONS = kimiVersionsWith("web-preactivation");
 const KIMI_AGENT_PROTOCOL_VERSION = "1.0.0";
 const READY_TIMEOUT_MS = 10_000;
 const REST_TIMEOUT_MS = 5_000;
@@ -107,7 +105,7 @@ type FailureCode = "SWARM_ACTIVATION_FAILED" | "SWARM_SESSION_CLEANUP_FAILED";
 type SwarmJournalState = "missing" | "unreadable" | "enter" | "exit" | "other";
 
 export function requiresSwarmPreactivation(version: string | null): boolean {
-  return version !== null && PREACTIVATION_VERSIONS.includes(version);
+  return kimiCertifiedReleaseHas(version, "web-preactivation");
 }
 
 export async function preactivateSwarmSession(
@@ -273,7 +271,7 @@ async function prepareWebSpawn(
     throw failure(
       failureCode,
       "swarm-activation.version",
-      `Swarm web preactivation requires exact kimi-code ${PREACTIVATION_VERSIONS.join(" or ")}.`,
+      `Swarm web preactivation requires exact kimi-code ${kimiVersionsWith("web-preactivation").join(" or ")}.`,
     );
   }
 

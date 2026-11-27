@@ -290,7 +290,7 @@ describe("runSwarm certified execution-plan gate", () => {
 
   test.each([
     { version: "2.7.3", refusalKind: "legacy-v1-unsupported" },
-    { version: "2.8.1", refusalKind: "v2-version-not-certified" },
+    { version: "2.8.2", refusalKind: "v2-version-not-certified" },
   ].flatMap(({ version, refusalKind }) => [
     { label: "swarm", args: ["review", "two", "targets"] },
     { label: "swarm-write", args: ["--write", "edit", "two", "targets"] },

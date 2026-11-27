@@ -46,11 +46,11 @@ test("compiled distributions certify exact 2.8.0 under the >= 2.8.0 rolling floo
         selectIntendedEngine,
       } from '${root}/kimi-engine.js';
       import { usesBoundedSwarmPolicy } from '${root}/swarm-policy.js';
-      assert.deepEqual([...NATIVE_V2_CERTIFIED_VERSIONS], ['2.8.0']);
-      assert.deepEqual([...NATIVE_V2_ANY_OPERATION_VERSIONS], ['2.8.0']);
+      assert.deepEqual([...NATIVE_V2_CERTIFIED_VERSIONS], ['2.8.0', '2.8.1']);
+      assert.deepEqual([...NATIVE_V2_ANY_OPERATION_VERSIONS], ['2.8.0', '2.8.1']);
       for (const operationKind of ['swarm', 'swarm-write']) {
         const versions = NATIVE_V2_CERTIFIED.get(operationKind);
-        assert.deepEqual([...versions], ['2.8.0']);
+        assert.deepEqual([...versions], ['2.8.0', '2.8.1']);
         for (const kimiVersion of versions) {
           assert.equal(usesBoundedSwarmPolicy({
             operationKind, intendedEngine: 'native-v2', kimiVersion,
@@ -78,7 +78,8 @@ test("compiled distributions certify exact 2.8.0 under the >= 2.8.0 rolling floo
         ['2.6.0', 'legacy-v1-unsupported'],
         ['2.6.2', 'legacy-v1-unsupported'],
         ['2.7.3', 'legacy-v1-unsupported'],
-        ['2.8.1', 'v2-version-not-certified'],
+        ['2.8.2', 'v2-version-not-certified'],
+        ['2.8.1-rc.1', 'v2-version-not-certified'],
         ['2.8.0-rc.1', 'v2-version-not-certified'],
         ['2.8.0+unreviewed', 'v2-version-not-certified'],
       ]) {

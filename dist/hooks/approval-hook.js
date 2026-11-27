@@ -299,7 +299,8 @@ var BASELINE = Object.freeze([
   "web-json-ready"
 ]);
 var KIMI_V2_RELEASES = Object.freeze([
-  { version: "2.8.0", commit: "46d9085f", scope: "all", capabilities: BASELINE }
+  { version: "2.8.0", commit: "46d9085f", scope: "all", capabilities: BASELINE },
+  { version: "2.8.1", commit: "62402f17", scope: "all", capabilities: BASELINE }
 ]);
 var BORROWABLE_CAPABILITIES = new Set([
   "local-environment"
